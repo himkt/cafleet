@@ -16,7 +16,6 @@ pub(crate) use crate::coding_agent::MatchEvidence;
 pub(crate) use crate::coding_agent::ObservationKind;
 pub(crate) use crate::coding_agent::ScreenObservation;
 pub(crate) use crate::coding_agent::SemanticFingerprint;
-use crate::config::Settings;
 use crate::error::CafleetError;
 pub(crate) use crate::error::Result;
 use crate::multiplexer::AnyMultiplexer;
@@ -41,7 +40,7 @@ pub(crate) use crate::runtime::control::SubmissionResult;
 pub(crate) use crate::runtime::control::SubmissionStage;
 pub(crate) use crate::runtime::control::SubmissionStatus;
 pub(crate) use crate::runtime::control::SubmitInput;
-pub(crate) use crate::runtime::control::diagnose_runtime;
+pub(crate) use crate::runtime::control::diagnose_runtime_at;
 pub(crate) use crate::runtime::control::encode_control_frame;
 pub(crate) use crate::runtime::control::probe_health;
 pub(crate) use crate::runtime::control::request_shutdown;
@@ -68,13 +67,39 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-pub(crate) fn resolve_mux(
-    settings: &Settings,
-) -> std::result::Result<AnyMultiplexer, MultiplexerError> {
-    resolve_multiplexer(
-        settings.multiplexer.as_deref(),
-        std::env::vars().collect(),
+pub(crate) fn resolve_mux() -> std::result::Result<AnyMultiplexer, MultiplexerError> {
+    resolve_multiplexer(std::env::vars().collect(), Rc::new(SystemRunner))
+}
+
+/// The multiplexer that targets `placement`'s recorded backend and server.
+pub(crate) fn mux_for_placement(
+    placement: &crate::broker::Placement,
+    deadline: Option<crate::time::Deadline>,
+) -> Result<AnyMultiplexer> {
+    let app = |cause: MultiplexerError| error(cause.to_string());
+    let mux = AnyMultiplexer::for_server(
+        &placement.backend,
+        &placement.mux_server,
         Rc::new(SystemRunner),
+    )
+    .map_err(app)?;
+    let mux = match deadline {
+        Some(deadline) => mux.bounded(deadline),
+        None => mux,
+    };
+    mux.ensure_available().map_err(app)?;
+    Ok(mux)
+}
+
+/// The multiplexer built from `fleet_id`'s recorded Director placement.
+pub(crate) fn mux_for_fleet(
+    conn: &rusqlite::Connection,
+    fleet_id: i64,
+    deadline: Option<crate::time::Deadline>,
+) -> Result<AnyMultiplexer> {
+    mux_for_placement(
+        &crate::broker::director_placement(conn, fleet_id)?,
+        deadline,
     )
 }
 
@@ -314,10 +339,7 @@ pub(crate) mod test_support {
                     "literal assignment 世界 '$x' `text`".into(),
                 ],
                 cwd: self._dir.path().to_path_buf(),
-                environment: vec![(
-                    "CAFLEET_DATABASE_URL".into(),
-                    format!("sqlite:///{}", self.conn.path().unwrap()),
-                )],
+                environment: Vec::new(),
                 evidence_policy: json!({"mode":"metadata"}),
                 size: TerminalSize { rows: 24, cols: 80 },
             }

@@ -25,6 +25,10 @@ pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
     about = "CAFleet — CLI for the message broker and member registry."
 )]
 struct CliArgs {
+    /// SQLite database URL `sqlite:///<path>` [default: the running version's database under
+    /// ~/.local/share/cafleet].
+    #[arg(long = "database-url", value_name = "URL", global = true)]
+    database_url: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -66,36 +70,114 @@ pub fn run() -> Result<(), CafleetError> {
 
 fn run_args(args: impl IntoIterator<Item = OsString>) -> Result<(), CafleetError> {
     let args = CliArgs::parse_from(args);
-    refuse_director_only(&args.command, std::env::var_os("CAFLEET_MEMBER_ID"))?;
-    let settings = Settings::from_env()?;
+    let settings = Settings::new(args.database_url)?;
     dispatch(&settings, args.command)
 }
 
-fn director_only_name(command: &Command) -> Option<&'static str> {
-    match command {
-        Command::Member(member::MemberCommand::Prompt { .. }) => Some("member prompt"),
-        Command::Member(member::MemberCommand::Exec { .. }) => Some("member exec"),
-        Command::Member(member::MemberCommand::Press { .. }) => Some("member press"),
-        Command::Member(member::MemberCommand::Recover { .. }) => Some("member recover"),
-        Command::Permission(runtime::PermissionCommand::Respond { .. }) => {
-            Some("permission respond")
-        }
-        Command::Input(runtime::InputCommand::Reconcile { .. }) => Some("input reconcile"),
-        _ => None,
-    }
+enum DirectorSubject {
+    Member(i64),
+    Input(i64),
+    Interaction(i64),
 }
 
-fn refuse_director_only(
-    command: &Command,
-    member_id: Option<OsString>,
+struct DirectorOnly {
+    name: &'static str,
+    subject: DirectorSubject,
+    director_member_id: i64,
+}
+
+fn director_only(command: &Command) -> Option<DirectorOnly> {
+    use DirectorSubject::*;
+    let (name, subject, director_member_id) = match command {
+        Command::Member(member::MemberCommand::Prompt {
+            member_id,
+            director_member_id,
+            ..
+        }) => ("member prompt", Member(*member_id), *director_member_id),
+        Command::Member(member::MemberCommand::Exec {
+            member_id,
+            director_member_id,
+            ..
+        }) => ("member exec", Member(*member_id), *director_member_id),
+        Command::Member(member::MemberCommand::Press {
+            member_id,
+            director_member_id,
+            ..
+        }) => ("member press", Member(*member_id), *director_member_id),
+        Command::Member(member::MemberCommand::Recover {
+            member_id,
+            director_member_id,
+            ..
+        }) => ("member recover", Member(*member_id), *director_member_id),
+        Command::Permission(runtime::PermissionCommand::Respond {
+            interaction_id,
+            director_member_id,
+            ..
+        }) => (
+            "permission respond",
+            Interaction(*interaction_id),
+            *director_member_id,
+        ),
+        Command::Input(runtime::InputCommand::Reconcile {
+            input_id,
+            director_member_id,
+            ..
+        }) => ("input reconcile", Input(*input_id), *director_member_id),
+        _ => return None,
+    };
+    Some(DirectorOnly {
+        name,
+        subject,
+        director_member_id,
+    })
+}
+
+/// Requires a Director-only command's `--from-member-id` to be the root Director of the live
+/// fleet that owns its subject. An unknown subject passes, so the command reports its own
+/// not-found error.
+fn require_director(
+    conn: &rusqlite::Connection,
+    guarded: Option<&DirectorOnly>,
 ) -> Result<(), CafleetError> {
-    match (director_only_name(command), member_id) {
-        (Some(name), Some(member_id)) => Err(CafleetError::App(format!(
-            "'cafleet {name}' is a Director-only command and this process runs inside CAFleet member {} (CAFLEET_MEMBER_ID is set); send the request to your Director.",
-            member_id.to_string_lossy()
-        ))),
-        _ => Ok(()),
+    use rusqlite::OptionalExtension;
+    let Some(guarded) = guarded else {
+        return Ok(());
+    };
+    let (sql, id) = match guarded.subject {
+        DirectorSubject::Member(id) => (
+            "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'",
+            id,
+        ),
+        DirectorSubject::Input(id) => (
+            "SELECT r.fleet_id FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id WHERE i.input_id=?1",
+            id,
+        ),
+        DirectorSubject::Interaction(id) => (
+            "SELECT r.fleet_id FROM member_interactions i JOIN member_runs r ON r.run_id=i.run_id WHERE i.interaction_id=?1",
+            id,
+        ),
+    };
+    let Some(fleet_id) = conn
+        .query_row(sql, [id], |row| row.get::<_, i64>(0))
+        .optional()?
+    else {
+        return Ok(());
+    };
+    let is_root_director = conn
+        .query_row(
+            "SELECT 1 FROM fleets WHERE fleet_id=?1 AND deleted_at IS NULL AND director_member_id=?2",
+            [fleet_id, guarded.director_member_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if is_root_director {
+        return Ok(());
     }
+    Err(CafleetError::App(format!(
+        "'cafleet {}' is a Director-only command and member {} is not the root Director of fleet {fleet_id}; send the request to your Director.",
+        guarded.name, guarded.director_member_id
+    )))
 }
 
 fn invocation_connection(
@@ -118,6 +200,7 @@ fn invocation_connection(
 }
 
 fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
+    let director = director_only(&command);
     match command {
         Command::Setup(cmd) => setup::run(settings, cmd),
         Command::Doctor(cmd) => setup::doctor(settings, cmd),
@@ -129,6 +212,7 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             member_id,
             keys,
             json,
+            ..
         }) => {
             let deadline = crate::time::Deadline::inherited_or_new();
             let keys = crate::multiplexer::PressKeys::parse(&keys)?;
@@ -141,6 +225,7 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
                         )],
                     }
                 })?;
+            require_director(&conn, director.as_ref())?;
             member::press(&mut conn, settings, member_id, &keys, json, deadline)
         }
         Command::Permission(command) => {
@@ -149,11 +234,13 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
                 .map_err(|source| runtime::permission_error(&command, source))?;
             let mut conn = invocation_connection(&settings.database_url, deadline)
                 .map_err(|source| runtime::permission_error(&command, source))?;
+            require_director(&conn, director.as_ref())?;
             runtime::permission(&mut conn, settings, command, deadline)
         }
         mut command => {
             let mut conn =
                 invocation_connection(&settings.database_url, crate::time::Deadline::new())?;
+            require_director(&conn, director.as_ref())?;
             if let Command::Member(command) = &mut command {
                 member::prepare_input(command)?;
             }
@@ -176,10 +263,9 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
 }
 
 pub(crate) fn available_mux(
-    settings: &Settings,
     deadline: Option<crate::time::Deadline>,
 ) -> Result<AnyMultiplexer, CafleetError> {
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
     let mux = match deadline {
         Some(deadline) => mux.bounded(deadline),
         None => mux,
@@ -421,8 +507,7 @@ mod tests {
         )
         .unwrap();
         let database = crate::db::database_path(config["database_url"].as_str().unwrap()).unwrap();
-        let settings =
-            crate::config::Settings::for_database(std::path::Path::new(database), Some("tmux"));
+        let settings = crate::config::Settings::for_database(std::path::Path::new(database));
         let args = config["args"]
             .as_array()
             .unwrap()
@@ -451,7 +536,7 @@ mod tests {
         ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("registry.db");
-            let settings = Settings::for_database(&path, None);
+            let settings = Settings::for_database(&path);
             let mut conn = crate::db::connect(&settings.database_url).unwrap();
             crate::db::initialize(&mut conn).unwrap();
             conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
@@ -463,7 +548,7 @@ mod tests {
                 &["fleet", "list", "--json"][..],
                 &["member", "show", "1", "--json"],
                 &["message", "poll", "1", "--json"],
-                &["member", "recover", "1", "--json"],
+                &["member", "recover", "1", "--from-member-id", "1", "--json"],
                 &["event", "show", "1", "--json"],
                 &["input", "show", "1", "--json"],
             ] {
@@ -669,6 +754,8 @@ mod tests {
         let Command::Fleet(fleet::FleetCommand::Create {
             name,
             coding_agent,
+            pane,
+            mux_server,
             json,
         }) = parse(&[
             "fleet",
@@ -684,7 +771,41 @@ mod tests {
         };
         assert_eq!(name, "alpha");
         assert_eq!(coding_agent, crate::coding_agent::CodingAgent::Codex);
+        assert_eq!((pane, mux_server), (None, None));
         assert!(json);
+        let Command::Fleet(fleet::FleetCommand::Create {
+            pane, mux_server, ..
+        }) = parse(&[
+            "fleet",
+            "create",
+            "--name",
+            "alpha",
+            "--coding-agent",
+            "hermes",
+            "--pane",
+            "%3",
+            "--mux-server",
+            "/tmp/tmux-0/default",
+        ])
+        else {
+            panic!("expected fleet creation");
+        };
+        assert_eq!(pane.as_deref(), Some("%3"));
+        assert_eq!(mux_server.as_deref(), Some("/tmp/tmux-0/default"));
+        assert_error(
+            &[
+                "fleet",
+                "create",
+                "--name",
+                "alpha",
+                "--coding-agent",
+                "codex",
+                "--mux-server",
+                "/tmp/tmux-0/default",
+            ],
+            ErrorKind::MissingRequiredArgument,
+            "--pane",
+        );
     }
 
     #[test]
@@ -707,7 +828,7 @@ mod tests {
             "--to-member-id",
             "18",
         ];
-        let exec = ["member", "exec", "17"];
+        let exec = ["member", "exec", "17", "--from-member-id", "1"];
         for base in [member.as_slice(), send.as_slice(), exec.as_slice()] {
             assert_error(base, ErrorKind::MissingRequiredArgument, "--file");
             let both: Vec<_> = base
@@ -918,9 +1039,17 @@ mod tests {
         let member = usage.find("MEMBER_ID").expect("usage names MEMBER_ID");
         let body = usage.find("COMMAND").expect("usage names COMMAND");
         assert!(member < body, "MEMBER_ID precedes COMMAND: {usage}");
-        match CliArgs::try_parse_from(["cafleet", "member", "exec", "17", "printf ok"])
-            .unwrap()
-            .command
+        match CliArgs::try_parse_from([
+            "cafleet",
+            "member",
+            "exec",
+            "--from-member-id",
+            "1",
+            "17",
+            "printf ok",
+        ])
+        .unwrap()
+        .command
         {
             crate::cli::Command::Member(crate::cli::member::MemberCommand::Exec {
                 member_id,
@@ -1033,7 +1162,7 @@ mod tests {
         let path = dir.path().join("registry.db");
         let descriptor = dir.path().join("unallocated.json");
         std::fs::write(&descriptor, b"{\"schema_version\":1}").unwrap();
-        let settings = crate::config::Settings::for_database(&path, None);
+        let settings = crate::config::Settings::for_database(&path);
         let mut conn = crate::db::connect(&settings.database_url).unwrap();
         crate::db::initialize(&mut conn).unwrap();
         drop(conn);
@@ -1128,30 +1257,64 @@ mod tests {
     }
 
     mod director_only_guard {
+        use crate::broker::runtime::InputKind;
+        use crate::broker::runtime::test_support::Fixture;
         use crate::cli::test_support::parse_cli;
         use crate::cli::*;
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
 
         const REQUEST_TOKEN: &str =
             "0000000000000000000000000000000000000000000000000000000000000000";
 
-        fn director_only_commands() -> Vec<(&'static str, Vec<&'static str>)> {
+        fn director_only_commands(subject: &str, caller: &str) -> Vec<(&'static str, Vec<String>)> {
+            let owned = |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect();
             vec![
-                ("member prompt", vec!["member", "prompt", "7", "hello"]),
-                ("member exec", vec!["member", "exec", "7", "printf ok"]),
-                ("member press", vec!["member", "press", "7", "Enter"]),
-                ("member recover", vec!["member", "recover", "7"]),
+                (
+                    "member prompt",
+                    owned(&[
+                        "member",
+                        "prompt",
+                        subject,
+                        "hello",
+                        "--from-member-id",
+                        caller,
+                    ]),
+                ),
+                (
+                    "member exec",
+                    owned(&[
+                        "member",
+                        "exec",
+                        subject,
+                        "printf ok",
+                        "--from-member-id",
+                        caller,
+                    ]),
+                ),
+                (
+                    "member press",
+                    owned(&[
+                        "member",
+                        "press",
+                        subject,
+                        "Enter",
+                        "--from-member-id",
+                        caller,
+                    ]),
+                ),
+                (
+                    "member recover",
+                    owned(&["member", "recover", subject, "--from-member-id", caller]),
+                ),
                 (
                     "permission respond",
-                    vec![
+                    owned(&[
                         "permission",
                         "respond",
-                        "7",
+                        subject,
                         "--event-id",
                         "1",
                         "--from-member-id",
-                        "1",
+                        caller,
                         "--expected-run-id",
                         "1",
                         "--expected-owner-epoch",
@@ -1170,19 +1333,21 @@ mod tests {
                         "decision",
                         "--operation-key",
                         "key",
-                    ],
+                    ]),
                 ),
                 (
                     "input reconcile",
-                    vec![
+                    owned(&[
                         "input",
                         "reconcile",
-                        "7",
+                        subject,
                         "--disposition",
                         "submitted",
                         "--evidence-ref",
                         "seen",
-                    ],
+                        "--from-member-id",
+                        caller,
+                    ]),
                 ),
             ]
         }
@@ -1228,72 +1393,178 @@ mod tests {
             ]
         }
 
-        fn parse(args: &[&str]) -> Command {
-            parse_cli(args).unwrap_or_else(|error| panic!("{args:?}: {error}"))
+        fn parse(args: &[impl AsRef<str>]) -> Command {
+            let args = args.iter().map(AsRef::as_ref).collect::<Vec<_>>();
+            parse_cli(&args).unwrap_or_else(|error| panic!("{args:?}: {error}"))
         }
 
-        fn guard_message(name: &str, value: &str) -> String {
+        fn guard_message(name: &str, caller: i64, fleet: i64) -> String {
             format!(
-                "'cafleet {name}' is a Director-only command and this process runs inside CAFleet member {value} (CAFLEET_MEMBER_ID is set); send the request to your Director."
+                "'cafleet {name}' is a Director-only command and member {caller} is not the root Director of fleet {fleet}; send the request to your Director."
             )
         }
 
         #[test]
-        fn director_only_name_names_exactly_the_six_guarded_commands() {
-            for (name, args) in director_only_commands() {
-                assert_eq!(director_only_name(&parse(&args)), Some(name), "{args:?}");
+        fn director_only_names_exactly_the_six_guarded_commands() {
+            for (name, args) in director_only_commands("7", "1") {
+                assert_eq!(
+                    director_only(&parse(&args)).map(|guarded| guarded.name),
+                    Some(name),
+                    "{args:?}"
+                );
             }
             for args in unguarded_commands() {
-                assert_eq!(director_only_name(&parse(&args)), None, "{args:?}");
+                assert!(director_only(&parse(&args)).is_none(), "{args:?}");
             }
         }
 
         #[test]
-        fn director_only_commands_refuse_when_the_member_variable_is_present_with_any_value() {
-            let values = [
-                (OsString::from("34"), "34".to_string()),
-                (OsString::from(""), String::new()),
-                (
-                    OsString::from_vec(vec![b'3', 0xff, b'4']),
-                    "3\u{fffd}4".to_string(),
-                ),
-            ];
-            for (name, args) in director_only_commands() {
-                for (value, rendered) in &values {
-                    let error = refuse_director_only(&parse(&args), Some(value.clone()))
-                        .expect_err(&format!("{args:?} with {value:?} is refused"));
-                    assert_eq!(error.exit_code(), 1, "{args:?} with {value:?}");
+        fn director_only_commands_require_a_positive_from_member_id() {
+            for (_, args) in director_only_commands("7", "1") {
+                let position = args
+                    .iter()
+                    .position(|arg| arg == "--from-member-id")
+                    .unwrap();
+                let mut missing = args.clone();
+                missing.drain(position..position + 2);
+                let missing = missing.iter().map(String::as_str).collect::<Vec<_>>();
+                let error = parse_cli(&missing)
+                    .err()
+                    .unwrap_or_else(|| panic!("{missing:?} parses without its caller"));
+                assert_eq!(error.exit_code(), 2, "{missing:?}");
+                let mut zero = args.clone();
+                zero[position + 1] = "0".into();
+                let zero = zero.iter().map(String::as_str).collect::<Vec<_>>();
+                let error = parse_cli(&zero)
+                    .err()
+                    .unwrap_or_else(|| panic!("{zero:?} parses with a zero caller"));
+                assert_eq!(error.exit_code(), 2, "{zero:?}");
+            }
+        }
+
+        struct Subjects {
+            fixture: Fixture,
+            input: i64,
+            interaction: i64,
+        }
+
+        impl Subjects {
+            fn new() -> Self {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let input = fixture
+                    .input(&owner, "prompt:guard", InputKind::Prompt, None)
+                    .input_id;
+                let interaction = fixture
+                    .open(&owner)
+                    .interaction_id
+                    .expect("the opening event creates an interaction");
+                Self {
+                    fixture,
+                    input,
+                    interaction,
+                }
+            }
+
+            fn commands(&self, caller: i64) -> Vec<(&'static str, Vec<String>)> {
+                let caller = caller.to_string();
+                director_only_commands("0", &caller)
+                    .into_iter()
+                    .map(|(name, mut args)| {
+                        args[2] = match name {
+                            "permission respond" => self.interaction,
+                            "input reconcile" => self.input,
+                            _ => self.fixture.member,
+                        }
+                        .to_string();
+                        (name, args)
+                    })
+                    .collect()
+            }
+
+            fn check(&self, args: &[String]) -> Result<(), CafleetError> {
+                require_director(&self.fixture.conn, director_only(&parse(args)).as_ref())
+            }
+        }
+
+        #[test]
+        fn require_director_admits_the_root_director_of_each_subjects_fleet() {
+            let subjects = Subjects::new();
+            for (name, args) in subjects.commands(subjects.fixture.director) {
+                subjects
+                    .check(&args)
+                    .unwrap_or_else(|error| panic!("{name}: {error}"));
+            }
+            for args in unguarded_commands() {
+                require_director(
+                    &subjects.fixture.conn,
+                    director_only(&parse(&args)).as_ref(),
+                )
+                .unwrap_or_else(|error| panic!("{args:?}: {error}"));
+            }
+        }
+
+        #[test]
+        fn require_director_refuses_any_other_caller_naming_the_subjects_fleet() {
+            let mut subjects = Subjects::new();
+            let (other_fleet, other_director) =
+                crate::broker::fleets::test_support::create_fleet_fixture(
+                    &mut subjects.fixture.conn,
+                    "other-fleet",
+                );
+            assert_ne!(other_fleet, subjects.fixture.fleet);
+            for caller in [subjects.fixture.member, other_director, 999_999] {
+                for (name, args) in subjects.commands(caller) {
+                    let error = subjects
+                        .check(&args)
+                        .expect_err(&format!("{name} refuses member {caller}"));
+                    assert_eq!(error.exit_code(), 1, "{name}");
                     assert_eq!(
                         error.to_string(),
-                        guard_message(name, rendered),
-                        "{args:?} with {value:?}"
+                        guard_message(name, caller, subjects.fixture.fleet),
+                        "{name}"
                     );
                 }
             }
         }
 
         #[test]
-        fn director_only_commands_pass_when_the_member_variable_is_unset() {
-            for (_, args) in director_only_commands() {
-                refuse_director_only(&parse(&args), None)
-                    .unwrap_or_else(|error| panic!("{args:?}: {error}"));
+        fn require_director_refuses_the_director_of_a_deleted_fleet() {
+            let subjects = Subjects::new();
+            subjects
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE fleets SET deleted_at='2026-11-07T00:00:00+00:00' WHERE fleet_id=?1",
+                    [subjects.fixture.fleet],
+                )
+                .unwrap();
+            for (name, args) in subjects.commands(subjects.fixture.director) {
+                if name.starts_with("member ") {
+                    continue;
+                }
+                assert_eq!(
+                    subjects.check(&args).unwrap_err().to_string(),
+                    guard_message(name, subjects.fixture.director, subjects.fixture.fleet),
+                    "{name}"
+                );
             }
         }
 
         #[test]
-        fn unguarded_commands_pass_when_the_member_variable_is_set() {
-            for args in unguarded_commands() {
-                for value in [OsString::from("34"), OsString::from("")] {
-                    refuse_director_only(&parse(&args), Some(value.clone()))
-                        .unwrap_or_else(|error| panic!("{args:?} with {value:?}: {error}"));
-                }
+        fn require_director_leaves_an_unknown_subject_to_the_commands_own_not_found_error() {
+            let subjects = Subjects::new();
+            for (name, args) in
+                director_only_commands("999999", &subjects.fixture.member.to_string())
+            {
+                subjects
+                    .check(&args)
+                    .unwrap_or_else(|error| panic!("{name}: {error}"));
             }
         }
 
         const CHILD_ARGV: &str = "CAFLEET_TEST_GUARD_ARGV";
         const CHILD_STDOUT_MARKER: &str = "cafleet-guard-child-stdout-begins";
-        const SETTINGS_ERROR: &str =
-            "Error: CAFLEET_MAX_TEXT_LEN must be a non-negative integer (got 'bogus')\n";
 
         #[test]
         #[ignore = "owned CLI subprocess entry"]
@@ -1303,8 +1574,8 @@ mod tests {
             )
             .unwrap();
             println!("{CHILD_STDOUT_MARKER}");
-            let args = std::iter::once(OsString::from("cafleet"))
-                .chain(argv.into_iter().map(OsString::from))
+            let args = std::iter::once(std::ffi::OsString::from("cafleet"))
+                .chain(argv.into_iter().map(std::ffi::OsString::from))
                 .collect::<Vec<_>>();
             match run_args(args) {
                 Ok(()) => std::process::exit(0),
@@ -1321,13 +1592,12 @@ mod tests {
             stderr: String,
         }
 
-        fn run_guarded_child(args: &[&str], member_id: Option<&str>) -> ChildOutcome {
+        fn run_guarded_child(args: &[String]) -> ChildOutcome {
             use crate::runtime::system::test_support::TestChild;
             use std::process::Stdio;
             use std::time::Duration;
             use std::time::Instant;
 
-            let database_dir = tempfile::tempdir().unwrap();
             let capture_dir = tempfile::tempdir().unwrap();
             let stdout_path = capture_dir.path().join("stdout");
             let stderr_path = capture_dir.path().join("stderr");
@@ -1342,22 +1612,10 @@ mod tests {
                     "--quiet",
                 ])
                 .env(CHILD_ARGV, serde_json::json!(args).to_string())
-                .env("CAFLEET_MAX_TEXT_LEN", "bogus")
-                .env(
-                    "CAFLEET_DATABASE_URL",
-                    format!(
-                        "sqlite:///{}",
-                        database_dir.path().join("absent.db").display()
-                    ),
-                )
                 .env("RUST_BACKTRACE", "0")
                 .stdin(Stdio::null())
                 .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
                 .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()));
-            match member_id {
-                Some(value) => command.env("CAFLEET_MEMBER_ID", value),
-                None => command.env_remove("CAFLEET_MEMBER_ID"),
-            };
             let started = Instant::now();
             let mut child = TestChild::new(command.spawn().unwrap());
             let status = child.poll_until(started + Duration::from_secs(10)).unwrap();
@@ -1370,11 +1628,6 @@ mod tests {
                     std::fs::read_to_string(&stderr_path).unwrap()
                 )
             });
-            assert_eq!(
-                std::fs::read_dir(database_dir.path()).unwrap().count(),
-                0,
-                "{args:?}: the database directory stays empty"
-            );
             let stdout = std::fs::read_to_string(stdout_path).unwrap();
             let (_, cli_stdout) = stdout
                 .split_once(&format!("{CHILD_STDOUT_MARKER}\n"))
@@ -1387,38 +1640,29 @@ mod tests {
         }
 
         #[test]
-        fn run_args_refuses_director_only_commands_before_reading_settings() {
-            for (name, args) in director_only_commands() {
-                let outcome = run_guarded_child(&args, Some("34"));
-                assert_eq!(outcome.code, Some(1), "{args:?}: {}", outcome.stderr);
+        fn run_args_refuses_a_member_caller_with_exit_one_and_nothing_on_stdout() {
+            let subjects = Subjects::new();
+            let url = format!("sqlite:///{}", subjects.fixture.conn.path().unwrap());
+            for (name, args) in subjects.commands(subjects.fixture.member) {
+                let mut argv = vec!["--database-url".to_owned(), url.clone()];
+                argv.extend(args);
+                let outcome = run_guarded_child(&argv);
+                assert_eq!(outcome.code, Some(1), "{name}: {}", outcome.stderr);
                 assert_eq!(
                     outcome.stderr,
-                    format!("Error: {}\n", guard_message(name, "34")),
-                    "{args:?}"
+                    format!(
+                        "Error: {}\n",
+                        guard_message(name, subjects.fixture.member, subjects.fixture.fleet)
+                    ),
+                    "{name}"
                 );
-                assert_eq!(outcome.stdout, "", "{args:?}");
+                assert_eq!(outcome.stdout, "", "{name}");
             }
-        }
-
-        #[test]
-        fn run_args_reads_the_rejected_settings_without_the_member_variable() {
-            for (_, args) in director_only_commands() {
-                let outcome = run_guarded_child(&args, None);
-                assert_eq!(outcome.code, Some(1), "{args:?}: {}", outcome.stderr);
-                assert_eq!(outcome.stderr, SETTINGS_ERROR, "{args:?}");
-            }
-        }
-
-        #[test]
-        fn run_args_lets_unguarded_commands_reach_settings_with_the_member_variable() {
-            let outcome = run_guarded_child(&["message", "poll", "1"], Some("34"));
-            assert_eq!(outcome.code, Some(1), "{}", outcome.stderr);
-            assert_eq!(outcome.stderr, SETTINGS_ERROR);
         }
 
         #[test]
         fn run_args_reports_parse_errors_before_the_guard() {
-            let outcome = run_guarded_child(&["member", "prompt", "7"], Some("34"));
+            let outcome = run_guarded_child(&["member".into(), "prompt".into(), "7".into()]);
             assert_eq!(outcome.code, Some(2), "{}", outcome.stderr);
             assert!(
                 !outcome.stderr.contains("Director-only"),

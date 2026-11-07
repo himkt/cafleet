@@ -2,7 +2,6 @@ use crate::broker;
 use crate::broker::MemberRecord;
 use crate::broker::NewPlacement;
 use crate::broker::runtime::DeliveryProjection;
-use crate::cli::available_mux;
 use crate::cli::emit;
 use crate::cli::nonblank;
 use crate::cli::resolve_body;
@@ -99,6 +98,9 @@ pub(crate) enum MemberCommand {
         /// The member whose recorded run is reconciled.
         #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
         member_id: i64,
+        /// The root Director issuing this Director-only command.
+        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        director_member_id: i64,
         /// Attest that the inspected owner and startup processes have terminated.
         #[arg(long, requires_all = ["expected_run_id", "expected_owner_epoch", "evidence_ref"])]
         owner_terminated: bool,
@@ -149,6 +151,9 @@ pub(crate) enum MemberCommand {
         /// The target member.
         #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
+        /// The root Director issuing this Director-only command.
+        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        director_member_id: i64,
         /// Single line of text to dispatch.
         #[arg(value_name = "TEXT")]
         text: String,
@@ -163,6 +168,9 @@ pub(crate) enum MemberCommand {
         /// The target member.
         #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
+        /// The root Director issuing this Director-only command.
+        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        director_member_id: i64,
         #[command(flatten)]
         body: ExecBodyArgs,
         /// Output in JSON format.
@@ -174,6 +182,9 @@ pub(crate) enum MemberCommand {
         /// The target member.
         #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
         member_id: i64,
+        /// The root Director issuing this Director-only command.
+        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        director_member_id: i64,
         /// One to 64 keys sent in order, with no implicit Escape or Enter.
         #[arg(index = 2, value_name = "KEY", num_args = 1..=64, required = true)]
         keys: Vec<String>,
@@ -271,6 +282,7 @@ pub(crate) fn run(
     match command {
         MemberCommand::Recover {
             member_id,
+            director_member_id: _,
             owner_terminated,
             expected_run_id,
             expected_owner_epoch,
@@ -298,7 +310,7 @@ pub(crate) fn run(
             );
             Ok(())
         }
-        MemberCommand::Create(args) => create(conn, settings, &args),
+        MemberCommand::Create(args) => create(conn, &args),
         MemberCommand::Delete { member_id, json } => {
             delete(conn, settings, member_id, json, deadline)
         }
@@ -306,11 +318,13 @@ pub(crate) fn run(
         MemberCommand::List { fleet_id, json } => list(conn, fleet_id, json),
         MemberCommand::Prompt {
             member_id,
+            director_member_id: _,
             text,
             json,
         } => prompt(conn, settings, member_id, &text, json, deadline),
         MemberCommand::Exec {
             member_id,
+            director_member_id: _,
             body,
             json,
         } => exec(conn, settings, member_id, &body, json, deadline),
@@ -320,7 +334,7 @@ pub(crate) fn run(
             lines,
             ansi,
             json,
-        } => capture(conn, settings, member_id, lines, ansi, json),
+        } => capture(conn, member_id, lines, ansi, json),
     }
 }
 
@@ -351,11 +365,7 @@ fn launch_evidence(
     }
 }
 
-fn create(
-    conn: &mut Connection,
-    settings: &Settings,
-    args: &CreateArgs,
-) -> Result<(), CafleetError> {
+fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> {
     let fleet_id = args.fleet_id;
     let name = args.name.as_str();
     let description = args.description.as_str();
@@ -384,50 +394,63 @@ fn create(
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
     let policy = backend.resolve_policy(None, permission_mode)?;
-    let catalog = ProfileCatalog::bundled()?;
+    let catalog = ProfileCatalog::bundled();
     let (event_evidence, evidence_policy) =
-        launch_evidence(event_evidence, event_redaction_file, &catalog)?;
+        launch_evidence(event_evidence, event_redaction_file, catalog)?;
 
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
-    let mux = available_mux(settings, None)?;
+    let director = broker::director_placement(conn, fleet_id)?;
+    let mux = crate::runtime::mux_for_placement(&director, None)?;
     let executable = backend.ensure_available(&SystemProbe, &policy.resolved_mode)?;
-    let context = mux
-        .context_discovery()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
+    let context = crate::multiplexer::MultiplexerContext {
+        session: director.mux_session.clone(),
+        window_id: director.mux_window_id.clone(),
+        pane_id: director.mux_pane_id.clone().ok_or_else(|| {
+            CafleetError::App(format!(
+                "fleet {fleet_id}'s Director placement records no pane; re-create the fleet with 'cafleet fleet create'."
+            ))
+        })?,
+    };
 
     use crate::runtime as runner;
     use std::io::IsTerminal;
     use std::time::Duration;
     use std::time::Instant;
     let deadline = Instant::now() + Duration::from_secs(10);
-    let hermes_home = (backend == crate::coding_agent::CodingAgent::Hermes)
+    let hermes = (backend == crate::coding_agent::CodingAgent::Hermes)
         .then(|| {
-            let base =
-                backend.config_dir(&|name| SystemProbe.env_var(name), &SystemProbe.home_dir())?;
-            crate::coding_agent::hermes_settlement::effective_home(
-                &executable,
-                &base,
-                deadline.min(Instant::now() + Duration::from_secs(2)),
-            )
+            backend
+                .config_dir(&|name| SystemProbe.env_var(name), &SystemProbe.home_dir())
+                .map(|base| crate::coding_agent::hermes::HermesCli::new(executable.clone(), base))
         })
         .transpose()?;
-    let probe = backend.probe_native_version(
-        &executable,
-        deadline.min(Instant::now() + Duration::from_secs(2)),
-    );
-    let native = crate::coding_agent::native_launch_identity(backend, probe, &catalog)?;
+    let probe_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
+    let (hermes_home, probe) = std::thread::scope(|scope| {
+        let home = hermes.as_ref().map(|hermes| {
+            scope.spawn(move || {
+                crate::coding_agent::hermes_settlement::effective_home(hermes, probe_deadline)
+            })
+        });
+        let probe = backend.probe_native_version(&executable, probe_deadline);
+        (home.map(crate::coding_agent::hermes::joined), probe)
+    });
+    let hermes_home = hermes_home.transpose()?;
+    let native = crate::coding_agent::native_launch_identity(backend, probe, catalog)?;
     if let Some(warning) = &native.warning {
         eprintln!("{warning}");
     }
-    substitute_spawn_placeholders(&prompt_body, fleet_id, 1, director_id, agent_name)?;
     let identity = broker::runtime::database_identity(conn)?;
-    let database_url = format!(
-        "sqlite:///{}",
-        identity["canonical_path"]
-            .as_str()
-            .expect("canonical database path")
-    );
+    let canonical_path = identity["canonical_path"]
+        .as_str()
+        .expect("canonical database path");
+    let prompt_database_url = spawn_database_url(canonical_path)?;
+    let cites_database_url = prompt_cites_database_url(&prompt_body)?;
+    if prompt_database_url != DEFAULT_DATABASE && !cites_database_url {
+        return Err(CafleetError::App(
+            "the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url".into(),
+        ));
+    }
     let forwarded_config = backend.forwarded_config(&|name| SystemProbe.env_var(name))?;
     let next_run: i64 = conn.query_row(
         "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
@@ -453,6 +476,7 @@ fn create(
             mux_window_id: context.window_id.clone(),
             mux_pane_id: None,
             coding_agent: agent_name.into(),
+            mux_server: director.mux_server.clone(),
         },
     };
     let run_settings = runner::RunSettings {
@@ -492,17 +516,14 @@ fn create(
                 pending.member.member_id,
                 director_id,
                 agent_name,
+                &prompt_database_url,
             )?;
             let argv =
                 backend.launch_argv(&executable, &prompt, name, &cwd, model, effort, &policy)?;
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
-                environment: CodingAgent::spawn_environment(
-                    &database_url,
-                    pending.member.member_id,
-                    forwarded_config.clone(),
-                ),
+                environment: forwarded_config.clone().into_iter().collect(),
                 evidence_policy,
                 size,
             };
@@ -606,7 +627,8 @@ fn delete(
     let pane_status = match &locked.value {
         DeleteAction::Deregistered(status) => status.to_string(),
         DeleteAction::Close => {
-            let mux = available_mux(settings, Some(deadline))?;
+            let mux =
+                crate::runtime::mux_for_fleet(conn, locked.snapshot.fleet_id, Some(deadline))?;
             close_member(conn, settings, member_id, &mut locked, &mux, deadline)?
         }
     };
@@ -870,16 +892,14 @@ fn exec(
 
 fn capture(
     conn: &mut Connection,
-    settings: &Settings,
     member_id: i64,
     lines: i64,
     ansi: bool,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let mux = available_mux(settings, None)?;
-
     let member = load_member(conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "capture")?;
+    let mux = crate::runtime::mux_for_fleet(conn, member.fleet_id, None)?;
     let raw = mux
         .capture_pane(&pane_id, lines)
         .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
@@ -892,10 +912,34 @@ fn capture(
     write_member_capture(&mut std::io::stdout(), &capture, json)
 }
 
+const DEFAULT_DATABASE: &str = "default";
+
+/// The `{database_url}` value: `default` when the fleet database is the default database,
+/// otherwise its canonical URL.
+fn spawn_database_url(canonical_path: &str) -> Result<String, CafleetError> {
+    let default_url = crate::config::default_database_url()?;
+    let default_path = crate::db::database_path(&default_url)?;
+    let is_default = std::fs::canonicalize(default_path)
+        .is_ok_and(|default| default == Path::new(canonical_path));
+    Ok(if is_default {
+        DEFAULT_DATABASE.to_owned()
+    } else {
+        format!("sqlite:///{canonical_path}")
+    })
+}
+
 const BRACE_HINT: &str = "Double literal braces ({{, }}) to keep them as text.";
 
+const SPAWN_PLACEHOLDERS: [&str; 5] = [
+    "fleet_id",
+    "member_id",
+    "director_member_id",
+    "coding_agent",
+    "database_url",
+];
+
 /// The spawn-placeholder mini-formatter used by `member create`:
-/// Python brace grammar — `{{` / `}}` escapes, the four placeholders, and the
+/// Python brace grammar — `{{` / `}}` escapes, the five placeholders, and the
 /// unknown-vs-malformed usage-error taxonomy (both exit 2).
 pub(crate) fn substitute_spawn_placeholders(
     body: &str,
@@ -903,6 +947,30 @@ pub(crate) fn substitute_spawn_placeholders(
     member_id: i64,
     director_member_id: i64,
     coding_agent: &str,
+    database_url: &str,
+) -> Result<String, CafleetError> {
+    render_spawn_placeholders(body, |key| match key {
+        "fleet_id" => fleet_id.to_string(),
+        "member_id" => member_id.to_string(),
+        "director_member_id" => director_member_id.to_string(),
+        "coding_agent" => coding_agent.to_owned(),
+        "database_url" => database_url.to_owned(),
+        other => unreachable!("{other} is a spawn placeholder"),
+    })
+}
+
+fn prompt_cites_database_url(body: &str) -> Result<bool, CafleetError> {
+    let mut cited = false;
+    render_spawn_placeholders(body, |key| {
+        cited |= key == "database_url";
+        String::new()
+    })?;
+    Ok(cited)
+}
+
+fn render_spawn_placeholders(
+    body: &str,
+    mut value: impl FnMut(&str) -> String,
 ) -> Result<String, CafleetError> {
     let mut out = String::with_capacity(body.len());
     let mut chars = body.chars().peekable();
@@ -925,19 +993,14 @@ pub(crate) fn substitute_spawn_placeholders(
                         None => return Err(malformed("expected '}' before end of string")),
                     }
                 }
-                match key.as_str() {
-                    "fleet_id" => out.push_str(&fleet_id.to_string()),
-                    "member_id" => out.push_str(&member_id.to_string()),
-                    "director_member_id" => out.push_str(&director_member_id.to_string()),
-                    "coding_agent" => out.push_str(coding_agent),
-                    _ => {
-                        return Err(CafleetError::Usage(format!(
-                            "Unknown placeholder '{key}' in custom prompt. Supported \
-                             placeholders: {{fleet_id}}, {{member_id}}, \
-                             {{director_member_id}}, {{coding_agent}}. {BRACE_HINT}"
-                        )));
-                    }
+                if !SPAWN_PLACEHOLDERS.contains(&key.as_str()) {
+                    return Err(CafleetError::Usage(format!(
+                        "Unknown placeholder '{key}' in custom prompt. Supported \
+                         placeholders: {{fleet_id}}, {{member_id}}, \
+                         {{director_member_id}}, {{coding_agent}}, {{database_url}}. {BRACE_HINT}"
+                    )));
                 }
+                out.push_str(&value(&key));
             }
             '}' => {
                 if chars.peek() == Some(&'}') {
@@ -1020,8 +1083,7 @@ mod tests {
         fn hermes_member_deletion_waits_for_busy_pane_input_only_within_the_command_deadline() {
             let _dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&_dir);
-            let settings =
-                Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "hermes-busy");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
             crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
@@ -1147,8 +1209,7 @@ mod tests {
             ));
             let _dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&_dir);
-            let settings =
-                Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "member-recovery");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
             crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
@@ -1285,11 +1346,20 @@ mod tests {
     use std::time::Instant;
 
     fn assert_run_less_input_failure(action: &str) {
-        let (_dir, settings, conn, member_id) = recovery_entry::run_less_registry();
+        let (_dir, settings, conn, member_id, director) = recovery_entry::run_less_registry();
         let id = member_id.to_string();
+        let director = director.to_string();
         let (output, pane_calls) = crate::cli::test_support::isolated_cli(
             &settings,
-            &["member", action, &id, "literal input", "--json"],
+            &[
+                "member",
+                action,
+                &id,
+                "literal input",
+                "--from-member-id",
+                &director,
+                "--json",
+            ],
         );
         assert!(pane_calls.is_empty(), "{action}: {pane_calls}");
         assert_eq!(output.status.code(), Some(1));
@@ -1313,7 +1383,6 @@ mod tests {
 
     #[test]
     fn hermes_member_create_fails_before_registration_when_the_hermes_home_cannot_be_resolved() {
-        let passthrough = json!(crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH).to_string();
         for (config_path, expected) in [
             (
                 "printf 'config.yaml\\n'",
@@ -1321,13 +1390,13 @@ mod tests {
             ),
             (
                 "echo 'no profile' >&2\n    exit 4",
-                "Error: cannot read hermes configuration through 'hermes config path': exited with exit status: 4: no profile\n",
+                "Error: cannot read hermes configuration through 'hermes config path': no profile\n",
             ),
         ] {
             let dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "hermes-home");
-            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let members = |conn: &Connection| {
                 conn.query_row("SELECT COUNT(*) FROM members", [], |row| {
                     row.get::<_, i64>(0)
@@ -1336,7 +1405,7 @@ mod tests {
             };
             let before = members(&conn);
             let hermes = format!(
-                "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config get --json terminal.client_env_passthrough') printf '%s\\n' '{passthrough}' ;;\n  'config path')\n    {config_path} ;;\n  *) exit 3 ;;\nesac"
+                "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config path')\n    {config_path} ;;\n  *) exit 3 ;;\nesac"
             );
             let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
             let fleet = fleet.to_string();
@@ -1353,7 +1422,7 @@ mod tests {
                     "hermes home fixture",
                     "--coding-agent",
                     "hermes",
-                    "literal assignment",
+                    "literal assignment on {database_url}",
                 ],
                 &[("tmux", tmux), ("hermes", &hermes)],
                 &[
@@ -1373,73 +1442,11 @@ mod tests {
     }
 
     #[test]
-    fn hermes_member_create_fails_before_registration_when_the_passthrough_lacks_a_member_name() {
-        let without_member_id = crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH
-            .into_iter()
-            .filter(|name| *name != "CAFLEET_MEMBER_ID")
-            .collect::<Vec<_>>();
-        for (passthrough, expected) in [
-            (
-                format!("printf '%s\\n' '{}'", json!(without_member_id)),
-                "Error: hermes terminal.client_env_passthrough lacks CAFleet's member names: CAFLEET_MEMBER_ID; run 'cafleet setup --coding-agent hermes'\n".to_owned(),
-            ),
-            (
-                "echo 'profile locked' >&2\n    exit 5".to_owned(),
-                "Error: cannot read hermes configuration through 'hermes config get': exited with exit status: 5: profile locked\n".to_owned(),
-            ),
-        ] {
-            let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, _) = create_fleet_fixture(&mut conn, "hermes-passthrough");
-            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
-            let members = |conn: &Connection| {
-                conn.query_row("SELECT COUNT(*) FROM members", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap()
-            };
-            let before = members(&conn);
-            let hermes = format!(
-                "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config get --json terminal.client_env_passthrough')\n    {passthrough} ;;\n  'config path') printf '%s\\n' '{}/config.yaml' ;;\n  *) exit 3 ;;\nesac",
-                dir.path().display()
-            );
-            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
-            let fleet = fleet.to_string();
-            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
-                &settings,
-                &[
-                    "member",
-                    "create",
-                    "--fleet-id",
-                    &fleet,
-                    "--name",
-                    "worker",
-                    "--description",
-                    "hermes passthrough fixture",
-                    "--coding-agent",
-                    "hermes",
-                    "literal assignment",
-                ],
-                &[("tmux", tmux), ("hermes", &hermes)],
-                &[
-                    ("TMUX_PANE", "%1"),
-                    ("HERMES_HOME", dir.path().to_str().unwrap()),
-                ],
-            );
-            let stderr = String::from_utf8(output.stderr).unwrap();
-            assert_eq!(stderr, expected);
-            assert_eq!(output.status.code(), Some(1), "{stderr}");
-            assert!(!pane_calls.contains("split-window"), "{pane_calls}");
-            assert_eq!(members(&conn), before);
-        }
-    }
-
-    #[test]
-    fn member_create_hands_the_allocated_member_id_to_the_native_child_only() {
+    fn member_create_renders_identity_and_database_into_the_prompt_and_the_runner_argv() {
         let dir = crate::runtime::test_support::short_tempdir();
         let mut conn = migrated_conn(&dir);
         let (fleet, _) = create_fleet_fixture(&mut conn, "member-environment");
-        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
         let config = dir.path().join("claude config");
         std::fs::create_dir(&config).unwrap();
         let descriptor_copy = dir.path().join("descriptor-copy.json");
@@ -1459,7 +1466,7 @@ mod tests {
                 "member environment fixture",
                 "--coding-agent",
                 "claude",
-                "allocated member {member_id}",
+                "allocated member {member_id} on {database_url}",
             ],
             &[("tmux", tmux), ("claude", claude)],
             &[
@@ -1476,9 +1483,20 @@ mod tests {
         assert!(stderr.contains("runner pane spawn failed"), "{stderr}");
         let split = pane_calls
             .lines()
-            .find(|line| line.starts_with("split-window "))
+            .find(|line| line.contains(" split-window "))
             .unwrap_or_else(|| panic!("the runner pane was requested: {pane_calls}"));
-        assert!(!split.contains("CAFLEET_MEMBER_ID"), "{split}");
+        let database_url = format!(
+            "sqlite:///{}",
+            std::fs::canonicalize(conn.path().unwrap())
+                .unwrap()
+                .display()
+        );
+        assert!(
+            split.contains(&format!(
+                " --database-url {database_url} __member-run --descriptor "
+            )),
+            "{split}"
+        );
         let descriptor: crate::runtime::LaunchDescriptor =
             serde_json::from_slice(&std::fs::read(&descriptor_copy).unwrap()).unwrap();
         let member_id = descriptor.member_id.to_string();
@@ -1486,28 +1504,16 @@ mod tests {
             descriptor
                 .spawn
                 .argv
-                .contains(&format!("allocated member {member_id}")),
+                .contains(&format!("allocated member {member_id} on {database_url}")),
             "{:?}",
             descriptor.spawn.argv
         );
         assert_eq!(
             descriptor.spawn.environment,
-            vec![
-                (
-                    "CAFLEET_DATABASE_URL".to_owned(),
-                    format!(
-                        "sqlite:///{}",
-                        std::fs::canonicalize(conn.path().unwrap())
-                            .unwrap()
-                            .display()
-                    ),
-                ),
-                ("CAFLEET_MEMBER_ID".to_owned(), member_id),
-                (
-                    "CLAUDE_CONFIG_DIR".to_owned(),
-                    config.to_str().unwrap().to_owned()
-                ),
-            ]
+            vec![(
+                "CLAUDE_CONFIG_DIR".to_owned(),
+                config.to_str().unwrap().to_owned()
+            )]
         );
     }
 
@@ -1607,7 +1613,7 @@ mod tests {
         let setup_expiration = config["setup_expiration"].as_u64().unwrap();
         let setup_deadline = external_member_deadline(setup_expiration);
         let database = crate::db::database_path(config["database_url"].as_str().unwrap()).unwrap();
-        let settings = Settings::for_database(std::path::Path::new(database), Some("tmux"));
+        let settings = Settings::for_database(std::path::Path::new(database));
         let mut conn = crate::db::connect(&settings.database_url).unwrap();
         external_member_private_json(&path.with_extension("ready"), &json!({"ready":true}));
         while !path.with_extension("continue").exists() {
@@ -1623,6 +1629,7 @@ mod tests {
         );
         let deadline = external_member_deadline(expiration);
         let member_id = config["member_id"].as_i64().unwrap();
+        let director_member_id = config["director_member_id"].as_i64().unwrap();
         let json = config["json"].as_bool().unwrap();
         let result = match config["action"].as_str().unwrap() {
             "prompt" => run(
@@ -1630,6 +1637,7 @@ mod tests {
                 &settings,
                 MemberCommand::Prompt {
                     member_id,
+                    director_member_id,
                     text: config["literal"].as_str().unwrap().into(),
                     json,
                 },
@@ -1640,6 +1648,7 @@ mod tests {
                 &settings,
                 MemberCommand::Exec {
                     member_id,
+                    director_member_id,
                     body: ExecBodyArgs {
                         command: Some(config["literal"].as_str().unwrap().into()),
                         file: None,
@@ -1708,7 +1717,9 @@ mod tests {
             &path,
             &json!({
                 "database_url":format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-                "member_id":fixture.fixture.run.member_id,"literal":literal,"action":action,
+                "member_id":fixture.fixture.run.member_id,
+                "director_member_id":fixture.fixture.run.director_member_id,
+                "literal":literal,"action":action,
                 "json":json,"input_id":input_id,"setup_expiration":setup_expiration,
             }),
         );
@@ -2035,10 +2046,9 @@ mod tests {
                         .unwrap()
                         .unwrap();
                 let placement = member.placement.unwrap();
-                let settings = Settings::for_database(
-                    std::path::Path::new(fixture.fixture.conn.path().unwrap()),
-                    Some("tmux"),
-                );
+                let settings = Settings::for_database(std::path::Path::new(
+                    fixture.fixture.conn.path().unwrap(),
+                ));
                 let request = SubmitInput {
                     operation_key: row.operation_key.clone(),
                     input_kind: row.kind,
@@ -2082,8 +2092,7 @@ mod tests {
     fn fixture() -> (tempfile::TempDir, Connection, Settings, i64, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let settings =
-            Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
         let (fleet, director) = create_fleet_fixture(&mut conn, "deletion");
         let worker = register(&mut conn, fleet, "worker", None);
         (dir, conn, settings, fleet, director, worker)
@@ -2322,10 +2331,7 @@ mod tests {
             let before = table_snapshot(&conn, |_| true);
             let identity = crate::broker::runtime::database_identity(&conn).unwrap();
             let paths = crate::runtime::RuntimePaths::for_run(&identity, 1).unwrap();
-            let settings = Settings::for_database(
-                std::path::Path::new(conn.path().unwrap()),
-                Some("unavailable-test-multiplexer"),
-            );
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let failure = member::run(&mut conn, &settings, command, crate::time::Deadline::new())
                 .expect_err("invalid launch must fail");
             assert!(
@@ -2516,10 +2522,7 @@ mod tests {
                 panic!("member command expected")
             };
             let before = table_snapshot(&conn, |_| true);
-            let settings = Settings::for_database(
-                std::path::Path::new(conn.path().unwrap()),
-                Some("unavailable-test-multiplexer"),
-            );
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let failure = member::run(&mut conn, &settings, command, crate::time::Deadline::new())
                 .expect_err("unknown fleet must fail");
             assert!(
@@ -2548,6 +2551,8 @@ mod tests {
                 "member",
                 "press",
                 "--json",
+                "--from-member-id",
+                "7",
                 "42",
                 "--",
                 "-",
@@ -2563,21 +2568,41 @@ mod tests {
             {
                 Command::Member(member::MemberCommand::Press {
                     member_id,
+                    director_member_id,
                     keys,
                     json,
                 }) => {
                     assert_eq!(member_id, 42);
+                    assert_eq!(director_member_id, 7);
                     assert!(json);
                     assert_eq!(keys, ["-", "+", ";", "A", "Ctrl+A", "Shift+Tab"]);
                 }
                 _ => panic!("press has its dedicated command arm"),
             }
             for arguments in [
-                vec!["cafleet", "member", "press", "0", "Enter"],
-                vec!["cafleet", "member", "press", "42"],
+                vec![
+                    "cafleet",
+                    "member",
+                    "press",
+                    "--from-member-id",
+                    "7",
+                    "0",
+                    "Enter",
+                ],
+                vec!["cafleet", "member", "press", "--from-member-id", "7", "42"],
+                vec!["cafleet", "member", "press", "42", "Enter"],
+                vec![
+                    "cafleet",
+                    "member",
+                    "press",
+                    "--from-member-id",
+                    "0",
+                    "42",
+                    "Enter",
+                ],
             ] {
                 match CliArgs::try_parse_from(arguments) {
-                    Ok(_) => panic!("press requires a positive member and keys"),
+                    Ok(_) => panic!("press requires a positive member, a positive caller and keys"),
                     Err(cause) => assert_eq!(cause.exit_code(), 2),
                 }
             }
@@ -2587,9 +2612,17 @@ mod tests {
         fn press_cli_invalid_tail_is_usage_before_missing_database_validation() {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("absent.db");
-            let settings = Settings::for_database(&path, Some("tmux"));
+            let settings = Settings::for_database(&path);
             let command = CliArgs::try_parse_from([
-                "cafleet", "member", "press", "42", "Enter", "Ctrl+1", "--json",
+                "cafleet",
+                "member",
+                "press",
+                "--from-member-id",
+                "1",
+                "42",
+                "Enter",
+                "Ctrl+1",
+                "--json",
             ])
             .unwrap_or_else(|cause| panic!("raw key arguments reach typed validation: {cause}"))
             .command;
@@ -2651,6 +2684,8 @@ mod tests {
                 "member",
                 "recover",
                 "7",
+                "--from-member-id",
+                "1",
                 "--owner-terminated",
                 "--expected-run-id",
                 "11",
@@ -2674,7 +2709,14 @@ mod tests {
         fn runner_recovery_entry_ordinary_parser_accepts_positive_member_ids_and_json_selection() {
             for member_id in ["1", "481", "9223372036854775807"] {
                 for json in [false, true] {
-                    let mut args = vec!["cafleet", "member", "recover", member_id];
+                    let mut args = vec![
+                        "cafleet",
+                        "member",
+                        "recover",
+                        member_id,
+                        "--from-member-id",
+                        "1",
+                    ];
                     if json {
                         args.push("--json");
                     }
@@ -2685,9 +2727,17 @@ mod tests {
 
         #[test]
         fn runner_recovery_entry_member_ids_require_positive_assigned_integers() {
-            recognized_usage_error(&["member", "recover", "--json"]);
+            recognized_usage_error(&["member", "recover", "--from-member-id", "1", "--json"]);
             for member_id in ["", "0", "-1", "unknown", "1.0", "9223372036854775808"] {
-                recognized_usage_error(&["member", "recover", "--json", "--", member_id]);
+                recognized_usage_error(&[
+                    "member",
+                    "recover",
+                    "--from-member-id",
+                    "1",
+                    "--json",
+                    "--",
+                    member_id,
+                ]);
             }
         }
 
@@ -2711,6 +2761,8 @@ mod tests {
                             "member",
                             "recover",
                             member_id,
+                            "--from-member-id",
+                            "1",
                             "--owner-terminated",
                             "--expected-run-id",
                             run_id,
@@ -2778,7 +2830,7 @@ mod tests {
                 &["--evidence-ref", "audit:owner-termination"],
             ];
             for selected in 1_u8..15 {
-                let mut args = vec!["member", "recover", "7", "--json"];
+                let mut args = vec!["member", "recover", "7", "--from-member-id", "1", "--json"];
                 for (index, option) in options.iter().enumerate() {
                     if selected & (1 << index) != 0 {
                         args.extend_from_slice(option);
@@ -2822,23 +2874,23 @@ mod tests {
             }
         }
 
-        pub(super) fn run_less_registry() -> (TempDir, Settings, Connection, i64) {
+        pub(super) fn run_less_registry() -> (TempDir, Settings, Connection, i64, i64) {
             let dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
-            let (fleet, _) = create_fleet_fixture(&mut conn, "recovery-entry");
+            let (fleet, director) = create_fleet_fixture(&mut conn, "recovery-entry");
             let member_id = crate::broker::members::test_support::register(
                 &mut conn,
                 fleet,
                 "run-less",
                 Some("%2"),
             );
-            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
-            (dir, settings, conn, member_id)
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            (dir, settings, conn, member_id, director)
         }
 
         #[test]
         fn member_recover_run_less_member_fails_explicitly_before_registry_or_artifact_mutation() {
-            let (dir, settings, conn, member_id) = run_less_registry();
+            let (dir, settings, conn, member_id, director) = run_less_registry();
             let path = std::path::PathBuf::from(conn.path().unwrap());
             drop(conn);
             let before = std::fs::read(&path).unwrap();
@@ -2848,8 +2900,17 @@ mod tests {
                 .collect::<Vec<_>>();
             names.sort();
             let id = member_id.to_string();
-            let args =
-                CliArgs::try_parse_from(["cafleet", "member", "recover", &id, "--json"]).unwrap();
+            let director = director.to_string();
+            let args = CliArgs::try_parse_from([
+                "cafleet",
+                "member",
+                "recover",
+                &id,
+                "--from-member-id",
+                &director,
+                "--json",
+            ])
+            .unwrap();
             let result = dispatch(&settings, args.command);
             let error = match result {
                 Ok(()) => panic!("a run-less member has no recorded run to recover"),
@@ -2881,48 +2942,60 @@ mod tests {
     }
 
     #[test]
-    fn substitutes_all_four_placeholders() {
+    fn substitutes_all_five_placeholders() {
         let body = "FLEET ID: {fleet_id}\nYOUR MEMBER ID: {member_id}\n\
-                    DIRECTOR MEMBER ID: {director_member_id}\nCODING AGENT: {coding_agent}";
-        let out = substitute_spawn_placeholders(body, 3, 14, 11, "claude").unwrap();
+                    DIRECTOR MEMBER ID: {director_member_id}\nCODING AGENT: {coding_agent}\n\
+                    DATABASE URL: {database_url}";
+        let out = substitute_spawn_placeholders(body, 3, 14, 11, "claude", "default").unwrap();
         assert_eq!(
             out,
-            "FLEET ID: 3\nYOUR MEMBER ID: 14\nDIRECTOR MEMBER ID: 11\nCODING AGENT: claude"
+            "FLEET ID: 3\nYOUR MEMBER ID: 14\nDIRECTOR MEMBER ID: 11\nCODING AGENT: claude\nDATABASE URL: default"
         );
     }
 
     #[test]
     fn substitutes_repeated_placeholders() {
-        let out = substitute_spawn_placeholders("{fleet_id}-{fleet_id}", 7, 1, 2, "codex").unwrap();
+        let out =
+            substitute_spawn_placeholders("{fleet_id}-{fleet_id}", 7, 1, 2, "codex", "default")
+                .unwrap();
         assert_eq!(out, "7-7");
     }
 
     #[test]
     fn body_without_placeholders_is_returned_verbatim() {
         let out =
-            substitute_spawn_placeholders("plain prompt, no braces", 1, 2, 3, "claude").unwrap();
+            substitute_spawn_placeholders("plain prompt, no braces", 1, 2, 3, "claude", "default")
+                .unwrap();
         assert_eq!(out, "plain prompt, no braces");
     }
 
     #[test]
     fn doubled_braces_render_literal_braces() {
-        let out =
-            substitute_spawn_placeholders("keep {{fleet_id}} literal", 1, 2, 3, "claude").unwrap();
+        let out = substitute_spawn_placeholders(
+            "keep {{fleet_id}} literal",
+            1,
+            2,
+            3,
+            "claude",
+            "default",
+        )
+        .unwrap();
         assert_eq!(out, "keep {fleet_id} literal");
-        let out = substitute_spawn_placeholders("a{{b}}c", 1, 2, 3, "claude").unwrap();
+        let out = substitute_spawn_placeholders("a{{b}}c", 1, 2, 3, "claude", "default").unwrap();
         assert_eq!(out, "a{b}c");
     }
 
     #[test]
     fn doubled_braces_compose_with_substitution() {
         let out =
-            substitute_spawn_placeholders("{{x}} and {fleet_id}", 42, 2, 3, "opencode").unwrap();
+            substitute_spawn_placeholders("{{x}} and {fleet_id}", 42, 2, 3, "opencode", "default")
+                .unwrap();
         assert_eq!(out, "{x} and 42");
     }
 
     #[test]
     fn unknown_placeholder_is_a_usage_error_with_the_pinned_message() {
-        let err = substitute_spawn_placeholders("hello {foo}", 1, 2, 3, "claude")
+        let err = substitute_spawn_placeholders("hello {foo}", 1, 2, 3, "claude", "default")
             .expect_err("an unknown placeholder must error");
         assert!(matches!(err, CafleetError::Usage(_)));
         assert_eq!(err.exit_code(), 2);
@@ -2930,18 +3003,22 @@ mod tests {
             err.message(),
             "Unknown placeholder 'foo' in custom prompt. \
              Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, \
-             {coding_agent}. Double literal braces ({{, }}) to keep them as text."
+             {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text."
         );
     }
 
     #[test]
     fn stray_open_brace_is_a_malformed_usage_error() {
-        assert_malformed_usage_error(substitute_spawn_placeholders("oops {", 1, 2, 3, "claude"));
+        assert_malformed_usage_error(substitute_spawn_placeholders(
+            "oops {", 1, 2, 3, "claude", "default",
+        ));
     }
 
     #[test]
     fn stray_close_brace_is_a_malformed_usage_error() {
-        assert_malformed_usage_error(substitute_spawn_placeholders("oops }", 1, 2, 3, "claude"));
+        assert_malformed_usage_error(substitute_spawn_placeholders(
+            "oops }", 1, 2, 3, "claude", "default",
+        ));
     }
 
     #[test]
@@ -2952,6 +3029,7 @@ mod tests {
             2,
             3,
             "claude",
+            "default",
         ));
     }
     use std::io;

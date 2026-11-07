@@ -60,7 +60,11 @@ pub(crate) struct Placement {
     pub(crate) mux_pane_id: Option<String>,
     pub(crate) coding_agent: String,
     pub(crate) created_at: String,
+    pub(crate) mux_server: String,
 }
+
+/// The `member_placements` columns [`Placement::from_row`] reads, in order, for the `p` alias.
+pub(crate) const PLACEMENT_COLUMNS: &str = "p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at, p.mux_server";
 
 impl Placement {
     pub(crate) fn from_row(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<Self> {
@@ -71,6 +75,7 @@ impl Placement {
             mux_pane_id: row.get(offset + 3)?,
             coding_agent: row.get(offset + 4)?,
             created_at: row.get(offset + 5)?,
+            mux_server: row.get(offset + 6)?,
         })
     }
 }

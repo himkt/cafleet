@@ -357,7 +357,7 @@ pub(crate) mod test_support {
             let member = crate::broker::get_member(&conn, worker, fleet)
                 .unwrap()
                 .unwrap();
-            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             Self {
                 _dir: dir,
                 conn,
@@ -370,15 +370,16 @@ pub(crate) mod test_support {
             self.member.placement.as_ref().unwrap()
         }
 
-        pub(crate) fn hold_for(&self, hold: Option<Duration>) -> std::thread::JoinHandle<()> {
-            let guard = PaneLock::try_acquire(&self.settings.database_url, self.placement())
+        pub(crate) fn hold(&self) -> PaneLock {
+            PaneLock::try_acquire(&self.settings.database_url, self.placement())
                 .unwrap()
-                .expect("the fixture lock is free");
+                .expect("the fixture lock is free")
+        }
+
+        pub(crate) fn hold_for(&self, hold: Duration) -> std::thread::JoinHandle<()> {
+            let guard = self.hold();
             std::thread::spawn(move || {
-                match hold {
-                    Some(hold) => std::thread::sleep(hold),
-                    None => std::thread::sleep(Duration::from_secs(3)),
-                }
+                std::thread::sleep(hold);
                 drop(guard);
             })
         }
@@ -403,10 +404,9 @@ mod tests {
         fn runner_recovery_pane_guard_validates_the_actual_database_placement_and_named_inode() {
             use std::os::unix::fs::PermissionsExt;
             let fixture = Fixture::new();
-            let configuration = crate::config::Settings::for_database(
-                std::path::Path::new(fixture.conn.path().unwrap()),
-                None,
-            );
+            let configuration = crate::config::Settings::for_database(std::path::Path::new(
+                fixture.conn.path().unwrap(),
+            ));
             let placement = crate::broker::get_member(
                 &fixture.conn,
                 fixture.run.member_id,
@@ -509,7 +509,7 @@ mod tests {
         #[test]
         fn a_lock_released_within_the_wait_is_acquired() {
             let fixture = LockFixture::new();
-            let holder = fixture.hold_for(Some(Duration::from_millis(300)));
+            let holder = fixture.hold_for(Duration::from_millis(300));
             let started = Instant::now();
             let guard = PaneLock::acquire_within(
                 &fixture.settings.database_url,
@@ -527,7 +527,7 @@ mod tests {
         fn a_lock_released_just_before_the_reserved_deadline_is_acquired() {
             let fixture = LockFixture::new();
             let lock_deadline = LockFixture::writer_deadline();
-            let holder = fixture.hold_for(Some(Duration::from_millis(1300)));
+            let holder = fixture.hold_for(Duration::from_millis(1300));
             let guard = PaneLock::acquire_within(
                 &fixture.settings.database_url,
                 fixture.placement(),
@@ -541,7 +541,7 @@ mod tests {
         #[test]
         fn a_lock_still_busy_at_the_reserved_deadline_returns_none() {
             let fixture = LockFixture::new();
-            let holder = fixture.hold_for(None);
+            let _held = fixture.hold();
             let started = Instant::now();
             let guard = PaneLock::acquire_within(
                 &fixture.settings.database_url,
@@ -553,7 +553,6 @@ mod tests {
             let waited = started.elapsed();
             assert!(waited >= Duration::from_millis(1400), "{waited:?}");
             assert!(waited < Duration::from_millis(2000), "{waited:?}");
-            holder.join().unwrap();
         }
 
         #[test]

@@ -1,45 +1,38 @@
 use crate::coding_agent::CodingAgent;
-use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
+use crate::coding_agent::hermes::HermesConfig;
 use crate::config::EnvLookup;
 use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
 use rusqlite::Connection;
-use serde_json::Value;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) struct AgentPaths {
     pub(crate) identity: String,
+    base: PathBuf,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
     plugins_dir: Option<PathBuf>,
 }
 
-/// A `hermes` process that ran to completion.
-#[derive(Debug)]
-pub(crate) struct HermesOutput {
-    pub(crate) exit_code: i32,
-    pub(crate) stdout: String,
-    pub(crate) stderr: String,
+/// How setup reaches Hermes for the plugin configuration.
+pub(crate) enum HermesSetup<'a> {
+    Available(&'a dyn HermesConfig),
+    /// `--coding-agent hermes` was given and no `hermes` is on `PATH`.
+    MissingRequired,
+    /// Plain setup found no `hermes` on `PATH`.
+    Absent,
 }
 
-/// Runs `hermes` subcommands for setup with `HERMES_HOME` set to the resolved base.
-pub(crate) trait HermesConfigRunner {
-    fn binary_available(&self) -> bool;
-    /// `args` follow the `hermes` binary. `Err` is a spawn failure or an expired deadline.
-    fn run(&mut self, args: &[String]) -> Result<HermesOutput, CafleetError>;
-}
+/// Each Hermes setup phase (the read batch, every write, the re-read) gets its own budget.
+const HERMES_SETUP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub(crate) const OPENCODE_EXTENSION_PREFIX: &str = "opencode/";
 pub(crate) const OPENCODE_EXECUTABLE_RECORD: &str = "cafleet.executable";
 pub(crate) const HERMES_EXTENSION_PREFIX: &str = "hermes/cafleet/";
 pub(crate) const HERMES_PLUGIN_DIR: &str = "plugins/cafleet";
 pub(crate) const HERMES_EXECUTABLE_RECORD: &str = "executable";
-pub(crate) const PLUGINS_DISABLED_KEY: &str = "plugins.disabled";
-pub(crate) const PLUGINS_ENABLED_KEY: &str = "plugins.enabled";
-pub(crate) const GATEWAY_INJECTION_KEY: &str = "plugins.entries.cafleet.allow_gateway_injection";
-pub(crate) const PLUGIN_NAME: &str = "cafleet";
 
 pub(crate) fn agent_paths(
     env: EnvLookup<'_>,
@@ -72,6 +65,7 @@ pub(crate) fn agent_paths(
     let plugins_dir = (agent == CodingAgent::Opencode).then(|| opencode_plugins_dir(&base));
     Ok(AgentPaths {
         identity: base.display().to_string(),
+        base,
         skills_dir,
         presets,
         plugins_dir,
@@ -82,10 +76,10 @@ pub(crate) fn opencode_plugins_dir(preset_base: &Path) -> PathBuf {
     preset_base.join("plugins")
 }
 
-/// The plugin directory under the Hermes home that owns `config_path`.
-pub(crate) fn hermes_plugin_dir(config_path: &str) -> Result<PathBuf, String> {
-    crate::coding_agent::hermes_settlement::home_of_config_path(config_path)
-        .map(|home| home.join(HERMES_PLUGIN_DIR))
+impl AgentPaths {
+    pub(crate) fn base(&self) -> &Path {
+        &self.base
+    }
 }
 
 /// Every embedded extension file under `prefix`, with its path relative to the extension root.
@@ -103,7 +97,7 @@ pub(crate) fn install_agent(
     agent: CodingAgent,
     paths: &AgentPaths,
     version: &str,
-    hermes: Option<&mut (dyn HermesConfigRunner + '_)>,
+    hermes: HermesSetup<'_>,
     out: &mut dyn Write,
 ) -> Result<(), CafleetError> {
     let mut report = |line: String| {
@@ -174,21 +168,19 @@ pub(crate) fn install_agent(
     }
     if agent == CodingAgent::Hermes {
         match hermes {
-            Some(runner) => {
-                let config = runner
-                    .run(&hermes_args(&["config", "path"]))
-                    .map_err(|cause| cause.message().into_owned())
-                    .and_then(succeeded)
-                    .map(|stdout| stdout.trim().to_owned())
-                    .map_err(|cause| passthrough_failure(&paths.identity, &cause))?;
-                let plugin_dir = hermes_plugin_dir(&config)
-                    .map_err(|cause| passthrough_failure(&paths.identity, &cause))?;
-                install_hermes_extension(&plugin_dir)?;
-                report(extension_line(&plugin_dir))?;
-                report(merge_client_env_passthrough(runner, &config)?)?;
-                report(enable_hermes_plugin(runner, &config)?)?;
+            HermesSetup::Available(hermes) => {
+                let line = install_hermes_plugin(hermes, paths, &mut |plugin_dir| {
+                    report(extension_line(plugin_dir))
+                })?;
+                report(line)?;
             }
-            None => report("hermes: skipped the plugin and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
+            HermesSetup::MissingRequired => {
+                return Err(extension_failure(
+                    &paths.base,
+                    "binary hermes not found on PATH",
+                ));
+            }
+            HermesSetup::Absent => report("hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
         }
     }
     crate::broker::record_asset_install(conn, agent.name(), &paths.identity, version)?;
@@ -273,169 +265,41 @@ pub(crate) fn extension_file_problem(target: &Path, embedded: &[u8]) -> Option<S
     }
 }
 
-/// The stdout of a command that exited 0, or its stderr text as the cause.
-pub(crate) fn succeeded(output: HermesOutput) -> Result<String, String> {
-    if output.exit_code == 0 {
-        return Ok(output.stdout);
-    }
-    let stderr = output.stderr.trim();
-    Err(if stderr.is_empty() {
-        format!("exited with code {}", output.exit_code)
-    } else {
-        stderr.to_owned()
-    })
-}
-
-/// Reads one key through `hermes config get --json`; `None` is the *not set* answer.
-pub(crate) fn hermes_config_get(
-    runner: &mut dyn HermesConfigRunner,
-    key: &str,
-) -> Result<Option<Value>, String> {
-    let output = runner
-        .run(&hermes_args(&["config", "get", "--json", key]))
-        .map_err(|cause| cause.message().into_owned())?;
-    let not_set = format!("Config key not set: {key}");
-    if output.exit_code == 1 && output.stderr.lines().any(|line| line.trim() == not_set) {
-        return Ok(None);
-    }
-    let stdout = succeeded(output)?;
-    serde_json::from_str(&stdout)
-        .map(Some)
-        .map_err(|cause| format!("{key} printed no JSON value: {cause}"))
-}
-
-/// A set plugin list, which must be a JSON array of strings.
-pub(crate) fn plugin_list(key: &str, value: Option<Value>) -> Result<Vec<String>, String> {
-    match value {
-        None => Ok(Vec::new()),
-        Some(value) => serde_json::from_value(value)
-            .map_err(|cause| format!("{key} is not a JSON array of strings: {cause}")),
-    }
-}
-
-fn hermes_config_set(
-    runner: &mut dyn HermesConfigRunner,
-    key: &str,
-    value: &str,
-) -> Result<(), String> {
-    runner
-        .run(&hermes_args(&["config", "set", key, value]))
-        .map_err(|cause| cause.message().into_owned())
-        .and_then(succeeded)
-        .map(drop)
-}
-
-/// Adds `cafleet` to `plugins.enabled` and allows its gateway injection, keeping an operator's
-/// `plugins.disabled` entry, and returns the setup line describing the result.
-fn enable_hermes_plugin(
-    runner: &mut dyn HermesConfigRunner,
-    config: &str,
+/// Installs the Hermes extension and enables its plugin: one concurrent `config path` and
+/// `plugins` read, the extension (reported through `installed` before the plugin is evaluated),
+/// then the plugin writes. Returns the plugin setup line.
+fn install_hermes_plugin(
+    hermes: &dyn HermesConfig,
+    paths: &AgentPaths,
+    installed: &mut dyn FnMut(&Path) -> Result<(), CafleetError>,
 ) -> Result<String, CafleetError> {
+    use crate::coding_agent::hermes::PLUGIN_NAME;
+    let (config, plugins) = crate::coding_agent::hermes::read_batch(
+        hermes,
+        std::time::Instant::now() + HERMES_SETUP_BUDGET,
+    );
+    let (config, plugin_dir) = config
+        .and_then(|config| {
+            crate::coding_agent::hermes::plugin_dir(&config).map(|dir| (config, dir))
+        })
+        .map_err(|cause| extension_failure(&paths.base, cause))?;
+    install_hermes_extension(&plugin_dir)?;
+    installed(&plugin_dir)?;
     let fail = |cause: String| {
         CafleetError::App(format!(
             "failed to enable hermes plugin {PLUGIN_NAME} in {config}: {cause}"
         ))
     };
-    let disabled = hermes_config_get(runner, PLUGINS_DISABLED_KEY)
-        .and_then(|value| plugin_list(PLUGINS_DISABLED_KEY, value))
+    let state = plugins
+        .and_then(crate::coding_agent::hermes::plugin_state)
         .map_err(fail)?;
-    if disabled.iter().any(|name| name == PLUGIN_NAME) {
-        return Err(fail(format!(
-            "{PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}; remove it from {PLUGINS_DISABLED_KEY}, then rerun 'cafleet setup --coding-agent hermes'"
-        )));
-    }
-    let mut enabled = hermes_config_get(runner, PLUGINS_ENABLED_KEY)
-        .and_then(|value| plugin_list(PLUGINS_ENABLED_KEY, value))
+    let wrote = crate::coding_agent::hermes::enable_plugin(hermes, &state, HERMES_SETUP_BUDGET)
         .map_err(fail)?;
-    let mut wrote = false;
-    if !enabled.iter().any(|name| name == PLUGIN_NAME) {
-        enabled.push(PLUGIN_NAME.to_owned());
-        let value = serde_json::to_string(&enabled).expect("a list of strings serializes as JSON");
-        hermes_config_set(runner, PLUGINS_ENABLED_KEY, &value).map_err(fail)?;
-        wrote = true;
-    }
-    if hermes_config_get(runner, GATEWAY_INJECTION_KEY).map_err(fail)? != Some(Value::Bool(true)) {
-        hermes_config_set(runner, GATEWAY_INJECTION_KEY, "true").map_err(fail)?;
-        wrote = true;
-    }
-    let enabled = hermes_config_get(runner, PLUGINS_ENABLED_KEY)
-        .and_then(|value| plugin_list(PLUGINS_ENABLED_KEY, value))
-        .map_err(fail)?;
-    if !enabled.iter().any(|name| name == PLUGIN_NAME) {
-        return Err(fail(format!(
-            "{PLUGINS_ENABLED_KEY} still lacks {PLUGIN_NAME} after the write"
-        )));
-    }
-    if hermes_config_get(runner, GATEWAY_INJECTION_KEY).map_err(fail)? != Some(Value::Bool(true)) {
-        return Err(fail(format!(
-            "{GATEWAY_INJECTION_KEY} is still not true after the write"
-        )));
-    }
     Ok(if wrote {
         format!("hermes: enabled plugin {PLUGIN_NAME} -> {config}")
     } else {
         format!("hermes: plugin {PLUGIN_NAME} already enabled -> {config}")
     })
-}
-
-const PASSTHROUGH_KEY: &str = "terminal.client_env_passthrough";
-
-/// Appends each missing CAFleet member name after the existing entries and
-/// returns the setup line describing the result.
-fn merge_client_env_passthrough(
-    runner: &mut dyn HermesConfigRunner,
-    config: &str,
-) -> Result<String, CafleetError> {
-    let fail = |cause: String| passthrough_failure(config, &cause);
-    let existing = read_passthrough(runner).map_err(fail)?;
-    let missing = missing_member_names(&existing);
-    if missing.is_empty() {
-        return Ok(format!(
-            "hermes: {PASSTHROUGH_KEY} already holds CAFleet's member names -> {config}"
-        ));
-    }
-    let mut merged = existing;
-    merged.extend(missing.iter().map(|name| (*name).to_owned()));
-    let value = serde_json::to_string(&merged).expect("a list of strings serializes as JSON");
-    hermes_config_set(runner, PASSTHROUGH_KEY, &value).map_err(fail)?;
-    let absent = missing_member_names(&read_passthrough(runner).map_err(fail)?);
-    if !absent.is_empty() {
-        return Err(fail(format!(
-            "{PASSTHROUGH_KEY} still lacks {} after the write",
-            absent.join(", ")
-        )));
-    }
-    Ok(format!(
-        "hermes: added {PASSTHROUGH_KEY} names -> {config}: {}",
-        missing.join(", ")
-    ))
-}
-
-fn read_passthrough(runner: &mut dyn HermesConfigRunner) -> Result<Vec<String>, String> {
-    let stdout = runner
-        .run(&hermes_args(&["config", "get", "--json", PASSTHROUGH_KEY]))
-        .map_err(|cause| cause.message().into_owned())
-        .and_then(succeeded)?;
-    serde_json::from_str::<Vec<String>>(&stdout)
-        .map_err(|cause| format!("{PASSTHROUGH_KEY} is not a JSON array of strings: {cause}"))
-}
-
-fn missing_member_names(present: &[String]) -> Vec<&'static str> {
-    HERMES_CLIENT_ENV_PASSTHROUGH
-        .iter()
-        .copied()
-        .filter(|name| !present.iter().any(|value| value == name))
-        .collect()
-}
-
-fn passthrough_failure(config: &str, cause: &str) -> CafleetError {
-    CafleetError::App(format!(
-        "failed to install hermes {PASSTHROUGH_KEY} names into {config}: {cause}"
-    ))
-}
-
-fn hermes_args(args: &[&str]) -> Vec<String> {
-    args.iter().map(|arg| (*arg).to_owned()).collect()
 }
 
 fn remove_existing_target(target: &Path) -> std::io::Result<()> {
@@ -461,172 +325,223 @@ pub(crate) fn lookup(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use crate::assets::HermesConfigRunner;
-    use crate::assets::HermesOutput;
-    use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
-    use crate::error::CafleetError;
+    use crate::coding_agent::hermes::HermesConfig;
     use serde_json::Value;
-    use std::collections::BTreeMap;
     use std::path::PathBuf;
+    use std::sync::Condvar;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use std::time::Instant;
 
-    pub(crate) const PASSTHROUGH_KEY: &str = "terminal.client_env_passthrough";
-    pub(crate) const DISABLED_KEY: &str = "plugins.disabled";
-    pub(crate) const ENABLED_KEY: &str = "plugins.enabled";
-    pub(crate) const INJECTION_KEY: &str = "plugins.entries.cafleet.allow_gateway_injection";
-    /// Hermes prints this unrelated line to stderr on every command.
-    pub(crate) const OUT_OF_SYNC: &str =
-        "⚠ install out of sync with its lockfile; run 'hermes update'";
+    pub(crate) use crate::coding_agent::hermes::GATEWAY_INJECTION_KEY as INJECTION_KEY;
+    pub(crate) use crate::coding_agent::hermes::PLUGINS_DISABLED_KEY as DISABLED_KEY;
+    pub(crate) use crate::coding_agent::hermes::PLUGINS_ENABLED_KEY as ENABLED_KEY;
+    pub(crate) use crate::coding_agent::hermes::PLUGINS_KEY;
 
+    /// A scripted answer to one exact call.
     pub(crate) enum Reply {
-        Exit {
-            code: i32,
-            stdout: String,
-            stderr: String,
-        },
-        /// A spawn failure or an expired deadline.
+        /// `config path` prints this path.
+        Path(String),
+        /// `config get` reads this value; `None` is *not set*.
+        Value(Option<Value>),
+        /// The call fails with this cause.
         Fail(String),
     }
 
-    impl Reply {
-        pub(crate) fn exit(code: i32, stderr: &str) -> Self {
-            Self::Exit {
-                code,
-                stdout: String::new(),
-                stderr: stderr.to_owned(),
-            }
-        }
+    struct State {
+        config: Value,
+        scripted: Vec<(Vec<String>, Reply)>,
+        ignored_sets: Vec<&'static str>,
+        calls: Vec<(Vec<String>, Instant)>,
+        arrived: usize,
     }
 
-    /// Serves `config path`, `config get --json KEY` and `config set KEY VALUE`
-    /// from an in-memory configuration. A scripted reply answers the next call
-    /// with its exact argv once; any other command panics.
+    /// Serves `config path`, `config get --json KEY` and `config set KEY VALUE` from an
+    /// in-memory configuration tree. A scripted reply answers the next call with its exact
+    /// argv once.
     pub(crate) struct FakeHermes {
-        pub(crate) available: bool,
-        pub(crate) config: BTreeMap<String, Value>,
-        pub(crate) scripted: Vec<(Vec<String>, Reply)>,
-        pub(crate) ignored_sets: Vec<&'static str>,
-        pub(crate) calls: Vec<Vec<String>>,
+        state: Mutex<State>,
+        batch_arrivals: Condvar,
+        rendezvous: bool,
         profile: tempfile::TempDir,
     }
 
+    /// How long each half of a rendezvous batch waits for the other half.
+    const RENDEZVOUS_WAIT: Duration = Duration::from_secs(2);
+
     impl FakeHermes {
-        pub(crate) fn complete() -> Self {
-            Self::holding(&HERMES_CLIENT_ENV_PASSTHROUGH)
-        }
-        pub(crate) fn holding(names: &[&str]) -> Self {
-            Self::with_passthrough(serde_json::json!(names))
-        }
-        pub(crate) fn with_passthrough(passthrough: Value) -> Self {
+        pub(crate) fn new() -> Self {
             Self {
-                available: true,
-                config: BTreeMap::from([(PASSTHROUGH_KEY.to_owned(), passthrough)]),
-                scripted: Vec::new(),
-                ignored_sets: Vec::new(),
-                calls: Vec::new(),
+                state: Mutex::new(State {
+                    config: Value::Object(Default::default()),
+                    scripted: Vec::new(),
+                    ignored_sets: Vec::new(),
+                    calls: Vec::new(),
+                    arrived: 0,
+                }),
+                batch_arrivals: Condvar::new(),
+                rendezvous: false,
                 profile: tempfile::tempdir().unwrap(),
             }
         }
+
         pub(crate) fn enabled() -> Self {
-            let mut fake = Self::complete();
-            fake.set(ENABLED_KEY, serde_json::json!(["cafleet"]));
-            fake.set(INJECTION_KEY, Value::Bool(true));
+            let mut fake = Self::new();
+            fake.put(ENABLED_KEY, serde_json::json!(["cafleet"]));
+            fake.put(INJECTION_KEY, Value::Bool(true));
             fake
         }
-        pub(crate) fn set(&mut self, key: &str, value: Value) {
-            self.config.insert(key.to_owned(), value);
+
+        /// Makes `config path` and the `plugins` read each wait until the other has started,
+        /// so a serial batch is slower than [`RENDEZVOUS_WAIT`].
+        pub(crate) fn rendezvous(mut self) -> Self {
+            self.rendezvous = true;
+            self
         }
-        pub(crate) fn value(&self, key: &str) -> Option<&Value> {
-            self.config.get(key)
+
+        fn state(&self) -> std::sync::MutexGuard<'_, State> {
+            self.state.lock().expect("no fake hermes call panicked")
         }
+
+        /// Stores `value` at the dotted `key`, creating the parent objects.
+        pub(crate) fn put(&mut self, key: &str, value: Value) {
+            store(&mut self.state().config, key, value);
+        }
+
+        pub(crate) fn value(&self, key: &str) -> Option<Value> {
+            read(&self.state().config, key)
+        }
+
         pub(crate) fn reply(&mut self, call: Vec<String>, reply: Reply) {
-            self.scripted.push((call, reply));
+            self.state().scripted.push((call, reply));
         }
+
+        /// Accepts every set of `key` without storing it, like a managed scope that wins.
+        pub(crate) fn ignore_sets(&mut self, key: &'static str) {
+            self.state().ignored_sets.push(key);
+        }
+
+        pub(crate) fn calls(&self) -> Vec<Vec<String>> {
+            self.state()
+                .calls
+                .iter()
+                .map(|(call, _)| call.clone())
+                .collect()
+        }
+
+        pub(crate) fn deadlines(&self) -> Vec<Instant> {
+            self.state()
+                .calls
+                .iter()
+                .map(|(_, deadline)| *deadline)
+                .collect()
+        }
+
         /// An active profile re-homes Hermes, so the printed path lies outside `HERMES_HOME`.
         pub(crate) fn config_path(&self) -> PathBuf {
             self.profile.path().join("profiles/work/config.yaml")
         }
+
         pub(crate) fn plugin_dir(&self) -> PathBuf {
             self.profile.path().join("profiles/work/plugins/cafleet")
         }
+
         pub(crate) fn path_call() -> Vec<String> {
             vec!["config".into(), "path".into()]
         }
+
         pub(crate) fn get_call(key: &str) -> Vec<String> {
             ["config", "get", "--json", key].map(str::to_owned).to_vec()
         }
+
         pub(crate) fn set_call(key: &str, value: &str) -> Vec<String> {
             ["config", "set", key, value].map(str::to_owned).to_vec()
         }
-        pub(crate) fn passthrough_get_call() -> Vec<String> {
-            Self::get_call(PASSTHROUGH_KEY)
-        }
-        pub(crate) fn passthrough_set_call(names: &[&str]) -> Vec<String> {
-            Self::set_call(PASSTHROUGH_KEY, &serde_json::to_string(names).unwrap())
-        }
-    }
 
-    fn output(exit_code: i32, stdout: String, diagnostic: &str) -> HermesOutput {
-        HermesOutput {
-            exit_code,
-            stdout,
-            stderr: format!("{OUT_OF_SYNC}\n{diagnostic}"),
-        }
-    }
-
-    fn stored_value(value: &str) -> Value {
-        assert!(
-            !value.contains('\n') && !value.contains(", "),
-            "compact JSON: {value}"
-        );
-        serde_json::from_str(value)
-            .unwrap_or_else(|cause| panic!("setup writes JSON values: {value}: {cause}"))
-    }
-
-    impl HermesConfigRunner for FakeHermes {
-        fn binary_available(&self) -> bool {
-            self.available
-        }
-        fn run(&mut self, args: &[String]) -> Result<HermesOutput, CafleetError> {
-            self.calls.push(args.to_vec());
-            if !self.available {
-                return Err(CafleetError::App("binary hermes not found on PATH".into()));
+        /// Logs `call` and returns its scripted reply, if any.
+        fn record(&self, call: Vec<String>, deadline: Instant) -> Option<Reply> {
+            let batch = call == Self::path_call() || call == Self::get_call(PLUGINS_KEY);
+            let mut state = self.state();
+            state.calls.push((call.clone(), deadline));
+            if self.rendezvous && batch {
+                state.arrived += 1;
+                self.batch_arrivals.notify_all();
+                let (waited, _) = self
+                    .batch_arrivals
+                    .wait_timeout_while(state, RENDEZVOUS_WAIT, |state| state.arrived < 2)
+                    .expect("no fake hermes call panicked");
+                state = waited;
             }
-            if let Some(index) = self.scripted.iter().position(|(call, _)| call == args) {
-                return match self.scripted.remove(index).1 {
-                    Reply::Exit {
-                        code,
-                        stdout,
-                        stderr,
-                    } => Ok(HermesOutput {
-                        exit_code: code,
-                        stdout,
-                        stderr,
-                    }),
-                    Reply::Fail(cause) => Err(CafleetError::App(cause)),
+            let index = state
+                .scripted
+                .iter()
+                .position(|(scripted, _)| *scripted == call)?;
+            Some(state.scripted.remove(index).1)
+        }
+    }
+
+    fn store(config: &mut Value, key: &str, value: Value) {
+        let mut node = config;
+        let mut parts = key.split('.').peekable();
+        while let Some(part) = parts.next() {
+            let object = node
+                .as_object_mut()
+                .unwrap_or_else(|| panic!("{key} descends through an object"));
+            if parts.peek().is_none() {
+                object.insert(part.to_owned(), value);
+                return;
+            }
+            node = object
+                .entry(part)
+                .or_insert_with(|| Value::Object(Default::default()));
+        }
+    }
+
+    fn read(config: &Value, key: &str) -> Option<Value> {
+        key.split('.')
+            .try_fold(config, |node, part| node.get(part))
+            .cloned()
+    }
+
+    impl HermesConfig for FakeHermes {
+        fn config_path(&self, deadline: Instant) -> Result<String, String> {
+            match self.record(Self::path_call(), deadline) {
+                None => Ok(self.config_path().display().to_string()),
+                Some(Reply::Path(path)) => Ok(path),
+                Some(Reply::Fail(cause)) => Err(cause),
+                Some(Reply::Value(_)) => panic!("config path answers a path"),
+            }
+        }
+
+        fn get(&self, key: &str, deadline: Instant) -> Result<Option<Value>, String> {
+            match self.record(Self::get_call(key), deadline) {
+                None => Ok(read(&self.state().config, key)),
+                Some(Reply::Value(value)) => Ok(value),
+                Some(Reply::Fail(cause)) => Err(cause),
+                Some(Reply::Path(_)) => panic!("config get answers a value"),
+            }
+        }
+
+        fn set(&self, key: &str, value: &str, deadline: Instant) -> Result<(), String> {
+            if let Some(reply) = self.record(Self::set_call(key, value), deadline) {
+                return match reply {
+                    Reply::Fail(cause) => Err(cause),
+                    Reply::Path(_) | Reply::Value(_) => {
+                        panic!("config set answers success or a cause")
+                    }
                 };
             }
-            match args
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .as_slice()
-            {
-                ["config", "path"] => {
-                    Ok(output(0, format!("{}\n", self.config_path().display()), ""))
-                }
-                ["config", "get", "--json", key] => Ok(match self.config.get(*key) {
-                    Some(value) => output(0, format!("{value}\n"), ""),
-                    None => output(1, String::new(), &format!("Config key not set: {key}\n")),
-                }),
-                ["config", "set", key, value] => {
-                    let stored = stored_value(value);
-                    if !self.ignored_sets.contains(key) {
-                        self.config.insert((*key).to_owned(), stored);
-                    }
-                    Ok(output(0, String::new(), ""))
-                }
-                other => panic!("unexpected hermes command {other:?}"),
+            assert!(
+                !value.contains('\n') && !value.contains(", "),
+                "compact JSON: {value}"
+            );
+            let stored = serde_json::from_str(value)
+                .unwrap_or_else(|cause| panic!("setup writes JSON values: {value}: {cause}"));
+            let mut state = self.state();
+            if !state.ignored_sets.contains(&key) {
+                store(&mut state.config, key, stored);
             }
+            Ok(())
         }
     }
 }
@@ -637,11 +552,9 @@ mod tests {
     use crate::assets::test_support::ENABLED_KEY;
     use crate::assets::test_support::FakeHermes;
     use crate::assets::test_support::INJECTION_KEY;
-    use crate::assets::test_support::OUT_OF_SYNC;
-    use crate::assets::test_support::PASSTHROUGH_KEY;
+    use crate::assets::test_support::PLUGINS_KEY;
     use crate::assets::test_support::Reply;
     use crate::assets::*;
-    use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::fs::symlink;
 
@@ -722,11 +635,11 @@ mod tests {
         }
     }
 
-    fn runner_for(
-        agent: CodingAgent,
-        fake: &mut FakeHermes,
-    ) -> Option<&mut dyn HermesConfigRunner> {
-        (agent == CodingAgent::Hermes).then_some(fake as &mut dyn HermesConfigRunner)
+    fn hermes_for(agent: CodingAgent, fake: &FakeHermes) -> HermesSetup<'_> {
+        match agent {
+            CodingAgent::Hermes => HermesSetup::Available(fake),
+            _ => HermesSetup::Absent,
+        }
     }
 
     fn expected_skills_dir(agent: CodingAgent, base: &Path, home: &Path) -> PathBuf {
@@ -766,7 +679,7 @@ mod tests {
             .unwrap();
             let skills_dir = expected_skills_dir(*agent, &custom, home.path());
             let presets = expected_presets(*agent, &custom);
-            let mut fake = FakeHermes::complete();
+            let fake = FakeHermes::new();
             let extensions = extension_targets(*agent, &custom, &fake);
             std::fs::create_dir_all(&skills_dir).unwrap();
             symlink(&external, skills_dir.join("cafleet")).unwrap();
@@ -794,7 +707,7 @@ mod tests {
                     *agent,
                     &paths,
                     "test-version",
-                    runner_for(*agent, &mut fake),
+                    hermes_for(*agent, &fake),
                     &mut Vec::<u8>::new(),
                 )
                 .unwrap();
@@ -850,7 +763,7 @@ mod tests {
                 CodingAgent::Codex,
                 &paths,
                 "version",
-                None,
+                HermesSetup::Absent,
                 &mut Vec::<u8>::new()
             )
             .is_err()
@@ -859,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn installation_prints_skills_then_presets_then_extensions_then_hermes_merges() {
+    fn installation_prints_skills_then_presets_then_extensions_then_hermes_enablement() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
         for agent in CodingAgent::all() {
@@ -871,14 +784,14 @@ mod tests {
             )
             .unwrap();
             let mut output = Vec::new();
-            let mut fake = FakeHermes::complete();
+            let fake = FakeHermes::new();
             let extensions = extension_targets(*agent, &custom, &fake);
             install_agent(
                 &mut conn,
                 *agent,
                 &paths,
                 "9.8.7",
-                runner_for(*agent, &mut fake),
+                hermes_for(*agent, &fake),
                 &mut output,
             )
             .unwrap();
@@ -901,10 +814,6 @@ mod tests {
                 ),
                 CodingAgent::Hermes => expected.extend([
                     extension_line(*agent, "9.8.7", &fake.plugin_dir()),
-                    format!(
-                        "hermes: terminal.client_env_passthrough already holds CAFleet's member names -> {}",
-                        fake.config_path().display()
-                    ),
                     format!(
                         "hermes: enabled plugin cafleet -> {}",
                         fake.config_path().display()
@@ -946,7 +855,7 @@ mod tests {
             CodingAgent::Opencode,
             &paths,
             "1.0.0",
-            None,
+            HermesSetup::Absent,
             &mut output,
         )
         .expect_err("a blocked preset target fails installation");
@@ -995,7 +904,7 @@ mod tests {
             CodingAgent::Opencode,
             &paths,
             "1.0.0",
-            None,
+            HermesSetup::Absent,
             &mut output,
         )
         .expect_err("a blocked extension target fails installation");
@@ -1043,7 +952,7 @@ mod tests {
             CodingAgent::Opencode,
             &paths,
             "1.0.0",
-            None,
+            HermesSetup::Absent,
             &mut output,
         )
         .unwrap();
@@ -1061,7 +970,7 @@ mod tests {
                 *bytes
             );
         }
-        let fake = FakeHermes::complete();
+        let fake = FakeHermes::new();
         let extensions = extension_targets(CodingAgent::Opencode, &base, &fake);
         assert_eq!(
             extensions
@@ -1116,11 +1025,11 @@ mod tests {
             CodingAgent::Opencode,
             &paths,
             "1.0.0",
-            None,
+            HermesSetup::Absent,
             &mut Vec::<u8>::new(),
         )
         .unwrap();
-        let fake = FakeHermes::complete();
+        let fake = FakeHermes::new();
         assert_embedded_extensions(&extension_targets(CodingAgent::Opencode, &base, &fake));
         assert_executable_record(&plugins.join("cafleet.executable"));
     }
@@ -1128,6 +1037,8 @@ mod tests {
     mod hermes {
         use crate::assets::tests::*;
         use serde_json::json;
+        use std::time::Duration;
+        use std::time::Instant;
 
         struct Installed {
             result: Result<(), CafleetError>,
@@ -1141,10 +1052,9 @@ mod tests {
         enum Cause<'a> {
             Exact(&'a str),
             Contains(&'a str),
-            Any,
         }
 
-        fn install_with(runner: Option<&mut dyn HermesConfigRunner>) -> Installed {
+        fn install_with(hermes: HermesSetup<'_>) -> Installed {
             let home = tempfile::tempdir().unwrap();
             let mut conn = crate::db::test_support::migrated_conn(&home);
             let paths = agent_paths(&|_| None, home.path(), CodingAgent::Hermes).unwrap();
@@ -1154,7 +1064,7 @@ mod tests {
                 CodingAgent::Hermes,
                 &paths,
                 "1.2.3",
-                runner,
+                hermes,
                 &mut output,
             );
             let base = home.path().join(".hermes");
@@ -1172,31 +1082,23 @@ mod tests {
             }
         }
 
-        fn install(fake: &mut FakeHermes) -> Installed {
-            install_with(Some(fake))
+        fn install(fake: &FakeHermes) -> Installed {
+            install_with(HermesSetup::Available(fake))
         }
 
-        fn after_path(calls: &[Vec<String>]) -> Vec<Vec<String>> {
-            assert_eq!(
-                calls.first(),
-                Some(&FakeHermes::path_call()),
-                "setup resolves the config path first"
+        /// The calls after the opening batch, which holds `config path` and the `plugins` read
+        /// in either order.
+        fn after_batch(calls: &[Vec<String>]) -> Vec<Vec<String>> {
+            assert!(
+                calls.len() >= 2,
+                "setup opens with the read batch: {calls:?}"
             );
-            calls[1..].to_vec()
-        }
-
-        fn passthrough_calls(calls: &[Vec<String>]) -> Vec<Vec<String>> {
-            after_path(calls)
-                .into_iter()
-                .filter(|call| call.iter().any(|arg| arg == PASSTHROUGH_KEY))
-                .collect()
-        }
-
-        fn plugin_calls(calls: &[Vec<String>]) -> Vec<Vec<String>> {
-            after_path(calls)
-                .into_iter()
-                .filter(|call| !call.iter().any(|arg| arg == PASSTHROUGH_KEY))
-                .collect()
+            let mut batch = calls[..2].to_vec();
+            batch.sort();
+            let mut expected = vec![FakeHermes::path_call(), get(PLUGINS_KEY)];
+            expected.sort();
+            assert_eq!(batch, expected, "setup opens with the read batch");
+            calls[2..].to_vec()
         }
 
         fn get(key: &str) -> Vec<String> {
@@ -1215,7 +1117,6 @@ mod tests {
                         .filter(|root| !root.contains('/'))
                 })
                 .collect::<Vec<_>>();
-            assert!(roots.contains(&"cafleet") && roots.contains(&"cafleet-design-doc"));
             format!(
                 "hermes: installed {} (v1.2.3) -> {}",
                 roots.join(", "),
@@ -1225,21 +1126,6 @@ mod tests {
 
         fn plugin_line(fake: &FakeHermes) -> String {
             extension_line(CodingAgent::Hermes, "1.2.3", &fake.plugin_dir())
-        }
-
-        fn passthrough_held_line(fake: &FakeHermes) -> String {
-            format!(
-                "hermes: terminal.client_env_passthrough already holds CAFleet's member names -> {}",
-                fake.config_path().display()
-            )
-        }
-
-        fn passthrough_added_line(fake: &FakeHermes, added: &[&str]) -> String {
-            format!(
-                "hermes: added terminal.client_env_passthrough names -> {}: {}",
-                fake.config_path().display(),
-                added.join(", ")
-            )
         }
 
         fn enabled_line(fake: &FakeHermes) -> String {
@@ -1271,7 +1157,6 @@ mod tests {
             match cause {
                 Cause::Exact(cause) => assert_eq!(actual, cause),
                 Cause::Contains(cause) => assert!(actual.contains(cause), "{actual}"),
-                Cause::Any => assert!(!actual.is_empty()),
             }
             assert_eq!(
                 installed.rows, 0,
@@ -1279,11 +1164,8 @@ mod tests {
             );
         }
 
-        fn passthrough_prefix(target: &Path) -> String {
-            format!(
-                "failed to install hermes terminal.client_env_passthrough names into {}: ",
-                target.display()
-            )
+        fn extension_prefix(target: &Path) -> String {
+            format!("failed to install extension into {}: ", target.display())
         }
 
         fn plugin_prefix(fake: &FakeHermes) -> String {
@@ -1293,25 +1175,9 @@ mod tests {
             )
         }
 
-        fn assert_passthrough_failed(installed: &Installed, fake: &FakeHermes, cause: Cause<'_>) {
-            assert_failure(installed, &passthrough_prefix(&fake.config_path()), cause);
-            assert_eq!(installed.lines, [skills_line(installed), plugin_line(fake)]);
-            assert!(
-                plugin_calls(&fake.calls).is_empty(),
-                "the enablement merge follows the passthrough merge"
-            );
-        }
-
         fn assert_plugin_failed(installed: &Installed, fake: &FakeHermes, cause: Cause<'_>) {
             assert_failure(installed, &plugin_prefix(fake), cause);
-            assert_eq!(
-                installed.lines,
-                [
-                    skills_line(installed),
-                    plugin_line(fake),
-                    passthrough_held_line(fake)
-                ]
-            );
+            assert_eq!(installed.lines, [skills_line(installed), plugin_line(fake)]);
         }
 
         fn writes(calls: &[Vec<String>]) -> Vec<Vec<String>> {
@@ -1370,8 +1236,8 @@ mod tests {
 
         #[test]
         fn hermes_setup_installs_the_plugin_into_the_home_that_owns_the_config_path() {
-            let mut fake = FakeHermes::complete();
-            let installed = install(&mut fake);
+            let fake = FakeHermes::new();
+            let installed = install(&fake);
             installed.result.as_ref().unwrap();
             assert_embedded_extensions(&extension_targets(
                 CodingAgent::Hermes,
@@ -1389,7 +1255,7 @@ mod tests {
 
         #[test]
         fn hermes_setup_replaces_a_stale_plugin_directory_with_exactly_the_embedded_files() {
-            let mut fake = FakeHermes::complete();
+            let fake = FakeHermes::new();
             let plugin_dir = fake.plugin_dir();
             let targets = extension_targets(CodingAgent::Hermes, Path::new("/unused"), &fake);
             std::fs::create_dir_all(&plugin_dir).unwrap();
@@ -1399,7 +1265,7 @@ mod tests {
                 std::fs::create_dir_all(target.parent().unwrap()).unwrap();
                 std::fs::write(target, "tampered").unwrap();
             }
-            let installed = install(&mut fake);
+            let installed = install(&fake);
             installed.result.as_ref().unwrap();
             assert_embedded_extensions(&targets);
             assert_executable_record(&plugin_dir.join("executable"));
@@ -1414,11 +1280,11 @@ mod tests {
 
         #[test]
         fn hermes_extension_failure_fails_setup_before_any_configuration_write() {
-            let mut fake = FakeHermes::complete();
+            let fake = FakeHermes::new();
             let plugins = fake.plugin_dir().parent().unwrap().to_owned();
             std::fs::create_dir_all(plugins.parent().unwrap()).unwrap();
             std::fs::write(&plugins, "blocked parent").unwrap();
-            let installed = install(&mut fake);
+            let installed = install(&fake);
             let failure = installed
                 .result
                 .as_ref()
@@ -1434,44 +1300,64 @@ mod tests {
             );
             assert_eq!(installed.rows, 0);
             assert_eq!(installed.lines, [skills_line(&installed)]);
-            assert_eq!(
-                fake.calls,
-                [FakeHermes::path_call()],
-                "the configuration merges follow the extension"
+            assert!(
+                after_batch(&fake.calls()).is_empty(),
+                "the plugin writes follow the extension"
             );
         }
 
         #[test]
-        fn hermes_setup_issues_the_complete_config_call_sequence() {
-            let mut fake = FakeHermes::complete();
-            let installed = install(&mut fake);
+        fn hermes_setup_runs_its_two_reads_concurrently_under_one_shared_deadline() {
+            let fake = FakeHermes::enabled().rendezvous();
+            let started = Instant::now();
+            let installed = install(&fake);
+            let finished = Instant::now();
             installed.result.as_ref().unwrap();
+            assert!(
+                finished - started < Duration::from_secs(2),
+                "a serial batch waits out the rendezvous: {:?}",
+                finished - started
+            );
+            assert!(after_batch(&fake.calls()).is_empty());
+            let deadlines = fake.deadlines();
+            assert_eq!(deadlines[0], deadlines[1], "one deadline covers the batch");
+            assert!(
+                deadlines[0] >= started + Duration::from_secs(10)
+                    && deadlines[0] <= finished + Duration::from_secs(10),
+                "the batch gets ten seconds"
+            );
+        }
+
+        #[test]
+        fn hermes_setup_writes_serially_then_rereads_plugins_once_each_with_its_own_budget() {
+            let fake = FakeHermes::new();
+            let installed = install(&fake);
+            installed.result.as_ref().unwrap();
+            let calls = fake.calls();
             assert_eq!(
-                fake.calls,
+                after_batch(&calls),
                 [
-                    FakeHermes::path_call(),
-                    FakeHermes::passthrough_get_call(),
-                    get(DISABLED_KEY),
-                    get(ENABLED_KEY),
                     set(ENABLED_KEY, r#"["cafleet"]"#),
-                    get(INJECTION_KEY),
                     set(INJECTION_KEY, "true"),
-                    get(ENABLED_KEY),
-                    get(INJECTION_KEY),
+                    get(PLUGINS_KEY),
                 ],
                 "setup runs no 'hermes plugins enable' and no approvals.deny command"
+            );
+            let deadlines = fake.deadlines();
+            assert!(
+                deadlines.windows(2).all(|pair| pair[0] <= pair[1]),
+                "each later phase starts its own ten seconds: {deadlines:?}"
             );
             assert_eq!(
                 installed.lines,
                 [
                     skills_line(&installed),
                     plugin_line(&fake),
-                    passthrough_held_line(&fake),
                     enabled_line(&fake),
                 ]
             );
-            assert_eq!(fake.value(ENABLED_KEY), Some(&json!(["cafleet"])));
-            assert_eq!(fake.value(INJECTION_KEY), Some(&json!(true)));
+            assert_eq!(fake.value(ENABLED_KEY), Some(json!(["cafleet"])));
+            assert_eq!(fake.value(INJECTION_KEY), Some(json!(true)));
             assert_eq!(
                 fake.value(DISABLED_KEY),
                 None,
@@ -1482,536 +1368,215 @@ mod tests {
 
         #[test]
         fn hermes_setup_appends_cafleet_after_the_existing_enabled_plugins() {
-            let mut fake = FakeHermes::complete();
-            fake.set(ENABLED_KEY, json!(["alpha", "beta"]));
-            fake.set(DISABLED_KEY, json!(["gamma"]));
-            let installed = install(&mut fake);
+            let mut fake = FakeHermes::new();
+            fake.put(ENABLED_KEY, json!(["alpha", "beta"]));
+            fake.put(DISABLED_KEY, json!(["gamma"]));
+            let installed = install(&fake);
             installed.result.as_ref().unwrap();
             assert_eq!(
-                plugin_calls(&fake.calls)[..3],
-                [
-                    get(DISABLED_KEY),
-                    get(ENABLED_KEY),
-                    set(ENABLED_KEY, r#"["alpha","beta","cafleet"]"#),
-                ]
+                after_batch(&fake.calls())[0],
+                set(ENABLED_KEY, r#"["alpha","beta","cafleet"]"#)
             );
             assert_eq!(
                 fake.value(ENABLED_KEY),
-                Some(&json!(["alpha", "beta", "cafleet"]))
+                Some(json!(["alpha", "beta", "cafleet"]))
             );
-            assert_eq!(fake.value(DISABLED_KEY), Some(&json!(["gamma"])));
-            assert_eq!(installed.lines[3], enabled_line(&fake));
+            assert_eq!(fake.value(DISABLED_KEY), Some(json!(["gamma"])));
+            assert_eq!(installed.lines[2], enabled_line(&fake));
         }
 
         #[test]
         fn hermes_setup_sets_gateway_injection_unless_it_is_exactly_true() {
-            for value in [json!(false), json!("true"), json!(1), json!(null)] {
-                let mut fake = FakeHermes::complete();
-                fake.set(ENABLED_KEY, json!(["cafleet"]));
-                fake.set(INJECTION_KEY, value.clone());
-                let installed = install(&mut fake);
+            for value in [json!(false), json!("true")] {
+                let mut fake = FakeHermes::new();
+                fake.put(ENABLED_KEY, json!(["cafleet"]));
+                fake.put(INJECTION_KEY, value.clone());
+                let installed = install(&fake);
                 installed.result.as_ref().unwrap();
                 assert_eq!(
-                    plugin_calls(&fake.calls),
-                    [
-                        get(DISABLED_KEY),
-                        get(ENABLED_KEY),
-                        get(INJECTION_KEY),
-                        set(INJECTION_KEY, "true"),
-                        get(ENABLED_KEY),
-                        get(INJECTION_KEY),
-                    ],
+                    after_batch(&fake.calls()),
+                    [set(INJECTION_KEY, "true"), get(PLUGINS_KEY)],
                     "{value}"
                 );
-                assert_eq!(fake.value(INJECTION_KEY), Some(&json!(true)));
-                assert_eq!(fake.value(ENABLED_KEY), Some(&json!(["cafleet"])));
-                assert_eq!(installed.lines[3], enabled_line(&fake), "{value}");
+                assert_eq!(fake.value(INJECTION_KEY), Some(json!(true)));
+                assert_eq!(fake.value(ENABLED_KEY), Some(json!(["cafleet"])));
+                assert_eq!(installed.lines[2], enabled_line(&fake), "{value}");
             }
         }
 
         #[test]
         fn hermes_setup_with_the_plugin_already_enabled_only_reads() {
             let mut fake = FakeHermes::enabled();
-            fake.set(ENABLED_KEY, json!(["alpha", "cafleet"]));
-            let installed = install(&mut fake);
+            fake.put(ENABLED_KEY, json!(["alpha", "cafleet"]));
+            let installed = install(&fake);
             installed.result.as_ref().unwrap();
-            assert_eq!(
-                plugin_calls(&fake.calls),
-                [
-                    get(DISABLED_KEY),
-                    get(ENABLED_KEY),
-                    get(INJECTION_KEY),
-                    get(ENABLED_KEY),
-                    get(INJECTION_KEY),
-                ]
+            assert!(
+                after_batch(&fake.calls()).is_empty(),
+                "steady state performs only the two reads: {:?}",
+                fake.calls()
             );
-            assert_eq!(fake.value(ENABLED_KEY), Some(&json!(["alpha", "cafleet"])));
-            assert_eq!(installed.lines[3], already_enabled_line(&fake));
+            assert_eq!(fake.value(ENABLED_KEY), Some(json!(["alpha", "cafleet"])));
+            assert_eq!(installed.lines[2], already_enabled_line(&fake));
             assert_eq!(installed.rows, 1);
         }
 
         #[test]
-        fn hermes_enablement_is_idempotent() {
-            let mut fake = FakeHermes::complete();
-            let first = install(&mut fake);
-            first.result.as_ref().unwrap();
-            assert_eq!(first.lines[3], enabled_line(&fake));
-            fake.calls.clear();
-            let second = install(&mut fake);
-            second.result.as_ref().unwrap();
-            assert!(writes(&fake.calls).is_empty(), "{:?}", fake.calls);
-            assert_eq!(second.lines[3], already_enabled_line(&fake));
-            assert_eq!(fake.value(ENABLED_KEY), Some(&json!(["cafleet"])));
-            assert_eq!(fake.value(INJECTION_KEY), Some(&json!(true)));
-        }
-
-        #[test]
-        fn hermes_setup_treats_only_an_exact_not_set_line_as_an_absent_key() {
-            for stderr in [
-                format!("{OUT_OF_SYNC}\nConfig key not set: plugins.enabled\n"),
-                format!("  Config key not set: plugins.enabled  \n{OUT_OF_SYNC}\n"),
+        fn hermes_setup_treats_a_not_set_plugins_key_or_a_missing_member_as_unset() {
+            for plugins in [
+                None,
+                Some(json!({})),
+                Some(json!({"entries": {"cafleet": {}}})),
             ] {
-                let mut fake = FakeHermes::complete();
-                fake.reply(get(ENABLED_KEY), Reply::exit(1, &stderr));
-                let installed = install(&mut fake);
+                let mut fake = FakeHermes::new();
+                fake.reply(get(PLUGINS_KEY), Reply::Value(plugins.clone()));
+                let installed = install(&fake);
                 installed.result.as_ref().unwrap();
-                assert!(
-                    writes(&fake.calls).contains(&set(ENABLED_KEY, r#"["cafleet"]"#)),
-                    "{stderr:?}"
-                );
-            }
-            for (key, code, stderr) in [
-                (
-                    ENABLED_KEY,
-                    1,
-                    format!("{OUT_OF_SYNC}\nConfig key not set: plugins.enabled.extra\n"),
-                ),
-                (
-                    ENABLED_KEY,
-                    1,
-                    format!("{OUT_OF_SYNC}\nError: Config key not set: plugins.enabled\n"),
-                ),
-                (
-                    ENABLED_KEY,
-                    1,
-                    format!("{OUT_OF_SYNC}\nConfig key not set: plugins.disabled\n"),
-                ),
-                (ENABLED_KEY, 1, format!("{OUT_OF_SYNC}\n")),
-                (
-                    ENABLED_KEY,
-                    2,
-                    "Config key not set: plugins.enabled\n".to_owned(),
-                ),
-                (
-                    DISABLED_KEY,
-                    1,
-                    format!("{OUT_OF_SYNC}\nConfig key not set: plugins\n"),
-                ),
-                (
-                    INJECTION_KEY,
-                    1,
-                    format!("{OUT_OF_SYNC}\nConfig key not set: plugins.entries.cafleet\n"),
-                ),
-            ] {
-                let mut fake = FakeHermes::complete();
-                fake.reply(get(key), Reply::exit(code, &stderr));
-                let installed = install(&mut fake);
-                assert_plugin_failed(&installed, &fake, Cause::Any);
                 assert_eq!(
-                    plugin_calls(&fake.calls).last(),
-                    Some(&get(key)),
-                    "{key} {code} {stderr:?}"
+                    writes(&fake.calls()),
+                    [
+                        set(ENABLED_KEY, r#"["cafleet"]"#),
+                        set(INJECTION_KEY, "true")
+                    ],
+                    "{plugins:?}"
                 );
-                assert!(
-                    !writes(&fake.calls).iter().any(|call| call[2] == key),
-                    "{key} {stderr:?}"
-                );
+                assert_eq!(installed.lines[2], enabled_line(&fake), "{plugins:?}");
             }
         }
 
         #[test]
         fn hermes_setup_refuses_a_plugins_disabled_entry_for_cafleet() {
-            for enabled in [None, Some(json!(["cafleet"]))] {
-                let mut fake = FakeHermes::complete();
-                fake.set(DISABLED_KEY, json!(["other", "cafleet"]));
-                if let Some(enabled) = &enabled {
-                    fake.set(ENABLED_KEY, enabled.clone());
-                    fake.set(INJECTION_KEY, json!(true));
-                }
-                let installed = install(&mut fake);
-                assert_plugin_failed(
-                    &installed,
-                    &fake,
-                    Cause::Exact(
-                        "plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'",
-                    ),
-                );
-                assert_eq!(plugin_calls(&fake.calls), [get(DISABLED_KEY)]);
-                assert_eq!(fake.value(DISABLED_KEY), Some(&json!(["other", "cafleet"])));
-                assert_eq!(fake.value(ENABLED_KEY), enabled.as_ref());
-            }
+            let mut fake = FakeHermes::new();
+            fake.put(DISABLED_KEY, json!(["other", "cafleet"]));
+            let installed = install(&fake);
+            assert_plugin_failed(
+                &installed,
+                &fake,
+                Cause::Exact(
+                    "plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'",
+                ),
+            );
+            assert!(after_batch(&fake.calls()).is_empty());
+            assert_eq!(fake.value(DISABLED_KEY), Some(json!(["other", "cafleet"])));
+            assert_eq!(fake.value(ENABLED_KEY), None);
         }
 
         #[test]
-        fn hermes_setup_fails_for_plugin_lists_that_are_not_arrays_of_strings() {
-            for (key, value) in [
-                (DISABLED_KEY, json!("cafleet")),
-                (DISABLED_KEY, json!({"cafleet": true})),
-                (DISABLED_KEY, json!(["other", 1])),
-                (DISABLED_KEY, json!(null)),
-                (ENABLED_KEY, json!("cafleet")),
-                (ENABLED_KEY, json!(null)),
-                (ENABLED_KEY, json!(["cafleet", null])),
-                (ENABLED_KEY, json!({})),
+        fn hermes_setup_fails_for_a_plugins_value_outside_its_reviewed_shape() {
+            for (key, value, cause) in [
+                (DISABLED_KEY, json!("cafleet"), None),
+                (ENABLED_KEY, json!(["cafleet", null]), None),
+                (
+                    PLUGINS_KEY,
+                    json!("cafleet"),
+                    Some("plugins is not a JSON object"),
+                ),
             ] {
-                let mut fake = FakeHermes::complete();
-                fake.set(key, value.clone());
-                let installed = install(&mut fake);
-                assert_plugin_failed(&installed, &fake, Cause::Any);
-                assert!(writes(&fake.calls).is_empty(), "{key} {value}");
-                assert_eq!(fake.value(key), Some(&value));
+                let mut fake = FakeHermes::new();
+                fake.put(key, value.clone());
+                let installed = install(&fake);
+                let cause = match cause {
+                    Some(cause) => Cause::Exact(cause),
+                    None => Cause::Contains("is not a JSON array of strings"),
+                };
+                assert_plugin_failed(&installed, &fake, cause);
+                assert!(writes(&fake.calls()).is_empty(), "{key} {value}");
+                assert_eq!(fake.value(key), Some(value));
             }
         }
 
         #[test]
         fn hermes_setup_fails_with_the_cause_of_a_failed_plugin_command() {
-            let mut fake = FakeHermes::complete();
+            let mut fake = FakeHermes::new();
             fake.reply(
                 set(ENABLED_KEY, r#"["cafleet"]"#),
-                Reply::exit(
-                    2,
-                    &format!("{OUT_OF_SYNC}\nconfig.yaml is locked by another process\n"),
-                ),
+                Reply::Fail("config.yaml is locked by another process".into()),
             );
-            let installed = install(&mut fake);
+            let installed = install(&fake);
             assert_plugin_failed(
                 &installed,
                 &fake,
-                Cause::Contains("config.yaml is locked by another process"),
+                Cause::Exact("config.yaml is locked by another process"),
             );
             assert_eq!(fake.value(ENABLED_KEY), None);
-            assert!(!plugin_calls(&fake.calls).contains(&get(INJECTION_KEY)));
-
-            let mut fake = FakeHermes::complete();
-            fake.reply(
-                get(DISABLED_KEY),
-                Reply::exit(
-                    3,
-                    &format!("{OUT_OF_SYNC}\npermission denied: config.yaml\n"),
-                ),
+            assert_eq!(
+                after_batch(&fake.calls()),
+                [set(ENABLED_KEY, r#"["cafleet"]"#)],
+                "a failed write stops before the next write and the re-read"
             );
-            let installed = install(&mut fake);
-            assert_plugin_failed(
-                &installed,
-                &fake,
-                Cause::Contains("permission denied: config.yaml"),
-            );
-            assert_eq!(plugin_calls(&fake.calls), [get(DISABLED_KEY)]);
 
-            let mut fake = FakeHermes::complete();
+            let mut fake = FakeHermes::new();
             fake.reply(
-                get(INJECTION_KEY),
+                get(PLUGINS_KEY),
                 Reply::Fail("did not finish within its deadline".into()),
             );
-            let installed = install(&mut fake);
+            let installed = install(&fake);
             assert_plugin_failed(
-                &installed,
-                &fake,
-                Cause::Contains("did not finish within its deadline"),
-            );
-            assert!(
-                !writes(&fake.calls)
-                    .iter()
-                    .any(|call| call[2] == INJECTION_KEY)
-            );
-        }
-
-        #[test]
-        fn hermes_setup_fails_when_the_reread_lacks_the_enablement() {
-            for key in [ENABLED_KEY, INJECTION_KEY] {
-                let mut fake = FakeHermes::complete();
-                fake.ignored_sets.push(key);
-                let installed = install(&mut fake);
-                assert_plugin_failed(&installed, &fake, Cause::Any);
-                let calls = plugin_calls(&fake.calls);
-                assert!(
-                    calls.starts_with(&[
-                        get(DISABLED_KEY),
-                        get(ENABLED_KEY),
-                        set(ENABLED_KEY, r#"["cafleet"]"#),
-                        get(INJECTION_KEY),
-                        set(INJECTION_KEY, "true"),
-                    ]),
-                    "{key}: {calls:?}"
-                );
-                assert!(
-                    calls[5..]
-                        .iter()
-                        .all(|call| [get(ENABLED_KEY), get(INJECTION_KEY)].contains(call)),
-                    "{key}: only re-reads follow the writes: {calls:?}"
-                );
-            }
-        }
-
-        #[test]
-        fn hermes_setup_appends_only_the_missing_passthrough_names_after_existing_entries() {
-            let mut fake = FakeHermes::holding(&["PATH", "TMUX", "CAFLEET_DATABASE_URL"]);
-            let installed = install(&mut fake);
-            installed.result.as_ref().unwrap();
-            let added = HERMES_CLIENT_ENV_PASSTHROUGH
-                .into_iter()
-                .filter(|name| !["TMUX", "CAFLEET_DATABASE_URL"].contains(name))
-                .collect::<Vec<_>>();
-            assert_eq!(added[0], "CAFLEET_MEMBER_ID");
-            let mut merged = vec!["PATH", "TMUX", "CAFLEET_DATABASE_URL"];
-            merged.extend(&added);
-            assert_eq!(
-                after_path(&fake.calls)[..3],
-                [
-                    FakeHermes::passthrough_get_call(),
-                    FakeHermes::passthrough_set_call(&merged),
-                    FakeHermes::passthrough_get_call(),
-                ],
-                "the passthrough merge precedes the enablement merge"
-            );
-            assert_eq!(fake.value(PASSTHROUGH_KEY), Some(&json!(merged)));
-            assert_eq!(
-                installed.lines,
-                [
-                    skills_line(&installed),
-                    plugin_line(&fake),
-                    passthrough_added_line(&fake, &added),
-                    enabled_line(&fake),
-                ]
-            );
-            assert_eq!(installed.rows, 1);
-        }
-
-        #[test]
-        fn hermes_setup_appends_the_member_id_to_an_existing_installation_list() {
-            let previous = HERMES_CLIENT_ENV_PASSTHROUGH
-                .into_iter()
-                .filter(|name| *name != "CAFLEET_MEMBER_ID")
-                .collect::<Vec<_>>();
-            let mut fake = FakeHermes::holding(&previous);
-            let installed = install(&mut fake);
-            installed.result.as_ref().unwrap();
-            let mut merged = previous.clone();
-            merged.push("CAFLEET_MEMBER_ID");
-            assert_eq!(fake.value(PASSTHROUGH_KEY), Some(&json!(merged)));
-            assert_eq!(
-                installed.lines[2],
-                passthrough_added_line(&fake, &["CAFLEET_MEMBER_ID"])
-            );
-        }
-
-        #[test]
-        fn hermes_setup_writes_no_passthrough_when_every_member_name_is_already_present() {
-            let mut existing = vec!["PATH"];
-            existing.extend(HERMES_CLIENT_ENV_PASSTHROUGH.iter().rev());
-            let mut fake = FakeHermes::holding(&existing);
-            let installed = install(&mut fake);
-            installed.result.as_ref().unwrap();
-            assert_eq!(
-                passthrough_calls(&fake.calls),
-                [FakeHermes::passthrough_get_call()]
-            );
-            assert_eq!(fake.value(PASSTHROUGH_KEY), Some(&json!(existing)));
-            assert_eq!(
-                installed.lines,
-                [
-                    skills_line(&installed),
-                    plugin_line(&fake),
-                    passthrough_held_line(&fake),
-                    enabled_line(&fake),
-                ]
-            );
-            assert_eq!(installed.rows, 1);
-        }
-
-        #[test]
-        fn hermes_setup_is_idempotent_from_an_empty_passthrough_list() {
-            let mut fake = FakeHermes::holding(&[]);
-            let first = install(&mut fake);
-            first.result.as_ref().unwrap();
-            assert_eq!(
-                fake.value(PASSTHROUGH_KEY),
-                Some(&json!(HERMES_CLIENT_ENV_PASSTHROUGH))
-            );
-            assert_eq!(
-                first.lines[2],
-                passthrough_added_line(&fake, &HERMES_CLIENT_ENV_PASSTHROUGH)
-            );
-            fake.calls.clear();
-            let second = install(&mut fake);
-            second.result.as_ref().unwrap();
-            assert_eq!(
-                passthrough_calls(&fake.calls),
-                [FakeHermes::passthrough_get_call()]
-            );
-            assert_eq!(
-                fake.value(PASSTHROUGH_KEY),
-                Some(&json!(HERMES_CLIENT_ENV_PASSTHROUGH))
-            );
-            assert_eq!(second.lines[2], passthrough_held_line(&fake));
-        }
-
-        #[test]
-        fn hermes_setup_compares_passthrough_names_by_exact_string() {
-            let near = ["cafleet_database_url", " TMUX", "TMUX_PANE ", "Herdr_Env"];
-            let mut fake = FakeHermes::holding(&near);
-            let installed = install(&mut fake);
-            installed.result.as_ref().unwrap();
-            let mut merged = near.to_vec();
-            merged.extend(HERMES_CLIENT_ENV_PASSTHROUGH);
-            assert_eq!(
-                passthrough_calls(&fake.calls)[1],
-                FakeHermes::passthrough_set_call(&merged)
-            );
-        }
-
-        #[test]
-        fn hermes_setup_fails_for_a_passthrough_value_that_is_not_an_array_of_strings() {
-            for passthrough in [
-                json!(null),
-                json!("CAFLEET_DATABASE_URL"),
-                json!({"0": "CAFLEET_DATABASE_URL"}),
-                json!([1, 2]),
-                json!(["CAFLEET_DATABASE_URL", null]),
-            ] {
-                let mut fake = FakeHermes::with_passthrough(passthrough.clone());
-                let installed = install(&mut fake);
-                assert_passthrough_failed(&installed, &fake, Cause::Any);
-                assert_eq!(
-                    after_path(&fake.calls),
-                    [FakeHermes::passthrough_get_call()],
-                    "{passthrough}"
-                );
-            }
-        }
-
-        #[test]
-        fn hermes_setup_fails_when_the_passthrough_cannot_be_read() {
-            let mut fake = FakeHermes::holding(&[]);
-            fake.reply(
-                FakeHermes::passthrough_get_call(),
-                Reply::Fail("did not finish within its deadline".into()),
-            );
-            let installed = install(&mut fake);
-            assert_passthrough_failed(
                 &installed,
                 &fake,
                 Cause::Exact("did not finish within its deadline"),
             );
+            assert!(after_batch(&fake.calls()).is_empty());
+        }
 
-            let mut fake = FakeHermes::holding(&[]);
-            fake.reply(
-                FakeHermes::passthrough_get_call(),
-                Reply::exit(
-                    2,
-                    &format!("{OUT_OF_SYNC}\npermission denied reading config.yaml\n"),
+        #[test]
+        fn hermes_setup_fails_when_the_reread_lacks_the_enablement() {
+            for (key, cause) in [
+                (
+                    ENABLED_KEY,
+                    "plugins.enabled still lacks cafleet after the write",
                 ),
-            );
-            let installed = install(&mut fake);
-            assert_passthrough_failed(
-                &installed,
-                &fake,
-                Cause::Contains("permission denied reading config.yaml"),
-            );
-            assert_eq!(
-                after_path(&fake.calls),
-                [FakeHermes::passthrough_get_call()]
-            );
-        }
-
-        #[test]
-        fn hermes_setup_treats_an_unset_passthrough_as_a_failed_read() {
-            let mut fake = FakeHermes::holding(&[]);
-            fake.config.remove(PASSTHROUGH_KEY);
-            let installed = install(&mut fake);
-            assert_passthrough_failed(
-                &installed,
-                &fake,
-                Cause::Contains("Config key not set: terminal.client_env_passthrough"),
-            );
-            assert!(writes(&fake.calls).is_empty());
-        }
-
-        #[test]
-        fn hermes_setup_fails_when_the_passthrough_write_fails() {
-            let mut fake = FakeHermes::holding(&["PATH"]);
-            let mut merged = vec!["PATH"];
-            merged.extend(HERMES_CLIENT_ENV_PASSTHROUGH);
-            fake.reply(
-                FakeHermes::passthrough_set_call(&merged),
-                Reply::exit(
-                    1,
-                    &format!(
-                        "{OUT_OF_SYNC}\nmanaged key terminal.client_env_passthrough cannot be set\n"
-                    ),
+                (
+                    INJECTION_KEY,
+                    "plugins.entries.cafleet.allow_gateway_injection is still not true after the write",
                 ),
-            );
-            let installed = install(&mut fake);
-            assert_passthrough_failed(
-                &installed,
-                &fake,
-                Cause::Contains("managed key terminal.client_env_passthrough cannot be set"),
-            );
-            assert_eq!(after_path(&fake.calls).len(), 2);
-            assert_eq!(fake.value(PASSTHROUGH_KEY), Some(&json!(["PATH"])));
-        }
-
-        #[test]
-        fn hermes_setup_fails_when_the_reread_passthrough_lacks_a_name() {
-            let mut fake = FakeHermes::holding(&["PATH"]);
-            fake.ignored_sets.push(PASSTHROUGH_KEY);
-            let installed = install(&mut fake);
-            assert_passthrough_failed(&installed, &fake, Cause::Any);
-            let mut merged = vec!["PATH"];
-            merged.extend(HERMES_CLIENT_ENV_PASSTHROUGH);
-            assert_eq!(
-                after_path(&fake.calls),
-                [
-                    FakeHermes::passthrough_get_call(),
-                    FakeHermes::passthrough_set_call(&merged),
-                    FakeHermes::passthrough_get_call()
-                ]
-            );
+            ] {
+                let mut fake = FakeHermes::new();
+                fake.ignore_sets(key);
+                let installed = install(&fake);
+                assert_plugin_failed(&installed, &fake, Cause::Exact(cause));
+                assert_eq!(
+                    after_batch(&fake.calls()),
+                    [
+                        set(ENABLED_KEY, r#"["cafleet"]"#),
+                        set(INJECTION_KEY, "true"),
+                        get(PLUGINS_KEY),
+                    ],
+                    "{key}: one re-read follows the writes"
+                );
+            }
         }
 
         #[test]
         fn explicit_hermes_setup_without_the_binary_fails_with_the_path_cause() {
-            let mut fake = FakeHermes::holding(&[]);
-            fake.available = false;
-            let installed = install(&mut fake);
+            let installed = install_with(HermesSetup::MissingRequired);
             assert_failure(
                 &installed,
-                &passthrough_prefix(&installed.base),
+                &extension_prefix(&installed.base),
                 Cause::Exact("binary hermes not found on PATH"),
             );
             assert_eq!(installed.lines, [skills_line(&installed)]);
-            assert_eq!(fake.calls, [FakeHermes::path_call()]);
-            assert!(!fake.plugin_dir().exists());
+            assert!(!installed.base.join("plugins").exists());
         }
 
         #[test]
         fn hermes_setup_fails_into_the_resolved_base_when_the_config_path_is_unavailable() {
-            for (reply, cause) in [
-                (
+            for plugins_failure in [false, true] {
+                let mut fake = FakeHermes::new();
+                fake.reply(
+                    FakeHermes::path_call(),
                     Reply::Fail("did not finish within its deadline".into()),
+                );
+                if plugins_failure {
+                    fake.reply(get(PLUGINS_KEY), Reply::Fail("permission denied".into()));
+                }
+                let installed = install(&fake);
+                assert_failure(
+                    &installed,
+                    &extension_prefix(&installed.base),
                     Cause::Exact("did not finish within its deadline"),
-                ),
-                (
-                    Reply::exit(1, &format!("{OUT_OF_SYNC}\nno configuration found\n")),
-                    Cause::Contains("no configuration found"),
-                ),
-            ] {
-                let mut fake = FakeHermes::holding(&[]);
-                fake.reply(FakeHermes::path_call(), reply);
-                let installed = install(&mut fake);
-                assert_failure(&installed, &passthrough_prefix(&installed.base), cause);
+                );
                 assert_eq!(installed.lines, [skills_line(&installed)]);
-                assert_eq!(fake.calls, [FakeHermes::path_call()]);
+                assert!(after_batch(&fake.calls()).is_empty());
                 assert!(!fake.plugin_dir().exists());
                 assert!(!installed.base.join("plugins").exists());
             }
@@ -2019,37 +1584,28 @@ mod tests {
 
         #[test]
         fn hermes_setup_fails_into_the_resolved_base_when_the_config_path_is_not_absolute() {
-            for printed in ["config.yaml", "profiles/work/config.yaml"] {
-                let mut fake = FakeHermes::holding(&[]);
-                fake.reply(
-                    FakeHermes::path_call(),
-                    Reply::Exit {
-                        code: 0,
-                        stdout: format!("{printed}\n"),
-                        stderr: format!("{OUT_OF_SYNC}\n"),
-                    },
-                );
-                let installed = install(&mut fake);
-                assert_failure(
-                    &installed,
-                    &passthrough_prefix(&installed.base),
-                    Cause::Exact(&format!("printed no absolute file path: {printed}")),
-                );
-                assert_eq!(installed.lines, [skills_line(&installed)]);
-                assert_eq!(fake.calls, [FakeHermes::path_call()]);
-                assert!(!installed.base.join("plugins").exists());
-            }
+            let mut fake = FakeHermes::new();
+            fake.reply(FakeHermes::path_call(), Reply::Path("config.yaml".into()));
+            let installed = install(&fake);
+            assert_failure(
+                &installed,
+                &extension_prefix(&installed.base),
+                Cause::Exact("printed no absolute file path: config.yaml"),
+            );
+            assert_eq!(installed.lines, [skills_line(&installed)]);
+            assert!(after_batch(&fake.calls()).is_empty());
+            assert!(!installed.base.join("plugins").exists());
         }
 
         #[test]
-        fn hermes_setup_without_a_runner_installs_skills_records_the_row_and_reports_the_skip() {
-            let installed = install_with(None);
+        fn plain_setup_without_hermes_installs_skills_records_the_row_and_reports_the_skip() {
+            let installed = install_with(HermesSetup::Absent);
             installed.result.as_ref().unwrap();
             assert_eq!(
                 installed.lines,
                 [
                     skills_line(&installed),
-                    "hermes: skipped the plugin and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".to_owned(),
+                    "hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".to_owned(),
                 ]
             );
             assert_eq!(installed.rows, 1);

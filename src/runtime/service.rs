@@ -561,7 +561,7 @@ impl ShutdownHost for LiveShutdown<'_> {
 }
 
 pub(crate) struct RunnerDependencies {
-    pub(crate) catalog: crate::coding_agent::ProfileCatalog,
+    pub(crate) catalog: &'static crate::coding_agent::ProfileCatalog,
     pub(crate) clock: Arc<dyn ObservationClock>,
     #[cfg(test)]
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
@@ -577,7 +577,7 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         settings,
         descriptor_path,
         RunnerDependencies {
-            catalog: crate::coding_agent::ProfileCatalog::bundled()?,
+            catalog: crate::coding_agent::ProfileCatalog::bundled(),
             clock: Arc::new(RealObservationClock),
             #[cfg(test)]
             writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
@@ -684,7 +684,7 @@ pub(crate) fn run_service(
         _ => return Err(error("invalid launch evidence policy")),
     };
     let mut controller =
-        ObservationController::new(&run, &services.catalog, evidence_policy, range)?;
+        ObservationController::new(&run, services.catalog, evidence_policy, range)?;
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -973,6 +973,7 @@ pub(crate) fn run_service(
                                         InputServices {
                                             catalog: services.catalog.clone(),
                                             token_source: Box::new(SystemRequestTokens),
+                                            stage_settle: crate::runtime::input::STAGE_SETTLE,
 #[cfg(test)]
 hooks: crate::runtime::input::test_support::default_input_hooks(),
 
@@ -1392,6 +1393,7 @@ pub(crate) mod test_support {
     use crate::runtime::*;
     pub(crate) const DESCRIPTOR_ENV: &str = "CAFLEET_REVIEW_RUNNER_DESCRIPTOR";
     pub(crate) const SERVICES_ENV: &str = "CAFLEET_REVIEW_TEST_SERVICES";
+    pub(crate) const DATABASE_ENV: &str = "CAFLEET_REVIEW_RUNNER_DATABASE_URL";
     pub(crate) fn wire_frame(value: &Value) -> Vec<u8> {
         let body = serde_json::to_vec(value).unwrap();
         assert!(body.len() <= 65536);
@@ -1645,7 +1647,7 @@ pub(crate) mod test_support {
                 command
                     .env(DESCRIPTOR_ENV, &artifacts.paths.descriptor)
                     .env(
-                        "CAFLEET_DATABASE_URL",
+                        DATABASE_ENV,
                         format!("sqlite:///{}", fixture.conn.path().unwrap()),
                     )
                     .stdin(Stdio::from(slave.try_clone().unwrap()))
@@ -2599,7 +2601,7 @@ pub(crate) mod test_support {
             let catalog = ProfileCatalog::from_definitions(&value["catalog"])?;
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
             let services = RunnerDependencies {
-                catalog,
+                catalog: Box::leak(Box::new(catalog)),
                 clock: Arc::new(Clock),
                 writer_hooks: Arc::new(Hooks {
                     directory: config.parent().unwrap().to_path_buf(),
@@ -2660,12 +2662,10 @@ pub(crate) mod test_support {
                 0o700
             );
             synthetic(fixture, spec);
-            let bundled = crate::coding_agent::ProfileCatalog::bundled()
-                .unwrap()
-                .capabilities(
-                    crate::coding_agent::CodingAgent::Codex,
-                    Some("0.0.1-synthetic"),
-                );
+            let bundled = crate::coding_agent::ProfileCatalog::bundled().capabilities(
+                crate::coding_agent::CodingAgent::Codex,
+                Some("0.0.1-synthetic"),
+            );
             fixture
                 .conn
                 .execute(
@@ -2682,7 +2682,7 @@ pub(crate) mod test_support {
             let hash = |path: &Path| sha256_hex(&std::fs::read(path).unwrap());
             let current = std::env::current_exe().unwrap();
             let executable = Path::new(&spec.argv[0]);
-            let producer = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":evidence,"source_manifest_sha256":hash(&evidence),"libtest_executable_path":current,"libtest_executable_sha256":hash(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"bundled_unknown","native_executable":{"path":executable,"sha256":hash(executable),"version":"0.0.1-synthetic","version_evidence_ref":evidence},"launch_evidence_ref":evidence,"environment_evidence_ref":evidence});
+            let producer = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":evidence,"source_manifest_sha256":hash(&evidence),"libtest_executable_path":current,"libtest_executable_sha256":crate::runtime::observation::native_capture::test_support::libtest_digest(),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"bundled_unknown","native_executable":{"path":executable,"sha256":hash(executable),"version":"0.0.1-synthetic","version_evidence_ref":evidence},"launch_evidence_ref":evidence,"environment_evidence_ref":evidence});
             let producer_path = fixture._dir.path().join("capture-producer.json");
             private_write(&producer_path, &serde_json::to_vec(&producer).unwrap());
             let policy = fixture._dir.path().join("capture-policy.json");
@@ -3015,11 +3015,9 @@ mod tests {
                     );
                 }
             }
-            let database_url = std::env::var("CAFLEET_DATABASE_URL").unwrap();
-            let settings = Settings::for_database(
-                Path::new(crate::db::database_path(&database_url).unwrap()),
-                Some("tmux"),
-            );
+            let database_url = std::env::var(DATABASE_ENV).unwrap();
+            let settings =
+                Settings::for_database(Path::new(crate::db::database_path(&database_url).unwrap()));
             let outcome = match std::env::var_os(SERVICES_ENV) {
                 Some(configured) => {
                     let configured = Path::new(&configured);

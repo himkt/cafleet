@@ -2,7 +2,9 @@ use crate::broker;
 use crate::broker::DeletedFleet;
 use crate::broker::DeletedMember;
 use crate::broker::MemberRecord;
+use crate::broker::PLACEMENT_COLUMNS;
 use crate::broker::Placement;
+use crate::broker::members::NewPlacement;
 use crate::broker::members::active_member;
 use crate::cli::emit;
 use crate::coding_agent::CodingAgent;
@@ -11,6 +13,7 @@ use crate::db::finalize_deletion;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::multiplexer::AnyMultiplexer;
+use crate::multiplexer::CommandRunner;
 use crate::multiplexer::PostCloseLayout;
 use crate::output::format_fleet_create;
 use crate::output::format_fleet_delete;
@@ -19,11 +22,13 @@ use crate::output::format_fleet_show;
 use crate::pane_lock::PaneLock;
 use crate::pane_lock::lock_deletion;
 use crate::pane_lock::lock_path;
+use crate::runtime::system::SystemRunner;
 use crate::time::Deadline;
 use clap::Subcommand;
 use rusqlite::Connection;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 #[derive(Subcommand)]
 pub(crate) enum FleetCommand {
@@ -35,6 +40,12 @@ pub(crate) enum FleetCommand {
         /// Director's coding agent.
         #[arg(long = "coding-agent", value_enum)]
         coding_agent: CodingAgent,
+        /// The Director's pane [default: the caller's pane from TMUX_PANE or HERDR_PANE_ID].
+        #[arg(long, value_name = "PANE_ID")]
+        pane: Option<String>,
+        /// The Director's tmux socket path or herdr session [default: the caller's server].
+        #[arg(long = "mux-server", value_name = "SERVER", requires = "pane")]
+        mux_server: Option<String>,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -70,8 +81,10 @@ pub(crate) fn run(
         FleetCommand::Create {
             name,
             coding_agent,
+            pane,
+            mux_server,
             json,
-        } => create(conn, settings, &name, coding_agent, json),
+        } => create(conn, &name, coding_agent, pane, mux_server, json),
         FleetCommand::List { json } => {
             let fleets = broker::list_fleets(conn)?;
             let payload = Value::Array(
@@ -102,29 +115,79 @@ pub(crate) fn run(
 
 fn create(
     conn: &mut Connection,
-    settings: &Settings,
     name: &str,
     agent: CodingAgent,
+    pane: Option<String>,
+    mux_server: Option<String>,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let inside_session = || {
+    let env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
+    let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
+    let backend = crate::multiplexer::resolve_multiplexer_name(lookup).map_err(|_| {
         CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
+    })?;
+    let pane = match pane {
+        Some(pane) => pane,
+        None => caller_pane(backend, lookup)?,
     };
-    let mux = crate::cli::available_mux(settings, None).map_err(|_| inside_session())?;
-    let context = mux.context_discovery().map_err(|_| inside_session())?;
+    let runner: Rc<dyn CommandRunner> = Rc::new(SystemRunner);
+    let server = match mux_server {
+        Some(server) => server,
+        None => crate::multiplexer::caller_server(backend, lookup, runner.as_ref())
+            .map_err(mux_error)?,
+    };
+    let mux = AnyMultiplexer::for_server(backend, &server, runner).map_err(mux_error)?;
+    mux.ensure_available().map_err(mux_error)?;
+    let context = mux.pane_context(&pane).map_err(mux_error)?.ok_or_else(|| {
+        CafleetError::App(format!(
+            "pane {pane} was not found on the {backend} server {server}; pass --pane and --mux-server for the Director's pane"
+        ))
+    })?;
     let fleet = broker::create_fleet(
         conn,
         Some(name),
-        &context.session,
-        &context.window_id,
-        &context.pane_id,
-        agent.name(),
-        mux.name(),
+        &NewPlacement {
+            backend: backend.into(),
+            mux_session: context.session,
+            mux_window_id: context.window_id,
+            mux_pane_id: Some(context.pane_id),
+            coding_agent: agent.name().into(),
+            mux_server: server,
+        },
     )?;
     emit(json, &crate::output::json::created_fleet(&fleet), || {
         format_fleet_create(&fleet)
     });
     Ok(())
+}
+
+/// The caller's own pane; a Hermes terminal tool runs in the shared gateway, so its pane
+/// variables may name another session's pane.
+fn caller_pane(
+    backend: &str,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<String, CafleetError> {
+    if lookup("HERMES_SESSION_ID").is_some() {
+        return Err(CafleetError::App(
+            "cafleet fleet create cannot identify its pane inside a Hermes session; pass --pane <pane-id>".into(),
+        ));
+    }
+    let (variable, missing) = match backend {
+        "tmux" => (
+            "TMUX_PANE",
+            "cafleet fleet create must be run inside a tmux or herdr session",
+        ),
+        "herdr" => (
+            "HERDR_PANE_ID",
+            "cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>",
+        ),
+        other => unreachable!("detection returns a supported multiplexer, not {other}"),
+    };
+    lookup(variable).ok_or_else(|| CafleetError::App(missing.into()))
+}
+
+fn mux_error(cause: crate::multiplexer::MultiplexerError) -> CafleetError {
+    CafleetError::App(cause.to_string())
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -140,11 +203,11 @@ pub(crate) fn deletion_placements(
     settings: &Settings,
     fleet_id: i64,
 ) -> Result<Vec<DeletionPlacement>, CafleetError> {
-    let mut statement = conn.prepare(
-        "SELECT m.member_id, p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at
-         FROM members m JOIN member_placements p ON p.member_id=m.member_id
-         WHERE m.fleet_id=?1 AND m.status='active' AND p.mux_pane_id IS NOT NULL"
-    )?;
+    let mut statement = conn.prepare(&format!(
+        "SELECT m.member_id, {PLACEMENT_COLUMNS}
+             FROM members m JOIN member_placements p ON p.member_id=m.member_id
+             WHERE m.fleet_id=?1 AND m.status='active' AND p.mux_pane_id IS NOT NULL"
+    ))?;
     let rows = statement.query_map([fleet_id], |row| {
         Ok((row.get::<_, i64>(0)?, Placement::from_row(row, 1)?))
     })?;
@@ -256,19 +319,21 @@ impl DeletionHost for MultiplexerDeletionHost<'_> {
     }
 }
 
-struct NativeFleetDeletionHost<'a> {
-    settings: &'a Settings,
+struct NativeFleetDeletionHost {
+    /// Read before deletion removes the placement rows; its error surfaces only when a pane
+    /// actually needs the multiplexer.
+    director: Result<Placement, CafleetError>,
     mux: Option<AnyMultiplexer>,
 }
 
-impl NativeFleetDeletionHost<'_> {
+impl NativeFleetDeletionHost {
     fn multiplexer(
         &mut self,
         deadline: Deadline,
     ) -> Result<MultiplexerDeletionHost<'_>, CafleetError> {
         if self.mux.is_none() {
-            let mux = crate::cli::available_mux(self.settings, Some(deadline))?;
-            self.mux = Some(mux);
+            let director = self.director.as_ref().map_err(Clone::clone)?;
+            self.mux = Some(crate::runtime::mux_for_placement(director, Some(deadline))?);
         }
         Ok(MultiplexerDeletionHost(
             self.mux
@@ -278,7 +343,7 @@ impl NativeFleetDeletionHost<'_> {
     }
 }
 
-impl DeletionHost for NativeFleetDeletionHost<'_> {
+impl DeletionHost for NativeFleetDeletionHost {
     fn settle_hermes(
         &mut self,
         conn: &Connection,
@@ -461,7 +526,7 @@ pub(crate) fn delete_fleet(
         fleet_id,
         deadline,
         &mut NativeFleetDeletionHost {
-            settings,
+            director: broker::director_placement(conn, fleet_id),
             mux: None,
         },
     )
@@ -1003,7 +1068,7 @@ pub(crate) mod test_support {
             !path.is_empty(),
             "fleet deletion has a concrete database path"
         );
-        let settings = crate::config::Settings::for_database(std::path::Path::new(path), None);
+        let settings = crate::config::Settings::for_database(std::path::Path::new(path));
         crate::cli::fleet::delete_fleet_with_host(
             conn,
             &settings,
@@ -1075,10 +1140,7 @@ mod tests {
         use std::time::Instant;
 
         fn settings(fixture: &Fixture) -> Settings {
-            Settings::for_database(
-                std::path::Path::new(fixture.conn.path().unwrap()),
-                Some("tmux"),
-            )
+            Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()))
         }
 
         fn while_locks_are_acquired(

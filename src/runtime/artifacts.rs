@@ -168,10 +168,15 @@ pub(super) fn placement_of(
 ) -> Result<Option<crate::broker::Placement>> {
     use rusqlite::OptionalExtension;
     conn.query_row(
-        "SELECT backend,mux_session,mux_window_id,mux_pane_id,coding_agent,created_at FROM member_placements WHERE member_id=?1",
+        &format!(
+            "SELECT {} FROM member_placements p WHERE member_id=?1",
+            crate::broker::PLACEMENT_COLUMNS
+        ),
         [member_id],
         |row| crate::broker::Placement::from_row(row, 0),
-    ).optional().map_err(CafleetError::from)
+    )
+    .optional()
+    .map_err(CafleetError::from)
 }
 pub(crate) fn validate_run_paths(conn: &Connection, run: &RunRecord) -> Result<RuntimePaths> {
     validate_database(
@@ -1037,32 +1042,23 @@ mod tests {
         let mut fixture = Fixture::new();
         let artifacts = fixture.artifacts();
         let mut spec = fixture.spec();
-        let database_url = spec.environment[0].1.clone();
-        let member_id = fixture.run.member_id;
         for &agent in crate::coding_agent::CodingAgent::all() {
-            let forwarded = agent
+            spec.environment = agent
                 .forwarded_config(&|name| {
                     (name == agent.config_variable()).then(|| format!("/cfg/{}", agent.name()))
                 })
-                .unwrap();
-            spec.environment = crate::coding_agent::CodingAgent::spawn_environment(
-                &database_url,
-                member_id,
-                forwarded,
-            );
+                .unwrap()
+                .into_iter()
+                .collect();
             let descriptor = LaunchDescriptor::new(&fixture.run, spec.clone()).unwrap();
             artifacts.write_descriptor(&descriptor).unwrap();
             let read = load_descriptor(&fixture.conn, &artifacts.paths.descriptor).unwrap();
             assert_eq!(
                 read.spawn.environment,
-                vec![
-                    ("CAFLEET_DATABASE_URL".to_owned(), database_url.clone()),
-                    ("CAFLEET_MEMBER_ID".to_owned(), member_id.to_string()),
-                    (
-                        agent.config_variable().to_owned(),
-                        format!("/cfg/{}", agent.name())
-                    ),
-                ]
+                vec![(
+                    agent.config_variable().to_owned(),
+                    format!("/cfg/{}", agent.name())
+                )]
             );
             artifacts.remove_descriptor().unwrap();
         }

@@ -860,46 +860,27 @@ mod tests {
         }
 
         #[test]
-        fn runner_real_pty_child_receives_the_member_id_and_forwarded_config_location() {
+        fn runner_real_pty_child_receives_the_forwarded_config_location() {
             let fixture = Fixture::new();
             let mut spec = fixture.spec();
-            let database_url = spec
-                .environment
-                .iter()
-                .find(|(key, _)| key == "CAFLEET_DATABASE_URL")
-                .map(|(_, value)| value.clone())
-                .expect("fixture spawn environment carries the database URL");
-            let member_id = fixture.run.member_id;
-            let forwarded = crate::coding_agent::CodingAgent::Opencode
+            spec.environment = crate::coding_agent::CodingAgent::Opencode
                 .forwarded_config(&|name| {
                     (name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string())
                 })
-                .unwrap();
-            spec.environment = crate::coding_agent::CodingAgent::spawn_environment(
-                &database_url,
-                member_id,
-                forwarded,
-            );
+                .unwrap()
+                .into_iter()
+                .collect();
             spec.argv = vec![
-            "/bin/sh".into(),
-            "-c".into(),
-            "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"; printf 'database=%s\\n' \"$CAFLEET_DATABASE_URL\"; printf 'member=%s\\n' \"$CAFLEET_MEMBER_ID\"".into(),
-        ];
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"".into(),
+            ];
             let mut owned = OwnedPty::prepare(spec.size);
             owned.session.spawn(&spec).unwrap();
             let (output, status) = collect(&mut owned.session);
             assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
             let text = String::from_utf8(output).unwrap();
             assert!(text.contains("config=/cfg/open code"), "{text:?}");
-            assert!(
-                text.contains(&format!("database={database_url}")),
-                "{text:?}"
-            );
-            assert!(
-                text.lines()
-                    .any(|line| line.trim_end_matches('\r') == format!("member={member_id}")),
-                "{text:?}"
-            );
             assert_eq!(status, ChildExit::Code(0));
         }
 
@@ -936,6 +917,13 @@ mod tests {
         #[test]
         fn runner_real_raw_terminal_guard_restores_only_its_owned_fixture_terminal() {
             let pty = nix::pty::openpty(None, None).unwrap();
+            for end in [&pty.master, &pty.slave] {
+                nix::fcntl::fcntl(
+                    end,
+                    nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC),
+                )
+                .unwrap();
+            }
             let terminal = File::from(pty.slave);
             let before = nix::sys::termios::tcgetattr(&terminal).unwrap();
             let mut guard = RawTerminalGuard::enter(&terminal).unwrap();
@@ -1001,6 +989,9 @@ mod tests {
             let process = owned.session.spawn(&spec).unwrap();
             read_until(&mut owned.session, "ready");
             let start = Instant::now();
+            owned.clock = Some(ShutdownClock::new(
+                start.checked_sub(Duration::from_millis(1700)).unwrap(),
+            ));
             let outcome = owned.stop();
             assert!(start.elapsed() < Duration::from_millis(4750));
             assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
@@ -1048,6 +1039,9 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let start = Instant::now();
+            owned.clock = Some(ShutdownClock::new(
+                start.checked_sub(Duration::from_millis(1700)).unwrap(),
+            ));
             let outcome = owned.stop();
             let elapsed = start.elapsed();
             assert!(

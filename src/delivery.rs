@@ -628,7 +628,7 @@ mod tests {
     use std::time::Instant;
 
     fn settings_for(conn: &Connection) -> Settings {
-        Settings::for_database(std::path::Path::new(conn.path().unwrap()), None)
+        Settings::for_database(std::path::Path::new(conn.path().unwrap()))
     }
 
     fn wrapped_line(message: &crate::broker::MessageRecord, body: &str) -> String {
@@ -881,7 +881,7 @@ mod tests {
                     "submitted before the lock is taken",
                 )
                 .unwrap();
-                let until = outer.min(Instant::now() + Duration::from_secs(5));
+                let until = outer.min(Instant::now() + Duration::from_secs(1));
                 let mut host = DeliveryHost::new(&settings, &placement, until);
                 host.take_lock_after_reply = true;
                 let outcome = deliver_pending_with(
@@ -1818,10 +1818,9 @@ mod tests {
             with_detecting_input_service(|fixture, until| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                let settings = Settings::for_database(
-                    std::path::Path::new(fixture.fixture.conn.path().unwrap()),
-                    None,
-                );
+                let settings = Settings::for_database(std::path::Path::new(
+                    fixture.fixture.conn.path().unwrap(),
+                ));
                 manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
                 loop {
                     assert!(Instant::now() < until, "the detected interaction opens");
@@ -1899,10 +1898,9 @@ mod tests {
             with_detecting_input_service(|fixture, until| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                let settings = Settings::for_database(
-                    std::path::Path::new(fixture.fixture.conn.path().unwrap()),
-                    None,
-                );
+                let settings = Settings::for_database(std::path::Path::new(
+                    fixture.fixture.conn.path().unwrap(),
+                ));
                 manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
                 loop {
                     assert!(Instant::now() < until, "the detected interaction opens");

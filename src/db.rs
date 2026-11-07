@@ -496,6 +496,8 @@ pub(crate) fn finalize_deletion<T>(
 
 // Pane side effects are irreversible; mandatory storage finalization gets a
 // bounded grace period independent of the input deadline.
+const COMPLETION_GRACE: Duration = Duration::from_secs(1);
+
 pub(crate) fn complete_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
@@ -505,11 +507,7 @@ pub(crate) fn complete_database_budget<T>(
 }
 
 fn completion_deadline(deadline: Deadline) -> Deadline {
-    Deadline::until(
-        deadline
-            .instant()
-            .max(Instant::now() + Duration::from_secs(1)),
-    )
+    Deadline::until(deadline.instant().max(Instant::now() + COMPLETION_GRACE))
 }
 
 fn scoped_database_budget<T>(
@@ -712,9 +710,9 @@ mod tests {
                     (1, 1, 'Director', 'director assignment', 'active', 'registered', NULL),
                     (2, 1, 'worker', 'worker assignment', 'active', 'registered', NULL),
                     (3, 1, 'departed', 'finished assignment', 'deregistered', 'registered', 'departed');
-                 INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES
-                    (1, 'main', '@1', '%0', 'tmux', 'claude', 'placed'),
-                    (2, 'main', '@1', NULL, 'tmux', 'codex', 'placed');
+                 INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, mux_server, coding_agent, created_at) VALUES
+                    (1, 'main', '@1', '%0', 'tmux', '/tmp/tmux-0/default', 'claude', 'placed'),
+                    (2, 'main', '@1', NULL, 'tmux', '/tmp/tmux-0/default', 'codex', 'placed');
                  UPDATE fleets SET director_member_id=1 WHERE fleet_id=1;
                  INSERT INTO messages(message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at) VALUES
                     (7, 1, 2, 'created-7', 'input_required', 'status-7', 'pending unicode 世界', NULL),
@@ -1695,8 +1693,8 @@ mod tests {
             })
             .unwrap_err();
             assert!(error.message().contains("database is locked"));
-            assert!(started.elapsed() >= Duration::from_millis(900));
-            assert!(started.elapsed() < Duration::from_secs(2));
+            assert!(started.elapsed() >= COMPLETION_GRACE * 9 / 10);
+            assert!(started.elapsed() < COMPLETION_GRACE * 2);
         }
 
         fn assert_timeout(conn: &Connection, expected: u32) {

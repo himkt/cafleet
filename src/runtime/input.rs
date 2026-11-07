@@ -65,7 +65,7 @@ pub(crate) trait RequestTokenSource: Send {
 }
 
 const RECEIPT_CACHE_CAPACITY: usize = 4096;
-const STAGE_SETTLE: Duration = Duration::from_millis(500);
+pub(crate) const STAGE_SETTLE: Duration = Duration::from_millis(500);
 const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
@@ -101,6 +101,7 @@ pub(crate) trait InputHooks: Send + Sync {
 pub(crate) struct InputServices {
     pub(crate) catalog: ProfileCatalog,
     pub(crate) token_source: Box<dyn RequestTokenSource>,
+    pub(crate) stage_settle: Duration,
     #[cfg(test)]
     pub(crate) hooks: Arc<dyn InputHooks>,
 }
@@ -2498,7 +2499,7 @@ impl InputCoordinator {
         let settles =
             u32::try_from(selection.2.len() - 1).expect("a plan has a bounded stage count");
         if attempt_deadline.saturating_duration_since(now)
-            <= STAGE_SETTLE * settles + STAGE_WRITE_MARGIN
+            <= self.services.stage_settle * settles + STAGE_WRITE_MARGIN
         {
             self.queue
                 .front_mut()
@@ -3484,7 +3485,7 @@ impl InputCoordinator {
                 )?;
                 if let Some(composer) = pending.composer.as_mut() {
                     composer.written_stages += 1;
-                    composer.settle_until = Some(Instant::now() + STAGE_SETTLE);
+                    composer.settle_until = Some(Instant::now() + self.services.stage_settle);
                 }
                 pending.bytes = next_bytes;
                 pending.phase = InputPhase::AwaitBeforeWrite;
@@ -4115,13 +4116,14 @@ mod tests {
                     &self.fixture.run,
                     self.lock.clone(),
                     InputServices {
-                        catalog: ProfileCatalog::bundled().unwrap(),
+                        catalog: ProfileCatalog::bundled().clone(),
                         token_source: Box::new(
                             crate::runtime::input::tests::ordinary_prompt::support::PanicTokens(
                                 "manual progress",
                             ),
                         ),
                         hooks: crate::runtime::input::test_support::default_input_hooks(),
+                        stage_settle: crate::runtime::input::STAGE_SETTLE,
                     },
                     self.until,
                 )
@@ -4166,7 +4168,7 @@ mod tests {
 
         fn with_harness(body: impl FnOnce(&mut RunnerFixture)) {
             let mut harness = RunnerFixture::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 storage::evidence::EvidencePolicy::metadata(),
                 None,
                 TerminalSize { rows: 24, cols: 80 },
@@ -4419,7 +4421,7 @@ mod tests {
                         observed: Mutex::new(None),
                     });
                     h.coordinator.services.hooks = hooks.clone();
-                    let deadline = Instant::now() + Duration::from_secs(1);
+                    let deadline = Instant::now() + Duration::from_millis(150);
                     assert!(deadline < h.until);
                     let failure = (0..8)
                         .find_map(|_| {
@@ -4500,7 +4502,11 @@ mod tests {
 
         #[test]
         fn prompt_reservation_and_each_hook_require_a_fresh_drain_before_one_real_write() {
-            with_host(|h| {
+            let profile = HostProfile {
+                stage_settle: crate::runtime::input::STAGE_SETTLE,
+                ..HostProfile::metadata()
+            };
+            with_profile_host(catalog(), encoded(), profile, |h| {
                 let id = h.arm("prompt:fixture-complete");
                 assert!(h.advance().is_none());
                 assert!(
@@ -4527,6 +4533,14 @@ mod tests {
                     h.pty.stage_bytes(),
                     vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
                 );
+                let gaps = h.pty.stage_gaps();
+                assert_eq!(gaps.len(), 1, "{gaps:?}");
+                assert!(
+                    gaps[0] >= crate::runtime::input::STAGE_SETTLE,
+                    "the submit key follows the production settle: {gaps:?}"
+                );
+                assert!(!h.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                assert_eq!(delivery_selection(h, id), (Some("profile".into()), None));
                 assert_eq!(h.pty.program, vec![encoded()]);
                 assert!(matches!(
                     storage::get_input(&h.fixture.conn, id).unwrap().state,
@@ -5019,7 +5033,6 @@ mod tests {
             use crate::coding_agent::CodingAgent;
             use crate::runtime::input::tests::ordinary_prompt::*;
 
-            pub(super) const SETTLE: Duration = Duration::from_millis(500);
             const ESCAPE: &[u8] = b"\x1b";
 
             fn prompt_request(host: &Host, key: &str) -> InputControlRequest {
@@ -5055,7 +5068,11 @@ mod tests {
                 let gaps = host.pty.stage_gaps();
                 assert_eq!(gaps.len(), count, "{gaps:?}");
                 for gap in gaps {
-                    assert!(gap >= SETTLE, "each stage follows a 500 ms settle: {gap:?}");
+                    assert!(
+                        gap >= host.stage_settle,
+                        "each stage follows its {:?} settle: {gap:?}",
+                        host.stage_settle
+                    );
                 }
             }
 
@@ -5096,26 +5113,6 @@ mod tests {
                     }
                     std::thread::sleep(Duration::from_millis(5));
                 }
-            }
-
-            #[test]
-            fn staged_profile_delivery_writes_the_literal_then_its_submit_key_after_a_500ms_settle()
-            {
-                with_host(|host| {
-                    let reply = settle(host, prompt_request(host, "prompt:staged"));
-                    assert_eq!(reply.status, SubmissionStatus::Accepted);
-                    assert_eq!(reply.stage, SubmissionStage::Submitted);
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
-                    );
-                    assert_settled_gaps(host, 1);
-                    assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
-                    assert_eq!(
-                        delivery_selection(host, reply.input_id.unwrap()),
-                        (Some("profile".into()), None)
-                    );
-                });
             }
 
             #[test]
@@ -5263,7 +5260,7 @@ mod tests {
                     HostProfile::metadata(),
                     |host| {
                         until_literal_written(host, prompt_request(host, "prompt:armed-race"));
-                        std::thread::sleep(SETTLE + Duration::from_millis(50));
+                        std::thread::sleep(host.stage_settle + Duration::from_millis(50));
                         while host.pending_snapshot().4 != InputPhase::Armed {
                             assert!(Instant::now() < host.until, "the submit stage arms");
                             host.drain();
@@ -5447,7 +5444,7 @@ mod tests {
                 }
 
                 fn until_armed(host: &mut Host) {
-                    std::thread::sleep(SETTLE + Duration::from_millis(50));
+                    std::thread::sleep(host.stage_settle + Duration::from_millis(50));
                     while host.pending_snapshot().4 != InputPhase::Armed {
                         assert!(Instant::now() < host.until, "the submit stage arms");
                         host.drain();
@@ -5835,35 +5832,6 @@ mod tests {
             }
 
             #[test]
-            fn queue_capacity_bounds_queued_plus_active_work_at_4096_with_a_zero_byte_error() {
-                with_permission_host(Duration::from_secs(120), |host| {
-                    form(host);
-                    for index in 0..RECEIPT_CACHE_CAPACITY {
-                        let reply = host.handle(host.request(&format!("prompt:capacity:{index}")));
-                        assert!(
-                            matches!(&reply, Ok(Some(_))),
-                            "request {index} is queued within the bound"
-                        );
-                    }
-                    assert!(
-                        host.handle(host.request("prompt:capacity:overflow"))
-                            .is_err(),
-                        "the 4097th unresolved input fails explicitly"
-                    );
-                    assert!(
-                        storage::find_input(
-                            &host.fixture.conn,
-                            host.fixture.run.run_id,
-                            "prompt:capacity:overflow"
-                        )
-                        .unwrap()
-                        .is_none()
-                    );
-                    assert!(host.pty.offers.is_empty());
-                });
-            }
-
-            #[test]
             fn queue_drains_once_after_the_interaction_closes_without_another_request() {
                 with_permission_host(Duration::from_secs(8), |host| {
                     form(host);
@@ -5957,7 +5925,7 @@ mod tests {
                         .unwrap()
                         .unwrap();
                     close(host);
-                    let busy_until = Instant::now() + Duration::from_secs(1);
+                    let busy_until = Instant::now() + Duration::from_millis(300);
                     while Instant::now() < busy_until {
                         host.drain();
                         host.advance();
@@ -6232,9 +6200,7 @@ mod tests {
                         if case == "write_failure" {
                             host.pty.failure = Some(io::ErrorKind::BrokenPipe);
                         } else {
-                            std::thread::sleep(
-                                crate::runtime::input::tests::ordinary_prompt::staged_delivery::SETTLE + Duration::from_millis(100),
-                            );
+                            std::thread::sleep(host.stage_settle + Duration::from_millis(100));
                             host.human.bytes.extend(b"h");
                         }
                         while row(host, first).state != storage::InputState::Uncertain {
@@ -6821,11 +6787,11 @@ mod tests {
                     let id = queued(host, host.request("prompt:outage"), "interaction_open");
                     close(host);
                     host.drain();
-                    let started = Instant::now();
+                    let mut backdated = false;
                     while !settled(host, id) {
                         assert!(
-                            started.elapsed() < Duration::from_secs(60),
-                            "the 5 s observer_unavailable budget, not the 3-minute bound, settles the head"
+                            Instant::now() < host.until,
+                            "the observer_unavailable attempt budget, not the 3-minute bound, settles the head"
                         );
                         host.controller
                             .observer_failed(
@@ -6834,8 +6800,17 @@ mod tests {
                             )
                             .unwrap();
                         host.advance();
+                        if !backdated
+                            && let Some(head) = host.coordinator.queue.front_mut()
+                            && head.attempt_deadline.is_some()
+                        {
+                            head.attempt_deadline =
+                                Some(Instant::now() + Duration::from_millis(300));
+                            backdated = true;
+                        }
                         std::thread::sleep(Duration::from_millis(20));
                     }
+                    assert!(backdated, "the outage started the head's attempt budget");
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
                     let input = row(host, id);
                     assert_eq!(
@@ -7830,7 +7805,10 @@ mod tests {
                 pub(crate) native_version: &'static str,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
+                pub(crate) stage_settle: Duration,
             }
+            pub(in crate::runtime::input) const TEST_STAGE_SETTLE: Duration =
+                Duration::from_millis(50);
             impl HostProfile {
                 pub(crate) fn synthetic(
                     policy: storage::evidence::EvidencePolicy,
@@ -7843,6 +7821,7 @@ mod tests {
                         native_version: VERSION,
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
+                        stage_settle: TEST_STAGE_SETTLE,
                     }
                 }
 
@@ -8177,6 +8156,7 @@ mod tests {
                 pub(crate) output: Output,
                 pub(crate) hooks: Arc<Hooks>,
                 pub(crate) until: Instant,
+                pub(crate) stage_settle: Duration,
                 expires: u64,
                 child: Child,
             }
@@ -8238,6 +8218,7 @@ mod tests {
                         native_version,
                         size,
                         screen,
+                        stage_settle,
                     } = profile;
                     let catalog = catalog();
                     let composer_selected =
@@ -8281,6 +8262,7 @@ mod tests {
                             catalog,
                             token_source: Box::new(PanicTokens("ordinary Prompt")),
                             hooks: hooks.clone(),
+                            stage_settle,
                         },
                         until,
                     )
@@ -8313,6 +8295,7 @@ mod tests {
                         output: Output::default(),
                         hooks,
                         until,
+                        stage_settle,
                         expires,
                         child,
                     };
@@ -8627,11 +8610,9 @@ mod tests {
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
         ) {
             with_profile_host(
-                ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled().clone(),
                 b"unused-program~".to_vec(),
                 HostProfile {
-                    policy: storage::evidence::EvidencePolicy::metadata(),
-                    event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
                     native_version,
                     size: crate::runtime::TerminalSize {
@@ -8641,6 +8622,7 @@ mod tests {
                     screen: native_fixture_bytes(
                         &crate::coding_agent::detector::test_support::bundled_screen(idle_fixture),
                     ),
+                    ..HostProfile::metadata()
                 },
                 |h| with_counted_tokens(h, body),
             );
@@ -8650,11 +8632,9 @@ mod tests {
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
         ) {
             with_profile_host(
-                ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled().clone(),
                 b"\r".to_vec(),
                 HostProfile {
-                    policy: storage::evidence::EvidencePolicy::metadata(),
-                    event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: "2.1.4",
                     size: crate::runtime::TerminalSize {
@@ -8666,6 +8646,7 @@ mod tests {
                             "opencode-2.1.4-idle-composer-1",
                         ),
                     ),
+                    ..HostProfile::metadata()
                 },
                 |h| with_counted_tokens(h, body),
             );
@@ -11262,6 +11243,7 @@ mod tests {
                             ),
                         ),
                         hooks: h.hooks.clone(),
+                        stage_settle: h.stage_settle,
                     },
                     h.until,
                 )

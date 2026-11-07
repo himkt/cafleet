@@ -1382,6 +1382,26 @@ pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthS
     let reply = crate::runtime::control::request(run, "health", deadline)?;
     HealthSnapshot::decode(reply, run)
 }
+/// A doctor row's status, ordered by severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum CheckStatus {
+    Ok,
+    Info,
+    Warn,
+    Error,
+}
+
+impl CheckStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MemberState {
     Running,
@@ -1436,27 +1456,29 @@ impl MemberState {
         }
     }
 
-    pub(crate) fn status(self) -> &'static str {
+    pub(crate) fn status(self) -> CheckStatus {
         match self {
-            Self::Running => "ok",
-            Self::NotChecked | Self::Ended => "info",
-            Self::CheckFailed => "error",
+            Self::Running => CheckStatus::Ok,
+            Self::NotChecked | Self::Ended => CheckStatus::Info,
+            Self::CheckFailed => CheckStatus::Error,
             Self::NotResponding
             | Self::LostRuntime
             | Self::InterruptedLaunch
             | Self::AgentExited
-            | Self::DeletedWithLeftoverRuntime => "warn",
+            | Self::DeletedWithLeftoverRuntime => CheckStatus::Warn,
         }
     }
 
-    /// Next commands with `ID` standing for the member ID.
+    /// Next commands with `ID` standing for the member ID and `DIRECTOR` for its fleet's
+    /// Director ID.
     pub(crate) fn next_commands(self) -> &'static [&'static str] {
+        const RECOVER: &str = "cafleet member recover ID --from-member-id DIRECTOR";
         match self {
             Self::Running | Self::Ended => &[],
             Self::NotResponding | Self::InterruptedLaunch | Self::DeletedWithLeftoverRuntime => {
-                &["cafleet member recover ID"]
+                &[RECOVER]
             }
-            Self::LostRuntime => &["cafleet member recover ID", "cafleet member delete ID"],
+            Self::LostRuntime => &[RECOVER, "cafleet member delete ID"],
             Self::AgentExited => &["cafleet member delete ID"],
             Self::CheckFailed => &["cafleet doctor --verbose"],
             Self::NotChecked => &["cafleet member show ID"],
@@ -1552,14 +1574,12 @@ pub(crate) struct RuntimeDiagnosis {
     pub(crate) state: MemberState,
     pub(crate) diagnostics: Vec<String>,
 }
-pub(crate) fn diagnose_runtime(
-    conn: &Connection,
+/// Diagnoses `run_id` through its own read-only connection to the registry file at `source`.
+pub(crate) fn diagnose_runtime_at(
+    source: &str,
     run_id: i64,
     deadline: Instant,
 ) -> Result<RuntimeDiagnosis> {
-    let source = conn
-        .path()
-        .ok_or_else(|| error("runtime diagnosis requires a file-backed registry"))?;
     let mut observed = crate::db::connect_read_only(&format!("sqlite:///{source}"))?;
     with_database_deadline(&mut observed, deadline, |conn| {
         diagnose_runtime_observed(conn, run_id, deadline)
@@ -1804,6 +1824,35 @@ mod tests {
     use crate::runtime::control::test_support::feed_values;
     use crate::runtime::control::test_support::independent_frame as frame;
     use crate::runtime::control::*;
+
+    #[test]
+    fn check_statuses_order_by_severity_and_render_their_wire_names() {
+        let mut statuses = [
+            CheckStatus::Error,
+            CheckStatus::Ok,
+            CheckStatus::Warn,
+            CheckStatus::Info,
+        ];
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            [
+                CheckStatus::Ok,
+                CheckStatus::Info,
+                CheckStatus::Warn,
+                CheckStatus::Error
+            ]
+        );
+        assert_eq!(
+            statuses.map(CheckStatus::as_str),
+            ["ok", "info", "warn", "error"]
+        );
+        assert_eq!(MemberState::Running.status(), CheckStatus::Ok);
+        assert_eq!(MemberState::CheckFailed.status(), CheckStatus::Error);
+        assert_eq!(MemberState::LostRuntime.status(), CheckStatus::Warn);
+        assert_eq!(MemberState::Ended.status(), CheckStatus::Info);
+    }
+
     mod input_frames_tests {
         use crate::runtime::control::tests::*;
         use std::time::Duration;
@@ -2938,8 +2987,8 @@ mod tests {
 
         fn diagnose_without_content_effects(fixture: &Fixture, expected_lock: &str) {
             let started = Instant::now();
-            let diagnosis = diagnose_runtime(
-                &fixture.conn,
+            let diagnosis = crate::runtime::control::diagnose_runtime_at(
+                fixture.conn.path().unwrap(),
                 fixture.run.run_id,
                 started + Duration::from_millis(80),
             )

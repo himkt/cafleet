@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { spawn, type ChildProcess } from "node:child_process"
+import { execFile, spawn, type ChildProcess } from "node:child_process"
 import { accessSync, constants, readFileSync, statSync } from "node:fs"
 import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
@@ -14,6 +14,7 @@ const ENTRY_KEY = "cafleet-goal"
 const GENERATION_KEY = "cafleetGoalGeneration"
 const IDLE_LIMIT = 3
 const CONTINUATION_LIMIT = 50
+const VERIFY_TIMEOUT_MS = 10_000
 
 type Status = "active" | "paused" | "complete"
 
@@ -34,6 +35,11 @@ interface EventData {
   sessionID: string
   inboxID?: string
   reason?: string
+}
+
+interface DirectorInput {
+  director_id: number
+  database_url?: string
 }
 
 interface ToolContext {
@@ -62,10 +68,40 @@ function recordedExecutable(): string {
   return target
 }
 
+const databaseArgs = (databaseURL?: string) => (databaseURL ? ["--database-url", databaseURL] : [])
+
+/** Resolves to undefined when `director_id` is a root Director, otherwise to the member refusal. */
+function directorRefusal({ director_id, database_url }: DirectorInput): Promise<string | undefined> {
+  const args = [...databaseArgs(database_url), "member", "show", String(director_id), "--json"]
+  let executable: string
+  try {
+    executable = recordedExecutable()
+  } catch (error) {
+    return Promise.resolve((error as Error).message)
+  }
+  return new Promise((resolve) => {
+    execFile(executable, args, { timeout: VERIFY_TIMEOUT_MS }, (error, stdout, stderr) => {
+      if (!error) {
+        try {
+          if (JSON.parse(stdout).kind === "director") return resolve(undefined)
+        } catch {}
+      }
+      resolve(`${MEMBER_REFUSAL}: ${String(stderr).trim() || (error?.message ?? "")}`)
+    })
+  })
+}
+
+const directorProperties = {
+  director_id: { type: "integer", description: "The Director's literal member ID." },
+  database_url: {
+    type: "string",
+    description: "The fleet's database URL when the Director's DATABASE URL line names one.",
+  },
+}
+
 export default Plugin.define({
   id: "cafleet",
   async setup(ctx) {
-    const isMember = Boolean(process.env.CAFLEET_MEMBER_ID)
     const receivers = new Map<string, ChildProcess>()
     const stoppedReceivers = new WeakSet<ChildProcess>()
     const continuationGenerations = new Map<string, number>()
@@ -137,11 +173,7 @@ export default Plugin.define({
       await writeGoal(sessionID, { ...goal, status: "paused", generation: await nextGeneration(sessionID) })
     }
 
-    function requireDirector() {
-      if (isMember) throw new Error(MEMBER_REFUSAL)
-    }
-
-    async function authorize(tool: string, context: ToolContext) {
+    async function authorize(tool: string, input: DirectorInput, context: ToolContext) {
       await ctx.permission.assert({
         sessionID: context.sessionID,
         agent: context.agent,
@@ -149,6 +181,7 @@ export default Plugin.define({
         action: "cafleet",
         resources: [tool],
       } as never)
+      return directorRefusal(input)
     }
 
     function stopReceiver(child: ChildProcess) {
@@ -156,8 +189,9 @@ export default Plugin.define({
       child.kill()
     }
 
-    function startReceiver(sessionID: string, directorID: number) {
-      const child = spawn(recordedExecutable(), ["message", "listen", String(directorID)], {
+    function startReceiver(sessionID: string, { director_id, database_url }: DirectorInput) {
+      const args = [...databaseArgs(database_url), "message", "listen", String(director_id)]
+      const child = spawn(recordedExecutable(), args, {
         stdio: ["ignore", "pipe", "pipe"],
       })
       receivers.set(sessionID, child)
@@ -204,20 +238,20 @@ export default Plugin.define({
           "arrives as its own turn beginning '[cafleet listen record]'.",
         input: {
           type: "object",
-          properties: { director_id: { type: "integer", description: "The Director's literal member ID." } },
+          properties: directorProperties,
           required: ["director_id"],
           additionalProperties: false,
         },
         execute: async (input, context) => {
-          if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
-          await authorize("cafleet_listen", context)
+          const refusal = await authorize("cafleet_listen", input as DirectorInput, context)
+          if (refusal !== undefined) return result({ ok: false, error: refusal })
           await serializeGoal(context.sessionID, () => touch(context.sessionID))
           const existing = receivers.get(context.sessionID)
           if (existing && existing.exitCode === null && existing.signalCode === null) {
             return result({ ok: true, pid: existing.pid, sessionID: context.sessionID, existing: true })
           }
           try {
-            const child = startReceiver(context.sessionID, (input as { director_id: number }).director_id)
+            const child = startReceiver(context.sessionID, input as DirectorInput)
             if (child.pid === undefined) {
               stoppedReceivers.add(child)
               receivers.delete(context.sessionID)
@@ -232,10 +266,15 @@ export default Plugin.define({
       editor.add({
         name: "cafleet_goal_status",
         description: "Report the CAFleet goal of this session.",
-        input: { type: "object", properties: {}, additionalProperties: false },
-        execute: async (_input, context) => {
-          if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
-          await authorize("cafleet_goal_status", context)
+        input: {
+          type: "object",
+          properties: directorProperties,
+          required: ["director_id"],
+          additionalProperties: false,
+        },
+        execute: async (input, context) => {
+          const refusal = await authorize("cafleet_goal_status", input as DirectorInput, context)
+          if (refusal !== undefined) return result({ ok: false, error: refusal })
           return serializeGoal(context.sessionID, async () => {
             await touch(context.sessionID)
             return { content: JSON.stringify((await readGoal(context.sessionID)) ?? null) }
@@ -247,13 +286,13 @@ export default Plugin.define({
         description: "Report a completed step toward the active CAFleet goal of this session.",
         input: {
           type: "object",
-          properties: { note: { type: "string" } },
-          required: ["note"],
+          properties: { ...directorProperties, note: { type: "string" } },
+          required: ["director_id", "note"],
           additionalProperties: false,
         },
-        execute: async (_input, context) => {
-          if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
-          await authorize("cafleet_goal_progress", context)
+        execute: async (input, context) => {
+          const refusal = await authorize("cafleet_goal_progress", input as DirectorInput, context)
+          if (refusal !== undefined) return result({ ok: false, error: refusal })
           return serializeGoal(context.sessionID, async () => {
             await touch(context.sessionID)
             const goal = await readGoal(context.sessionID)
@@ -269,13 +308,13 @@ export default Plugin.define({
         description: "Mark the active CAFleet goal of this session as achieved.",
         input: {
           type: "object",
-          properties: { summary: { type: "string" } },
-          required: ["summary"],
+          properties: { ...directorProperties, summary: { type: "string" } },
+          required: ["director_id", "summary"],
           additionalProperties: false,
         },
-        execute: async (_input, context) => {
-          if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
-          await authorize("cafleet_goal_complete", context)
+        execute: async (input, context) => {
+          const refusal = await authorize("cafleet_goal_complete", input as DirectorInput, context)
+          if (refusal !== undefined) return result({ ok: false, error: refusal })
           return serializeGoal(context.sessionID, async () => {
             await touch(context.sessionID)
             const goal = await readGoal(context.sessionID)
@@ -297,7 +336,6 @@ export default Plugin.define({
         name: "cafleet-goal",
         description: "Set a CAFleet goal (text), or report status / pause / resume / clear it.",
         execute: async ({ sessionID, prompt }) => {
-          requireDirector()
           return serializeGoal(sessionID, async () => {
             await touch(sessionID)
             const argument = (prompt.text ?? "").trim()
@@ -333,8 +371,6 @@ export default Plugin.define({
         },
       })
     })
-
-    if (isMember) return () => undefined
 
     await ctx.session.hook("context", async (input) => {
       const goal = await readGoal(input.sessionID)

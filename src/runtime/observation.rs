@@ -2236,6 +2236,12 @@ pub(crate) mod native_capture {
         pub(crate) fn digest(path: &Path) -> String {
             sha256_hex(&std::fs::read(path).unwrap())
         }
+        static LIBTEST_DIGEST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        /// The running test binary does not change during its process, so one
+        /// read of its bytes serves every producer manifest.
+        pub(crate) fn libtest_digest() -> &'static str {
+            LIBTEST_DIGEST.get_or_init(|| digest(&std::env::current_exe().unwrap()))
+        }
         pub(super) use crate::coding_agent::catalog::test_support::synthetic_catalog as catalog;
         pub(crate) fn redacted() -> Value {
             json!({"mode":"redacted","config":{"schema_version":1,"patterns":["PRIVATE-[A-Z]+"],"sensitive_rules":[]}})
@@ -2334,7 +2340,7 @@ pub(crate) mod native_capture {
                     b"{\"kind\":\"synthetic\",\"version\":\"0.0.1-synthetic\"}",
                 );
                 let current = std::env::current_exe().unwrap();
-                let producer_json = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":source,"source_manifest_sha256":digest(&source),"libtest_executable_path":current,"libtest_executable_sha256":digest(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"synthetic","native_executable":{"path":executable,"sha256":digest(&executable),"version":"0.0.1-synthetic","version_evidence_ref":source},"launch_evidence_ref":source,"environment_evidence_ref":source});
+                let producer_json = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":source,"source_manifest_sha256":digest(&source),"libtest_executable_path":current,"libtest_executable_sha256":libtest_digest(),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"synthetic","native_executable":{"path":executable,"sha256":digest(&executable),"version":"0.0.1-synthetic","version_evidence_ref":source},"launch_evidence_ref":source,"environment_evidence_ref":source});
                 let producer_path = fixture._dir.path().join("producer.json");
                 private_write(&producer_path, &serde_json::to_vec(&producer_json).unwrap());
                 let placement = crate::broker::get_member(
@@ -3376,7 +3382,7 @@ pub(crate) mod native_capture {
 
             fn select_catalog(fixture: &mut CaptureFixture, bundled: bool) -> ProfileCatalog {
                 if bundled {
-                    let selected = ProfileCatalog::bundled().unwrap().capabilities(
+                    let selected = ProfileCatalog::bundled().capabilities(
                         crate::coding_agent::CodingAgent::Codex,
                         fixture.fixture.run.native_version.as_deref(),
                     );
@@ -3394,7 +3400,7 @@ pub(crate) mod native_capture {
                     fixture.fixture.run =
                         storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
                             .unwrap();
-                    ProfileCatalog::bundled().unwrap()
+                    ProfileCatalog::bundled().clone()
                 } else {
                     catalog()
                 }
@@ -4865,7 +4871,8 @@ pub(crate) mod native_capture {
                 selected.is_absolute()
                     && std::fs::canonicalize(selected).map_err(io_error)?
                         == std::fs::canonicalize(current).map_err(io_error)?
-                    && lower_digest(&value["libtest_executable_sha256"])? == file_digest(selected)?,
+                    && lower_digest(&value["libtest_executable_sha256"])?
+                        == crate::runtime::observation::native_capture::test_support::libtest_digest(),
                 "capture libtest provenance mismatch",
             )?;
             let native = &value["native_executable"];
@@ -5795,7 +5802,6 @@ pub(crate) mod native_capture {
         use crate::digest::sha256_hex;
         use crate::multiplexer::CommandRunner;
         use crate::multiplexer::MultiplexerContext;
-        use crate::multiplexer::resolve_multiplexer;
         use crate::runtime::observation::native_capture::*;
         use crate::runtime::system::SystemRunner;
         use rusqlite::Connection;
@@ -5827,10 +5833,8 @@ pub(crate) mod native_capture {
         ) -> Result<i32> {
             let limits = NativeCaptureLimits::default();
             let config = read_native_capture_config(config, &limits)?;
-            let settings = Settings::for_database(
-                Path::new(crate::db::database_path(&config.database_url)?),
-                None,
-            );
+            let settings =
+                Settings::for_database(Path::new(crate::db::database_path(&config.database_url)?));
             let conn = crate::db::connect(&settings.database_url)?;
             let descriptor = load_descriptor(&conn, &config.descriptor_path)?;
             let run = storage::get_run(&conn, descriptor.run_id)?;
@@ -5839,7 +5843,7 @@ pub(crate) mod native_capture {
                     && run.launch_nonce == config.expected_launch_nonce,
                 "verification configuration run/nonce mismatch",
             )?;
-            let catalog = ProfileCatalog::bundled()?;
+            let catalog = ProfileCatalog::bundled();
             let policy: CapturePolicyFile = serde_json::from_slice(
                 &crate::runtime::observation::native_capture::files::read_private(
                     &config.capture_policy_path,
@@ -5849,7 +5853,7 @@ pub(crate) mod native_capture {
             .map_err(io_error)?;
             ensure(policy.schema_version == 1, "capture policy schema mismatch")?;
             let capture_policy =
-                NativeCapturePolicy::from_launch(&descriptor.spawn, &policy.masks, &catalog)?;
+                NativeCapturePolicy::from_launch(&descriptor.spawn, &policy.masks, catalog)?;
             let (mut port, receiver) =
                 native_capture_channel(&run, capture_policy, limits.clone())?;
             port.service_producer = Some(read_native_capture_producer(
@@ -7775,17 +7779,26 @@ pub(crate) mod native_capture {
                     &self.case.config_path,
                     &NativeCaptureLimits::default(),
                 )?;
+                let canonical_database_url = format!(
+                    "sqlite:///{}",
+                    std::fs::canonicalize(
+                        self.case
+                            .database_url
+                            .strip_prefix("sqlite:///")
+                            .expect("case database URLs use the sqlite scheme")
+                    )
+                    .map_err(io_error)?
+                    .display()
+                );
                 ensure(
-                    argv.len() == 4
+                    argv.len() == 6
                         && argv[0] == self.case.libtest.path.to_string_lossy()
-                        && argv[1] == "__member-run"
-                        && argv[2] == "--descriptor"
-                        && Path::new(&argv[3]) == config.descriptor_path
-                        && environment
-                            == [(
-                                "CAFLEET_DATABASE_URL".into(),
-                                self.case.database_url.clone(),
-                            )],
+                        && argv[1] == "--database-url"
+                        && argv[2] == canonical_database_url
+                        && argv[3] == "__member-run"
+                        && argv[4] == "--descriptor"
+                        && Path::new(&argv[5]) == config.descriptor_path
+                        && environment.is_empty(),
                     "generated launch tuple changed",
                 )?;
                 let descriptor: LaunchDescriptor = driver_read(&config.descriptor_path)?;
@@ -7876,7 +7889,7 @@ pub(crate) mod native_capture {
             )?;
             argv[0] = case.native_executable.path.to_string_lossy().into_owned();
             let config: Value = driver_read(&case.event_redaction.path)?;
-            let catalog = ProfileCatalog::bundled()?;
+            let catalog = ProfileCatalog::bundled();
             let rules = catalog.rule_ids();
             crate::broker::runtime::evidence::EvidencePolicy::redacted(
                 &config,
@@ -7897,17 +7910,12 @@ pub(crate) mod native_capture {
             let spawn = SpawnSpec {
                 argv,
                 cwd: case.cwd.clone(),
-                environment: std::iter::once((
-                    "CAFLEET_DATABASE_URL".into(),
-                    case.database_url.clone(),
-                ))
-                .chain(approved.child_environment())
-                .collect(),
+                environment: approved.child_environment(),
                 evidence_policy: json!({"mode":"redacted","config":config}),
                 size: approved.size,
             };
             spawn.validate()?;
-            NativeCapturePolicy::from_launch(&spawn, &capture.masks, &catalog)?;
+            NativeCapturePolicy::from_launch(&spawn, &capture.masks, catalog)?;
             driver_publish(
                 &case.launch_evidence_path,
                 &json!({"schema_version":1,"run_id":pending.run.run_id,
@@ -8866,7 +8874,8 @@ pub(crate) mod native_capture {
             driver_validate_tmux(case, &ownership, work_until)?;
             driver_publish(&case.driver_ownership_path, &ownership, work_until)?;
             let runner: Rc<dyn CommandRunner> = Rc::new(SystemRunner);
-            let mux = resolve_multiplexer(Some("tmux"), std::env::vars().collect(), runner)
+            let server = case.tmux.socket_path.to_string_lossy().into_owned();
+            let mux = crate::multiplexer::AnyMultiplexer::for_server("tmux", &server, runner)
                 .map_err(io_error)?;
             let context = MultiplexerContext {
                 session: case.tmux.session.clone(),
@@ -8884,16 +8893,19 @@ pub(crate) mod native_capture {
                 let fleet = crate::broker::fleets::create_fleet(
                     conn,
                     Some(format!("native-{}", approved.id).as_str()),
-                    &context.session,
-                    &context.window_id,
-                    &context.pane_id,
-                    &case.director_backend,
-                    "tmux",
+                    &crate::broker::NewPlacement {
+                        backend: "tmux".into(),
+                        mux_session: context.session.clone(),
+                        mux_window_id: context.window_id.clone(),
+                        mux_pane_id: Some(context.pane_id.clone()),
+                        coding_agent: case.director_backend.clone(),
+                        mux_server: server.clone(),
+                    },
                 )?;
                 let policy = approved
                     .backend
                     .resolve_policy(Some(&case.native_version), approved.requested_mode())?;
-                let capabilities = ProfileCatalog::bundled()?
+                let capabilities = ProfileCatalog::bundled()
                     .capabilities(approved.backend, Some(&case.native_version));
                 let settings = RunSettings {
                     database_identity_json: storage::database_identity(conn)?,
@@ -8917,6 +8929,7 @@ pub(crate) mod native_capture {
                         mux_window_id: context.window_id.clone(),
                         mux_pane_id: None,
                         coding_agent: approved.backend.name().into(),
+                        mux_server: server.clone(),
                     },
                 };
                 let launch_until = work_until.min(Instant::now() + Duration::from_secs(10));
@@ -10072,18 +10085,17 @@ pub(crate) mod native_capture {
                     .expect("owned resize configuration");
                 let limits = NativeCaptureLimits::default();
                 let config = read_native_capture_config(Path::new(&path), &limits).unwrap();
-                let settings = Settings::for_database(
-                    Path::new(crate::db::database_path(&config.database_url).unwrap()),
-                    None,
-                );
+                let settings = Settings::for_database(Path::new(
+                    crate::db::database_path(&config.database_url).unwrap(),
+                ));
                 let conn = crate::db::connect(&settings.database_url).unwrap();
                 let descriptor = load_descriptor(&conn, &config.descriptor_path).unwrap();
                 let run = storage::get_run(&conn, descriptor.run_id).unwrap();
                 assert_eq!(run.run_id, config.expected_run_id);
                 assert_eq!(run.launch_nonce, config.expected_launch_nonce);
-                let catalog = ProfileCatalog::bundled().unwrap();
+                let catalog = ProfileCatalog::bundled();
                 let policy =
-                    NativeCapturePolicy::from_launch(&descriptor.spawn, &[], &catalog).unwrap();
+                    NativeCapturePolicy::from_launch(&descriptor.spawn, &[], catalog).unwrap();
                 let (mut port, receiver) =
                     native_capture_channel(&run, policy, limits.clone()).unwrap();
                 let producer =
@@ -12476,7 +12488,6 @@ mod tests {
         #[test]
         fn service_later_version_profile_emits_no_coverage_unknown_while_no_profile_still_does() {
             let reused = crate::coding_agent::ProfileCatalog::bundled()
-                .unwrap()
                 .capabilities(crate::coding_agent::CodingAgent::Codex, Some("0.164.0"));
             assert_eq!(reused.min_version.as_deref(), Some("0.163.0"));
             assert_eq!(reused.detection, storage::Coverage::Tested);
@@ -12882,10 +12893,10 @@ mod tests {
             storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
             fixture.conn.execute("UPDATE member_runs SET backend='opencode',native_version='2.1.4',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let mut controller = ObservationController::new(
                 &fixture.run,
-                &catalog,
+                catalog,
                 EvidencePolicy::metadata(),
                 1..=256,
             )

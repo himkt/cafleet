@@ -1986,7 +1986,7 @@ pub(crate) mod test_support {
             assert!(read.claim.is_some());
             assert_eq!(read.response.metadata, request.metadata);
             let settings =
-                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()));
             let placement = crate::broker::get_member(
                 &fixture.conn,
                 fixture.run.member_id,
@@ -2281,10 +2281,8 @@ mod tests {
         let output_start = fixture.output.len();
         let (event_id, interaction_id, message_id) = opened_interaction(&mut fixture, until);
         let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        let settings = Settings::for_database(
-            std::path::Path::new(fixture.fixture.conn.path().unwrap()),
-            Some("tmux"),
-        );
+        let settings =
+            Settings::for_database(std::path::Path::new(fixture.fixture.conn.path().unwrap()));
         let before = permission_counts(&fixture.fixture.conn);
         let inspected = inspect_permission(
             &mut fixture.fixture.conn,
@@ -3767,7 +3765,7 @@ mod tests {
             .placement
             .unwrap();
         (
-            Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux")),
+            Settings::for_database(std::path::Path::new(conn.path().unwrap())),
             run,
             placement,
         )
@@ -4130,7 +4128,6 @@ mod tests {
         let foreign = Fixture::new();
         let foreign_settings = Settings {
             database_url: format!("sqlite:///{}", foreign.conn.path().unwrap()),
-            ..case.settings.clone()
         };
         assert!(
             reconcile_ordinary_with_host(
@@ -4515,10 +4512,8 @@ mod tests {
             .unwrap()
             .placement
             .unwrap();
-            let settings = Settings::for_database(
-                std::path::Path::new(fixture.conn.path().unwrap()),
-                Some("tmux"),
-            );
+            let settings =
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()));
             Self {
                 fixture,
                 settings,
@@ -4926,7 +4921,6 @@ mod tests {
             let foreign = Fixture::new();
             let foreign_settings = Settings {
                 database_url: format!("sqlite:///{}", foreign.conn.path().unwrap()),
-                ..settings.clone()
             };
             assert!(
                 submit_wrapped_input_under_pane_lock_with_host(
@@ -5041,7 +5035,7 @@ mod tests {
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "lock-taken-after-reply");
-            let until = outer.min(Instant::now() + Duration::from_secs(4));
+            let until = outer.min(Instant::now() + Duration::from_secs(1));
             let attempt = PreparedSubmission::new(
                 &request,
                 until,
@@ -5577,7 +5571,7 @@ mod tests {
             fn copied(case: &Case) -> (Settings, Connection) {
                 let path = case.fixture._dir.path().join("copied-inspection.db");
                 std::fs::copy(case.fixture.conn.path().unwrap(), &path).unwrap();
-                let settings = Settings::for_database(&path, None);
+                let settings = Settings::for_database(&path);
                 let conn = crate::db::connect(&settings.database_url).unwrap();
                 (settings, conn)
             }
@@ -6275,7 +6269,7 @@ mod tests {
                 let case = Case::new(Retained::Accepted);
                 let copied = case.fixture._dir.path().join("copied-history.db");
                 std::fs::copy(case.fixture.conn.path().unwrap(), &copied).unwrap();
-                let settings = Settings::for_database(&copied, None);
+                let settings = Settings::for_database(&copied);
                 let mut conn = crate::db::connect(&settings.database_url).unwrap();
                 let before = Snapshot::take(&conn);
                 assert!(
@@ -7050,7 +7044,7 @@ mod tests {
             std::fs::write(&artifacts.paths.outbox, [0, 0]).unwrap();
             let placement = member_placement(&fixture.conn, &fixture.run);
             let settings =
-                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()));
             drop(lock);
             Self {
                 fixture,
@@ -7719,8 +7713,8 @@ mod tests {
                 .unwrap();
             assert_eq!(journal, "wal");
             let placement_row = case.fixture.conn.query_row(
-                "SELECT mux_session,mux_window_id,mux_pane_id,backend,coding_agent,created_at FROM member_placements WHERE member_id=?1",
-                [case.fixture.run.member_id], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, Option<String>>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, String>(5)?)),
+                "SELECT mux_session,mux_window_id,mux_pane_id,backend,coding_agent,created_at,mux_server FROM member_placements WHERE member_id=?1",
+                [case.fixture.run.member_id], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, Option<String>>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, String>(5)?,row.get::<_, String>(6)?)),
             ).unwrap();
             let held = if change == "appearance" {
                 crate::broker::members::test_support::deregister_member(
@@ -7816,8 +7810,8 @@ mod tests {
                         "state" => { conn.execute("UPDATE member_input_operations SET state='accepted',uncertain_cause=NULL WHERE input_id=?1", [input_id]).unwrap(); }
                         "placement" => { conn.execute("DELETE FROM member_placements WHERE member_id=?1", [member_id]).unwrap(); }
                         "appearance" => { conn.execute(
-                            "INSERT INTO member_placements(member_id,mux_session,mux_window_id,mux_pane_id,backend,coding_agent,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",
-                            rusqlite::params![member_id,placement_row.0,placement_row.1,placement_row.2,placement_row.3,placement_row.4,placement_row.5],
+                            "INSERT INTO member_placements(member_id,mux_session,mux_window_id,mux_pane_id,backend,coding_agent,created_at,mux_server) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+                            rusqlite::params![member_id,placement_row.0,placement_row.1,placement_row.2,placement_row.3,placement_row.4,placement_row.5,placement_row.6],
                         ).unwrap(); }
                         "deadline" => {}
                         _ => unreachable!(),

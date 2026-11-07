@@ -543,7 +543,7 @@ matching rule applies:
 
 1. A `configuration` check with status `error` prints `error <agent>: <cause>`.
 2. An absent `executable` prints `info <agent>: not installed (<agent> is not on PATH)`; the other checks of an unused backend raise nothing.
-3. Otherwise each non-`ok` check contributes a problem phrase. The line's status is the worst contributed status (`error` > `warn` > `info`). The detail joins the phrases with `; ` in check order and, when any phrase carries the setup fix, ends once with ` — run 'cafleet setup --coding-agent <agent>'`.
+3. Otherwise each non-`ok` check contributes a problem phrase. The line's status is the worst contributed status (`error` > `warn` > `info`). The detail joins the phrases with `; ` in check order, listing a phrase identical to an earlier one only once (a missing Hermes home reads `info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), and, when any phrase carries the setup fix, ends once with ` — run 'cafleet setup --coding-agent <agent>'`.
 
 | Check state | Status | Phrase | Setup fix |
 |---|---|---|---|

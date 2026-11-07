@@ -36,15 +36,16 @@ pub(crate) fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<FleetRec
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))
 }
 
+/// Creates a fleet whose root Director occupies `director`, whose pane is required.
 pub(crate) fn create_fleet(
     conn: &mut Connection,
     name: Option<&str>,
-    mux_session: &str,
-    mux_window_id: &str,
-    mux_pane_id: &str,
-    coding_agent: &str,
-    backend: &str,
+    director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
+    let mux_pane_id = director
+        .mux_pane_id
+        .clone()
+        .expect("the Director placement records its pane");
     let now = now_stamp();
     let tx = conn.transaction()?;
     let fleet_id = tx.query_row(
@@ -53,18 +54,7 @@ pub(crate) fn create_fleet(
         |row| row.get(0),
     )?;
     let director_id = insert_member_row(&tx, fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &now)?;
-    insert_placement_row(
-        &tx,
-        director_id,
-        &NewPlacement {
-            backend: backend.into(),
-            mux_session: mux_session.into(),
-            mux_window_id: mux_window_id.into(),
-            mux_pane_id: Some(mux_pane_id.into()),
-            coding_agent: coding_agent.into(),
-        },
-        &now,
-    )?;
+    insert_placement_row(&tx, director_id, director, &now)?;
     tx.execute(
         "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
         params![director_id, fleet_id],
@@ -84,14 +74,37 @@ pub(crate) fn create_fleet(
             kind: MemberKind::Director,
             runtime: None,
             placement: Some(Placement {
-                backend: backend.into(),
-                mux_session: mux_session.into(),
-                mux_window_id: mux_window_id.into(),
-                mux_pane_id: Some(mux_pane_id.into()),
-                coding_agent: coding_agent.into(),
+                backend: director.backend.clone(),
+                mux_session: director.mux_session.clone(),
+                mux_window_id: director.mux_window_id.clone(),
+                mux_pane_id: Some(mux_pane_id),
+                coding_agent: director.coding_agent.clone(),
                 created_at: now,
+                mux_server: director.mux_server.clone(),
             }),
         },
+    })
+}
+
+/// The recorded placement of `fleet_id`'s root Director.
+pub(crate) fn director_placement(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Placement, CafleetError> {
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM fleets f JOIN member_placements p ON p.member_id=f.director_member_id
+             WHERE f.fleet_id=?1",
+            crate::broker::PLACEMENT_COLUMNS
+        ),
+        [fleet_id],
+        |row| Placement::from_row(row, 0),
+    )
+    .optional()?
+    .ok_or_else(|| {
+        CafleetError::App(format!(
+            "fleet {fleet_id} has no recorded Director placement; re-create the fleet with 'cafleet fleet create'."
+        ))
     })
 }
 
@@ -175,14 +188,16 @@ pub(crate) struct MemberRunRegistry {
     pub(crate) run_status: crate::broker::runtime::RunStatus,
     pub(crate) cleanup_state: crate::broker::runtime::CleanupState,
     pub(crate) member_status: String,
+    pub(crate) director_member_id: Option<i64>,
 }
 
 pub(crate) fn member_run_registry(
     conn: &Connection,
 ) -> Result<Vec<MemberRunRegistry>, CafleetError> {
     let mut statement = conn.prepare(
-        "SELECT r.run_id, r.member_id, r.status, r.cleanup_state, m.status \
-         FROM member_runs r JOIN members m ON m.member_id = r.member_id ORDER BY r.run_id",
+        "SELECT r.run_id, r.member_id, r.status, r.cleanup_state, m.status, f.director_member_id \
+         FROM member_runs r JOIN members m ON m.member_id = r.member_id \
+         JOIN fleets f ON f.fleet_id = m.fleet_id ORDER BY r.run_id",
     )?;
     let runs = statement
         .query_map([], |row| {
@@ -192,6 +207,7 @@ pub(crate) fn member_run_registry(
                 run_status: row.get(2)?,
                 cleanup_state: row.get(3)?,
                 member_status: row.get(4)?,
+                director_member_id: row.get(5)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -235,11 +251,7 @@ pub(crate) mod test_support {
         let fleet = crate::broker::fleets::create_fleet(
             conn,
             Some(name),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
+            &crate::broker::members::test_support::placement(Some("%0")),
         )
         .unwrap();
         (fleet.fleet_id, fleet.director.member_id)
@@ -251,6 +263,7 @@ mod tests {
     use crate::broker;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::fleets::*;
+    use crate::broker::members::test_support::placement;
     use crate::broker::members::test_support::register;
     use crate::cli::guarded_delete_fleet;
     use crate::db::test_support::migrated_conn;
@@ -273,16 +286,8 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut conn = migrated_conn(&dir);
             conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
-            let error = broker::create_fleet(
-                &mut conn,
-                Some("alpha"),
-                "main",
-                "@1",
-                "%0",
-                "claude",
-                "tmux",
-            )
-            .unwrap_err();
+            let error =
+                broker::create_fleet(&mut conn, Some("alpha"), &placement(Some("%0"))).unwrap_err();
             assert!(error.message().contains("registration failure"));
             for table in ["fleets", "members", "member_placements"] {
                 assert_eq!(row_count(&conn, table), 0);
@@ -468,8 +473,49 @@ mod tests {
         assert_eq!(rows[1].cleanup_state, CleanupState::Incomplete);
         assert_eq!(rows[1].member_status, "deregistered");
         assert!(
+            rows.iter()
+                .all(|row| row.director_member_id == Some(director))
+        );
+        let (other_fleet, other_director) = create_fleet_fixture(&mut conn, "other");
+        let third = register_member_run(&mut conn, other_fleet, other_director, "third");
+        let rows = member_run_registry(&conn).unwrap();
+        assert_eq!(rows[2].run_id, third.run_id);
+        assert_eq!(rows[2].director_member_id, Some(other_director));
+        assert!(
             member_run_registry(&Connection::open_in_memory().unwrap()).is_err(),
             "a registry without member runs surfaces the query error"
+        );
+    }
+
+    #[test]
+    fn director_placement_reads_the_recorded_director_pane_and_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, _) = create_fleet_fixture(&mut conn, "alpha");
+        register(&mut conn, fleet, "worker", Some("%5"));
+        let expected = placement(Some("%0"));
+        let recorded = director_placement(&conn, fleet).unwrap();
+        assert_eq!(
+            (
+                recorded.backend.as_str(),
+                recorded.mux_session.as_str(),
+                recorded.mux_window_id.as_str(),
+                recorded.mux_pane_id.as_deref(),
+                recorded.coding_agent.as_str(),
+                recorded.mux_server.as_str(),
+            ),
+            (
+                expected.backend.as_str(),
+                expected.mux_session.as_str(),
+                expected.mux_window_id.as_str(),
+                Some("%0"),
+                expected.coding_agent.as_str(),
+                expected.mux_server.as_str(),
+            )
+        );
+        assert_eq!(
+            director_placement(&conn, 999).unwrap_err().message(),
+            "fleet 999 has no recorded Director placement; re-create the fleet with 'cafleet fleet create'."
         );
     }
 }

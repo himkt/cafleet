@@ -2,7 +2,6 @@
 //! PATH/HOME [`SpawnProbe`].
 
 use crate::coding_agent::SpawnProbe;
-use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::RunError;
 use crate::multiplexer::TimedRunError;
@@ -37,15 +36,6 @@ pub(crate) fn random_hex32() -> io::Result<String> {
     Ok(crate::digest::hex(&bytes))
 }
 
-/// Resolve `name` against the `PATH` environment variable to an executable
-/// regular file.
-fn find_on_path(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(name))
-        .find(|candidate| is_executable_file(candidate))
-}
-
 /// Resolve `name` to the first executable regular file under an absolute
 /// entry of `path`, returning the path as found without resolving links.
 fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
@@ -56,25 +46,17 @@ fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
 }
 
 fn is_executable_file(candidate: &Path) -> bool {
-    let Ok(metadata) = candidate.metadata() else {
-        return false;
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        metadata.is_file()
-    }
+    use std::os::unix::fs::PermissionsExt;
+    candidate
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
 pub(crate) struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn binary_exists(&self, name: &str) -> bool {
-        find_on_path(name).is_some()
+        std::env::var_os("PATH").is_some_and(|path| find_executable_in(&path, name).is_some())
     }
 
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
@@ -150,14 +132,14 @@ fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, Timed
         cleanup_deadline: Some(deadline),
         cleanup_attempted: false,
     };
-    let result = collect_timed(&mut owned, started, cutoff.duration_since(started)).and_then(
-        |(status, stdout, stderr)| {
+    let result = collect_until(&mut owned, cutoff, usize::MAX)
+        .map_err(RunError::from)
+        .and_then(|output| {
             if Instant::now() >= cutoff {
                 return Err(RunError::Timeout);
             }
-            decode(status, &stdout, &stderr)
-        },
-    );
+            decode(output.status, &output.stdout, &output.stderr)
+        });
     result.map_err(|source| TimedRunError {
         source,
         cleanup_diagnostics: owned.cleanup_absolute(),
@@ -188,19 +170,8 @@ impl OwnedChild {
             return diagnostics;
         }
         let pid = self.child.id();
-        loop {
-            match self.child.kill() {
-                Err(error)
-                    if error.kind() == io::ErrorKind::Interrupted && Instant::now() < deadline =>
-                {
-                    continue;
-                }
-                Err(error) => {
-                    diagnostics.push(format!("cleanup failed for child {pid} kill: {error}"))
-                }
-                Ok(()) => {}
-            }
-            break;
+        if let Err(error) = retry_interrupted(|| self.child.kill()) {
+            diagnostics.push(format!("cleanup failed for child {pid} kill: {error}"));
         }
         loop {
             let Some(_) = deadline
@@ -210,17 +181,12 @@ impl OwnedChild {
                 diagnostics.push(format!("cleanup unconfirmed for child {pid}: original command deadline expired before reap"));
                 break;
             };
-            match self.child.try_wait() {
+            match retry_interrupted(|| self.child.try_wait()) {
                 Ok(Some(_)) => {
                     self.reaped = true;
                     break;
                 }
-                Ok(None) => std::thread::sleep(
-                    deadline
-                        .saturating_duration_since(Instant::now())
-                        .min(Duration::from_millis(2)),
-                ),
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Ok(None) => crate::runtime::nap_until(deadline),
                 Err(error) => {
                     diagnostics.push(format!("cleanup failed for child {pid} try_wait: {error}"));
                     diagnostics.push(format!(
@@ -266,11 +232,11 @@ fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
         cleanup_deadline: None,
         cleanup_attempted: false,
     };
-    let result = collect_timed(&mut owned, started, timeout);
+    let result = collect_until(&mut owned, started + timeout, usize::MAX).map_err(RunError::from);
     match result {
-        Ok((status, stdout, stderr)) => decode(status, &stdout, &stderr),
+        Ok(output) => decode(output.status, &output.stdout, &output.stderr),
         Err(mut primary) => {
-            // collect_timed owns the read ends, so they have already closed.
+            // collect_until owns the read ends, so they have already closed.
             let mut diagnostics = Vec::new();
             if !owned.reaped {
                 let killed = retry_interrupted(|| owned.child.kill());
@@ -311,31 +277,71 @@ fn io_failure(error: io::Error) -> RunError {
     }
 }
 
-fn remaining(started: Instant, timeout: Duration) -> Result<Duration, RunError> {
-    timeout
-        .checked_sub(started.elapsed())
-        .filter(|left| !left.is_zero())
-        .ok_or(RunError::Timeout)
+/// A process that exited and closed both output pipes before its deadline.
+pub(crate) struct BoundedOutput {
+    pub(crate) status: ExitStatus,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
 }
 
-fn configure_pipe(fd: BorrowedFd<'_>, started: Instant, timeout: Duration) -> Result<(), RunError> {
-    loop {
-        remaining(started, timeout)?;
-        let result: io::Result<()> = (|| {
-            let flags = OFlag::from_bits_retain(fcntl(fd, FcntlArg::F_GETFL)?);
-            fcntl(fd, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
-            Ok(())
-        })();
-        match result {
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            result => return result.map_err(io_failure),
+/// Why a bounded run returned no [`BoundedOutput`].
+pub(crate) enum BoundedFailure {
+    NotStarted(io::Error),
+    /// The deadline passed; `exited` tells whether the child had already exited and only its
+    /// output pipes were still open.
+    Deadline {
+        exited: bool,
+    },
+    Io(io::Error),
+}
+
+impl From<BoundedFailure> for RunError {
+    fn from(failure: BoundedFailure) -> Self {
+        match failure {
+            BoundedFailure::Deadline { .. } => RunError::Timeout,
+            BoundedFailure::NotStarted(error) | BoundedFailure::Io(error) => io_failure(error),
         }
     }
 }
 
-/// One stream gets at most 64 KiB per iteration, including short reads. An
-/// interruption yields to the outer deadline/status check instead of spinning.
-fn drain_pipe(pipe: &mut Option<impl Read>, output: &mut Vec<u8>) -> io::Result<()> {
+/// Runs `program` with null stdin and `environment` added until `deadline`, keeping at most
+/// `cap` bytes of each stream; the child is killed and reaped when the run fails.
+pub(crate) fn run_until_exit(
+    program: &Path,
+    args: &[&str],
+    environment: &[(&str, &Path)],
+    deadline: Instant,
+    cap: usize,
+) -> Result<BoundedOutput, BoundedFailure> {
+    let child = Command::new(program)
+        .args(args)
+        .envs(environment.iter().copied())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(BoundedFailure::NotStarted)?;
+    let mut owned = OwnedChild {
+        child,
+        reaped: false,
+        cleanup_deadline: None,
+        cleanup_attempted: false,
+    };
+    collect_until(&mut owned, deadline, cap)
+}
+
+fn configure_pipe(fd: BorrowedFd<'_>) -> io::Result<()> {
+    retry_interrupted(|| {
+        let flags = OFlag::from_bits_retain(fcntl(fd, FcntlArg::F_GETFL)?);
+        fcntl(fd, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
+        Ok(())
+    })
+}
+
+/// One stream gets at most 64 KiB per iteration, including short reads, and keeps at most `cap`
+/// bytes while still draining the rest. An interruption yields to the outer deadline/status
+/// check instead of spinning.
+fn drain_pipe(pipe: &mut Option<impl Read>, output: &mut Vec<u8>, cap: usize) -> io::Result<()> {
     let Some(reader) = pipe.as_mut() else {
         return Ok(());
     };
@@ -350,7 +356,8 @@ fn drain_pipe(pipe: &mut Option<impl Read>, output: &mut Vec<u8>) -> io::Result<
                 break;
             }
             Ok(count) => {
-                output.extend_from_slice(&buffer[..count]);
+                let kept = count.min(cap.saturating_sub(output.len()));
+                output.extend_from_slice(&buffer[..kept]);
                 budget -= count;
             }
             Err(error)
@@ -367,43 +374,47 @@ fn drain_pipe(pipe: &mut Option<impl Read>, output: &mut Vec<u8>) -> io::Result<
     Ok(())
 }
 
-fn collect_timed(
+/// Collects the child's status and both streams, returning as soon as it has exited and both
+/// pipes have closed.
+fn collect_until(
     owned: &mut OwnedChild,
-    started: Instant,
-    timeout: Duration,
-) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), RunError> {
+    deadline: Instant,
+    cap: usize,
+) -> Result<BoundedOutput, BoundedFailure> {
     let mut stdout = owned.child.stdout.take();
     let mut stderr = owned.child.stderr.take();
     for fd in [
         stdout.as_ref().expect("stdout is piped").as_fd(),
         stderr.as_ref().expect("stderr is piped").as_fd(),
     ] {
-        configure_pipe(fd, started, timeout)?;
+        configure_pipe(fd).map_err(BoundedFailure::Io)?;
     }
     let mut out = Vec::new();
     let mut err = Vec::new();
     let mut status = None;
     loop {
-        remaining(started, timeout)?;
+        let left = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
+            .ok_or(BoundedFailure::Deadline {
+                exited: status.is_some(),
+            })?;
         if status.is_none() {
-            match owned.child.try_wait() {
-                Ok(observed) => {
-                    status = observed;
-                    owned.reaped = status.is_some();
-                }
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(io_failure(error)),
-            }
+            status = retry_interrupted(|| owned.child.try_wait()).map_err(BoundedFailure::Io)?;
+            owned.reaped = status.is_some();
         }
-        drain_pipe(&mut stdout, &mut out).map_err(io_failure)?;
-        drain_pipe(&mut stderr, &mut err).map_err(io_failure)?;
+        drain_pipe(&mut stdout, &mut out, cap).map_err(BoundedFailure::Io)?;
+        drain_pipe(&mut stderr, &mut err, cap).map_err(BoundedFailure::Io)?;
         if stdout.is_none()
             && stderr.is_none()
             && let Some(status) = status
         {
-            return Ok((status, out, err));
+            return Ok(BoundedOutput {
+                status,
+                stdout: out,
+                stderr: err,
+            });
         }
-        let wait = remaining(started, timeout)?.min(Duration::from_millis(20));
         let mut fds = Vec::with_capacity(2);
         if let Some(pipe) = &stdout {
             fds.push(PollFd::new(pipe.as_fd(), PollFlags::POLLIN));
@@ -411,21 +422,26 @@ fn collect_timed(
         if let Some(pipe) = &stderr {
             fds.push(PollFd::new(pipe.as_fd(), PollFlags::POLLIN));
         }
+        // With both pipes closed only the exit status is pending, so the wait stays short.
+        let wait = if fds.is_empty() {
+            Duration::from_millis(1)
+        } else {
+            Duration::from_millis(20)
+        }
+        .min(left);
         // Floor the sub-millisecond remainder so poll never exceeds the budget.
-        let result: io::Result<()> = (|| {
+        retry_interrupted(|| {
             poll(&mut fds, wait.as_millis() as u16)?;
-            if fds.iter().any(|fd| {
-                fd.revents()
-                    .is_some_and(|events| events.contains(PollFlags::POLLNVAL))
-            }) {
-                return Err(io::Error::other("invalid subprocess pipe descriptor"));
-            }
             Ok(())
-        })();
-        match result {
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(io_failure(error)),
-            Ok(()) => {}
+        })
+        .map_err(BoundedFailure::Io)?;
+        if fds.iter().any(|fd| {
+            fd.revents()
+                .is_some_and(|events| events.contains(PollFlags::POLLNVAL))
+        }) {
+            return Err(BoundedFailure::Io(io::Error::other(
+                "invalid subprocess pipe descriptor",
+            )));
         }
     }
 }
@@ -443,20 +459,6 @@ impl SpawnProbe for SystemProbe {
 
     fn env_var(&self, name: &str) -> Option<String> {
         std::env::var(name).ok()
-    }
-
-    fn hermes_client_env_passthrough(
-        &self,
-        executable: &Path,
-        config_base: &Path,
-    ) -> Result<String, CafleetError> {
-        crate::coding_agent::run_bounded(
-            executable,
-            &["config", "get", "--json", "terminal.client_env_passthrough"],
-            &[("HERMES_HOME", config_base)],
-            Instant::now() + Duration::from_secs(2),
-        )
-        .map_err(CafleetError::App)
     }
 }
 
@@ -563,12 +565,7 @@ mod tests {
     use nix::sys::wait::WaitPidFlag;
     use nix::sys::wait::waitpid;
     use nix::unistd::Pid;
-    use std::sync::Mutex;
-    use std::sync::MutexGuard;
     use tempfile::TempDir;
-
-    // Concurrent process launches can exhaust a one-second deadline before sh starts.
-    static PROCESS_FIXTURE_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn native_executable_resolution_uses_the_first_absolute_path_entry_as_found() {
@@ -647,20 +644,12 @@ mod tests {
 
     struct ProcessFixture {
         dir: TempDir,
-        _serial: MutexGuard<'static, ()>,
     }
 
     impl ProcessFixture {
         fn new() -> Self {
-            let serial = PROCESS_FIXTURE_LOCK
-                .lock()
-                .expect("the process fixture lock is healthy");
             Self {
-                dir: tempfile::Builder::new()
-                    .prefix(".process-test-")
-                    .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-                    .unwrap(),
-                _serial: serial,
+                dir: tempfile::tempdir().unwrap(),
             }
         }
 
@@ -728,7 +717,7 @@ mod tests {
     fn timed_runner_kills_and_reaps_a_sleeping_direct_child_within_five_seconds() {
         let fixture = ProcessFixture::new();
         let start = Instant::now();
-        let result = fixture.run("exec sleep 30", Some(1));
+        let result = fixture.run("exec sleep 30", Some(2));
         let elapsed = start.elapsed();
         fixture.assert_direct_child_reaped(&result);
         assert!(matches!(result, Err(RunError::Timeout)), "{result:?}");
@@ -741,7 +730,7 @@ mod tests {
         let start = Instant::now();
         let result = fixture.run(
             "while :; do printf 'stdout flood\\n'; printf 'stderr flood\\n' >&2; done",
-            Some(1),
+            Some(2),
         );
         let elapsed = start.elapsed();
         fixture.assert_direct_child_reaped(&result);
@@ -753,8 +742,7 @@ mod tests {
     fn timed_runner_applies_deadline_after_child_exit_with_inherited_pipes_open() {
         let fixture = ProcessFixture::new();
         let start = Instant::now();
-        // The descendant is deliberately bounded even against the old blocking runner.
-        let result = fixture.run("sleep 6 & exit 0", Some(1));
+        let result = fixture.run("sleep 6 & exit 0", Some(2));
         let elapsed = start.elapsed();
         fixture.assert_direct_child_reaped(&result);
         assert!(matches!(result, Err(RunError::Timeout)), "{result:?}");
@@ -765,7 +753,7 @@ mod tests {
     fn timed_runner_waits_for_child_exit_even_after_both_pipes_close() {
         let fixture = ProcessFixture::new();
         let start = Instant::now();
-        let result = fixture.run("exec 1>&- 2>&-; exec sleep 30", Some(1));
+        let result = fixture.run("exec 1>&- 2>&-; exec sleep 30", Some(2));
         let elapsed = start.elapsed();
         fixture.assert_direct_child_reaped(&result);
         assert!(matches!(result, Err(RunError::Timeout)), "{result:?}");
@@ -835,10 +823,19 @@ mod tests {
         for max_read in [3, 8192] {
             let mut pipe = Some(EndlessReader { max_read });
             let mut output = Vec::new();
-            drain_pipe(&mut pipe, &mut output).unwrap();
+            drain_pipe(&mut pipe, &mut output, usize::MAX).unwrap();
             assert_eq!(output, vec![b'x'; 64 * 1024]);
             assert!(pipe.is_some());
         }
+    }
+
+    #[test]
+    fn a_drained_stream_keeps_at_most_its_cap_while_still_reading_the_budget() {
+        let mut pipe = Some(EndlessReader { max_read: 8192 });
+        let mut output = Vec::new();
+        drain_pipe(&mut pipe, &mut output, 100).unwrap();
+        assert_eq!(output, vec![b'x'; 100]);
+        assert!(pipe.is_some());
     }
 
     #[test]
@@ -942,5 +939,114 @@ mod tests {
             "elapsed={:?}",
             returned - started
         );
+    }
+
+    mod bounded_run {
+        use crate::runtime::system::*;
+
+        fn shell(dir: &Path, body: &str) -> std::path::PathBuf {
+            crate::coding_agent::test_support::executable_stub(dir, "bounded", body)
+        }
+
+        fn run(
+            program: &Path,
+            environment: &[(&str, &Path)],
+            bound: Duration,
+            cap: usize,
+        ) -> Result<BoundedOutput, BoundedFailure> {
+            for _ in 0..50 {
+                match run_until_exit(program, &[], environment, Instant::now() + bound, cap) {
+                    Err(BoundedFailure::NotStarted(cause))
+                        if cause.raw_os_error() == Some(nix::libc::ETXTBSY) =>
+                    {
+                        std::thread::sleep(Duration::from_millis(20))
+                    }
+                    result => return result,
+                }
+            }
+            panic!("an executable stub stayed busy")
+        }
+
+        fn failure(result: Result<BoundedOutput, BoundedFailure>) -> BoundedFailure {
+            match result {
+                Ok(output) => panic!("the bounded run fails, got {:?}", output.status),
+                Err(failure) => failure,
+            }
+        }
+
+        #[test]
+        fn a_finished_child_returns_its_status_streams_and_environment_without_a_polling_tail() {
+            let dir = tempfile::tempdir().unwrap();
+            let program = shell(
+                dir.path(),
+                "printf 'out=%s\\n' \"$BOUNDED_VALUE\"; printf 'err\\n' >&2; exit 3",
+            );
+            let started = Instant::now();
+            let output = run(
+                &program,
+                &[("BOUNDED_VALUE", Path::new("/srv/value"))],
+                Duration::from_secs(5),
+                4096,
+            )
+            .unwrap_or_else(|_| panic!("the bounded run finishes"));
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "{:?}",
+                started.elapsed()
+            );
+            assert_eq!(output.status.code(), Some(3));
+            assert_eq!(output.stdout, b"out=/srv/value\n");
+            assert_eq!(output.stderr, b"err\n");
+        }
+
+        #[test]
+        fn each_stream_keeps_at_most_its_cap_while_the_child_runs_to_exit() {
+            let dir = tempfile::tempdir().unwrap();
+            let program = shell(
+                dir.path(),
+                "head -c 200000 /dev/zero; head -c 200000 /dev/zero >&2",
+            );
+            let output = run(&program, &[], Duration::from_secs(5), 10)
+                .unwrap_or_else(|_| panic!("the bounded run finishes"));
+            assert!(output.status.success());
+            assert_eq!(output.stdout, vec![0; 10]);
+            assert_eq!(output.stderr, vec![0; 10]);
+        }
+
+        #[test]
+        fn the_deadline_kills_a_running_child_and_reports_whether_it_had_exited() {
+            let dir = tempfile::tempdir().unwrap();
+            let running = shell(dir.path(), "exec /bin/sleep 30");
+            let started = Instant::now();
+            assert!(matches!(
+                failure(run(&running, &[], Duration::from_millis(300), 4096)),
+                BoundedFailure::Deadline { exited: false }
+            ));
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "{:?}",
+                started.elapsed()
+            );
+            let held = tempfile::tempdir().unwrap();
+            let holding = shell(held.path(), "/bin/sleep 30 & exit 0");
+            assert!(matches!(
+                failure(run(&holding, &[], Duration::from_millis(300), 4096)),
+                BoundedFailure::Deadline { exited: true }
+            ));
+        }
+
+        #[test]
+        fn a_missing_program_is_not_started() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(matches!(
+                failure(run(
+                    &dir.path().join("absent"),
+                    &[],
+                    Duration::from_secs(1),
+                    4096
+                )),
+                BoundedFailure::NotStarted(_)
+            ));
+        }
     }
 }

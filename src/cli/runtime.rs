@@ -67,6 +67,9 @@ pub(crate) enum InputCommand {
         /// The programmatic-input receipt to settle.
         #[arg(value_parser = positive_id)]
         input_id: i64,
+        /// The root Director issuing this Director-only command.
+        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        director_member_id: i64,
         /// The observed input disposition to record.
         #[arg(long, value_enum)]
         disposition: Disposition,
@@ -107,6 +110,7 @@ pub(crate) fn input(
         }
         InputCommand::Reconcile {
             input_id,
+            director_member_id: _,
             disposition,
             evidence_ref,
             json,
@@ -365,10 +369,9 @@ mod tests {
             |fixture, outer| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                let settings = Settings::for_database(
-                    std::path::Path::new(fixture.fixture.conn.path().unwrap()),
-                    None,
-                );
+                let settings = Settings::for_database(std::path::Path::new(
+                    fixture.fixture.conn.path().unwrap(),
+                ));
                 let original = storage::reserve_input(
                     &mut fixture.fixture.conn,
                     &run.owner(),
@@ -390,6 +393,7 @@ mod tests {
                 let until = outer.min(Instant::now() + Duration::from_secs(2));
                 let command = |disposition, evidence: &str| InputCommand::Reconcile {
                     input_id: original.input_id,
+                    director_member_id: run.director_member_id,
                     disposition,
                     evidence_ref: evidence.into(),
                     json: true,
@@ -897,6 +901,8 @@ mod tests {
                     "input",
                     "reconcile",
                     "17",
+                    "--from-member-id",
+                    "1",
                     "--disposition",
                     disposition,
                     "--evidence-ref",
@@ -967,6 +973,7 @@ mod tests {
                 "audit:x",
             ],
         ] {
+            let args = [args, vec!["--from-member-id", "1"]].concat();
             assert_eq!(usage_error(&args).exit_code(), 2, "{args:?}");
         }
     }

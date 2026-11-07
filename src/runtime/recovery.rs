@@ -3627,10 +3627,9 @@ mod tests {
                 let status = writer.finish(deadline);
                 panic!("the selected writer should be killed after fsync: {status:?}");
             }
-            let settings = Settings::for_database(
-                std::path::Path::new(crate::db::database_path(database_url).unwrap()),
-                None,
-            );
+            let settings = Settings::for_database(std::path::Path::new(
+                crate::db::database_path(database_url).unwrap(),
+            ));
             let mut host = Host::new(deadline);
             let claim;
             let attestation = if matches!(
@@ -3800,7 +3799,7 @@ mod tests {
             std::fs::copy(case.fixture.conn.path().unwrap(), &copy).unwrap();
             let mut conn = Connection::open(&copy).unwrap();
             let copied_before = rows(&conn);
-            let settings = Settings::for_database(&copy, None);
+            let settings = Settings::for_database(&copy);
             let mut host = new_host();
             assert!(
                 recover_member_with_host(
@@ -4703,7 +4702,7 @@ pub(crate) mod test_support {
                     .unwrap(),
             );
             let settings =
-                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()));
             let placement = crate::broker::get_member(
                 &fixture.conn,
                 fixture.run.member_id,

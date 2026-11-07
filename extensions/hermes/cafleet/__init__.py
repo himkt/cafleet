@@ -21,10 +21,12 @@ WATCHDOG_INTERVAL_S = 5.0
 DETACH_GRACE_S = 30.0
 EXIT_CONFIRM_S = 5.0
 INJECT_DEADLINE_S = 10.0
+VERIFY_DEADLINE_S = 10.0
 REFUSAL_RETRY_S = 1.0
 REFUSAL_LIMIT_S = 600.0
 INJECTION_SEAM = "gateway runner._dispatch_plugin_message_injection"
 CONSENT_ERROR = f"plugins.entries.cafleet.allow_gateway_injection is not true; {SETUP_FIX}"
+MEMBER_REFUSAL = "cafleet_listen runs only in a Director session"
 
 _ctx = None
 _receivers: dict[str, "Receiver"] = {}
@@ -38,14 +40,6 @@ def _result(**fields) -> str:
 def _session_key() -> str:
     from hermes_cli.plugin_session import session_key
     return session_key()
-
-
-def _client_tool_env() -> dict[str, str] | None:
-    """The calling session's tool-subprocess environment, or None for a session without a client."""
-    from agent.session_client_env import bound_client_env, tool_env
-    if bound_client_env() is None:
-        return None
-    return tool_env()
 
 
 def _gateway_runner():
@@ -85,6 +79,33 @@ def _recorded_executable() -> Path:
     if not (target.is_file() and os.access(target, os.X_OK)):
         raise ValueError(f"executable record {record}: {target} is not an executable file; {SETUP_FIX}")
     return target
+
+
+def _database_args(database_url: str | None) -> list[str]:
+    return ["--database-url", database_url] if database_url else []
+
+
+def _cafleet_env() -> dict[str, str]:
+    return {name: value for name, value in os.environ.items() if not name.startswith("CAFLEET_")}
+
+
+def _director_refusal(executable: Path, director_id: int, database_url: str | None) -> str | None:
+    """None when `director_id` is a root Director, otherwise the member refusal with the CLI's stderr."""
+    try:
+        shown = subprocess.run(
+            [str(executable), *_database_args(database_url), "member", "show", str(director_id), "--json"],
+            stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
+            env=_cafleet_env(), timeout=VERIFY_DEADLINE_S,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"{MEMBER_REFUSAL}: {exc}"
+    if shown.returncode == 0:
+        try:
+            if json.loads(shown.stdout).get("kind") == "director":
+                return None
+        except ValueError:
+            pass
+    return f"{MEMBER_REFUSAL}: {shown.stderr.strip()}"
 
 
 class Receiver:
@@ -244,16 +265,8 @@ class Receiver:
 
 
 def _listen(args: dict, **kwargs) -> str:
-    try:
-        client_env = _client_tool_env()
-    except Exception as exc:
-        return _result(ok=False, error=f"agent.session_client_env: {exc}")
-    if client_env is None:
-        return _result(ok=False, error="cafleet_listen cannot read the calling session's client environment")
-    if not client_env:
-        return _result(ok=False, error="cafleet_listen cannot verify a client that is not attached locally")
-    if client_env.get("CAFLEET_MEMBER_ID"):
-        return _result(ok=False, error="cafleet_listen runs only in a Director session")
+    director_id = int(args["director_id"])
+    database_url = args.get("database_url")
     try:
         session_key = _session_key()
     except Exception as exc:
@@ -278,14 +291,13 @@ def _listen(args: dict, **kwargs) -> str:
             return _result(ok=False, error=str(exc))
         if not _ctx._gateway_injection_allowed():
             return _result(ok=False, error=CONSENT_ERROR)
-        env = {name: value for name, value in os.environ.items() if not name.startswith("CAFLEET_")}
-        database_url = client_env.get("CAFLEET_DATABASE_URL")
-        if database_url:
-            env["CAFLEET_DATABASE_URL"] = database_url
+        refusal = _director_refusal(executable, director_id, database_url)
+        if refusal is not None:
+            return _result(ok=False, error=refusal)
         proc = subprocess.Popen(
-            [str(executable), "message", "listen", str(int(args["director_id"]))],
+            [str(executable), *_database_args(database_url), "message", "listen", str(director_id)],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            encoding="utf-8", errors="replace", bufsize=1, env=env,
+            encoding="utf-8", errors="replace", bufsize=1, env=_cafleet_env(),
         )
         receiver = Receiver(session_key, str(kwargs.get("session_id") or ""), proc)
         _receivers[session_key] = receiver
@@ -335,7 +347,13 @@ _SCHEMA = {
     ),
     "parameters": {
         "type": "object",
-        "properties": {"director_id": {"type": "integer", "description": "The Director's literal member ID."}},
+        "properties": {
+            "director_id": {"type": "integer", "description": "The Director's literal member ID."},
+            "database_url": {
+                "type": "string",
+                "description": "The fleet's database URL when the Director's DATABASE URL line names one.",
+            },
+        },
         "required": ["director_id"],
         "additionalProperties": False,
     },

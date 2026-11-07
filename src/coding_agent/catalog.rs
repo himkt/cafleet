@@ -9,13 +9,15 @@ use crate::error::Result;
 use regex::Regex;
 use serde_json::Map;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
 #[cfg(test)]
 use crate::coding_agent::detector::AnnotationBlock;
 #[cfg(test)]
 use crate::coding_agent::detector::Detector;
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AnswerKey {
@@ -1086,225 +1088,23 @@ fn composer_submissions(
 }
 
 const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
-const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
-const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
-const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
-const HERMES_FIXTURES: &[u8] = include_bytes!("native/hermes.json");
-const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
-    ("native/claude.json", CLAUDE_FIXTURES),
-    ("native/codex.json", CODEX_FIXTURES),
-    ("native/opencode.json", OPENCODE_FIXTURES),
-    ("native/hermes.json", HERMES_FIXTURES),
-];
 
-fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
-    let mut sources = BTreeMap::<String, Vec<&Value>>::new();
-    for entry in entries {
-        require(
-            entry["kind"] == "native",
-            "bundled fixtures require native provenance",
-        )?;
-        let source = text(&entry["source_ref"])?;
-        require(
-            embedded.iter().any(|(reference, _)| *reference == source),
-            "bundled fixture bytes are not embedded",
-        )?;
-        sources.entry(source).or_default().push(entry);
-    }
-    for (source, bytes) in embedded {
-        let file: Value = serde_json::from_slice(bytes)
-            .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
-        let entries = sources.get(*source).map(Vec::as_slice).unwrap_or(&[]);
-        let screens = verify_native_fixture_file(&file, entries)?;
-        for entry in entries {
-            let id = text(&entry["id"])?;
-            let screen = screens
-                .get(&id)
-                .expect("the file guard verified every catalogued screen");
-            verify_native_screen(entry, screen)?;
-        }
-    }
-    Ok(())
-}
-
-fn verify_native_fixture_file<'a>(
-    file: &'a Value,
-    entries: &[&Value],
-) -> Result<&'a Map<String, Value>> {
-    let file = object(
-        file,
-        &["schema_version", "backend", "provenance", "screens"],
-    )?;
-    require(
-        file["schema_version"].as_u64() == Some(1)
-            && file["provenance"] == "native"
-            && entries
-                .iter()
-                .all(|entry| file["backend"] == entry["backend"]),
-        "bundled fixture file identity differs from its catalog entry",
-    )?;
-    backend(&file["backend"])?;
-    let screens = file["screens"]
-        .as_object()
-        .ok_or_else(|| invalid("object required"))?;
-    for entry in entries {
-        require(
-            screens.contains_key(&text(&entry["id"])?),
-            "bundled fixture screen is missing",
-        )?;
-    }
-    require(
-        screens.keys().all(|id| {
-            entries
-                .iter()
-                .any(|entry| entry["id"].as_str() == Some(id.as_str()))
-        }),
-        "bundled fixture file holds an uncited screen",
-    )?;
-    Ok(screens)
-}
-
-fn verify_native_screen(entry: &Value, screen: &Value) -> Result<()> {
-    let id = text(&entry["id"])?;
-    let recorded = text(&entry["sha256"])?;
-    let computed = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
-    require(
-        recorded == computed,
-        &format!(
-            "bundled fixture digest mismatch for {id}: catalog {recorded}, computed {computed}"
-        ),
-    )?;
-    let backgrounds = screen.get("cell_backgrounds").is_some();
-    let fields = SCREEN_FIELDS
-        .iter()
-        .copied()
-        .chain(backgrounds.then_some("cell_backgrounds"))
-        .collect::<Vec<_>>();
-    let m = object(screen, &fields)?;
-    require(
-        m["rows"] == entry["rows"] && m["cols"] == entry["cols"],
-        "bundled fixture identity differs from its catalog entry",
-    )?;
-    let rows = positive(&m["rows"])?;
-    let cols = positive(&m["cols"])?;
-    boolean(&m["alternate_screen"])?;
-    m["screen_seq"]
-        .as_u64()
-        .ok_or_else(|| invalid("fixture screen sequence required"))?;
-    require(
-        m["cursor_row"]
-            .as_u64()
-            .is_some_and(|row| row < u64::from(rows))
-            && m["cursor_col"]
-                .as_u64()
-                .is_some_and(|col| col <= u64::from(cols)),
-        "fixture cursor outside its geometry",
-    )?;
-    let lines = array(&m["lines"])?;
-    require(
-        lines.len() == usize::from(rows) && lines.iter().all(Value::is_string),
-        "fixture lines must cover every row",
-    )?;
-    let mut masked = BTreeSet::new();
-    for mask in array(&m["masked_rows"])? {
-        let mask = object(mask, &["row", "reason"])?;
-        let row = mask["row"]
-            .as_u64()
-            .and_then(|row| usize::try_from(row).ok())
-            .filter(|row| *row < lines.len())
-            .ok_or_else(|| invalid("masked row outside fixture geometry"))?;
-        require(masked.insert(row), "duplicate masked row")?;
-        require(
-            mask["reason"] == "reviewed_privacy",
-            "masked rows require reviewed privacy",
-        )?;
-        require(
-            lines[row].as_str().is_some_and(str::is_empty),
-            "masked row must be empty",
-        )?;
-    }
-    if backgrounds {
-        verify_cell_backgrounds(&m["cell_backgrounds"], rows, cols, &masked)?;
-    }
-    Ok(())
-}
-const SCREEN_FIELDS: [&str; 8] = [
-    "rows",
-    "cols",
-    "alternate_screen",
-    "screen_seq",
-    "cursor_row",
-    "cursor_col",
-    "lines",
-    "masked_rows",
-];
-fn verify_cell_backgrounds(
-    value: &Value,
-    rows: u16,
-    cols: u16,
-    masked: &BTreeSet<usize>,
-) -> Result<()> {
-    let index = |value: &Value, bound: u64| {
-        value
-            .as_u64()
-            .filter(|n| *n <= bound)
-            .ok_or_else(|| invalid("background run coordinate outside its geometry"))
+static BUNDLED: LazyLock<ProfileCatalog> = LazyLock::new(|| {
+    let catalog = ProfileCatalog::from_definitions(
+        &serde_json::from_str(BUNDLED_DEFINITIONS).expect("bundled.json is valid JSON"),
+    )
+    .expect("the bundled catalog passes its build guard");
+    #[cfg(test)]
+    let catalog = ProfileCatalog {
+        capture_origin: "bundled_unknown",
+        ..catalog
     };
-    let mut spans = BTreeMap::<u64, Vec<(u64, u64)>>::new();
-    for run in array(value)? {
-        let run = object(run, &["row", "start_col", "end_col", "bg"])?;
-        let row = index(&run["row"], u64::from(rows) - 1)?;
-        let start = index(&run["start_col"], u64::from(cols))?;
-        let end = index(&run["end_col"], u64::from(cols))?;
-        require(start < end, "background run requires start below end")?;
-        require(
-            !masked.contains(&usize::try_from(row).expect("bounded row")),
-            "background run inside a masked row",
-        )?;
-        let bg = &run["bg"];
-        match bg.get("kind").and_then(Value::as_str) {
-            Some("indexed") => {
-                let m = object(bg, &["kind", "index"])?;
-                index(&m["index"], 255)?;
-            }
-            Some("rgb") => {
-                let m = object(bg, &["kind", "r", "g", "b"])?;
-                for channel in ["r", "g", "b"] {
-                    index(&m[channel], 255)?;
-                }
-            }
-            _ => return Err(invalid("background run requires a non-default colour")),
-        }
-        spans.entry(row).or_default().push((start, end));
-    }
-    for runs in spans.values_mut() {
-        runs.sort_unstable();
-        require(
-            runs.windows(2).all(|pair| pair[0].1 <= pair[1].0),
-            "background runs overlap",
-        )?;
-    }
-    Ok(())
-}
+    catalog
+});
 
 impl ProfileCatalog {
-    pub(crate) fn bundled() -> Result<Self> {
-        let definitions: Value = serde_json::from_str(BUNDLED_DEFINITIONS)
-            .map_err(|cause| invalid(format!("bundled definitions: {cause}")))?;
-        Self::from_bundled_definitions(&definitions, BUNDLED_FIXTURES)
-    }
-    pub(crate) fn from_bundled_definitions(
-        definitions: &Value,
-        embedded: &[(&str, &[u8])],
-    ) -> Result<Self> {
-        let catalog = Self::from_definitions(definitions)?;
-        verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
-        #[cfg(test)]
-        let catalog = Self {
-            capture_origin: "bundled_unknown",
-            ..catalog
-        };
-        Ok(catalog)
+    pub(crate) fn bundled() -> &'static ProfileCatalog {
+        &BUNDLED
     }
     #[cfg(test)]
     pub(crate) fn capture_origin(&self) -> &'static str {
@@ -1776,6 +1576,222 @@ pub(crate) mod test_support {
     use crate::coding_agent::catalog::*;
     use serde_json::json;
 
+    const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
+    const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
+    const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
+    const HERMES_FIXTURES: &[u8] = include_bytes!("native/hermes.json");
+    pub(crate) const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
+        ("native/claude.json", CLAUDE_FIXTURES),
+        ("native/codex.json", CODEX_FIXTURES),
+        ("native/opencode.json", OPENCODE_FIXTURES),
+        ("native/hermes.json", HERMES_FIXTURES),
+    ];
+
+    fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
+        let mut sources = BTreeMap::<String, Vec<&Value>>::new();
+        for entry in entries {
+            require(
+                entry["kind"] == "native",
+                "bundled fixtures require native provenance",
+            )?;
+            let source = text(&entry["source_ref"])?;
+            require(
+                embedded.iter().any(|(reference, _)| *reference == source),
+                "bundled fixture bytes are not embedded",
+            )?;
+            sources.entry(source).or_default().push(entry);
+        }
+        for (source, bytes) in embedded {
+            let file: Value = serde_json::from_slice(bytes)
+                .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
+            let entries = sources.get(*source).map(Vec::as_slice).unwrap_or(&[]);
+            let screens = verify_native_fixture_file(&file, entries)?;
+            for entry in entries {
+                let id = text(&entry["id"])?;
+                let screen = screens
+                    .get(&id)
+                    .expect("the file guard verified every catalogued screen");
+                verify_native_screen(entry, screen)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_native_fixture_file<'a>(
+        file: &'a Value,
+        entries: &[&Value],
+    ) -> Result<&'a Map<String, Value>> {
+        let file = object(
+            file,
+            &["schema_version", "backend", "provenance", "screens"],
+        )?;
+        require(
+            file["schema_version"].as_u64() == Some(1)
+                && file["provenance"] == "native"
+                && entries
+                    .iter()
+                    .all(|entry| file["backend"] == entry["backend"]),
+            "bundled fixture file identity differs from its catalog entry",
+        )?;
+        backend(&file["backend"])?;
+        let screens = file["screens"]
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?;
+        for entry in entries {
+            require(
+                screens.contains_key(&text(&entry["id"])?),
+                "bundled fixture screen is missing",
+            )?;
+        }
+        require(
+            screens.keys().all(|id| {
+                entries
+                    .iter()
+                    .any(|entry| entry["id"].as_str() == Some(id.as_str()))
+            }),
+            "bundled fixture file holds an uncited screen",
+        )?;
+        Ok(screens)
+    }
+
+    fn verify_native_screen(entry: &Value, screen: &Value) -> Result<()> {
+        let id = text(&entry["id"])?;
+        let recorded = text(&entry["sha256"])?;
+        let computed = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
+        require(
+            recorded == computed,
+            &format!(
+                "bundled fixture digest mismatch for {id}: catalog {recorded}, computed {computed}"
+            ),
+        )?;
+        let backgrounds = screen.get("cell_backgrounds").is_some();
+        let fields = SCREEN_FIELDS
+            .iter()
+            .copied()
+            .chain(backgrounds.then_some("cell_backgrounds"))
+            .collect::<Vec<_>>();
+        let m = object(screen, &fields)?;
+        require(
+            m["rows"] == entry["rows"] && m["cols"] == entry["cols"],
+            "bundled fixture identity differs from its catalog entry",
+        )?;
+        let rows = positive(&m["rows"])?;
+        let cols = positive(&m["cols"])?;
+        boolean(&m["alternate_screen"])?;
+        m["screen_seq"]
+            .as_u64()
+            .ok_or_else(|| invalid("fixture screen sequence required"))?;
+        require(
+            m["cursor_row"]
+                .as_u64()
+                .is_some_and(|row| row < u64::from(rows))
+                && m["cursor_col"]
+                    .as_u64()
+                    .is_some_and(|col| col <= u64::from(cols)),
+            "fixture cursor outside its geometry",
+        )?;
+        let lines = array(&m["lines"])?;
+        require(
+            lines.len() == usize::from(rows) && lines.iter().all(Value::is_string),
+            "fixture lines must cover every row",
+        )?;
+        let mut masked = BTreeSet::new();
+        for mask in array(&m["masked_rows"])? {
+            let mask = object(mask, &["row", "reason"])?;
+            let row = mask["row"]
+                .as_u64()
+                .and_then(|row| usize::try_from(row).ok())
+                .filter(|row| *row < lines.len())
+                .ok_or_else(|| invalid("masked row outside fixture geometry"))?;
+            require(masked.insert(row), "duplicate masked row")?;
+            require(
+                mask["reason"] == "reviewed_privacy",
+                "masked rows require reviewed privacy",
+            )?;
+            require(
+                lines[row].as_str().is_some_and(str::is_empty),
+                "masked row must be empty",
+            )?;
+        }
+        if backgrounds {
+            verify_cell_backgrounds(&m["cell_backgrounds"], rows, cols, &masked)?;
+        }
+        Ok(())
+    }
+    const SCREEN_FIELDS: [&str; 8] = [
+        "rows",
+        "cols",
+        "alternate_screen",
+        "screen_seq",
+        "cursor_row",
+        "cursor_col",
+        "lines",
+        "masked_rows",
+    ];
+    fn verify_cell_backgrounds(
+        value: &Value,
+        rows: u16,
+        cols: u16,
+        masked: &BTreeSet<usize>,
+    ) -> Result<()> {
+        let index = |value: &Value, bound: u64| {
+            value
+                .as_u64()
+                .filter(|n| *n <= bound)
+                .ok_or_else(|| invalid("background run coordinate outside its geometry"))
+        };
+        let mut spans = BTreeMap::<u64, Vec<(u64, u64)>>::new();
+        for run in array(value)? {
+            let run = object(run, &["row", "start_col", "end_col", "bg"])?;
+            let row = index(&run["row"], u64::from(rows) - 1)?;
+            let start = index(&run["start_col"], u64::from(cols))?;
+            let end = index(&run["end_col"], u64::from(cols))?;
+            require(start < end, "background run requires start below end")?;
+            require(
+                !masked.contains(&usize::try_from(row).expect("bounded row")),
+                "background run inside a masked row",
+            )?;
+            let bg = &run["bg"];
+            match bg.get("kind").and_then(Value::as_str) {
+                Some("indexed") => {
+                    let m = object(bg, &["kind", "index"])?;
+                    index(&m["index"], 255)?;
+                }
+                Some("rgb") => {
+                    let m = object(bg, &["kind", "r", "g", "b"])?;
+                    for channel in ["r", "g", "b"] {
+                        index(&m[channel], 255)?;
+                    }
+                }
+                _ => return Err(invalid("background run requires a non-default colour")),
+            }
+            spans.entry(row).or_default().push((start, end));
+        }
+        for runs in spans.values_mut() {
+            runs.sort_unstable();
+            require(
+                runs.windows(2).all(|pair| pair[0].1 <= pair[1].0),
+                "background runs overlap",
+            )?;
+        }
+        Ok(())
+    }
+
+    impl ProfileCatalog {
+        pub(crate) fn from_bundled_definitions(
+            definitions: &Value,
+            embedded: &[(&str, &[u8])],
+        ) -> Result<Self> {
+            let catalog = Self::from_definitions(definitions)?;
+            verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
+            let catalog = Self {
+                capture_origin: "bundled_unknown",
+                ..catalog
+            };
+            Ok(catalog)
+        }
+    }
+
     pub(crate) struct BundledBoundary {
         pub(crate) backend: CodingAgent,
         pub(crate) min_version: &'static str,
@@ -1885,10 +1901,6 @@ pub(crate) mod test_support {
         crate::digest::canonical_json(screen)
     }
 
-    pub(crate) fn bundled_embedded() -> Vec<(&'static str, &'static [u8])> {
-        BUNDLED_FIXTURES.to_vec()
-    }
-
     pub(crate) fn bundled_definitions() -> Value {
         serde_json::from_str(BUNDLED_DEFINITIONS).unwrap()
     }
@@ -1913,60 +1925,6 @@ pub(crate) mod test_support {
                     .collect::<Vec<_>>()
             })
             .collect()
-    }
-
-    pub(crate) fn bundled_entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
-        definitions["fixtures"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .find(|entry| entry["id"] == id)
-            .unwrap_or_else(|| panic!("the bundled catalog cites {id}"))
-    }
-
-    /// The bundled catalog with `id`'s screen and catalog entry changed; the
-    /// entry's digest follows the changed screen.
-    pub(crate) fn guarded_fixture(
-        id: &str,
-        change_definitions: impl FnOnce(&mut Value),
-        change_screen: impl FnOnce(&mut Value),
-    ) -> Result<ProfileCatalog> {
-        let (source, mut file) = bundled_file(id);
-        let screen = file["screens"]
-            .as_object_mut()
-            .expect("the backend file contains a screen map")
-            .get_mut(id)
-            .expect("the catalogued screen is embedded");
-        change_screen(screen);
-        let digest = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
-        let mut definitions = bundled_definitions();
-        bundled_entry(&mut definitions, id)["sha256"] = json!(digest);
-        change_definitions(&mut definitions);
-        load_bundled_file(&source, &file, &definitions)
-    }
-
-    pub(crate) fn guarded_fixture_file(
-        id: &str,
-        change_definitions: impl FnOnce(&mut Value),
-        change_file: impl FnOnce(&mut Value),
-    ) -> Result<ProfileCatalog> {
-        let (source, mut file) = bundled_file(id);
-        let mut definitions = bundled_definitions();
-        change_file(&mut file);
-        change_definitions(&mut definitions);
-        load_bundled_file(&source, &file, &definitions)
-    }
-
-    fn load_bundled_file(
-        source: &str,
-        file: &Value,
-        definitions: &Value,
-    ) -> Result<ProfileCatalog> {
-        let bytes = serde_json::to_vec_pretty(file).unwrap();
-        let mut embedded = bundled_embedded();
-        embedded.retain(|&(cited, _)| cited != source);
-        embedded.push((source, &bytes));
-        ProfileCatalog::from_bundled_definitions(definitions, &embedded)
     }
 
     pub(crate) fn synthetic_definitions() -> Value {
@@ -2914,6 +2872,8 @@ mod tests {
 
     mod bundled_backend_files {
         use crate::coding_agent::catalog::ProfileCatalog;
+        use crate::coding_agent::catalog::test_support::BUNDLED_FIXTURES;
+        use crate::coding_agent::catalog::test_support::bundled_definitions;
         use crate::coding_agent::catalog::tests::definitions;
         use crate::error::CafleetError;
         use serde_json::Value;
@@ -3120,182 +3080,276 @@ mod tests {
                 "invalid native profile: bundled fixture bytes are not embedded"
             );
         }
-    }
 
-    type ScreenChange = (&'static str, fn(&mut Value));
+        type ScreenChange = (&'static str, fn(&mut Value));
 
-    fn first_masked_or_empty_row(screen: &Value) -> u64 {
-        screen["masked_rows"]
-            .as_array()
-            .unwrap()
-            .first()
-            .map(|mask| mask["row"].as_u64().unwrap())
-            .or_else(|| {
-                screen["lines"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .position(|line| line == "")
-                    .map(|row| row as u64)
-            })
-            .unwrap_or(0)
-    }
-
-    fn push_mask(screen: &mut Value, row: u64, reason: &str) {
-        screen["masked_rows"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({"row":row,"reason":reason}));
-    }
-
-    const SCREEN_CHANGES: [ScreenChange; 11] = [
-        ("extra field", |s| s["note"] = json!("unreviewed")),
-        ("missing masked rows", |s| {
-            s.as_object_mut().unwrap().remove("masked_rows");
-        }),
-        ("nonempty masked row", |s| {
-            let masked = s["masked_rows"]
+        fn first_masked_or_empty_row(screen: &Value) -> u64 {
+            screen["masked_rows"]
                 .as_array()
                 .unwrap()
                 .first()
-                .map(|mask| mask["row"].as_u64().unwrap() as usize);
-            match masked {
-                Some(row) => s["lines"][row] = json!("restored header"),
-                None => {
-                    let row = s["lines"]
+                .map(|mask| mask["row"].as_u64().unwrap())
+                .or_else(|| {
+                    screen["lines"]
                         .as_array()
                         .unwrap()
                         .iter()
-                        .position(|line| line != "")
-                        .unwrap() as u64;
+                        .position(|line| line == "")
+                        .map(|row| row as u64)
+                })
+                .unwrap_or(0)
+        }
+
+        fn push_mask(screen: &mut Value, row: u64, reason: &str) {
+            screen["masked_rows"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"row":row,"reason":reason}));
+        }
+
+        const SCREEN_CHANGES: [ScreenChange; 11] = [
+            ("extra field", |s| s["note"] = json!("unreviewed")),
+            ("missing masked rows", |s| {
+                s.as_object_mut().unwrap().remove("masked_rows");
+            }),
+            ("nonempty masked row", |s| {
+                let masked = s["masked_rows"]
+                    .as_array()
+                    .unwrap()
+                    .first()
+                    .map(|mask| mask["row"].as_u64().unwrap() as usize);
+                match masked {
+                    Some(row) => s["lines"][row] = json!("restored header"),
+                    None => {
+                        let row = s["lines"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .position(|line| line != "")
+                            .unwrap() as u64;
+                        push_mask(s, row, "reviewed_privacy");
+                    }
+                }
+            }),
+            ("masked row out of range", |s| {
+                let rows = s["rows"].as_u64().unwrap();
+                push_mask(s, rows, "reviewed_privacy");
+            }),
+            ("duplicate masked row", |s| {
+                let row = first_masked_or_empty_row(s);
+                if s["masked_rows"].as_array().unwrap().is_empty() {
                     push_mask(s, row, "reviewed_privacy");
                 }
-            }
-        }),
-        ("masked row out of range", |s| {
-            let rows = s["rows"].as_u64().unwrap();
-            push_mask(s, rows, "reviewed_privacy");
-        }),
-        ("duplicate masked row", |s| {
-            let row = first_masked_or_empty_row(s);
-            if s["masked_rows"].as_array().unwrap().is_empty() {
                 push_mask(s, row, "reviewed_privacy");
-            }
-            push_mask(s, row, "reviewed_privacy");
-        }),
-        ("unreviewed mask reason", |s| {
-            if s["masked_rows"].as_array().unwrap().is_empty() {
-                let row = first_masked_or_empty_row(s);
-                push_mask(s, row, "convenience");
-            } else {
-                s["masked_rows"][0]["reason"] = json!("convenience");
-            }
-        }),
-        ("rows", |s| {
-            s["rows"] = json!(s["rows"].as_u64().unwrap() - 1)
-        }),
-        ("line count", |s| {
-            s["lines"].as_array_mut().unwrap().pop();
-        }),
-        ("cols differ from the entry", |s| {
-            s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
-        }),
-        ("cursor row outside the geometry", |s| {
-            s["cursor_row"] = s["rows"].clone()
-        }),
-        ("cursor column past the geometry", |s| {
-            s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
-        }),
-    ];
+            }),
+            ("unreviewed mask reason", |s| {
+                if s["masked_rows"].as_array().unwrap().is_empty() {
+                    let row = first_masked_or_empty_row(s);
+                    push_mask(s, row, "convenience");
+                } else {
+                    s["masked_rows"][0]["reason"] = json!("convenience");
+                }
+            }),
+            ("rows", |s| {
+                s["rows"] = json!(s["rows"].as_u64().unwrap() - 1)
+            }),
+            ("line count", |s| {
+                s["lines"].as_array_mut().unwrap().pop();
+            }),
+            ("cols differ from the entry", |s| {
+                s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
+            }),
+            ("cursor row outside the geometry", |s| {
+                s["cursor_row"] = s["rows"].clone()
+            }),
+            ("cursor column past the geometry", |s| {
+                s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
+            }),
+        ];
 
-    #[test]
-    fn bundled_guard_rejects_every_unreviewed_change_to_each_bundled_fixture() {
-        let definitions = bundled_definitions();
-        let embedded = bundled_embedded();
-        let entries = definitions["fixtures"].as_array().unwrap();
-        ProfileCatalog::from_bundled_definitions(&definitions, &embedded).unwrap();
-        let catalogued = entries
-            .iter()
-            .map(|entry| entry["id"].as_str().unwrap().to_owned())
-            .collect::<BTreeSet<_>>();
-        let screens = embedded
-            .iter()
-            .flat_map(|(_, bytes)| {
-                let file: Value = serde_json::from_slice(bytes).unwrap();
-                file["screens"]
-                    .as_object()
-                    .expect("the backend file contains a screen map")
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .collect::<BTreeSet<_>>();
-        assert_eq!(screens, catalogued);
-        for entry in entries {
-            let id = entry["id"].as_str().unwrap();
-            for (case, change) in SCREEN_CHANGES {
-                assert!(
-                    guarded_fixture(id, |_| {}, change).is_err(),
-                    "{id}: {case} must be rejected"
+        impl NativeFixtureCatalog {
+            fn masked() -> Self {
+                let mut fixture = Self::new();
+                fixture.change_primary(|s| push_mask(s, 5, "reviewed_privacy"));
+                fixture
+            }
+
+            fn change_primary(&mut self, change: impl FnOnce(&mut Value)) {
+                let screen = &mut self.file["screens"][PRIMARY];
+                change(screen);
+                self.definitions["fixtures"][0]["sha256"] = json!(screen_digest(screen));
+            }
+        }
+
+        fn failure_message(result: Result<ProfileCatalog, CafleetError>) -> Option<String> {
+            result.err().map(|error| error.message().into_owned())
+        }
+
+        #[test]
+        fn a_screen_outside_the_reviewed_shape_is_rejected() {
+            for base in [NativeFixtureCatalog::new, NativeFixtureCatalog::masked] {
+                assert_eq!(failure_message(base().load()), None);
+                for (case, change) in SCREEN_CHANGES {
+                    let mut fixture = base();
+                    fixture.change_primary(change);
+                    assert!(fixture.load().is_err(), "{case} must be rejected");
+                }
+                let mut pending_wrap = base();
+                pending_wrap.change_primary(|s| s["cursor_col"] = s["cols"].clone());
+                assert_eq!(
+                    failure_message(pending_wrap.load()),
+                    None,
+                    "cursor_col equal to cols records the pending-wrap position"
                 );
             }
-            for (field, value) in [
-                ("schema_version", json!(2)),
-                ("provenance", json!("synthetic")),
+            let mut flipped = NativeFixtureCatalog::new();
+            let screen = &mut flipped.file["screens"][PRIMARY];
+            screen["alternate_screen"] = json!(!screen["alternate_screen"].as_bool().unwrap());
+            let failure = usage_failure(flipped.load());
+            assert!(
+                failure.starts_with(&format!(
+                    "invalid native profile: bundled fixture digest mismatch for {PRIMARY}: "
+                )),
+                "{failure}"
+            );
+            let mut synthetic = NativeFixtureCatalog::new();
+            synthetic.definitions["fixtures"][0]["kind"] = json!("synthetic");
+            assert_eq!(
+                usage_failure(synthetic.load()),
+                "invalid native profile: bundled fixtures require native provenance"
+            );
+        }
+
+        #[test]
+        fn cell_backgrounds_outside_the_reviewed_shape_are_rejected() {
+            let run = |row: u64, start: u64, end: u64, bg: &Value| json!({"row":row,"start_col":start,"end_col":end,"bg":bg});
+            let rgb = json!({"kind":"rgb","r":1,"g":2,"b":3});
+            let indexed = json!({"kind":"indexed","index":255});
+            let load = |runs: Value| {
+                let mut fixture = NativeFixtureCatalog::masked();
+                fixture.change_primary(|s| s["cell_backgrounds"] = runs);
+                fixture.load()
+            };
+            assert_eq!(
+                failure_message(load(json!([
+                    run(0, 0, 4, &rgb),
+                    run(0, 4, 80, &indexed),
+                    run(23, 0, 80, &rgb)
+                ]))),
+                None,
+                "adjacent full-geometry runs are reviewed"
+            );
+            for (case, runs) in [
+                ("not an array", json!({"row":0})),
                 (
-                    "backend",
-                    json!(if entry["backend"] == "codex" {
-                        "claude"
-                    } else {
-                        "codex"
-                    }),
+                    "run missing a field",
+                    json!([{"row":0,"start_col":0,"bg":rgb}]),
+                ),
+                ("row below the geometry", json!([run(24, 0, 4, &rgb)])),
+                ("start past the width", json!([run(0, 81, 82, &rgb)])),
+                ("end past the width", json!([run(0, 0, 81, &rgb)])),
+                ("empty run", json!([run(0, 4, 4, &rgb)])),
+                ("masked row", json!([run(5, 0, 4, &rgb)])),
+                (
+                    "default colour",
+                    json!([run(0, 0, 4, &json!({"kind":"default"}))]),
+                ),
+                (
+                    "indexed colour out of range",
+                    json!([run(0, 0, 4, &json!({"kind":"indexed","index":256}))]),
+                ),
+                (
+                    "rgb channel out of range",
+                    json!([run(0, 0, 4, &json!({"kind":"rgb","r":256,"g":0,"b":0}))]),
+                ),
+                (
+                    "overlapping runs",
+                    json!([run(0, 0, 6, &rgb), run(0, 5, 9, &rgb)]),
                 ),
             ] {
-                assert!(
-                    guarded_fixture_file(id, |_| {}, |file| file[field] = value).is_err(),
-                    "{id}: {field} must match its catalog entry"
+                assert!(load(runs).is_err(), "{case} must be rejected");
+            }
+        }
+
+        #[test]
+        fn the_bundled_catalog_passes_its_fixture_build_guard() {
+            assert_eq!(
+                failure_message(ProfileCatalog::from_bundled_definitions(
+                    &bundled_definitions(),
+                    BUNDLED_FIXTURES
+                )),
+                None
+            );
+        }
+
+        fn load_with_file(
+            definitions: &Value,
+            source: &str,
+            file: &Value,
+        ) -> Result<ProfileCatalog, CafleetError> {
+            let bytes = serde_json::to_vec(file).unwrap();
+            let embedded = BUNDLED_FIXTURES
+                .iter()
+                .map(|&(cited, original)| {
+                    (
+                        cited,
+                        if cited == source {
+                            bytes.as_slice()
+                        } else {
+                            original
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            ProfileCatalog::from_bundled_definitions(definitions, &embedded)
+        }
+
+        #[test]
+        fn each_embedded_backend_file_is_bound_to_its_catalog_identity_screens_and_bytes() {
+            let definitions = bundled_definitions();
+            for &(source, bytes) in BUNDLED_FIXTURES {
+                let file: Value = serde_json::from_slice(bytes).unwrap();
+                let other = if file["backend"] == "codex" {
+                    "claude"
+                } else {
+                    "codex"
+                };
+                for (field, value) in [
+                    ("schema_version", json!(2)),
+                    ("provenance", json!("synthetic")),
+                    ("backend", json!(other)),
+                ] {
+                    let mut changed = file.clone();
+                    changed[field] = value;
+                    assert_eq!(
+                        usage_failure(load_with_file(&definitions, source, &changed)),
+                        "invalid native profile: bundled fixture file identity differs from its catalog entry",
+                        "{source}: {field}"
+                    );
+                }
+                let mut missing = file.clone();
+                let screens = missing["screens"].as_object_mut().unwrap();
+                let first = screens.keys().next().unwrap().clone();
+                screens.remove(&first);
+                assert_eq!(
+                    usage_failure(load_with_file(&definitions, source, &missing)),
+                    "invalid native profile: bundled fixture screen is missing",
+                    "{source}"
+                );
+                let absent = BUNDLED_FIXTURES
+                    .iter()
+                    .copied()
+                    .filter(|&(cited, _)| cited != source)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    usage_failure(ProfileCatalog::from_bundled_definitions(
+                        &definitions,
+                        &absent
+                    )),
+                    "invalid native profile: bundled fixture bytes are not embedded",
+                    "{source}"
                 );
             }
-            assert!(
-                guarded_fixture(
-                    id,
-                    |definitions| bundled_entry(definitions, id)["kind"] = json!("synthetic"),
-                    |_| {}
-                )
-                .is_err(),
-                "{id}: bundled fixtures require native catalog provenance"
-            );
-            assert!(
-                guarded_fixture_file(
-                    id,
-                    |_| {},
-                    |file| {
-                        file["screens"].as_object_mut().unwrap().remove(id);
-                    }
-                )
-                .is_err(),
-                "{id}: its catalogued screen must be present"
-            );
-            assert!(
-                guarded_fixture_file(
-                    id,
-                    |_| {},
-                    |file| {
-                        let screen = &mut file["screens"][id];
-                        screen["alternate_screen"] =
-                            json!(!screen["alternate_screen"].as_bool().unwrap());
-                    }
-                )
-                .is_err(),
-                "{id}: changed screen content requires its canonical digest"
-            );
-            let source = entry["source_ref"].as_str().unwrap();
-            let mut missing = embedded.clone();
-            missing.retain(|&(cited, _)| cited != source);
-            assert!(
-                ProfileCatalog::from_bundled_definitions(&definitions, &missing).is_err(),
-                "{id}: a cited fixture is embedded"
-            );
         }
     }
 
@@ -3375,7 +3429,6 @@ mod tests {
         }
         assert!(
             ProfileCatalog::bundled()
-                .unwrap()
                 .answer_plan(
                     CodingAgent::Codex,
                     "0.0.1-synthetic",
@@ -3901,7 +3954,7 @@ mod tests {
 
     #[test]
     fn runtime_profile_bundled_loader_validates_its_packaged_declarations() {
-        let catalog = ProfileCatalog::bundled().unwrap();
+        let catalog = ProfileCatalog::bundled();
         for &backend in CodingAgent::all() {
             let unprobed = catalog.capabilities(backend, None);
             assert_eq!(unprobed.min_version, None);
@@ -4011,7 +4064,7 @@ mod tests {
                     &AnswerKey::Decision(PermissionDecision::Allow),
                 )
                 .unwrap();
-            let bundled = ProfileCatalog::bundled().unwrap();
+            let bundled = ProfileCatalog::bundled();
             let mut plans = vec![synthetic];
             for (backend, version, rule) in [
                 (CodingAgent::Claude, "2.1.302", "claude-bash-permission"),
@@ -4586,25 +4639,10 @@ mod tests {
 
         const CLAUDE_VERSION: &str = "2.1.302";
         const NATIVE_FIXTURE: &str = "claude-2.1.302-default-permission-1";
-        const IDLE_FIXTURE: &str = "claude-2.1.302-idle-composer-1";
         const WRAPPED_FIXTURE: &str = "claude-2.1.302-wrapped-permission-1";
 
         fn bytes(id: &str) -> Vec<u8> {
             bundled_fixture(id).into_bytes()
-        }
-
-        #[test]
-        fn bundled_guard_rejects_a_restored_masked_status_row_of_the_idle_composer() {
-            assert!(guarded_fixture(IDLE_FIXTURE, |_| {}, |_| {}).is_ok());
-            assert!(
-                guarded_fixture(
-                    IDLE_FIXTURE,
-                    |_| {},
-                    |s| s["lines"][33] = json!("  Opus 5.5 (1M context)")
-                )
-                .is_err(),
-                "a restored masked status row is rejected"
-            );
         }
 
         fn sequenced_replay(
@@ -4612,13 +4650,12 @@ mod tests {
             change: impl FnOnce(&mut Vec<String>),
             output_seq: u64,
         ) -> ScreenObservation {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let screen =
                 replay_native_fixture(std::str::from_utf8(bytes).unwrap(), change, true, None);
-            let mut observation =
-                Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-                    .observe(&screen)
-                    .unwrap();
+            let mut observation = Detector::new(catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
+                .observe(&screen)
+                .unwrap();
             observation.output_seq = output_seq;
             observation.raw_evidence["screen_seq"] = json!(output_seq);
             observation
@@ -4945,7 +4982,7 @@ mod tests {
         }
 
         fn observe(id: &str) -> ScreenObservation {
-            detector(&ProfileCatalog::bundled().unwrap())
+            detector(ProfileCatalog::bundled())
                 .observe(&screen(id))
                 .unwrap()
         }
@@ -5080,7 +5117,7 @@ mod tests {
 
         #[test]
         fn bundled_claude_auto_ask_form_answers_allow_with_1_and_deny_with_2_ungated() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let form = observe(ASK_FORM);
             assert_eq!(form.match_evidence, MatchEvidence::Complete);
             assert!(!form.verified_noninteraction);
@@ -5107,14 +5144,14 @@ mod tests {
                 assert_eq!(stage.required_choice_id(), choice);
                 assert!(stage.gate().is_none(), "{decision:?} is ungated");
                 assert_eq!(plan.capability().native_version(), CLAUDE_VERSION);
-                let matched = detector(&catalog)
+                let matched = detector(catalog)
                     .match_answer(&screen(ASK_FORM), &plan)
                     .unwrap()
                     .expect("the ask form matches its plan");
                 assert_eq!(matched.choices(), &["Yes".to_owned(), "No".to_owned()]);
                 assert!(Some(matched.semantic()) == form.fingerprint.as_ref());
                 assert!(
-                    detector(&catalog)
+                    detector(catalog)
                         .match_answer(&default_form, &plan)
                         .unwrap()
                         .is_none(),
@@ -5129,7 +5166,7 @@ mod tests {
                     )
                     .unwrap();
                 assert!(
-                    detector(&catalog)
+                    detector(catalog)
                         .match_answer(&screen(ASK_FORM), &predecessor)
                         .unwrap()
                         .is_none(),
@@ -5159,7 +5196,7 @@ mod tests {
 
         #[test]
         fn bundled_claude_auto_tip_form_answers_allow_with_1_and_deny_with_4_ungated() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             for (id, operation) in [
                 (TIP_FORM, TIP_ALLOW),
                 (TIP_ALLOW_PRE_STAGE, TIP_ALLOW),
@@ -5213,7 +5250,7 @@ mod tests {
                     [pre_stage.to_owned()].as_slice(),
                     "{decision:?} rests on its pre-stage capture"
                 );
-                let matched = detector(&catalog)
+                let matched = detector(catalog)
                     .match_answer(&screen(pre_stage), &plan)
                     .unwrap()
                     .expect("the pre-stage form matches its plan");
@@ -5221,7 +5258,7 @@ mod tests {
                 assert!(Some(matched.semantic()) == observe(pre_stage).fingerprint.as_ref());
                 for (other, rule) in other_forms {
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(other), &plan)
                             .unwrap()
                             .is_none(),
@@ -5236,7 +5273,7 @@ mod tests {
                         )
                         .unwrap();
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(pre_stage), &foreign)
                             .unwrap()
                             .is_none(),
@@ -5278,10 +5315,10 @@ mod tests {
                     1,
                 ),
             ];
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             for (id, operation, rows) in cases {
                 for version in [CLAUDE_VERSION, "2.1.309"] {
-                    let form = Detector::new(&catalog, CodingAgent::Claude, Some(version))
+                    let form = Detector::new(catalog, CodingAgent::Claude, Some(version))
                         .observe(&screen(id))
                         .unwrap();
                     assert_eq!(form.kind, FORM, "{id} {version}");
@@ -5318,7 +5355,7 @@ mod tests {
 
         #[test]
         fn bundled_claude_read_outside_dialog_answers_allow_with_4_and_deny_with_3_ungated() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let other_forms = [
                 ("claude-2.1.302-default-permission-1", PERMISSION_RULE),
                 (ASK_FORM, ASK_RULE),
@@ -5362,7 +5399,7 @@ mod tests {
                     [pre_stage.to_owned()].as_slice(),
                     "{decision:?} rests on its pre-stage capture"
                 );
-                let matched = detector(&catalog)
+                let matched = detector(catalog)
                     .match_answer(&screen(pre_stage), &plan)
                     .unwrap()
                     .expect("the pre-stage dialog matches its plan");
@@ -5370,7 +5407,7 @@ mod tests {
                 assert!(Some(matched.semantic()) == observe(pre_stage).fingerprint.as_ref());
                 for (other, rule) in other_forms {
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(other), &plan)
                             .unwrap()
                             .is_none(),
@@ -5385,7 +5422,7 @@ mod tests {
                         )
                         .unwrap();
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(pre_stage), &foreign)
                             .unwrap()
                             .is_none(),
@@ -5397,7 +5434,7 @@ mod tests {
 
         #[test]
         fn bundled_claude_auto_startup_offer_and_wizard_are_separate_questions() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let offer = observe(STARTUP_OFFER);
             let wizard = observe(STARTUP_WIZARD);
             for (id, observed, choices) in [
@@ -5656,7 +5693,7 @@ mod tests {
                 let mut run = replay_run(EvidencePolicy::metadata());
                 assert!(run.hold(id, 0, 500).events.is_empty(), "{id}");
             }
-            let primary = detector(&ProfileCatalog::bundled().unwrap())
+            let primary = detector(ProfileCatalog::bundled())
                 .observe(&replay(NOTICE_IDLE, false))
                 .unwrap();
             assert!(
@@ -6201,7 +6238,7 @@ mod tests {
         }
         fn detector() -> Detector {
             Detector::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 CodingAgent::Claude,
                 Some(VERSION_312),
             )
@@ -6298,7 +6335,7 @@ mod tests {
                 ("claude-2.1.302-idle-composer-1", IDLE),
             ] {
                 let observed = Detector::new(
-                    &ProfileCatalog::bundled().unwrap(),
+                    ProfileCatalog::bundled(),
                     CodingAgent::Claude,
                     Some("2.1.302"),
                 )
@@ -6357,7 +6394,7 @@ mod tests {
                 None,
             );
             Detector::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 CodingAgent::Claude,
                 Some(fixture_version(id)),
             )
@@ -6471,12 +6508,7 @@ mod tests {
         }
 
         fn plan(rule: &str, key: AnswerKey) -> Option<AnswerPlan> {
-            ProfileCatalog::bundled().unwrap().answer_plan(
-                CodingAgent::Claude,
-                VERSION_312,
-                rule,
-                &key,
-            )
+            ProfileCatalog::bundled().answer_plan(CodingAgent::Claude, VERSION_312, rule, &key)
         }
         fn stages(plan: &AnswerPlan) -> Vec<(Vec<u8>, Option<String>)> {
             plan.stages()
@@ -6566,7 +6598,7 @@ mod tests {
 
         #[test]
         fn no_plan_selects_a_yes_choice_of_either_nudge_dialog() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             assert!(plan(DIALOG_A, AnswerKey::Choice("accept".into())).is_none());
             assert!(plan(OFFER, AnswerKey::Choice("yes".into())).is_none());
             for rule in [WIZARD, NOTICE] {
@@ -6741,6 +6773,14 @@ mod tests {
         use crate::coding_agent::catalog::tests::*;
 
         const CODEX_VERSION: &str = "0.163.0";
+        /// The captures of the predecessor form; every other Codex fixture is an
+        /// automatic-mode capture.
+        const PREDECESSOR_FIXTURES: [&str; 4] = [
+            "codex-0.163.0-on-request-permission-1",
+            "codex-0.163.0-allow-pre-stage-1",
+            "codex-0.163.0-deny-pre-stage-1",
+            "codex-0.163.0-idle-composer-1",
+        ];
         const REFUSAL_RULE: &str = "codex-auto-review-refusal";
         const INDICATOR_RULE: &str = "codex-auto-review-indicator";
         const IDLE_RULE: &str = "codex-idle-composer";
@@ -6866,7 +6906,7 @@ mod tests {
         }
 
         fn observe(id: &str) -> ScreenObservation {
-            detector(&ProfileCatalog::bundled().unwrap())
+            detector(ProfileCatalog::bundled())
                 .observe(&screen(id))
                 .unwrap()
         }
@@ -6964,14 +7004,14 @@ mod tests {
                     assert_eq!(block.raw_evidence["observed_mode"], mode, "{id}");
                 }
             }
-            for id in crate::coding_agent::catalog::tests::bundled_codex::PREDECESSOR_FIXTURES {
+            for id in PREDECESSOR_FIXTURES {
                 let screen = replay_native_fixture(
                     std::str::from_utf8(&bytes(id)).unwrap(),
                     |_| {},
                     true,
                     None,
                 );
-                let observed = detector(&ProfileCatalog::bundled().unwrap())
+                let observed = detector(ProfileCatalog::bundled())
                     .observe(&screen)
                     .unwrap();
                 assert!(observed.annotations.is_empty(), "predecessor fixture {id}");
@@ -7090,53 +7130,6 @@ mod tests {
         }
     }
 
-    mod bundled_codex {
-        use crate::coding_agent::catalog::tests::*;
-
-        const PERMISSION_FIXTURE: &str = "codex-0.163.0-on-request-permission-1";
-        const ALLOW_FIXTURE: &str = "codex-0.163.0-allow-pre-stage-1";
-        const DENY_FIXTURE: &str = "codex-0.163.0-deny-pre-stage-1";
-        const IDLE_FIXTURE: &str = "codex-0.163.0-idle-composer-1";
-        /// The captures of the predecessor form; every other Codex fixture is an
-        /// automatic-mode capture classified in `bundled_codex_auto`.
-        pub(super) const PREDECESSOR_FIXTURES: [&str; 4] = [
-            PERMISSION_FIXTURE,
-            ALLOW_FIXTURE,
-            DENY_FIXTURE,
-            IDLE_FIXTURE,
-        ];
-
-        #[test]
-        fn bundled_guard_accepts_a_pending_wrap_cursor_at_cols_and_rejects_one_past_it() {
-            assert!(
-                guarded_fixture(PERMISSION_FIXTURE, |_| {}, |s| s["cursor_col"] = json!(120))
-                    .is_ok(),
-                "cursor_col equal to cols records the pending-wrap position"
-            );
-            assert!(
-                guarded_fixture(IDLE_FIXTURE, |_| {}, |s| s["cursor_col"] = json!(120)).is_ok(),
-                "the pending-wrap position is valid on any row"
-            );
-            for (case, change) in [
-                ("one past the pending-wrap column", (35, 121)),
-                ("a row below the geometry", (36, 0)),
-            ] {
-                assert!(
-                    guarded_fixture(
-                        PERMISSION_FIXTURE,
-                        |_| {},
-                        |s| {
-                            s["cursor_row"] = json!(change.0);
-                            s["cursor_col"] = json!(change.1);
-                        }
-                    )
-                    .is_err(),
-                    "{case} must be rejected"
-                );
-            }
-        }
-    }
-
     mod bundled_backends {
         use crate::coding_agent::catalog::tests::*;
 
@@ -7224,7 +7217,7 @@ mod tests {
         #[test]
         fn each_bundled_profile_declares_detection_idle_composer_both_operations_and_both_answers()
         {
-            let bundled = ProfileCatalog::bundled().unwrap();
+            let bundled = ProfileCatalog::bundled();
             for profile in [CLAUDE, CODEX, OPENCODE] {
                 let backend = profile.backend;
                 let declared = bundled.capabilities(backend, Some(profile.version));
@@ -7268,14 +7261,14 @@ mod tests {
         #[test]
         fn bundled_submission_fixtures_replay_their_composer_stages_through_the_production_catalog()
         {
-            let bundled = ProfileCatalog::bundled().unwrap();
+            let bundled = ProfileCatalog::bundled();
             for (profile, run) in [
                 (CLAUDE, "2.1.308"),
                 (CODEX, CODEX.version),
                 (OPENCODE, OPENCODE.version),
             ] {
                 let backend = profile.backend;
-                let detector = Detector::new(&bundled, backend, Some(run));
+                let detector = Detector::new(bundled, backend, Some(run));
                 for (operation, name) in [
                     (ComposerOperation::Prompt, "prompt"),
                     (ComposerOperation::Exec, "exec"),
@@ -7320,7 +7313,7 @@ mod tests {
 
         #[test]
         fn single_byte_answer_plans_are_the_measured_stages() {
-            let bundled = ProfileCatalog::bundled().unwrap();
+            let bundled = ProfileCatalog::bundled();
             for SingleByteAnswers {
                 profile,
                 rule,
@@ -7561,13 +7554,6 @@ mod tests {
                 .collect()
         }
 
-        fn guarded_fixture(
-            id: &str,
-            change_screen: impl FnOnce(&mut Value),
-        ) -> std::result::Result<ProfileCatalog, CafleetError> {
-            crate::coding_agent::catalog::test_support::guarded_fixture(id, |_| {}, change_screen)
-        }
-
         fn replay(bytes: &[u8]) -> ScreenSnapshot {
             replay_changed(bytes, |_| {}, None)
         }
@@ -7582,7 +7568,7 @@ mod tests {
 
         fn detector() -> Detector {
             Detector::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 CodingAgent::Opencode,
                 Some(OPENCODE_VERSION),
             )
@@ -7594,7 +7580,6 @@ mod tests {
 
         fn plan(decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
-                .unwrap()
                 .answer_plan(
                     CodingAgent::Opencode,
                     OPENCODE_VERSION,
@@ -7650,7 +7635,7 @@ mod tests {
 
         #[test]
         fn bundled_opencode_compact_answers_repeat_the_measured_stages_on_the_compact_rules() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             for (decision, choice, stages) in [
                 (
                     PermissionDecision::Allow,
@@ -7728,7 +7713,6 @@ mod tests {
 
         fn plan_for(request: &str, decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
-                .unwrap()
                 .answer_plan(
                     CodingAgent::Opencode,
                     OPENCODE_VERSION,
@@ -7985,7 +7969,7 @@ mod tests {
                     fixtures,
                     "{decision:?}"
                 );
-                let bundled = ProfileCatalog::bundled().unwrap();
+                let bundled = ProfileCatalog::bundled();
                 for (backend, version, request) in [
                     (CodingAgent::Opencode, OPENCODE_VERSION, REASON_RULE),
                     (CodingAgent::Opencode, OPENCODE_VERSION, IDLE_RULE),
@@ -8278,100 +8262,6 @@ mod tests {
                     );
                 }
             }
-        }
-
-        #[test]
-        fn bundled_guard_accepts_the_opencode_fixtures_and_rejects_altered_backgrounds() {
-            let run = |row: u64, start: u64, end: u64, bg: Value| json!({"row":row,"start_col":start,"end_col":end,"bg":bg});
-            let rgb = json!({"kind":"rgb","r":1,"g":2,"b":3});
-            for (case, runs) in [
-                (
-                    "indexed colour",
-                    json!([run(30, 0, 4, json!({"kind":"indexed","index":255}))]),
-                ),
-                (
-                    "adjacent runs",
-                    json!([
-                        run(30, 0, 4, rgb.clone()),
-                        run(30, 4, 8, json!({"kind":"indexed","index":3}))
-                    ]),
-                ),
-                ("full-width run", json!([run(30, 0, 120, rgb.clone())])),
-            ] {
-                assert!(
-                    guarded_fixture(IDLE_FIXTURE, |s| s["cell_backgrounds"] = runs).is_ok(),
-                    "{case} is a valid run set"
-                );
-            }
-            for (case, runs) in [
-                (
-                    "row below the geometry",
-                    json!([run(36, 0, 4, rgb.clone())]),
-                ),
-                (
-                    "end past the width",
-                    json!([run(30, 100, 121, rgb.clone())]),
-                ),
-                ("masked row", json!([run(35, 0, 4, rgb.clone())])),
-                ("empty run", json!([run(30, 4, 4, rgb.clone())])),
-                ("reversed run", json!([run(30, 8, 4, rgb.clone())])),
-                (
-                    "overlapping runs",
-                    json!([run(30, 0, 6, rgb.clone()), run(30, 5, 9, rgb.clone())]),
-                ),
-                (
-                    "default colour",
-                    json!([run(30, 0, 4, json!({"kind":"default"}))]),
-                ),
-                (
-                    "unknown colour kind",
-                    json!([run(30, 0, 4, json!({"kind":"named","name":"red"}))]),
-                ),
-                (
-                    "rgb component out of range",
-                    json!([run(30, 0, 4, json!({"kind":"rgb","r":256,"g":0,"b":0}))]),
-                ),
-                (
-                    "rgb component missing",
-                    json!([run(30, 0, 4, json!({"kind":"rgb","r":1,"g":2}))]),
-                ),
-                (
-                    "rgb extra field",
-                    json!([run(30, 0, 4, json!({"kind":"rgb","r":1,"g":2,"b":3,"a":4}))]),
-                ),
-                (
-                    "indexed out of range",
-                    json!([run(30, 0, 4, json!({"kind":"indexed","index":256}))]),
-                ),
-                (
-                    "negative column",
-                    json!([{"row":30,"start_col":-1,"end_col":4,"bg":rgb.clone()}]),
-                ),
-                (
-                    "run extra field",
-                    json!([{"row":30,"start_col":0,"end_col":4,"bg":rgb.clone(),"fg":rgb.clone()}]),
-                ),
-                (
-                    "run missing field",
-                    json!([{"row":30,"start_col":0,"bg":rgb.clone()}]),
-                ),
-                ("not an array", json!({"row":30})),
-            ] {
-                assert!(
-                    guarded_fixture(IDLE_FIXTURE, |s| s["cell_backgrounds"] = runs).is_err(),
-                    "{case} must be rejected"
-                );
-            }
-            assert!(
-                guarded_fixture(PERMISSION_FIXTURE, |s| {
-                    s["cell_backgrounds"]
-                        .as_array_mut()
-                        .unwrap()
-                        .push(json!({"row":21,"start_col":5,"end_col":7,"bg":{"kind":"indexed","index":1}}));
-                })
-                .is_err(),
-                "a run overlapping a captured run is rejected"
-            );
         }
 
         #[test]
@@ -8896,7 +8786,7 @@ mod tests {
 
         #[test]
         fn bundled_later_versions_reuse_the_complete_boundary_profile_including_claude_2_1_308() {
-            let bundled = ProfileCatalog::bundled().unwrap();
+            let bundled = ProfileCatalog::bundled();
             for (boundary, request) in BUNDLED_BOUNDARIES.iter().zip([
                 "claude-bash-permission",
                 "codex-exec-approval",
@@ -9120,7 +9010,7 @@ mod tests {
             Coverage::Unknown,
             (Coverage::Unknown, Coverage::Unknown),
         );
-        let bundled = ProfileCatalog::bundled().unwrap();
+        let bundled = ProfileCatalog::bundled();
         for &backend in CodingAgent::all() {
             let actual = bundled.capabilities(backend, Some(VERSION));
             assert_eq!(

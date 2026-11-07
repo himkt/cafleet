@@ -1713,18 +1713,17 @@ mod tests {
     fn settled_receipt_history_can_exceed_the_unresolved_cache_bound() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        for index in 0..4097 {
-            let input = fixture.input(&owner, &format!("settled:{index}"), InputKind::Prompt, None);
-            storage::settle_input(
-                &mut fixture.conn,
-                &owner,
-                input.input_id,
-                InputState::InProgress,
-                InputDisposition::NotSubmitted,
-                "audit:zero-byte",
-            )
-            .unwrap();
-        }
+        fixture.conn.execute("WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<4095) INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,disposition,evidence_ref) SELECT ?1,'settled:'||x,'prompt',?2,'settled',?3,?3,'not_submitted','audit:zero-byte' FROM n",params![owner.run_id,"d".repeat(64),NOW]).unwrap();
+        let input = fixture.input(&owner, "settled:4096", InputKind::Prompt, None);
+        storage::settle_input(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::InProgress,
+            InputDisposition::NotSubmitted,
+            "audit:zero-byte",
+        )
+        .unwrap();
         assert_eq!(rows(&fixture.conn, "member_input_operations").len(), 4097);
         assert!(
             storage::find_input(&fixture.reopen(), owner.run_id, "settled:0")
@@ -3628,6 +3627,11 @@ mod tests {
             rows(&fixture.base.conn, "member_input_operations").len(),
             4097
         );
+
+        let mut deferred = ResponseFixture::new();
+        deferred.base.conn.execute("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<4096) INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,deferred_at,defer_reason) SELECT ?1,'deferred:'||x,'prompt',?2,'ready',?3,?3,?3,'interaction_open' FROM n",params![deferred.owner.run_id,"d".repeat(64),NOW]).unwrap();
+        let request = deferred.request.clone();
+        assert_rejected_unchanged(&mut deferred, &request);
     }
 
     #[test]

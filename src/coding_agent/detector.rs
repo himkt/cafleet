@@ -905,7 +905,7 @@ pub(crate) mod test_support {
         id: &str,
     ) -> ScreenObservation {
         let screen = replay_native_fixture(&bundled_screen(id), |_| {}, true, None);
-        Detector::new(&ProfileCatalog::bundled().unwrap(), backend, Some(version))
+        Detector::new(ProfileCatalog::bundled(), backend, Some(version))
             .observe(&screen)
             .unwrap()
     }
@@ -1130,8 +1130,8 @@ mod tests {
 
     #[test]
     fn bundled_claude_auto_tip_form_with_written_padding_rows_keeps_its_request_identity() {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        let detector = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.308"));
+        let catalog = ProfileCatalog::bundled();
+        let detector = Detector::new(catalog, CodingAgent::Claude, Some("2.1.308"));
         let clean = detector.observe(&auto_tip_form(0)).unwrap();
         assert_eq!(
             clean.kind,
@@ -1165,8 +1165,8 @@ mod tests {
     const AUTO_IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
 
     fn read_outside_observation(screen: &ScreenSnapshot) -> ScreenObservation {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        Detector::new(&catalog, CodingAgent::Claude, Some("2.1.309"))
+        let catalog = ProfileCatalog::bundled();
+        Detector::new(catalog, CodingAgent::Claude, Some("2.1.309"))
             .observe(screen)
             .unwrap()
     }
@@ -1349,8 +1349,8 @@ mod tests {
         )
     }
     fn claude_observation(screen: &ScreenSnapshot) -> ScreenObservation {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
+        let catalog = ProfileCatalog::bundled();
+        Detector::new(catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
             .observe(screen)
             .unwrap()
     }
@@ -1384,8 +1384,8 @@ mod tests {
         let replay = claude_observation(&native_screen(|_| {}, true));
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
-        let catalog = ProfileCatalog::bundled().unwrap();
-        let reused = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.308"))
+        let catalog = ProfileCatalog::bundled();
+        let reused = Detector::new(catalog, CodingAgent::Claude, Some("2.1.308"))
             .observe(&screen)
             .unwrap();
         assert_eq!(reused.kind, observation.kind);
@@ -1396,13 +1396,13 @@ mod tests {
             observation.raw_evidence["operation"]
         );
         assert_eq!(reused.raw_evidence["native_version"], "2.1.308");
-        let below = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.301"))
+        let below = Detector::new(catalog, CodingAgent::Claude, Some("2.1.301"))
             .observe(&screen)
             .unwrap();
         assert_eq!(below.kind, ObservationKind::Unknown);
         assert_eq!(below.match_evidence, MatchEvidence::Absent);
         assert!(below.fingerprint.is_none());
-        let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
+        let unprobed = Detector::new(catalog, CodingAgent::Claude, None)
             .observe(&screen)
             .unwrap();
         assert_eq!(unprobed.kind, ObservationKind::Unknown);
@@ -1523,12 +1523,12 @@ mod tests {
             assert_claude_request(&pre_stage, operation);
             assert_eq!(pre_stage.raw_evidence["operation_rows"], 2);
         }
-        let catalog = ProfileCatalog::bundled().unwrap();
-        let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
+        let catalog = ProfileCatalog::bundled();
+        let unprobed = Detector::new(catalog, CodingAgent::Claude, None)
             .observe(&screen)
             .unwrap();
         assert_eq!(unprobed.kind, ObservationKind::Unknown);
-        let fallback = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.306"))
+        let fallback = Detector::new(catalog, CodingAgent::Claude, Some("2.1.306"))
             .observe(&screen)
             .unwrap();
         assert_ne!(fallback.kind, ObservationKind::Unknown);
@@ -1936,8 +1936,8 @@ mod tests {
     const CODEX_CHOICES: [&str; 2] = ["Yes, proceed", "No, and tell Codex what to do differently"];
 
     fn codex_observation(screen: &ScreenSnapshot) -> ScreenObservation {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
+        let catalog = ProfileCatalog::bundled();
+        Detector::new(catalog, CodingAgent::Codex, Some(CODEX_VERSION))
             .observe(screen)
             .unwrap()
     }
@@ -2033,21 +2033,21 @@ mod tests {
         let replay = codex_observation(&codex_form(|_| {}, None));
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
-        let catalog = ProfileCatalog::bundled().unwrap();
-        let reused = Detector::new(&catalog, CodingAgent::Codex, Some("0.164.0"))
+        let catalog = ProfileCatalog::bundled();
+        let reused = Detector::new(catalog, CodingAgent::Codex, Some("0.164.0"))
             .observe(&screen)
             .unwrap();
         assert_eq!(reused.kind, observation.kind);
         assert_eq!(reused.rule_id, observation.rule_id);
         assert!(reused.fingerprint == observation.fingerprint);
         assert_eq!(reused.raw_evidence["native_version"], "0.164.0");
-        let below = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
+        let below = Detector::new(catalog, CodingAgent::Codex, Some("0.162.0"))
             .observe(&screen)
             .unwrap();
         assert_eq!(below.kind, ObservationKind::Unknown);
         assert_eq!(below.match_evidence, MatchEvidence::Absent);
         assert!(below.fingerprint.is_none());
-        let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
+        let unprobed = Detector::new(catalog, CodingAgent::Codex, None)
             .observe(&screen)
             .unwrap();
         assert_eq!(unprobed.kind, ObservationKind::Unknown);
@@ -2161,7 +2161,7 @@ mod tests {
     }
 
     fn bundled_detector(backend: CodingAgent, version: &str) -> Detector {
-        Detector::new(&ProfileCatalog::bundled().unwrap(), backend, Some(version))
+        Detector::new(ProfileCatalog::bundled(), backend, Some(version))
     }
 
     struct PreStageForms {
@@ -2261,7 +2261,6 @@ mod tests {
             let focus = u16::try_from(forms.focus_row).unwrap();
             for (decision, id, choice, byte) in forms.answers {
                 let plan = ProfileCatalog::bundled()
-                    .unwrap()
                     .answer_plan(
                         forms.backend,
                         forms.version,
@@ -2529,7 +2528,7 @@ mod tests {
                 cursor,
             );
             Detector::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 CodingAgent::Claude,
                 Some("2.1.312"),
             )
@@ -4499,7 +4498,6 @@ mod tests {
 
         fn allow_match(screen: &ScreenSnapshot) -> AnswerMatch {
             let plan = ProfileCatalog::bundled()
-                .unwrap()
                 .answer_plan(
                     CodingAgent::Opencode,
                     VERSION,
@@ -4976,7 +4974,6 @@ mod tests {
 
         fn plan(rule: &str, decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
-                .unwrap()
                 .answer_plan(
                     CodingAgent::Hermes,
                     VERSION,
@@ -5055,10 +5052,10 @@ mod tests {
             for (stage, rule, rows) in FORMS {
                 assert_request(&observed(stage), rule, rows, stage);
             }
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let screen = replay("escalate-tmux-120", |_| {});
             for version in [None, Some("2026.9.23")] {
-                let below = Detector::new(&catalog, CodingAgent::Hermes, version)
+                let below = Detector::new(catalog, CodingAgent::Hermes, version)
                     .observe(&screen)
                     .unwrap();
                 assert_eq!(below.kind, ObservationKind::Unknown, "{version:?}");
@@ -5142,7 +5139,6 @@ mod tests {
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 assert!(
                     ProfileCatalog::bundled()
-                        .unwrap()
                         .answer_plan(
                             CodingAgent::Hermes,
                             VERSION,
@@ -5228,7 +5224,7 @@ mod tests {
 
         #[test]
         fn hermes_composer_plans_submit_a_prompt_and_a_native_exec_in_separate_stages() {
-            let bundled = ProfileCatalog::bundled().unwrap();
+            let bundled = ProfileCatalog::bundled();
             for (operation, name, literal, typed) in [
                 (ComposerOperation::Prompt, "prompt", "ok", b"ok".to_vec()),
                 (

@@ -173,7 +173,7 @@ pub(crate) fn run(
                     input_id,
                     &delivery,
                 ),
-                || format_message_sent(&message, settings.max_text_len, input_id, &delivery),
+                || format_message_sent(&message, input_id, &delivery),
             );
             Ok(())
         }
@@ -182,9 +182,7 @@ pub(crate) fn run(
             let payload = serde_json::Value::Array(
                 messages.iter().map(crate::output::json::message).collect(),
             );
-            emit(json, &payload, || {
-                format_messages(&messages, settings.max_text_len)
-            });
+            emit(json, &payload, || format_messages(&messages));
             Ok(())
         }
         MessageCommand::Wait {
@@ -203,9 +201,7 @@ pub(crate) fn run(
                 "outcome":if messages.is_empty() { "timeout" } else { "messages" },
                 "messages":messages.iter().map(crate::output::json::message).collect::<Vec<_>>(),
             });
-            emit(json, &payload, || {
-                format_message_wait(member_id, messages, settings.max_text_len)
-            });
+            emit(json, &payload, || format_message_wait(member_id, messages));
             Ok(())
         }
         MessageCommand::Listen {
@@ -224,7 +220,7 @@ pub(crate) fn run(
             emit(
                 json,
                 &crate::output::json::message_envelope(&message),
-                || format_message_acknowledged(&message, settings.max_text_len),
+                || format_message_acknowledged(&message),
             );
             Ok(())
         }
@@ -233,7 +229,7 @@ pub(crate) fn run(
             emit(
                 json,
                 &crate::output::json::message_envelope(&message),
-                || format_message(&message, settings.max_text_len),
+                || format_message(&message),
             );
             Ok(())
         }
@@ -598,11 +594,43 @@ fn full_queue_limit() -> Duration {
     FULL_QUEUE_LIMIT
 }
 
+#[cfg(not(test))]
+fn codex_queue_budget() -> Duration {
+    CODEX_QUEUE_BUDGET
+}
+
+#[cfg(not(test))]
+fn full_queue_retry_interval() -> Duration {
+    FULL_QUEUE_RETRY_INTERVAL
+}
+
 /// A test-built listener takes a shortened limit, in whole seconds, from its environment.
 #[cfg(test)]
 fn full_queue_limit() -> Duration {
     std::env::var("CAFLEET_TEST_CODEX_FULL_QUEUE_LIMIT_SECS").map_or(FULL_QUEUE_LIMIT, |secs| {
         Duration::from_secs(secs.parse().expect("the test limit is whole seconds"))
+    })
+}
+
+/// A test-built listener takes a shortened queue budget, in milliseconds, from its environment.
+#[cfg(test)]
+fn codex_queue_budget() -> Duration {
+    millis_override("CAFLEET_TEST_CODEX_QUEUE_BUDGET_MS", CODEX_QUEUE_BUDGET)
+}
+
+/// A test-built listener takes a shortened retry interval, in milliseconds, from its environment.
+#[cfg(test)]
+fn full_queue_retry_interval() -> Duration {
+    millis_override(
+        "CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS",
+        FULL_QUEUE_RETRY_INTERVAL,
+    )
+}
+
+#[cfg(test)]
+fn millis_override(name: &str, production: Duration) -> Duration {
+    std::env::var(name).map_or(production, |millis| {
+        Duration::from_millis(millis.parse().expect("the override is whole milliseconds"))
     })
 }
 
@@ -818,7 +846,7 @@ impl CodexQueue<'_> {
                             limit.as_secs()
                         )));
                     }
-                    std::thread::sleep(FULL_QUEUE_RETRY_INTERVAL);
+                    std::thread::sleep(full_queue_retry_interval());
                     if pinned_session_exited(self.session)? {
                         return Ok(Forwarding::SessionExited);
                     }
@@ -882,7 +910,7 @@ impl CodexQueue<'_> {
         format!(
             "codex queue for thread {} did not finish within {} s",
             self.thread,
-            CODEX_QUEUE_BUDGET.as_secs()
+            codex_queue_budget().as_secs()
         )
     }
 
@@ -903,7 +931,7 @@ impl CodexQueue<'_> {
                 .send(stderr.read_to_string(&mut text).map(|_| text))
                 .ok();
         });
-        let deadline = Instant::now() + CODEX_QUEUE_BUDGET;
+        let deadline = Instant::now() + codex_queue_budget();
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
@@ -985,7 +1013,7 @@ mod tests {
                 "{from} -> {to}"
             );
         }
-        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
         let (output, pane_calls) = crate::cli::test_support::isolated_cli(
             &settings,
             &[
@@ -1049,7 +1077,7 @@ mod tests {
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let messages = ["first", "second"]
             .map(|body| broker::send_message(&mut conn, director, worker, body).unwrap());
-        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
         let expected = messages.iter().map(|message| format!(
             "message {} was not notified to member {worker}: member {worker} has no recorded run; the next send to member {worker} or the next message wait retries it.\n",
             message.message_id,
@@ -1786,7 +1814,8 @@ mod tests {
     }
 
     fn primed_pipe(nonblocking: bool) -> (OwnedFd, OwnedFd, OwnedFd, i32) {
-        let (read_end, write_end) = nix::unistd::pipe().unwrap();
+        let (read_end, write_end) = std::io::pipe().unwrap();
+        let (read_end, write_end) = (OwnedFd::from(read_end), OwnedFd::from(write_end));
         let initial = fcntl(&write_end, FcntlArg::F_GETFL).unwrap();
         let mut flags = OFlag::from_bits_retain(initial) | OFlag::O_APPEND;
         flags.set(OFlag::O_NONBLOCK, nonblocking);
@@ -1796,7 +1825,7 @@ mod tests {
         let mut byte = [0];
         assert_eq!(nix::unistd::read(&read_end, &mut byte).unwrap(), 1);
         assert_eq!(byte, *b"x");
-        let retained = nix::unistd::dup(&write_end).unwrap();
+        let retained = write_end.try_clone().unwrap();
         let original = fcntl(&retained, FcntlArg::F_GETFL).unwrap();
         let flags = OFlag::from_bits_retain(original);
         assert!(flags.contains(OFlag::O_APPEND));
@@ -1818,6 +1847,10 @@ mod tests {
         const RECORD_LIMIT: usize = 65_536;
         /// Whole seconds that replace the 600 s full-queue limit in a test-built listener.
         const FULL_QUEUE_LIMIT_SECS: &str = "CAFLEET_TEST_CODEX_FULL_QUEUE_LIMIT_SECS";
+        const QUEUE_BUDGET_MS: &str = "CAFLEET_TEST_CODEX_QUEUE_BUDGET_MS";
+        const RETRY_MS: &str = "CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS";
+        const QUEUE_BUDGET: Duration = Duration::from_millis(1000);
+        const RETRY: Duration = Duration::from_millis(100);
         const FULL_QUEUE_REFUSAL: &str = "printf '%s\\n' '⚠ install out of sync' 'Error: queue cannot contain more than 100 submissions (code -32600)' >&2\nexit 1";
 
         /// Appends the stub's argv to the log: fields end with US, invocations with RS.
@@ -1933,9 +1966,9 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                         "CAFLEET_TEST_ISOLATED_CLI",
                         json!({"database_url": database_url, "args": args}).to_string(),
                     )
-                    .env_remove("CAFLEET_MEMBER_ID")
-                    .env_remove("CAFLEET_DATABASE_URL")
                     .env("RUST_BACKTRACE", "0")
+                    .env(QUEUE_BUDGET_MS, QUEUE_BUDGET.as_millis().to_string())
+                    .env(RETRY_MS, RETRY.as_millis().to_string())
                     .envs(env.iter().copied())
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
@@ -2069,8 +2102,8 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             let mut conn = migrated_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "codex forwarding");
             let worker = register(&mut conn, fleet, "worker", Some("%2"));
-            let url = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None)
-                .database_url;
+            let url =
+                Settings::for_database(std::path::Path::new(conn.path().unwrap())).database_url;
             Broker {
                 _dir: dir,
                 conn,
@@ -2391,13 +2424,16 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 Some(&codex_refusing_records("exec sleep 30")),
                 Launch::Session,
             );
-            assert_eq!(forwarder.wait_exit(Duration::from_secs(25)), 1);
+            assert_eq!(forwarder.wait_exit(Duration::from_secs(10)), 1);
             let elapsed = started.elapsed();
             assert!(
-                elapsed >= Duration::from_secs(10) && elapsed < Duration::from_secs(25),
+                elapsed >= QUEUE_BUDGET && elapsed < Duration::from_secs(10),
                 "{elapsed:?}"
             );
-            let diagnostic = format!("codex queue for thread {THREAD} did not finish within 10 s");
+            let diagnostic = format!(
+                "codex queue for thread {THREAD} did not finish within {} s",
+                QUEUE_BUDGET.as_secs()
+            );
             assert!(
                 forwarder.stderr().contains(&diagnostic),
                 "{}",
@@ -2457,18 +2493,18 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 ["first", "second", "third"].map(|body| broker.send(worker, director, body));
             let forwarder = start(
                 &broker,
-                &listen_args(director, Some(8)),
-                Some(&full_queue_codex(Some(3), "exit 0")),
+                &listen_args(director, Some(1)),
+                Some(&full_queue_codex(Some(2), "exit 0")),
                 Launch::Session,
             );
             assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(20)),
+                forwarder.wait_exit(Duration::from_secs(10)),
                 0,
                 "{}",
                 forwarder.stderr()
             );
             let first = queued(&broker.record_text(records[0]));
-            let mut expected = vec![first; 4];
+            let mut expected = vec![first; 3];
             expected.extend(
                 records[1..]
                     .iter()
@@ -2478,14 +2514,12 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             assert_eq!(
                 forwarder.forwarded(),
                 expected,
-                "three refusals, one acceptance, then the later records in order"
+                "two refusals, one acceptance, then the later records in order"
             );
             let gaps = forwarder.invocation_gaps();
             assert!(
-                gaps[..3]
-                    .iter()
-                    .all(|gap| *gap >= Duration::from_millis(900)),
-                "each retry waits 1 s: {gaps:?}"
+                gaps[..2].iter().all(|gap| *gap >= RETRY),
+                "each retry waits the retry interval: {gaps:?}"
             );
             assert_eq!(
                 forwarder.stdout_records(),
@@ -2681,7 +2715,8 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
             let message = broker.send(worker, director, "refused");
-            let forwarder = start(
+            let wait = Duration::from_millis(500);
+            let forwarder = start_with_env(
                 &broker,
                 &listen_args(director, None),
                 Some(&full_queue_codex(
@@ -2691,6 +2726,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                     ),
                 )),
                 Launch::Session,
+                &[(RETRY_MS, &wait.as_millis().to_string())],
             );
             assert_eq!(forwarder.wait_exit(Duration::from_secs(15)), 1);
             let stderr = forwarder.stderr();
@@ -2718,7 +2754,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             );
             let gaps = forwarder.invocation_gaps();
             assert!(
-                gaps[0] >= Duration::from_millis(900) && gaps[1] < Duration::from_millis(900),
+                gaps[0] >= wait && gaps[1] < wait,
                 "only the full-queue refusal waits: {gaps:?}"
             );
         }

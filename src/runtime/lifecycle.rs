@@ -636,6 +636,13 @@ fn launch_registered(
                 .to_str()
                 .ok_or_else(|| error("CAFleet executable requires UTF-8 path"))?
                 .into(),
+            "--database-url".into(),
+            format!(
+                "sqlite:///{}",
+                run.database_identity_json["canonical_path"]
+                    .as_str()
+                    .expect("validated database path")
+            ),
             "__member-run".into(),
             "--descriptor".into(),
             artifacts
@@ -645,16 +652,7 @@ fn launch_registered(
                 .ok_or_else(|| error("descriptor requires UTF-8 path"))?
                 .into(),
         ];
-        let environment = vec![(
-            "CAFLEET_DATABASE_URL".into(),
-            format!(
-                "sqlite:///{}",
-                run.database_identity_json["canonical_path"]
-                    .as_str()
-                    .expect("validated database path")
-            ),
-        )];
-        pane = Some(host.split_runner(&argv, &environment, deadline)?);
+        pane = Some(host.split_runner(&argv, &[], deadline)?);
         check_deadline(host.now(), deadline)?;
         let prepared = host.wait_prepared(&descriptor, deadline)?;
         check_deadline(host.now(), deadline)?;
@@ -1304,16 +1302,21 @@ mod tests {
             self.phase("split", deadline)?;
             self.argv = argv.to_vec();
             assert_eq!(argv[0], "/absolute/cafleet");
-            assert_eq!(argv[1], "__member-run");
-            assert_eq!(argv[2], "--descriptor");
-            assert!(std::path::Path::new(&argv[3]).is_absolute());
-            assert_eq!(argv.len(), 4);
-            for (key, value) in environment {
-                if key == "CAFLEET_DATABASE_URL" {
-                    assert_eq!(value, &self.database_url);
-                }
-                assert!(!value.contains("literal assignment"));
-            }
+            assert_eq!(argv[1], "--database-url");
+            assert_eq!(
+                argv[2],
+                format!(
+                    "sqlite:///{}",
+                    std::fs::canonicalize(crate::db::database_path(&self.database_url).unwrap())
+                        .unwrap()
+                        .display()
+                )
+            );
+            assert_eq!(argv[3], "__member-run");
+            assert_eq!(argv[4], "--descriptor");
+            assert!(std::path::Path::new(&argv[5]).is_absolute());
+            assert_eq!(argv.len(), 6);
+            assert!(environment.is_empty(), "{environment:?}");
             Ok("%9".into())
         }
         fn wait_prepared(
@@ -2217,7 +2220,8 @@ mod tests {
         let mut spec = fixture.spec();
         let mut host = LaunchFixtureHost::new(&fixture);
         let deadline = host.now + Duration::from_secs(10);
-        let template = "member={member_id}; literal={{member_id}}; '$x' `text` 世界";
+        let template =
+            "member={member_id}; database={database_url}; literal={{member_id}}; '$x' `text` 世界";
         let outcome = create_registered(
             &mut fixture.conn,
             &member,
@@ -2229,6 +2233,7 @@ mod tests {
                     pending.member.member_id,
                     pending.run.director_member_id,
                     "codex",
+                    "sqlite:///fixture.db",
                 )?;
                 spec.argv = vec!["/fixture/codex".into(), assignment];
                 Ok((
@@ -2245,7 +2250,7 @@ mod tests {
             [
                 "/fixture/codex".to_owned(),
                 format!(
-                    "member={}; literal={{member_id}}; '$x' `text` 世界",
+                    "member={}; database=sqlite:///fixture.db; literal={{member_id}}; '$x' `text` 世界",
                     outcome.member.member_id
                 )
             ]

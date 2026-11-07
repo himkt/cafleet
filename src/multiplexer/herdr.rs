@@ -15,10 +15,6 @@ fn is_pane_not_found(stderr: &str) -> bool {
     error_code(stderr).as_deref() == Some(PANE_NOT_FOUND)
 }
 
-fn herdr_argv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|part| part.to_string()).collect()
-}
-
 /// The herdr error envelope's `error.code`, when the stderr carries one.
 fn error_code(stderr: &str) -> Option<String> {
     let payload: Value = serde_json::from_str(stderr).ok()?;
@@ -97,6 +93,18 @@ pub(crate) struct HerdrMultiplexer {
 
 impl HerdrMultiplexer {
     pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
+        Self::with_server(runner, env, None)
+    }
+
+    pub(crate) fn for_server(runner: Rc<dyn CommandRunner>, session: &str) -> Self {
+        Self::with_server(runner, HashMap::new(), Some(session.to_owned()))
+    }
+
+    fn with_server(
+        runner: Rc<dyn CommandRunner>,
+        env: HashMap<String, String>,
+        server: Option<String>,
+    ) -> Self {
         HerdrMultiplexer {
             core: BackendCore {
                 runner,
@@ -104,6 +112,8 @@ impl HerdrMultiplexer {
                 name: "herdr",
                 session_variable: "HERDR_ENV",
                 pane_gone: is_pane_not_found,
+                server_flag: "--session",
+                server,
             },
         }
     }
@@ -132,7 +142,7 @@ impl HerdrMultiplexer {
     }
 
     fn list_panes(&self) -> Result<Vec<Value>, MultiplexerError> {
-        let result = self.run_json(&herdr_argv(&["herdr", "pane", "list"]), None)?;
+        let result = self.run_json(&self.core.argv(&["herdr", "pane", "list"]), None)?;
         panes_of(&result).cloned()
     }
 
@@ -148,24 +158,12 @@ impl HerdrMultiplexer {
         crate::multiplexer::check_deadline(deadline)?;
         self.ensure_available()?;
         crate::multiplexer::check_deadline(deadline)?;
-        let current = parse_envelope(&self.core.press_run(
-            &herdr_argv(&["herdr", "pane", "current"]),
-            deadline,
-            false,
-        )?)?;
-        let pane = &current["pane"];
-        let session = str_field(pane, "pane current", "workspace_id")?;
-        str_field(pane, "pane current", "tab_id")?;
-        str_field(pane, "pane current", "pane_id")?;
-        if session != placement.mux_session {
-            return Err(MultiplexerError::new(PLACEMENT_MISMATCH));
-        }
         let target = placement
             .mux_pane_id
             .as_deref()
             .ok_or_else(|| MultiplexerError::new("press target has no pane"))?;
         let result = parse_envelope(&self.core.press_run(
-            &herdr_argv(&["herdr", "pane", "list"]),
+            &self.core.argv(&["herdr", "pane", "list"]),
             deadline,
             false,
         )?)?;
@@ -193,19 +191,33 @@ impl HerdrMultiplexer {
         keys: &crate::multiplexer::PressKeys,
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
-        let mut argv = herdr_argv(&["herdr", "pane", "send-keys", pane_id]);
+        let mut argv = self.core.argv(&["herdr", "pane", "send-keys", pane_id]);
         argv.extend(keys.herdr_arguments());
         self.core.send_keys(&argv, deadline)
     }
 
+    /// The caller pane's context, which `herdr pane current` resolves through `HERDR_PANE_ID`.
     pub(crate) fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        let result = self.run_json(&herdr_argv(&["herdr", "pane", "current"]), None)?;
-        let pane = &result["pane"];
-        Ok(MultiplexerContext {
-            session: str_field(pane, "pane current", "workspace_id")?.to_string(),
-            window_id: str_field(pane, "pane current", "tab_id")?.to_string(),
-            pane_id: str_field(pane, "pane current", "pane_id")?.to_string(),
-        })
+        let result = self.run_json(&self.core.argv(&["herdr", "pane", "current"]), None)?;
+        current_context(&result)
+    }
+
+    pub(crate) fn pane_context(
+        &self,
+        pane: &str,
+    ) -> Result<Option<MultiplexerContext>, MultiplexerError> {
+        let argv = self
+            .core
+            .argv(&["herdr", "pane", "current", "--pane", pane]);
+        match self.core.runner.run(&argv, None) {
+            Ok(out) => current_context(&parse_envelope(&out)?).map(Some),
+            Err(crate::multiplexer::RunError::Failed { ref stderr })
+                if is_pane_not_found(stderr) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(self.core.map_error(&argv, None, error)),
+        }
     }
 
     /// Emulate tmux main-vertical: the first member splits the Director pane
@@ -243,7 +255,9 @@ impl HerdrMultiplexer {
                 let _ = self.resize_tab_column(&reference.pane_id);
             }
             self.run(
-                &herdr_argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
+                &self
+                    .core
+                    .argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
                 None,
             )?;
             Ok(())
@@ -261,7 +275,7 @@ impl HerdrMultiplexer {
         cwd: &str,
         env: &[(String, String)],
     ) -> Result<String, MultiplexerError> {
-        let mut args = herdr_argv(&[
+        let mut args = self.core.argv(&[
             "herdr",
             "pane",
             "split",
@@ -296,7 +310,9 @@ impl HerdrMultiplexer {
         anchor_pane_id: &str,
     ) -> Result<(Vec<Value>, Vec<Value>), MultiplexerError> {
         let result = self.run_json(
-            &herdr_argv(&["herdr", "pane", "layout", "--pane", anchor_pane_id]),
+            &self
+                .core
+                .argv(&["herdr", "pane", "layout", "--pane", anchor_pane_id]),
             None,
         )?;
         let layout = &result["layout"];
@@ -354,7 +370,7 @@ impl HerdrMultiplexer {
             };
             let pane_id = str_field(pane, "pane layout", "pane_id")?;
             self.run(
-                &herdr_argv(&[
+                &self.core.argv(&[
                     "herdr",
                     "pane",
                     "resize",
@@ -382,7 +398,7 @@ impl HerdrMultiplexer {
         crate::multiplexer::check_capture_lines(lines)?;
         let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
         let raw = self.run(
-            &herdr_argv(&[
+            &self.core.argv(&[
                 "herdr",
                 "pane",
                 "read",
@@ -417,7 +433,7 @@ impl HerdrMultiplexer {
     ) -> Result<Option<String>, MultiplexerError> {
         let target_tab_id = self.pane_tab_id(target_pane_id);
         self.core.run_tolerating_missing(
-            &herdr_argv(&["herdr", "pane", "close", target_pane_id]),
+            &self.core.argv(&["herdr", "pane", "close", target_pane_id]),
             ignore_missing,
             None,
         )?;
@@ -429,7 +445,7 @@ impl HerdrMultiplexer {
     /// close must proceed regardless.
     fn pane_tab_id(&self, pane_id: &str) -> Option<String> {
         let result = self
-            .run_json(&herdr_argv(&["herdr", "pane", "get", pane_id]), None)
+            .run_json(&self.core.argv(&["herdr", "pane", "get", pane_id]), None)
             .ok()?;
         result["pane"]["tab_id"].as_str().map(str::to_string)
     }
@@ -482,7 +498,7 @@ impl HerdrMultiplexer {
         }
         let pane_id = str_field(&panes[0], "pane layout", "pane_id")?;
         self.run(
-            &herdr_argv(&[
+            &self.core.argv(&[
                 "herdr",
                 "pane",
                 "resize",
@@ -497,6 +513,15 @@ impl HerdrMultiplexer {
         )?;
         Ok(())
     }
+}
+
+fn current_context(result: &Value) -> Result<MultiplexerContext, MultiplexerError> {
+    let pane = &result["pane"];
+    Ok(MultiplexerContext {
+        session: str_field(pane, "pane current", "workspace_id")?.to_string(),
+        window_id: str_field(pane, "pane current", "tab_id")?.to_string(),
+        pane_id: str_field(pane, "pane current", "pane_id")?.to_string(),
+    })
 }
 
 /// The members' right column: every pane outside the leftmost (Director)
@@ -648,10 +673,7 @@ mod tests {
         let pane = mux
             .split_window(
                 &reference(),
-                &[(
-                    "CAFLEET_DATABASE_URL".to_string(),
-                    "sqlite:///x.db".to_string(),
-                )],
+                &[("CLAUDE_CONFIG_DIR".to_string(), "/srv/claude".to_string())],
                 &argv(&["claude", "--name", "w 1"]),
             )
             .unwrap();
@@ -671,7 +693,7 @@ mod tests {
                     "--cwd",
                     &cwd(),
                     "--env",
-                    "CAFLEET_DATABASE_URL=sqlite:///x.db",
+                    "CLAUDE_CONFIG_DIR=/srv/claude",
                 ]),
                 argv(&["herdr", "pane", "run", "w1:p2", "claude --name 'w 1'"]),
             ],

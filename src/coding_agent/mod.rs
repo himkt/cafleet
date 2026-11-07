@@ -1,5 +1,6 @@
 pub(crate) mod catalog;
 pub(crate) mod detector;
+pub(crate) mod hermes;
 pub(crate) mod hermes_settlement;
 
 use crate::broker::runtime::Coverage;
@@ -22,13 +23,8 @@ use crate::config::EnvLookup;
 use crate::error::CafleetError;
 use clap::ValueEnum;
 use std::cmp::Ordering;
-use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
-use std::process::Stdio;
-use std::sync::mpsc;
-use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(test)]
@@ -38,11 +34,6 @@ pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
     fn home_dir(&self) -> PathBuf;
     fn env_var(&self, name: &str) -> Option<String>;
-    fn hermes_client_env_passthrough(
-        &self,
-        executable: &Path,
-        config_base: &Path,
-    ) -> Result<String, CafleetError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -53,20 +44,6 @@ pub(crate) enum CodingAgent {
     Opencode,
     Hermes,
 }
-
-pub(crate) const HERMES_CLIENT_ENV_PASSTHROUGH: [&str; 11] = [
-    "CAFLEET_DATABASE_URL",
-    "CAFLEET_MEMBER_ID",
-    "TMUX",
-    "TMUX_PANE",
-    "HERDR_ENV",
-    "HERDR_PANE_ID",
-    "HERDR_TAB_ID",
-    "HERDR_WORKSPACE_ID",
-    "HERDR_SOCKET_PATH",
-    "HERDR_BIN_PATH",
-    "HERDR_SESSION",
-];
 
 impl CodingAgent {
     pub(crate) fn all() -> &'static [Self] {
@@ -115,20 +92,6 @@ impl CodingAgent {
                 Ok((self.config_variable().to_owned(), value))
             })
             .transpose()
-    }
-
-    pub(crate) fn spawn_environment(
-        database_url: &str,
-        member_id: i64,
-        forwarded_config: Option<(String, String)>,
-    ) -> Vec<(String, String)> {
-        [
-            ("CAFLEET_DATABASE_URL".to_owned(), database_url.to_owned()),
-            ("CAFLEET_MEMBER_ID".to_owned(), member_id.to_string()),
-        ]
-        .into_iter()
-        .chain(forwarded_config)
-        .collect()
     }
 
     pub(crate) fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
@@ -187,9 +150,6 @@ impl CodingAgent {
             std::fs::read(&preset).map_err(|error| CafleetError::App(format!(
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;
-        }
-        if self == Self::Hermes {
-            hermes_client_env_names(probe.hermes_client_env_passthrough(&executable, &config))?;
         }
         Ok(executable)
     }
@@ -476,7 +436,7 @@ impl CodingAgent {
     }
 }
 
-const OUTPUT_BYTES: u64 = 4096;
+const OUTPUT_BYTES: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct NativeVersion(semver::Version);
@@ -528,26 +488,7 @@ pub(crate) fn native_launch_identity(
     }
 }
 
-fn bounded_output(source: impl Read + Send + 'static) -> mpsc::Receiver<std::io::Result<Vec<u8>>> {
-    let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = source
-            .take(OUTPUT_BYTES)
-            .read_to_end(&mut bytes)
-            .map(|_| bytes);
-        // The receiver is dropped once the probe has already failed at its deadline.
-        let _ = sender.send(result);
-    });
-    receiver
-}
-
-/// A native command that ran to completion within its deadline.
-pub(crate) struct BoundedOutput {
-    pub(crate) status: std::process::ExitStatus,
-    pub(crate) stdout: Vec<u8>,
-    pub(crate) stderr: Vec<u8>,
-}
+pub(crate) use crate::runtime::system::BoundedOutput;
 
 /// Runs a native command with null stdin and bounded output, returning its
 /// UTF-8 stdout or the failure detail that callers prefix with the command.
@@ -583,46 +524,18 @@ pub(crate) fn run_bounded_output(
     environment: &[(&str, &Path)],
     deadline: Instant,
 ) -> Result<BoundedOutput, String> {
-    let mut child = Command::new(executable)
-        .args(args)
-        .envs(environment.iter().copied())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|cause| format!("could not start: {cause}"))?;
-    let stdout = bounded_output(child.stdout.take().expect("piped probe stdout"));
-    let stderr = bounded_output(child.stderr.take().expect("piped probe stderr"));
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|cause| format!("wait failed: {cause}"))?
-        {
-            break status;
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            child
-                .kill()
-                .map_err(|cause| format!("timed out and could not be killed: {cause}"))?;
-            child
-                .wait()
-                .map_err(|cause| format!("timed out and could not be reaped: {cause}"))?;
-            return Err("did not finish within its deadline".into());
-        }
-        std::thread::sleep(Duration::from_millis(10).min(deadline - now));
-    };
-    let collect = |receiver: mpsc::Receiver<std::io::Result<Vec<u8>>>| {
-        receiver
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .map_err(|_| "output did not close within its deadline".to_owned())?
-            .map_err(|cause| format!("output could not be read: {cause}"))
-    };
-    Ok(BoundedOutput {
-        status,
-        stdout: collect(stdout)?,
-        stderr: collect(stderr)?,
-    })
+    use crate::runtime::system::BoundedFailure;
+    crate::runtime::system::run_until_exit(executable, args, environment, deadline, OUTPUT_BYTES)
+        .map_err(|failure| match failure {
+            BoundedFailure::NotStarted(cause) => format!("could not start: {cause}"),
+            BoundedFailure::Deadline { exited: false } => {
+                "did not finish within its deadline".into()
+            }
+            BoundedFailure::Deadline { exited: true } => {
+                "output did not close within its deadline".into()
+            }
+            BoundedFailure::Io(cause) => format!("output could not be read: {cause}"),
+        })
 }
 
 impl CodingAgent {
@@ -665,48 +578,6 @@ fn hermes_version(line: &str) -> Result<&str, &'static str> {
     NativeVersion::parse(version)
         .map(|_| version)
         .ok_or("printed a non-SemVer Hermes version")
-}
-
-pub(crate) fn hermes_client_env_names(
-    output: Result<String, CafleetError>,
-) -> Result<(), CafleetError> {
-    let missing = hermes_missing_client_env_names(output)?;
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(CafleetError::App(format!(
-            "hermes {}; run 'cafleet setup --coding-agent hermes'",
-            hermes_missing_names_phrase(&missing)
-        )))
-    }
-}
-
-/// Returns the CAFleet member names the passthrough list lacks, in canonical order.
-pub(crate) fn hermes_missing_client_env_names(
-    output: Result<String, CafleetError>,
-) -> Result<Vec<&'static str>, CafleetError> {
-    let text = output.map_err(|cause| {
-        CafleetError::App(format!(
-            "cannot read hermes configuration through 'hermes config get': {}",
-            cause.message()
-        ))
-    })?;
-    let present = serde_json::from_str::<Vec<String>>(&text).map_err(|cause| {
-        CafleetError::App(format!(
-            "cannot read hermes configuration through 'hermes config get': terminal.client_env_passthrough is not a JSON array of strings: {cause}"
-        ))
-    })?;
-    Ok(HERMES_CLIENT_ENV_PASSTHROUGH
-        .into_iter()
-        .filter(|name| !present.iter().any(|entry| entry == name))
-        .collect())
-}
-
-pub(crate) fn hermes_missing_names_phrase(missing: &[&str]) -> String {
-    format!(
-        "terminal.client_env_passthrough lacks CAFleet's member names: {}",
-        missing.join(", ")
-    )
 }
 
 pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
@@ -756,6 +627,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use crate::coding_agent::*;
+    use std::time::Duration;
 
     struct Probe {
         agent: CodingAgent,
@@ -776,15 +648,6 @@ mod tests {
         fn env_var(&self, name: &str) -> Option<String> {
             assert_eq!(name, self.agent.config_variable());
             self.config.clone()
-        }
-        fn hermes_client_env_passthrough(
-            &self,
-            executable: &Path,
-            _config_base: &Path,
-        ) -> Result<String, CafleetError> {
-            assert_eq!(self.agent, CodingAgent::Hermes);
-            assert_eq!(executable, Path::new("/fixture/bin/hermes"));
-            Ok(serde_json::json!(HERMES_CLIENT_ENV_PASSTHROUGH).to_string())
         }
     }
 
@@ -953,8 +816,6 @@ mod tests {
         assert!(coding_agent("unknown").is_none());
     }
 
-    const DATABASE_URL: &str = "sqlite:///fixture/db/registry.db";
-
     fn every_config_variable(name: &str) -> Option<String> {
         match name {
             "CLAUDE_CONFIG_DIR" => Some("/cfg/claude dir/".into()),
@@ -1009,51 +870,6 @@ mod tests {
                     agent.config_variable().to_owned(),
                     "/cfg/selected".to_owned()
                 ))
-            );
-        }
-    }
-
-    #[test]
-    fn spawn_environment_orders_database_url_member_id_then_the_forwarded_config() {
-        for &agent in CodingAgent::all() {
-            let forwarded = agent.forwarded_config(&every_config_variable).unwrap();
-            let expected = every_config_variable(agent.config_variable()).unwrap();
-            assert_eq!(
-                CodingAgent::spawn_environment(DATABASE_URL, 34, forwarded),
-                vec![
-                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
-                    ("CAFLEET_MEMBER_ID".to_owned(), "34".to_owned()),
-                    (agent.config_variable().to_owned(), expected),
-                ],
-                "{agent:?} with its config variable set"
-            );
-        }
-    }
-
-    #[test]
-    fn spawn_environment_holds_database_url_and_member_id_when_the_config_variable_is_unset() {
-        for &agent in CodingAgent::all() {
-            let forwarded = agent.forwarded_config(&|_| None).unwrap();
-            assert_eq!(
-                CodingAgent::spawn_environment(DATABASE_URL, 34, forwarded),
-                vec![
-                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
-                    ("CAFLEET_MEMBER_ID".to_owned(), "34".to_owned()),
-                ],
-                "{agent:?} with its config variable unset"
-            );
-        }
-    }
-
-    #[test]
-    fn spawn_environment_renders_the_member_id_in_decimal() {
-        for member_id in [1, 9, 10, 1234567890123] {
-            assert_eq!(
-                CodingAgent::spawn_environment(DATABASE_URL, member_id, None),
-                vec![
-                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
-                    ("CAFLEET_MEMBER_ID".to_owned(), member_id.to_string()),
-                ]
             );
         }
     }
@@ -1313,13 +1129,6 @@ mod tests {
                 assert_eq!(name, "CLAUDE_CONFIG_DIR");
                 Some(self.home.join("claude-config").display().to_string())
             }
-            fn hermes_client_env_passthrough(
-                &self,
-                _: &Path,
-                _: &Path,
-            ) -> Result<String, CafleetError> {
-                unreachable!("only the hermes preflight reads terminal.client_env_passthrough")
-            }
         }
         let backend = CodingAgent::Claude;
         let resolved = backend
@@ -1469,6 +1278,47 @@ mod tests {
         }
 
         #[test]
+        fn bounded_runs_name_an_unstartable_program_and_each_expired_deadline() {
+            let dir = tempfile::tempdir().unwrap();
+            let run = |program: &Path| {
+                let mut result = None;
+                for _ in 0..50 {
+                    let attempt = run_bounded_output(
+                        program,
+                        &[],
+                        &[],
+                        Instant::now() + Duration::from_millis(300),
+                    );
+                    match attempt {
+                        Err(cause) if cause.contains("Text file busy") => {
+                            std::thread::sleep(Duration::from_millis(20))
+                        }
+                        other => {
+                            result = Some(other);
+                            break;
+                        }
+                    }
+                }
+                result
+                    .expect("an executable stub stayed busy")
+                    .err()
+                    .expect("the bounded run fails")
+            };
+            assert!(
+                run(&dir.path().join("absent")).starts_with("could not start: "),
+                "unstartable binary"
+            );
+            assert_eq!(
+                run(&stub(dir.path(), "sleeping", "exec /bin/sleep 30")),
+                "did not finish within its deadline"
+            );
+            assert_eq!(
+                run(&stub(dir.path(), "holding", "/bin/sleep 30 & exit 0")),
+                "output did not close within its deadline"
+            );
+        }
+
+        #[test]
         fn native_version_probe_records_the_single_version_token_of_a_version_only_invocation() {
             let dir = tempfile::tempdir().unwrap();
             let path = stub(
@@ -1549,11 +1399,11 @@ mod tests {
 
         #[test]
         fn native_launch_identity_selects_the_boundary_profile_from_its_minimum_onwards() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             for boundary in BUNDLED_BOUNDARIES {
                 let backend = boundary.backend;
                 for version in std::iter::once(boundary.min_version).chain(boundary.later) {
-                    let identity = launched(backend, version, &catalog);
+                    let identity = launched(backend, version, catalog);
                     assert_eq!(identity.native_version.as_deref(), Some(version));
                     assert_eq!(
                         catalog
@@ -1574,11 +1424,11 @@ mod tests {
 
         #[test]
         fn native_launch_identity_rejects_a_known_version_below_the_lowest_boundary() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             for boundary in BUNDLED_BOUNDARIES {
                 let below = boundary.below;
                 let error =
-                    match native_launch_identity(boundary.backend, Ok(below.into()), &catalog) {
+                    match native_launch_identity(boundary.backend, Ok(below.into()), catalog) {
                         Err(error) => error,
                         Ok(_) => panic!("{:?} {below} must not launch", boundary.backend),
                     };
@@ -1610,11 +1460,11 @@ mod tests {
 
         #[test]
         fn native_launch_identity_launches_a_failed_probe_with_unknown_coverage_and_its_warning() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let failed = native_launch_identity(
                 CodingAgent::Codex,
                 Err(CafleetError::App("probe exited with status 1".into())),
-                &catalog,
+                catalog,
             )
             .unwrap_or_else(|error| panic!("a failed probe still launches: {}", error.message()));
             assert_eq!(failed.native_version, None);
@@ -1932,7 +1782,6 @@ mod tests {
         use crate::coding_agent::test_support::run_stub;
         use crate::coding_agent::tests::*;
         use serde_json::json;
-        use std::cell::RefCell;
 
         const HERMES_EFFORTS: [&str; 8] = [
             "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
@@ -2281,8 +2130,8 @@ mod tests {
                 failure.message(),
                 "hermes --version printed no Hermes version line"
             );
-            let catalog = ProfileCatalog::bundled().unwrap();
-            let identity = native_launch_identity(CodingAgent::Hermes, Err(failure), &catalog)
+            let catalog = ProfileCatalog::bundled();
+            let identity = native_launch_identity(CodingAgent::Hermes, Err(failure), catalog)
                 .unwrap_or_else(|error| {
                     panic!("a failed probe still launches: {}", error.message())
                 });
@@ -2365,56 +2214,10 @@ mod tests {
             );
         }
 
-        #[test]
-        fn hermes_spawn_environment_places_hermes_home_after_the_member_id() {
-            let lookup = |name: &str| (name == "HERMES_HOME").then(|| "/srv/hermes".to_string());
-            let forwarded = CodingAgent::Hermes.forwarded_config(&lookup).unwrap();
-            assert_eq!(
-                CodingAgent::spawn_environment(DATABASE_URL, 34, forwarded),
-                vec![
-                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
-                    ("CAFLEET_MEMBER_ID".to_owned(), "34".to_owned()),
-                    ("HERMES_HOME".to_owned(), "/srv/hermes".to_owned()),
-                ]
-            );
-        }
-
-        #[test]
-        fn hermes_client_env_passthrough_names_the_member_database_id_and_multiplexer_variables() {
-            assert_eq!(
-                HERMES_CLIENT_ENV_PASSTHROUGH,
-                [
-                    "CAFLEET_DATABASE_URL",
-                    "CAFLEET_MEMBER_ID",
-                    "TMUX",
-                    "TMUX_PANE",
-                    "HERDR_ENV",
-                    "HERDR_PANE_ID",
-                    "HERDR_TAB_ID",
-                    "HERDR_WORKSPACE_ID",
-                    "HERDR_SOCKET_PATH",
-                    "HERDR_BIN_PATH",
-                    "HERDR_SESSION",
-                ]
-            );
-        }
-
-        fn passthrough_json(names: &[&str]) -> String {
-            json!(names).to_string()
-        }
-
-        fn missing_names_error(names: &str) -> String {
-            format!(
-                "hermes terminal.client_env_passthrough lacks CAFleet's member names: {names}; run 'cafleet setup --coding-agent hermes'"
-            )
-        }
-
         struct HermesProbe {
             home: PathBuf,
             config: Option<String>,
             available: bool,
-            passthrough: Result<String, String>,
-            calls: RefCell<Vec<(PathBuf, PathBuf)>>,
         }
 
         impl SpawnProbe for HermesProbe {
@@ -2429,25 +2232,13 @@ mod tests {
                 assert_eq!(name, "HERMES_HOME");
                 self.config.clone()
             }
-            fn hermes_client_env_passthrough(
-                &self,
-                executable: &Path,
-                config_base: &Path,
-            ) -> Result<String, CafleetError> {
-                self.calls
-                    .borrow_mut()
-                    .push((executable.into(), config_base.into()));
-                self.passthrough.clone().map_err(CafleetError::App)
-            }
         }
 
-        fn hermes_probe(passthrough: Result<String, String>) -> HermesProbe {
+        fn hermes_probe() -> HermesProbe {
             HermesProbe {
                 home: PathBuf::from("/home/tester"),
                 config: None,
                 available: true,
-                passthrough,
-                calls: RefCell::new(Vec::new()),
             }
         }
 
@@ -2458,54 +2249,17 @@ mod tests {
         }
 
         #[test]
-        fn hermes_availability_reads_the_passthrough_of_the_resolved_home_once() {
-            let mut probe = hermes_probe(Ok(passthrough_json(&HERMES_CLIENT_ENV_PASSTHROUGH)));
-            assert_eq!(
-                CodingAgent::Hermes
-                    .ensure_available(&probe, "smart")
-                    .unwrap(),
-                PathBuf::from("/fixture/bin/hermes")
-            );
-            assert_eq!(
-                *probe.calls.borrow(),
-                [(
-                    PathBuf::from("/fixture/bin/hermes"),
-                    PathBuf::from("/home/tester/.hermes")
-                )]
-            );
-            probe.config = Some("/srv/hermes".into());
-            probe.calls.borrow_mut().clear();
-            CodingAgent::Hermes
-                .ensure_available(&probe, "manual")
-                .unwrap();
-            assert_eq!(
-                *probe.calls.borrow(),
-                [(
-                    PathBuf::from("/fixture/bin/hermes"),
-                    PathBuf::from("/srv/hermes")
-                )]
-            );
-        }
-
-        #[test]
-        fn hermes_availability_accepts_every_member_name_in_any_order_among_other_entries() {
-            let mut names = vec!["PATH", "LANG"];
-            names.extend(HERMES_CLIENT_ENV_PASSTHROUGH.iter().rev());
-            names.push("EDITOR");
-            for output in [
-                passthrough_json(&names),
-                format!("{}\n", passthrough_json(&HERMES_CLIENT_ENV_PASSTHROUGH)),
-            ] {
-                let probe = hermes_probe(Ok(output.clone()));
-                CodingAgent::Hermes
-                    .ensure_available(&probe, "smart")
-                    .unwrap_or_else(|error| panic!("{output}: {error}"));
+        fn hermes_availability_checks_the_home_then_the_binary() {
+            let mut probe = hermes_probe();
+            for config in [None, Some("/srv/hermes".to_owned())] {
+                probe.config = config;
+                assert_eq!(
+                    CodingAgent::Hermes
+                        .ensure_available(&probe, "smart")
+                        .unwrap(),
+                    PathBuf::from("/fixture/bin/hermes")
+                );
             }
-        }
-
-        #[test]
-        fn hermes_availability_checks_the_home_then_the_binary_before_reading_the_passthrough() {
-            let mut probe = hermes_probe(Ok(passthrough_json(&HERMES_CLIENT_ENV_PASSTHROUGH)));
             probe.config = Some("relative".into());
             assert_eq!(
                 availability_error(&probe).message(),
@@ -2517,72 +2271,6 @@ mod tests {
                 availability_error(&probe).message(),
                 "binary hermes not found on PATH"
             );
-            assert!(probe.calls.borrow().is_empty());
-        }
-
-        #[test]
-        fn hermes_availability_names_every_missing_member_name_in_canonical_order() {
-            let without_member_id = HERMES_CLIENT_ENV_PASSTHROUGH
-                .into_iter()
-                .filter(|name| *name != "CAFLEET_MEMBER_ID")
-                .collect::<Vec<_>>();
-            let cases = [
-                (
-                    passthrough_json(&without_member_id),
-                    missing_names_error("CAFLEET_MEMBER_ID"),
-                ),
-                (
-                    passthrough_json(&["HERDR_SESSION", "TMUX", "CAFLEET_DATABASE_URL"]),
-                    missing_names_error(
-                        "CAFLEET_MEMBER_ID, TMUX_PANE, HERDR_ENV, HERDR_PANE_ID, HERDR_TAB_ID, HERDR_WORKSPACE_ID, HERDR_SOCKET_PATH, HERDR_BIN_PATH",
-                    ),
-                ),
-                (
-                    passthrough_json(&[]),
-                    missing_names_error(&HERMES_CLIENT_ENV_PASSTHROUGH.join(", ")),
-                ),
-                (
-                    passthrough_json(&["cafleet_member_id", " CAFLEET_MEMBER_ID"]),
-                    missing_names_error(&HERMES_CLIENT_ENV_PASSTHROUGH.join(", ")),
-                ),
-            ];
-            for (output, expected) in cases {
-                let failure = availability_error(&hermes_probe(Ok(output.clone())));
-                assert!(matches!(failure, CafleetError::App(_)), "{output}");
-                assert_eq!(failure.exit_code(), 1, "{output}");
-                assert_eq!(failure.message(), expected, "{output}");
-            }
-        }
-
-        #[test]
-        fn hermes_availability_reports_an_unreadable_passthrough_with_its_cause() {
-            let prefix = "cannot read hermes configuration through 'hermes config get': ";
-            let failure =
-                availability_error(&hermes_probe(Err("exited with exit status: 1".to_owned())));
-            assert_eq!(failure.exit_code(), 1);
-            assert_eq!(
-                failure.message(),
-                format!("{prefix}exited with exit status: 1")
-            );
-            for output in [
-                "",
-                "not json",
-                "\"CAFLEET_DATABASE_URL\"",
-                "null",
-                "{\"mode\":\"smart\"}",
-                "[1, 2]",
-                "[\"CAFLEET_DATABASE_URL\",",
-            ] {
-                let failure = availability_error(&hermes_probe(Ok(output.into())));
-                assert!(matches!(failure, CafleetError::App(_)), "{output:?}");
-                assert_eq!(failure.exit_code(), 1, "{output:?}");
-                let cause = failure
-                    .message()
-                    .strip_prefix(prefix)
-                    .unwrap_or_else(|| panic!("{output:?}: {}", failure.message()))
-                    .to_owned();
-                assert!(!cause.is_empty(), "{output:?}");
-            }
         }
     }
 }

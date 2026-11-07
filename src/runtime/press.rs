@@ -47,8 +47,11 @@ pub(crate) fn press_member(
     deadline
         .remaining()
         .map_err(|cause| effect_error(member_id, cause, false))?;
-    let mux = crate::runtime::resolve_mux(settings)
-        .map_err(|cause| effect_error(member_id, CafleetError::App(cause.to_string()), false))?;
+    let mux = with_database_budget(conn, deadline, |conn| {
+        let member = load_member(conn, member_id)?;
+        crate::runtime::mux_for_fleet(conn, member.fleet_id, Some(deadline))
+    })
+    .map_err(|cause| effect_error(member_id, cause, false))?;
     press_member_with_mux(conn, settings, member_id, keys, deadline, &mux)
 }
 
@@ -135,7 +138,6 @@ mod tests {
     use crate::multiplexer::PressKeys;
     use crate::multiplexer::RunError;
     use crate::multiplexer::TimedRunError;
-    use crate::multiplexer::TmuxMultiplexer;
     use crate::pane_lock::PaneLock;
     use crate::runtime::press::*;
     use crate::runtime::test_support::Fixture;
@@ -143,10 +145,11 @@ mod tests {
     use nix::sys::signal::SigSet;
     use nix::sys::signal::Signal;
     use std::cell::RefCell;
-    use std::collections::HashMap;
     use std::rc::Rc;
     use std::time::Duration;
     use std::time::Instant;
+
+    const SERVER: &str = "/owned/tmux-fixture.sock";
 
     #[derive(Clone, Copy, Debug)]
     enum Mode {
@@ -206,11 +209,13 @@ mod tests {
                     "termination is deferred while press owns input"
                 );
             }
-            self.calls.borrow_mut().push(args.to_vec());
-            assert_eq!(args[0], "tmux");
+            assert_eq!(args[..3], ["tmux", "-S", SERVER], "{args:?}");
+            let args = std::iter::once(args[0].clone())
+                .chain(args[3..].iter().cloned())
+                .collect::<Vec<_>>();
+            self.calls.borrow_mut().push(args.clone());
             match args[1].as_str() {
                 "display-message" => match args.last().unwrap().as_str() {
-                    "#{session_name}|#{window_id}|#{pane_id}" => Ok("main|@1|%0\n".into()),
                     "#{pane_id}|#{window_id}|#{session_name}" => {
                         assert!(args.iter().any(|value| value == "%2"));
                         match self.mode {
@@ -257,10 +262,7 @@ mod tests {
     }
 
     fn settings(fixture: &Fixture) -> Settings {
-        Settings::for_database(
-            std::path::Path::new(fixture.conn.path().unwrap()),
-            Some("tmux"),
-        )
+        Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()))
     }
 
     fn setup(
@@ -282,13 +284,7 @@ mod tests {
             mode,
             calls: RefCell::default(),
         });
-        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-            probe.clone(),
-            HashMap::from([
-                ("TMUX".into(), "owned-fixture".into()),
-                ("TMUX_PANE".into(), "%0".into()),
-            ]),
-        ));
+        let mux = AnyMultiplexer::for_server("tmux", SERVER, probe.clone()).unwrap();
         (settings, probe, mux)
     }
 
@@ -388,7 +384,7 @@ mod tests {
         assert_eq!(value.member_id, fixture.run.member_id);
         assert_eq!(value.pane_id, "%2");
         assert_eq!(value.keys, ["Tab"]);
-        assert_eq!(probe.calls.borrow().len(), 3);
+        assert_eq!(probe.calls.borrow().len(), 2);
         assert_eq!(probe.writes(), 1);
         assert_eq!(
             crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap(),
@@ -484,7 +480,11 @@ mod tests {
     fn press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata() {
         for mode in [Mode::ChangePlacement, Mode::ExpireMetadata] {
             let mut fixture = Fixture::new();
-            let until = Instant::now() + Duration::from_secs(2);
+            let budget = match mode {
+                Mode::ExpireMetadata => Duration::from_millis(300),
+                _ => Duration::from_secs(2),
+            };
+            let until = Instant::now() + budget;
             let (settings, probe, mux) = setup(&fixture, mode, until);
             let cause = failure(press_member_with_mux(
                 &mut fixture.conn,
@@ -494,7 +494,7 @@ mod tests {
                 Deadline::until(until),
                 &mux,
             ));
-            assert_eq!(probe.calls.borrow().len(), 2);
+            assert_eq!(probe.calls.borrow().len(), 1);
             assert_eq!(probe.writes(), 0);
             assert_zero_effect(&cause, fixture.run.member_id);
             match mode {
@@ -532,7 +532,7 @@ mod tests {
                 Deadline::until(until),
                 &mux,
             ));
-            assert_eq!(probe.calls.borrow().len(), 3);
+            assert_eq!(probe.calls.borrow().len(), 2);
             assert_eq!(probe.writes(), 1);
             assert_eq!(cause.exit_code(), 1);
             match mode {

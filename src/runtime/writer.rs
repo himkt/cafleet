@@ -1710,16 +1710,9 @@ mod tests {
         }
         fixture.fixture.run =
             storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        let io = FaultIo::default();
-        let mut outbox = open(&fixture, io.clone());
         let policy=storage::evidence::EvidencePolicy::redacted(&serde_json::json!({"schema_version":1,"patterns":["absent-fixture-canary"],"sensitive_rules":[]}),&["runner-lifecycle"]).unwrap();
         let until = Instant::now() + Duration::from_secs(30);
-        let mut used = 0;
-        for sequence in 1..=4096 {
-            assert!(
-                Instant::now() < until,
-                "bounded outbox-capacity fixture exceeded its budget"
-            );
+        let large = |sequence| {
             let mut value = transition(&fixture, sequence);
             let mut raw = value.evidence_json.clone();
             raw["sensitive"] = serde_json::json!(false);
@@ -1727,19 +1720,32 @@ mod tests {
             value.evidence_json = policy.apply(&raw).unwrap();
             value.kind = RuntimeEventKind::PermissionDeniedObserved;
             value.cause_json = None;
-            let size = frame(&value).len();
-            if used + size > 16 * 1024 * 1024 {
-                let before = io.snapshot_bytes();
-                assert!(outbox.append_synced(&value, until).is_err());
-                assert_eq!(io.snapshot_bytes(), before);
-                assert!(used <= 16 * 1024 * 1024);
-                return;
-            }
-            outbox.append_synced(&value, until).unwrap();
-            used += size;
-            assert_eq!(io.byte_len().unwrap(), used as u64);
-        }
-        panic!("fixture must reach the fixed outbox capacity");
+            value
+        };
+        let mut fitting = Vec::new();
+        let mut used = 0;
+        let overflow = (1..=4096)
+            .map(large)
+            .find(|value| {
+                let size = frame(value).len();
+                if used + size > 16 * 1024 * 1024 {
+                    return true;
+                }
+                used += size;
+                fitting.push(value.clone());
+                false
+            })
+            .expect("fixture must reach the fixed outbox capacity");
+        let last = fitting.pop().unwrap();
+        let io = FaultIo::from_bytes(fitting.iter().flat_map(frame).collect());
+        let mut outbox = open(&fixture, io.clone());
+        assert!(outbox.scan(until).unwrap().incomplete_tail.is_none());
+        outbox.append_synced(&last, until).unwrap();
+        assert_eq!(io.byte_len().unwrap(), used as u64);
+        let before = io.snapshot_bytes();
+        assert!(outbox.append_synced(&overflow, until).is_err());
+        assert_eq!(io.snapshot_bytes(), before);
+        assert!(used <= 16 * 1024 * 1024);
     }
 
     #[test]

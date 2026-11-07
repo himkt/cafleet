@@ -30,6 +30,7 @@ pub(crate) struct NewPlacement {
     pub(crate) mux_window_id: String,
     pub(crate) mux_pane_id: Option<String>,
     pub(crate) coding_agent: String,
+    pub(crate) mux_server: String,
 }
 
 pub(crate) fn register_member_rows(
@@ -76,14 +77,15 @@ pub(super) fn insert_placement_row(
 ) -> Result<(), CafleetError> {
     conn.execute(
         "INSERT INTO member_placements
-         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (member_id, mux_session, mux_window_id, mux_pane_id, backend, mux_server, coding_agent, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             member_id,
             placement.mux_session,
             placement.mux_window_id,
             placement.mux_pane_id,
             placement.backend,
+            placement.mux_server,
             placement.coding_agent,
             now
         ],
@@ -93,7 +95,8 @@ pub(super) fn insert_placement_row(
 
 const MEMBER_COLUMNS: &str = "m.name, m.description, m.status, m.registered_at,
     f.director_member_id=m.member_id,
-    p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at";
+    p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at,
+    p.mux_server";
 
 fn member_row(
     row: &rusqlite::Row<'_>,
@@ -212,10 +215,10 @@ fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, 
     ))?;
     stmt.query_map([fleet_id], |row| {
         Ok(MemberActivity {
-            member: member_row(row, row.get(11)?, fleet_id)?,
-            last_sent: row.get(12)?,
-            last_recv: row.get(13)?,
-            last_ack: row.get(14)?,
+            member: member_row(row, row.get(12)?, fleet_id)?,
+            last_sent: row.get(13)?,
+            last_recv: row.get(14)?,
+            last_ack: row.get(15)?,
             idle: None,
         })
     })?
@@ -299,7 +302,7 @@ pub(crate) mod test_support {
     ) -> Result<Option<Placement>, CafleetError> {
         conn.query_row(
             "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2
-         RETURNING backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at",
+         RETURNING backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at, mux_server",
             params![pane_id, member_id],
             |row| Placement::from_row(row, 0),
         )
@@ -317,6 +320,7 @@ pub(crate) mod test_support {
             mux_window_id: "@1".into(),
             mux_pane_id: pane.map(str::to_owned),
             coding_agent: "claude".into(),
+            mux_server: "/nonexistent/cafleet-test/tmux.sock".into(),
         }
     }
 

@@ -8,10 +8,6 @@ use std::rc::Rc;
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
 
-fn tmux_argv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|part| part.to_string()).collect()
-}
-
 fn is_pane_gone(stderr: &str) -> bool {
     let lowered = stderr.to_lowercase();
     PANE_GONE_MARKERS
@@ -25,6 +21,18 @@ pub(crate) struct TmuxMultiplexer {
 
 impl TmuxMultiplexer {
     pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
+        Self::with_server(runner, env, None)
+    }
+
+    pub(crate) fn for_server(runner: Rc<dyn CommandRunner>, socket: &str) -> Self {
+        Self::with_server(runner, HashMap::new(), Some(socket.to_owned()))
+    }
+
+    fn with_server(
+        runner: Rc<dyn CommandRunner>,
+        env: HashMap<String, String>,
+        server: Option<String>,
+    ) -> Self {
         TmuxMultiplexer {
             core: BackendCore {
                 runner,
@@ -32,6 +40,8 @@ impl TmuxMultiplexer {
                 name: "tmux",
                 session_variable: "TMUX",
                 pane_gone: is_pane_gone,
+                server_flag: "-S",
+                server,
             },
         }
     }
@@ -50,22 +60,22 @@ impl TmuxMultiplexer {
         self.core.ensure_available()
     }
 
-    /// The caller pane's session, window and pane, read through `run`.
-    fn caller_context(
+    /// `pane`'s session, window and pane as `display-message` prints them.
+    fn read_context(
         &self,
-        run: impl Fn(&[String]) -> Result<String, MultiplexerError>,
+        pane: &str,
     ) -> Result<(String, Option<MultiplexerContext>), MultiplexerError> {
-        let caller = self.core.env_var("TMUX_PANE").ok_or_else(|| {
-            MultiplexerError::new("TMUX_PANE is not set; not running inside a tmux pane")
-        })?;
-        let out = run(&tmux_argv(&[
-            "tmux",
-            "display-message",
-            "-p",
-            "-t",
-            caller,
-            "#{session_name}|#{window_id}|#{pane_id}",
-        ]))?;
+        let out = self.core.run(
+            &self.core.argv(&[
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                pane,
+                "#{session_name}|#{window_id}|#{pane_id}",
+            ]),
+            None,
+        )?;
         let parts: Vec<&str> = out.trim().splitn(3, '|').collect();
         let context = match parts.as_slice() {
             [session, window_id, pane_id] => Some(MultiplexerContext {
@@ -78,6 +88,21 @@ impl TmuxMultiplexer {
         Ok((out, context))
     }
 
+    /// tmux prints `||` and exits 0 for a missing pane, so an empty field or another pane id
+    /// means the server has no such pane.
+    pub(crate) fn pane_context(
+        &self,
+        pane: &str,
+    ) -> Result<Option<MultiplexerContext>, MultiplexerError> {
+        let (out, context) = self.read_context(pane)?;
+        let context = context.ok_or_else(|| {
+            MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
+        })?;
+        let found =
+            !context.session.is_empty() && !context.window_id.is_empty() && context.pane_id == pane;
+        Ok(found.then_some(context))
+    }
+
     pub(crate) fn validate_key_target(
         &self,
         placement: &crate::broker::Placement,
@@ -86,22 +111,12 @@ impl TmuxMultiplexer {
         crate::multiplexer::check_deadline(deadline)?;
         self.ensure_available()?;
         crate::multiplexer::check_deadline(deadline)?;
-        let (_, current) =
-            self.caller_context(|argv| self.core.press_run(argv, deadline, false))?;
-        if !current.is_some_and(|context| {
-            !context.session.is_empty()
-                && !context.window_id.is_empty()
-                && !context.pane_id.is_empty()
-                && context.session == placement.mux_session
-        }) {
-            return Err(MultiplexerError::new(PLACEMENT_MISMATCH));
-        }
         let pane = placement
             .mux_pane_id
             .as_deref()
             .ok_or_else(|| MultiplexerError::new("press target has no pane"))?;
         let target = self.core.press_run(
-            &tmux_argv(&[
+            &self.core.argv(&[
                 "tmux",
                 "display-message",
                 "-p",
@@ -131,13 +146,17 @@ impl TmuxMultiplexer {
         keys: &crate::multiplexer::PressKeys,
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
-        let mut argv = tmux_argv(&["tmux", "send-keys", "-t", pane_id]);
+        let mut argv = self.core.argv(&["tmux", "send-keys", "-t", pane_id]);
         argv.extend(keys.tmux_arguments());
         self.core.send_keys(&argv, deadline)
     }
 
+    /// The caller pane's context, read through `TMUX_PANE`.
     pub(crate) fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        let (out, context) = self.caller_context(|argv| self.core.run(argv, None))?;
+        let caller = self.core.env_var("TMUX_PANE").ok_or_else(|| {
+            MultiplexerError::new("TMUX_PANE is not set; not running inside a tmux pane")
+        })?;
+        let (out, context) = self.read_context(caller)?;
         context.ok_or_else(|| {
             MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
         })
@@ -151,7 +170,7 @@ impl TmuxMultiplexer {
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError> {
-        let mut args = tmux_argv(&[
+        let mut args = self.core.argv(&[
             "tmux",
             "split-window",
             "-t",
@@ -179,7 +198,7 @@ impl TmuxMultiplexer {
             );
         }
         let _ = self.core.run(
-            &tmux_argv(&[
+            &self.core.argv(&[
                 "tmux",
                 "select-layout",
                 "-t",
@@ -201,7 +220,7 @@ impl TmuxMultiplexer {
         crate::multiplexer::check_capture_lines(lines)?;
         let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
         let raw = self.core.run(
-            &tmux_argv(&[
+            &self.core.argv(&[
                 "tmux",
                 "capture-pane",
                 "-p",
@@ -222,7 +241,7 @@ impl TmuxMultiplexer {
         ignore_missing: bool,
     ) -> Result<(), MultiplexerError> {
         self.core.run_tolerating_missing(
-            &tmux_argv(&["tmux", "kill-pane", "-t", target_pane_id]),
+            &self.core.argv(&["tmux", "kill-pane", "-t", target_pane_id]),
             ignore_missing,
             None,
         )
@@ -355,10 +374,7 @@ mod tests {
         let pane = mux
             .split_window(
                 &reference(),
-                &[(
-                    "CAFLEET_DATABASE_URL".to_string(),
-                    "sqlite:///x.db".to_string(),
-                )],
+                &[("CLAUDE_CONFIG_DIR".to_string(), "/srv/claude".to_string())],
                 &argv(&["claude", "--name", "worker"]),
             )
             .unwrap();
@@ -376,7 +392,7 @@ mod tests {
                     "#{pane_id}",
                     "-d",
                     "-e",
-                    "CAFLEET_DATABASE_URL=sqlite:///x.db",
+                    "CLAUDE_CONFIG_DIR=/srv/claude",
                     "claude",
                     "--name",
                     "worker",

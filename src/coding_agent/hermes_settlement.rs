@@ -333,22 +333,17 @@ pub(crate) fn composer_row_empty(screen: &str) -> bool {
 /// The effective Hermes home for the configuration base `base`: the directory of the file
 /// `hermes config path` names, which follows a sticky `active_profile`.
 pub(crate) fn effective_home(
-    executable: &Path,
-    base: &Path,
+    hermes: &dyn crate::coding_agent::hermes::HermesConfig,
     until: Instant,
 ) -> Result<PathBuf, CafleetError> {
-    crate::coding_agent::run_bounded(
-        executable,
-        &["config", "path"],
-        &[("HERMES_HOME", base)],
-        until,
-    )
-    .and_then(|config| home_of_config_path(config.trim()))
-    .map_err(|cause| {
-        CafleetError::App(format!(
-            "cannot read hermes configuration through 'hermes config path': {cause}"
-        ))
-    })
+    hermes
+        .config_path(until)
+        .and_then(|config| home_of_config_path(&config))
+        .map_err(|cause| {
+            CafleetError::App(format!(
+                "cannot read hermes configuration through 'hermes config path': {cause}"
+            ))
+        })
 }
 
 /// The Hermes home that owns the file `hermes config path` printed as `config_path`.
@@ -940,13 +935,8 @@ mod tests {
     fn resolved_home(body: &str) -> Result<PathBuf, CafleetError> {
         let dir = tempfile::tempdir().unwrap();
         let path = executable_stub(dir.path(), "hermes", body);
-        run_stub(|| {
-            effective_home(
-                &path,
-                Path::new("/srv/hermes"),
-                Instant::now() + Duration::from_secs(2),
-            )
-        })
+        let hermes = crate::coding_agent::hermes::HermesCli::new(path, "/srv/hermes".into());
+        run_stub(|| effective_home(&hermes, Instant::now() + Duration::from_secs(2)))
     }
 
     #[test]

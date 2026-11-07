@@ -392,11 +392,7 @@ pub(crate) mod test_support {
         let created = broker::create_fleet(
             &mut conn,
             Some("listen"),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
+            &crate::broker::members::test_support::placement(Some("%0")),
         )
         .unwrap();
         let fleet = created.fleet_id;

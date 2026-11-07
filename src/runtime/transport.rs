@@ -1552,7 +1552,7 @@ mod tests {
             let fixture = WriterFixture::new();
             let controller = ObservationController::new(
                 &fixture.fixture.run,
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 storage::evidence::EvidencePolicy::metadata(),
                 1..=256,
             )
