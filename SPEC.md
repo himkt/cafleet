@@ -205,7 +205,7 @@ Send requires integer sender and recipient flags, validated per §6.2 Messaging;
 
 #### Director-only command guard
 
-The Director-only commands are exactly `member prompt`, `member exec` and `member press` (explicit native pane input), `permission respond` (native permission answers), `input reconcile` (input-receipt settlement) and `member recover` (run reconciliation), which write into a member's live native session or its runtime record. Every other subcommand, including `permission inspect`, `input show` and `event show`, is unguarded; the lifecycle commands `member create`, `member delete`, `fleet create` and `fleet delete`, `member list` and `member capture` remain Director-owned by role.
+The Director-only commands are exactly `member prompt`, `member exec` and `member press` (explicit native pane input), `permission respond` (native permission answers), `input reconcile` (input-receipt settlement) and `member recover` (run reconciliation), which write into a member's live native session or its runtime record. Every other subcommand, including `permission inspect`, `input show` and `event show`, is unguarded; the lifecycle commands `member create`, `member delete`, `fleet create` and `fleet delete`, roster listing (`member list`) and captures (`member capture`) remain Director-owned by role.
 
 Each requires `--from-member-id <director-member-id>`, a positive integer: the caller's ID, or the pinned Director for `permission respond`. A missing or malformed value is a parse error, exit 2.
 
