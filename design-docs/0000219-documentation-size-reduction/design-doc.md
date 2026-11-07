@@ -1,7 +1,7 @@
 # Documentation Size Reduction
 
-**Status**: Approved
-**Progress**: 45/47 tasks complete
+**Status**: Complete
+**Progress**: 47/47 tasks complete
 **Last Updated**: 2026-11-07
 
 ## Overview
@@ -11,15 +11,15 @@ Reduce the byte count of `SPEC.md`, the `docs/` site, `README.md` and the `skill
 ## Success Criteria
 
 - [x] Every finding in § Work sources has a ledger row (§ Ledger) with status `applied`, `kept` or `superseded`. Every `kept` row cites one of the allowed keep reasons.
-- [ ] The PR body has a before/after `wc -c` table for every in-scope file and every always-read set (§ Metrics). Each home's percentage is shown against the soft target of ≥12%.
+- [x] The PR body has a before/after `wc -c` table for every in-scope file and every always-read set (§ Metrics). Each home's percentage is shown against the soft target of ≥12%.
 - [x] The Director always-read set shrinks by at least the bytes of the model-selection procedures moved out of `director.md`. A default spawn (fleet backend, Role default, no trigger in § Model-selection relocation) reads none of the moved text.
-- [ ] The Director's per-home meaning review passes against that home's ledger before each home commit. The fresh Reviewer approves the full branch.
+- [x] The Director's per-home meaning review passes against that home's ledger before each home commit. The fresh Reviewer approves the full branch.
 - [x] Every item that disappears in the fact-inventory diff (§ Verification) is accounted for.
 - [x] Every defect in § Defect fixes is corrected.
 - [x] The rule edits in § Rule edits are in `.claude/rules/documentation-maintenance.md` and `.claude/skills/update-readme/SKILL.md`.
 - [x] The link resolver reports no unresolved link that was resolved at baseline. `mise //docs:build`, `mise //:test` and `mise //:lint` pass.
 - [x] Every `SKILL.md` frontmatter block and every `cafleet-model-list-refresh` dependency is byte-identical to the baseline.
-- [ ] The two observation tests in § CI wait budgets assert the same behavior with CI-safe budgets and pass repeated runs under parallel load. The PR's CI `test` job passes.
+- [x] The two observation tests in § CI wait budgets assert the same behavior with CI-safe budgets and pass repeated runs under parallel load. The PR's CI `test` job passes.
 
 ---
 
@@ -405,8 +405,8 @@ Commit 0 precedes the documentation commits because the documentation-first rule
 - [x] Re-run the link resolver and the `§` reference check across every home and `.claude/` on the final tree <!-- completed: 2026-11-07T13:10 -->
 - [x] Re-run `mise //docs:build`, `mise //:test` and `mise //:lint` on the final tree <!-- completed: 2026-11-07T13:10 -->
 - [x] Measure the final bytes, and write the per-file, per-home and always-read before/after tables with the soft-target comparison and the ledger status summary <!-- completed: 2026-11-07T13:10 -->
-- [ ] The Director makes commit 6 (design doc). After the fresh Reviewer approves and the user approves publication, the Director pushes and opens the PR with the byte tables and the ledger summary <!-- completed: -->
-- [ ] Confirm that the PR's CI `test` job passes. A failure goes back to Step 2 for the failing wait, with the same identify, budget and verify cycle <!-- completed: -->
+- [x] The Director makes commit 6 (design doc). After the fresh Reviewer approves and the user approves publication, the Director pushes and opens the PR with the byte tables and the ledger summary <!-- completed: 2026-11-07T13:45 -->
+- [x] Confirm that the PR's CI `test` job passes. A failure goes back to Step 2 for the failing wait, with the same identify, budget and verify cycle <!-- completed: 2026-11-07T13:45 -->
 
 ---
 
