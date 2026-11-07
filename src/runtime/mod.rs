@@ -65,8 +65,9 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-pub(crate) fn resolve_mux() -> std::result::Result<Box<dyn Multiplexer>, MultiplexerError> {
-    resolve_multiplexer(std::env::vars().collect(), Rc::new(SystemRunner))
+pub(crate) fn resolve_mux() -> Result<Box<dyn Multiplexer>> {
+    let env = crate::multiplexer::caller_env()?;
+    Ok(resolve_multiplexer(env, Rc::new(SystemRunner))?)
 }
 
 /// The multiplexer that targets `placement`'s recorded backend and server.

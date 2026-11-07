@@ -201,7 +201,7 @@ Validate identity, ownership, reachability, storage and receipt history first; f
 
 An open/candidate interaction (`permission_request`, `question`, `trust`, `update`, `unknown_interaction`, including obscured) or earlier queued input defers with zero bytes, including Escape. A verified empty composer with a measured plan receives literal input, 500 ms settle and the measured submit key without Escape. Terminal replies leave submission valid; human input stops it with `uncertain_cause=manual_input`.
 
-A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`. Interaction/earlier-input time is excluded. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID Escape`.
+A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`. Interaction/earlier-input time is excluded. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
 
 Absent plan/profile/version probe uses fallback `submission_plan_unavailable`: Escape, settle, literal (`! ` prefix for exec), settle, Enter. Recheck interactions before each stage; permission answers require their tested plan.
 

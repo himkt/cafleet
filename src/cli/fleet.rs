@@ -118,7 +118,7 @@ fn create(
     mux_server: Option<String>,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
+    let env = crate::multiplexer::caller_env()?;
     let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
     let backend = MuxBackend::detect(lookup).map_err(|_| {
         CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
@@ -277,20 +277,20 @@ pub(crate) trait DeletionHost {
 
 /// Runs each deletion step through `mux` bounded by that step's deadline, so a Hermes
 /// settlement's budget never shortens the pane close that follows it.
-pub(crate) struct MultiplexerDeletionHost<'a> {
-    mux: &'a dyn Multiplexer,
+pub(crate) struct MultiplexerDeletionHost<M> {
+    mux: M,
     /// The bounded multiplexer of the last pane close; herdr's layout restoration reads the
     /// closed tab it recorded.
     closing: Option<Box<dyn Multiplexer>>,
 }
 
-impl<'a> MultiplexerDeletionHost<'a> {
-    pub(crate) fn new(mux: &'a dyn Multiplexer) -> Self {
+impl<M: std::ops::Deref<Target: Multiplexer>> MultiplexerDeletionHost<M> {
+    pub(crate) fn new(mux: M) -> Self {
         Self { mux, closing: None }
     }
 }
 
-impl DeletionHost for MultiplexerDeletionHost<'_> {
+impl<M: std::ops::Deref<Target: Multiplexer>> DeletionHost for MultiplexerDeletionHost<M> {
     fn settle_hermes(
         &mut self,
         conn: &Connection,
@@ -329,23 +329,20 @@ struct NativeFleetDeletionHost {
     /// Read before deletion removes the placement rows; its error surfaces only when a pane
     /// actually needs the multiplexer.
     director: Result<Placement, CafleetError>,
-    mux: Option<Box<dyn Multiplexer>>,
-    closing: Option<Box<dyn Multiplexer>>,
+    host: Option<MultiplexerDeletionHost<Box<dyn Multiplexer>>>,
 }
 
 impl NativeFleetDeletionHost {
-    fn multiplexer(&mut self) -> Result<MultiplexerDeletionHost<'_>, CafleetError> {
-        if self.mux.is_none() {
+    fn host(&mut self) -> Result<&mut MultiplexerDeletionHost<Box<dyn Multiplexer>>, CafleetError> {
+        if self.host.is_none() {
             let director = self.director.as_ref().map_err(Clone::clone)?;
-            self.mux = Some(crate::runtime::mux_for_placement(director, None)?);
+            let mux = crate::runtime::mux_for_placement(director, None)?;
+            self.host = Some(MultiplexerDeletionHost::new(mux));
         }
-        Ok(MultiplexerDeletionHost {
-            mux: self
-                .mux
-                .as_deref()
-                .expect("the multiplexer was resolved above"),
-            closing: self.closing.take(),
-        })
+        Ok(self
+            .host
+            .as_mut()
+            .expect("the multiplexer was resolved above"))
     }
 }
 
@@ -357,23 +354,18 @@ impl DeletionHost for NativeFleetDeletionHost {
         pane_id: &str,
         deadline: Deadline,
     ) -> Result<(), CafleetError> {
-        self.multiplexer()?
-            .settle_hermes(conn, run, pane_id, deadline)
+        self.host()?.settle_hermes(conn, run, pane_id, deadline)
     }
     fn close_pane(
         &mut self,
         placement: &Placement,
         deadline: Deadline,
     ) -> Result<(), CafleetError> {
-        let mut host = self.multiplexer()?;
-        host.close_pane(placement, deadline)?;
-        self.closing = host.closing;
-        Ok(())
+        self.host()?.close_pane(placement, deadline)
     }
 
     fn restore_layout(&mut self) -> Result<(), CafleetError> {
-        let mut host = self.multiplexer()?;
-        host.restore_layout()
+        self.host()?.restore_layout()
     }
 }
 
@@ -406,8 +398,6 @@ fn revalidate_member(
     }
 }
 
-/// `scope` revalidates the caller's wider deletion state, such as a fleet's
-/// placement set, before each irreversible step up to the pane close.
 /// Waits within `deadline` for the runner to finish once a settlement has ended its client: until
 /// it exits or settles the run it still holds the run, and recovery would read the member as live.
 fn await_runner_exit(
@@ -426,6 +416,8 @@ fn await_runner_exit(
     }
 }
 
+/// `scope` revalidates the caller's wider deletion state, such as a fleet's
+/// placement set, before each irreversible step up to the pane close.
 pub(crate) fn end_member(
     conn: &mut Connection,
     settings: &Settings,
@@ -461,7 +453,7 @@ pub(crate) fn end_member(
             &pane_id,
             crate::coding_agent::hermes::settlement_deadline(),
         )?;
-        *deadline = deadline.extended_by(started.elapsed());
+        *deadline = Deadline::until(deadline.instant() + started.elapsed());
         await_runner_exit(conn, run.run_id, *deadline)?;
     }
     let deadline = *deadline;
@@ -552,8 +544,7 @@ pub(crate) fn delete_fleet(
         deadline,
         &mut NativeFleetDeletionHost {
             director: broker::director_placement(conn, fleet_id),
-            mux: None,
-            closing: None,
+            host: None,
         },
     )
 }

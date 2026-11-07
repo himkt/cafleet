@@ -263,7 +263,7 @@ pub(crate) fn permission(
                 (None, Some(choice)) => AnswerKey::Choice(choice),
                 _ => unreachable!("clap requires exactly one answer argument"),
             };
-            let response = crate::runtime::respond_permission(
+            let response = crate::runtime::input_client::respond_permission_with_host(
                 conn,
                 settings,
                 &PermissionRespondInput {
@@ -281,6 +281,7 @@ pub(crate) fn permission(
                     operation_key,
                 },
                 deadline,
+                &mut crate::runtime::input_client::NativeInputHost,
             )
             .map_err(CafleetError::from)?;
             emit(

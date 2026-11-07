@@ -334,10 +334,6 @@ impl EmittedMessages {
     fn contains(&self, message_id: i64) -> bool {
         self.0.contains(&message_id)
     }
-
-    fn flushed(&mut self, message_id: i64) {
-        self.0.insert(message_id);
-    }
 }
 
 fn work_deadline(now: Instant, expiry: Option<Instant>) -> Deadline {
@@ -425,7 +421,7 @@ pub(crate) fn listen(
                     if output.session_exited() {
                         return close(clock, output, member_id, "session_exited");
                     }
-                    emitted.flushed(message_id);
+                    emitted.0.insert(message_id);
                     new_messages += 1;
                 }
             }

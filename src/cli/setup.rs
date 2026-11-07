@@ -335,7 +335,8 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
         .find(|backend| backend.agent == CodingAgent::Hermes)
         .expect("the registry includes hermes");
     std::thread::scope(|scope| {
-        let batch = hermes_batch_runs(hermes).then(|| {
+        let runs = hermes.executable.is_some() && hermes.paths.as_ref().is_ok_and(|b| b.exists());
+        let batch = runs.then(|| {
             let reader = inputs
                 .hermes
                 .expect("doctor builds a Hermes reader whenever hermes and its base resolve");
@@ -762,11 +763,6 @@ fn resolve_backends(probe: &dyn SpawnProbe, home: &Result<PathBuf, CafleetError>
 
 /// The Hermes batch's `config path` and `plugins` results.
 type HermesReading = (Result<String, String>, Result<Option<Value>, String>);
-
-/// Whether the Hermes batch may run: a resolved existing base and an executable.
-fn hermes_batch_runs(hermes: &Backend) -> bool {
-    hermes.executable.is_some() && hermes.paths.as_ref().is_ok_and(|base| base.exists())
-}
 
 /// The `info` row of a check whose backend configuration failed or whose executable is absent.
 fn unavailable(

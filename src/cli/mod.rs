@@ -83,6 +83,8 @@ struct DirectorOnly {
 }
 
 const MEMBER_FLEET: &str = "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'";
+/// Recovery also reconciles a deregistered member's run, so its subject keeps its fleet.
+const RECOVER_FLEET: &str = "SELECT fleet_id FROM members WHERE member_id=?1";
 const INPUT_FLEET: &str = "SELECT r.fleet_id FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id WHERE i.input_id=?1";
 const INTERACTION_FLEET: &str = "SELECT r.fleet_id FROM member_interactions i JOIN member_runs r ON r.run_id=i.run_id WHERE i.interaction_id=?1";
 
@@ -110,7 +112,7 @@ fn director_only(command: &Command) -> Option<DirectorOnly> {
             ..
         }) => (
             "member recover",
-            MEMBER_FLEET,
+            RECOVER_FLEET,
             member_id,
             director_member_id,
         ),
@@ -278,18 +280,16 @@ pub(crate) fn nonblank(
     }
 }
 
-fn is_blank(text: &str) -> bool {
-    text.chars()
-        .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
-}
-
 pub(crate) fn resolve_body(
     inline: Option<&str>,
     file: Option<&str>,
     flag: &str,
 ) -> Result<String, CafleetError> {
     let body = read_body(inline, file, flag)?;
-    if !is_blank(&body) {
+    if !body
+        .chars()
+        .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
+    {
         return Ok(body);
     }
     Err(match file {
@@ -1399,6 +1399,34 @@ mod tests {
                         "{name}"
                     );
                 }
+            }
+        }
+
+        #[test]
+        fn require_director_guards_member_recover_of_a_deregistered_member() {
+            let subjects = Subjects::new();
+            subjects
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                    [subjects.fixture.member],
+                )
+                .unwrap();
+            let recover = |caller: i64| {
+                subjects
+                    .commands(caller)
+                    .into_iter()
+                    .find(|(name, _)| *name == "member recover")
+                    .expect("member recover is Director-only")
+                    .1
+            };
+            subjects.check(&recover(subjects.fixture.director)).unwrap();
+            for caller in [subjects.fixture.member, 999_999] {
+                assert_eq!(
+                    subjects.check(&recover(caller)).unwrap_err().to_string(),
+                    guard_message("member recover", caller, subjects.fixture.fleet)
+                );
             }
         }
 

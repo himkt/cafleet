@@ -549,14 +549,10 @@ pub(crate) fn complete_database_budget<T>(
 ) -> Result<T, CafleetError> {
     scoped_database_budget(
         conn,
-        completion_deadline(deadline),
+        Deadline::until(deadline.instant().max(Instant::now() + COMPLETION_GRACE)),
         ScopeKind::Completion,
         operation,
     )
-}
-
-fn completion_deadline(deadline: Deadline) -> Deadline {
-    Deadline::until(deadline.instant().max(Instant::now() + COMPLETION_GRACE))
 }
 
 fn scoped_database_budget<T>(

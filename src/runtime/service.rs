@@ -1305,7 +1305,7 @@ impl RunnerLoop<'_> {
         };
         if !matches!(result, Ok(None)) {
             started(&mut self.coordinator).finish_pending_attempt();
-            self.deferred_retry.wake();
+            self.deferred_retry.next_at = None;
             let pending = self
                 .pending_input_client
                 .take()
@@ -1391,9 +1391,6 @@ impl DeferredRetry {
             self.next_at = Some(now + DEFERRED_RETRY_INTERVAL);
         }
         due
-    }
-    fn wake(&mut self) {
-        self.next_at = None;
     }
 }
 

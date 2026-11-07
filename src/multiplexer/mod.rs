@@ -158,7 +158,10 @@ pub(crate) trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-        self.run(argv, Some(whole_seconds(timeout)))
+        self.run(
+            argv,
+            Some(timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)),
+        )
     }
     fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
         let remaining = deadline
@@ -174,10 +177,6 @@ pub(crate) trait CommandRunner {
     fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
         Ok(None)
     }
-}
-
-fn whole_seconds(duration: Duration) -> u64 {
-    duration.as_secs() + u64::from(duration.subsec_nanos() > 0)
 }
 
 const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
@@ -571,6 +570,19 @@ impl MuxBackend {
 }
 
 /// The caller-environment multiplexer that `fleet create` and doctor detect.
+/// The set caller-environment variables multiplexer detection and `fleet create` read; a
+/// non-UTF-8 one fails with its name.
+pub(crate) fn caller_env()
+-> Result<std::collections::HashMap<String, String>, crate::error::CafleetError> {
+    let names =
+        "TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH HERDR_PANE_ID HERMES_SESSION_ID";
+    let set = |name: &str| Ok(crate::config::process_env(name)?.map(|value| (name.into(), value)));
+    names
+        .split(' ')
+        .filter_map(|name| set(name).transpose())
+        .collect()
+}
+
 pub(crate) fn resolve_multiplexer(
     env: std::collections::HashMap<String, String>,
     runner: Rc<dyn CommandRunner>,
