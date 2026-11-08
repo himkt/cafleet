@@ -1,7 +1,7 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 45/52 tasks complete
+**Progress**: 52/52 tasks complete
 **Last Updated**: 2026-11-08
 
 ## Overview
@@ -609,16 +609,16 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 
 ### Step 11: Live acceptance and evidence
 
-- [ ] After the profile lands, delete its implementation members, reinstall the CLI and rerun `cafleet setup --coding-agent pi` <!-- completed: -->
-- [ ] Run A-P (pi Director) <!-- completed: -->
-- [ ] Run A-M (pi Members on tmux and herdr) <!-- completed: -->
-- [ ] Rewrite the SPEC § Role eligibility pi rows and the coding-agents.md pi Role eligibility table from the observed results, recording `no` with the observed failure for a failed run, and update the dependent Notes and docs verdict mentions <!-- completed: -->
+- [x] After the profile lands, delete its implementation members, reinstall the CLI and rerun `cafleet setup --coding-agent pi` <!-- completed: 2026-11-08T02:20 -->
+- [x] Run A-P (pi Director) <!-- completed: 2026-11-08T02:20 -->
+- [x] Run A-M (pi Members on tmux and herdr) <!-- completed: 2026-11-08T02:20 -->
+- [x] Rewrite the SPEC § Role eligibility pi rows and the coding-agents.md pi Role eligibility table from the observed results, recording `no` with the observed failure for a failed run, and update the dependent Notes and docs verdict mentions <!-- completed: 2026-11-08T02:20 -->
 
 ### Step 12: Final consistency
 
-- [ ] Search SPEC, docs, skills, rules and help text for backend enumerations, and add pi to every one that is a registry copy, or rewrite it to point at the registry <!-- completed: -->
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
-- [ ] Commit `design-docs/0000220-pi-backend/design-doc.md` with the implementation <!-- completed: -->
+- [x] Search SPEC, docs, skills, rules and help text for backend enumerations, and add pi to every one that is a registry copy, or rewrite it to point at the registry <!-- completed: 2026-11-08T02:22 -->
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: 2026-11-08T02:22 -->
+- [x] Commit `design-docs/0000220-pi-backend/design-doc.md` with the implementation <!-- completed: 2026-11-08T02:22 -->
 
 ---
 

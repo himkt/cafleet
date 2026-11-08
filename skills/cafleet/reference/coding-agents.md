@@ -466,5 +466,5 @@ After a restart on the same session (`pi --continue`), re-arm with `cafleet_list
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `no` | `goal` `extension` and `listen` `extension` `subscribe` through the CAFleet pi extension (1.5.0 minimum): not established (acceptance run A-P pending) |
-| Member | `no` | The omitted `cafleet` gate mode and the pi profile from `1.5.0`: not established (acceptance run A-M pending) |
+| Director | `yes` | `goal` `extension` `/cafleet-goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both from the CAFleet pi extension under plain `pi` (1.5.0); re-arm reception after `/reload`, `/new`, `/resume`, `/fork` or `pi --continue` |
+| Member | `yes` | The omitted `cafleet` gate mode, which renders no approval form; the pi profile from `1.5.0` |

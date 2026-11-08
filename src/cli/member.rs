@@ -73,7 +73,7 @@ pub(crate) struct CreateArgs {
     /// Model passed to the backend binary.
     #[arg(long)]
     pub(super) model: Option<String>,
-    /// Reasoning-effort level (claude, codex, hermes).
+    /// Reasoning-effort level, validated against the resolved backend's levels.
     #[arg(long)]
     pub(super) effort: Option<String>,
     #[arg(long, value_name = "MODE", help = CodingAgent::permission_mode_help())]

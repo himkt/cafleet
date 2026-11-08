@@ -1507,10 +1507,10 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 | `hermes` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with ordered gateway injection on the TUI client: subscribe probe (idle wake, 70 s busy command, bursts of 3 and 10 in order) and `/exit` ending the child, 2026.9.24, checked 2026-11-06. |
 | `hermes` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `hermes` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
-| `pi` | Director | `goal` | `extension` | — | `no` | not established (acceptance run A-P pending) |
-| `pi` | Director | `listen` | `extension` | `subscribe` | `no` | not established (acceptance run A-P pending) |
-| `pi` | Director | `verdict` | — | — | `no` | `goal, listen` |
-| `pi` | Member | — | — | — | `no` | not established (acceptance run A-M pending) |
+| `pi` | Director | `goal` | `extension` | — | `yes` | CAFleet pi extension `/cafleet-goal` and goal tools under plain `pi`: set, status, pause, resume, clear, complete, automatic continuation, the no-progress stop, an interrupt pausing, manual `/compact` and `/quit` then `pi --continue` on the same session, 1.5.0 (minimum), checked 2026-11-08. A threshold compaction inside a continuation chain and a continuation by the re-arm turn after restart were not separately observed. |
+| `pi` | Director | `listen` | `extension` | `subscribe` | `yes` | CAFleet pi extension `cafleet_listen` with `followUp` delivery under plain `pi`: subscribe probe (idle wake, records during a 70 s foreground command delivered after it, burst of 3 in order), `/quit` and a pane kill ending the child and `/reload` delivering the runtime-replaced notice, 1.5.0 (minimum), checked 2026-11-08. |
+| `pi` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
+| `pi` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` gate mode, which renders no approval form: live runner acceptance on tmux and herdr (gate case table, protected directories, routed command and `member exec`, busy delivery, and `cafleet-ask` allow and deny answers), 1.5.0, checked 2026-11-08. Bundled support: the pi profile from `1.5.0`. |
 
 | Column | Values |
 |---|---|
