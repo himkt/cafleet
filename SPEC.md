@@ -1771,19 +1771,20 @@ The permission argv stays independent of the pi base, so runtime observation re-
 
 | Tool | `cafleet` | `cafleet-ask` |
 |---|---|---|
-| `bash` | Allowlist match runs; otherwise blocked | Allowlist match runs; otherwise the approval form |
+| `bash` | A command holding a control character is blocked; an allowlist match runs; otherwise blocked | A command holding a control character is blocked without a form; an allowlist match runs; otherwise the approval form |
 | `read` | Allowed for a path that is not a `.env` file | Same |
 | `grep`, `find`, `ls` | Allowed for a path that is not a `.env` file; a missing or empty `path` is `.`, pi's documented default | Same |
 | `edit`, `write` | Allowed for a path inside `ctx.cwd` that is not a `.env` file and not below a protected directory | Same |
 | A tool whose name begins with `cafleet_` | Blocked | Same |
 | Any other tool, MCP and extension tools included | Blocked | Same |
 
-`read`, `edit` and `write` require a non-empty string `path`; without one the call is blocked, because the gate cannot evaluate a path it cannot read. A path resolves against `ctx.cwd` with `path.resolve`, following no symbolic link, and is a `.env` file when its final component is `.env` or begins with `.env.`. `edit` and `write` are blocked for a path any of whose components relative to `ctx.cwd` is `.git`, `.pi`, `.agents`, `.claude`, `.codex` or `.opencode`: `.git/hooks` runs under the allowlisted `git commit *`, `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a later trusted-project pi session from the same directory, and `.claude`, `.codex` and `.opencode` hold the project configuration, such as Claude Code hooks and permission rules, that a later Claude Code, Codex or OpenCode session from the same directory loads. Leading-`!` input runs as pi's `user_bash`, outside `tool_call`, so Director-dispatched `member exec` commands stay under the Director's authorization.
+`read`, `edit` and `write` require a non-empty string `path`; without one the call is blocked, because the gate cannot evaluate a path it cannot read. A path resolves against `ctx.cwd` with `path.resolve`, following no symbolic link, and is a `.env` file when its final component, compared case-insensitively, is `.env` or begins with `.env.`. `edit` and `write` are blocked for a path any of whose components relative to `ctx.cwd`, compared case-insensitively, is `.git`, `.pi`, `.agents`, `.claude`, `.codex` or `.opencode`: `.git/hooks` runs under the allowlisted `git commit *`, `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a later trusted-project pi session from the same directory, and `.claude`, `.codex` and `.opencode` hold the project configuration, such as Claude Code hooks and permission rules, that a later Claude Code, Codex or OpenCode session from the same directory loads. The case-insensitive comparison covers a case-insensitive file system, such as the macOS default, where `.Git/hooks` names `.git/hooks`. Leading-`!` input runs as pi's `user_bash`, outside `tool_call`, so Director-dispatched `member exec` commands stay under the Director's authorization.
 
 **Block reasons.** A block reason reaches the member as the tool's error result. Besides the activation failures above, the gate returns exactly these reasons, where `<tool>` is the tool name; a file tool checks the path input, then the `.env` rule, then the working directory, then the protected directories:
 
 | Case | Reason |
 |---|---|
+| Bash command holding a control character, either mode | `the CAFleet member gate refuses a command holding a control character; route the command to the Director if it is required` |
 | Bash command not allowlisted, `cafleet` mode | `the CAFleet member gate allows only allowlisted simple commands; route the command to the Director if it is required` |
 | Bash command not allowlisted, `cafleet-ask` mode in a session without the interactive TUI | `the approval form needs the interactive pi TUI; route the command to the Director if it is required` |
 | Form answered `Deny` | `the operator denied this command` |
@@ -1803,27 +1804,26 @@ The permission argv stays independent of the pi base, so runtime observation re-
 const MEMBER_ALLOWLIST = [
   "git add *", "git commit *", "git diff *", "git grep *", "git log *", "git ls-tree *",
   "git ls-files *", "git branch *", "git status", "grep *", "ls", "ls *", "stat *",
-  "tree", "tree *", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
+  "tree", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
   "mise //:typecheck", "mise //:build", "wc *", "cafleet *",
 ];
 ```
 
 A command is allowlisted when all of these hold:
 
-1. **Simple.** The command, trimmed of surrounding whitespace, is one simple command. A lexer tracks single quotes, double quotes and backslash escapes, and splits the command into words at unquoted spaces and tabs, removing quotes and escapes; single-quoted text is literal. The command is not simple when it contains a newline or carriage return anywhere, quoted or unquoted, because bash removes a backslash-newline pair even inside double quotes; when an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)` or backtick, or a backtick inside double quotes, appears; or when a quote is unterminated. An unescaped `$` outside single quotes, unquoted or inside double quotes, is accepted only when the next character starts a name (`A-Z`, `a-z` or `_`); any other `$`, such as `$(`, `${`, `$[`, `$((`, `$'`, `$"`, `$?`, `$1`, `$$` or a trailing `$`, makes the command not simple.
-2. **Literal git and tree words.** A command whose first word is `git` or `tree` has no word holding a `$` outside single quotes or an unquoted `*`, `?`, `[` or `{`, because bash expands such a word after the gate checks it.
-3. **No command-running or file-writing option.** A `git` command has no word that begins with a single `-` and contains `O`, and no word beginning with `--` whose name before any `=` is `output` or a prefix of `open-files-in-pager` at least two characters long. A `tree` command has no word that begins with a single `-` and contains `o`. These cover `git grep -O<cmd>` (also bundled, as `-iO<cmd>`, or abbreviated, as `--open-files`), which runs a command, and `git diff`/`git log` `--output` and `tree -o`, which write chosen text to any path.
+1. **Simple.** The command holds no control character: in both launch modes, a bash command holding a C0 control character other than tab (U+0000–U+0008, U+000A–U+001F), DEL (U+007F) or a C1 control (U+0080–U+009F), anywhere and quoted or not, is blocked with the control-character reason before any allowlist check or approval form. A newline or carriage return separates commands, and bash removes a backslash-newline pair even inside double quotes; an escape sequence or carriage return would make the form render an operation other than the command bash runs. The command, trimmed of surrounding whitespace, is then one simple command. A lexer tracks single quotes, double quotes and backslash escapes, and splits the command into words at unquoted spaces and tabs, removing quotes and escapes; single-quoted text is literal. The command is not simple when an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)` or backtick, or a backtick inside double quotes, appears; or when a quote is unterminated. An unescaped `$` outside single quotes, unquoted or inside double quotes, is accepted only when the next character starts a name (`A-Z`, `a-z` or `_`); any other `$`, such as `$(`, `${`, `$[`, `$((`, `$'`, `$"`, `$?`, `$1`, `$$` or a trailing `$`, makes the command not simple.
+2. **Literal git words.** A command whose first word is `git` has no word holding a `$` outside single quotes or an unquoted `*`, `?`, `[` or `{`, because bash expands such a word after the gate checks it.
+3. **No command-running or file-writing option.** A `git` command has no word that begins with a single `-` and contains `O`, and no word beginning with `--` whose name before any `=` is `output` or a prefix of `open-files-in-pager` at least two characters long. These cover `git grep -O<cmd>` (also bundled, as `-iO<cmd>`, or abbreviated, as `--open-files`), which runs a command, and `git diff`/`git log` `--output`, which writes chosen text to any path.
 4. **Matching.** The whole trimmed command matches at least one pattern, where `*` matches any character sequence, spaces included, and every other character matches itself.
 
-A leading `NAME=value` assignment matches no pattern, so a member passes `--database-url` instead. Rule 3 also refuses harmless words such as `git log -SFOO`, which the member routes. `grep`, `ls`, `stat` and `wc` words may expand, because none of these commands has an option that runs a command or writes a file.
+A leading `NAME=value` assignment matches no pattern, so a member passes `--database-url` instead. Rule 3 also refuses harmless words such as `git log -SFOO`, which the member routes. `grep`, `ls`, `stat` and `wc` words may expand, because none of these commands has an option that runs a command or writes a file. `tree` runs only bare, because its options write files: `-o` writes the listing to a chosen path, and `-R` writes `00Tree.html` into every listed directory.
 
-**Approval form.** Under `cafleet-ask` the gate calls `ctx.ui.select(title, ["Allow once", "Deny"])` with the title:
+**Approval form.** Under `cafleet-ask` the gate calls `ctx.ui.select(title, ["Allow once", "Deny"])` for a command that holds no control character and is not allowlisted, with the title:
 
 ```
 CAFleet member gate: allow this bash command?
 
-$ <first command line>
-  <each further command line, prefixed with two spaces>
+$ <command>
 ```
 
 | Result | Gate action |
@@ -1844,7 +1844,7 @@ The form has no timeout. Concurrent bash calls of one assistant message are eval
 | Protected directories | The path check follows no symbolic link, so a link elsewhere in the cwd that targets a protected directory stays writable; an allowlisted command writes where its own tool writes, as `git` does under `.git/` |
 | Project files | Project-root configuration files such as `opencode.json` and context files such as `AGENTS.md` and `CLAUDE.md` stay writable, because members edit them as ordinary work; a later session of any backend loads what a member writes there |
 | Delivery fallback | Escape interrupts a running pi turn and cancels an open form. While coverage is `tested`, profile delivery queues instead of falling back to Escape; a `coverage=unknown` member's Escape-first delivery interrupts its run or dismisses the form |
-| Multi-line commands | Every command holding a newline is refused, including `cafleet message send` with a multi-line positional body; a member sends a multi-line body with `--file PATH` from a file written inside the cwd |
+| Multi-line commands | Every command holding a newline is blocked in both launch modes without a form, including `cafleet message send` with a multi-line positional body; a member sends a multi-line body with `--file PATH` from a file written inside the cwd |
 
 #### Contract error strings
 
@@ -2415,8 +2415,7 @@ The title, the `Allow once` and `Deny` labels and the `$ ` operation prefix are 
 ```text
  CAFleet member gate: allow this bash command?
 
- $ <first command line>
-   <each further command line>
+ $ <command>
 
  → Allow once
    Deny

@@ -34,7 +34,7 @@ const DENY = "Deny"
 const MEMBER_ALLOWLIST = [
   "git add *", "git commit *", "git diff *", "git grep *", "git log *", "git ls-tree *",
   "git ls-files *", "git branch *", "git status", "grep *", "ls", "ls *", "stat *",
-  "tree", "tree *", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
+  "tree", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
   "mise //:typecheck", "mise //:build", "wc *", "cafleet *",
 ]
 
@@ -116,9 +116,8 @@ interface Word {
 /** A `$` outside single quotes is plain parameter expansion only when a name follows it. */
 const startsName = (char: string | undefined) => char !== undefined && /[A-Za-z_]/.test(char)
 
-/** The words of `command` when it is one simple command, otherwise undefined. */
+/** The words of `command`, which holds no control character, when it is one simple command, otherwise undefined. */
 function simpleWords(command: string): Word[] | undefined {
-  if (/[\n\r]/.test(command)) return undefined
   const words: Word[] = []
   let word: Word | undefined
   let quote: "'" | '"' | undefined
@@ -178,13 +177,9 @@ function isRefusedGitWord(text: string): boolean {
   return name === "output" || (name.length >= 2 && "open-files-in-pager".startsWith(name))
 }
 
-/** True when a git or tree word expands or names an option that runs a command or writes a chosen file. */
-function hasRefusedWord(words: Word[]): boolean {
-  const program = words[0]?.text
-  if (program === "git") return words.some((word) => word.expands || isRefusedGitWord(word.text))
-  if (program === "tree") return words.some((word) => word.expands || isShortOptionWith(word.text, "o"))
-  return false
-}
+/** True when a git word expands or names an option that runs a command or writes a chosen file. */
+const hasRefusedWord = (words: Word[]) =>
+  words[0]?.text === "git" && words.some((word) => word.expands || isRefusedGitWord(word.text))
 
 const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
   (pattern) =>
@@ -213,7 +208,10 @@ function resolveToolPath(cwd: string, text: string): string {
   return resolve(cwd, text)
 }
 
-const isEnvFile = (path: string) => basename(path) === ".env" || basename(path).startsWith(".env.")
+function isEnvFile(path: string): boolean {
+  const name = basename(path).toLowerCase()
+  return name === ".env" || name.startsWith(".env.")
+}
 
 function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: string): Block | undefined {
   const changes = toolName === "edit" || toolName === "write"
@@ -234,7 +232,7 @@ function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: st
       reason: `the CAFleet member gate allows edit and write only inside the working directory; ${ROUTE_CHANGE}`,
     }
   }
-  if (inside.split(sep).some((component) => PROTECTED_DIRECTORIES.includes(component))) {
+  if (inside.split(sep).some((component) => PROTECTED_DIRECTORIES.includes(component.toLowerCase()))) {
     return {
       block: true,
       reason: `the CAFleet member gate protects .git, .pi, .agents, .claude, .codex and .opencode from edit and write; ${ROUTE_CHANGE}`,
@@ -243,12 +241,15 @@ function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: st
   return undefined
 }
 
-function approvalTitle(command: string): string {
-  const [first, ...rest] = command.split("\n")
-  return ["CAFleet member gate: allow this bash command?", "", `$ ${first}`, ...rest.map((line) => `  ${line}`)].join(
-    "\n",
-  )
+const CONTROL_CHARACTER = /[\x00-\x08\x0a-\x1f\x7f-\x9f]/
+
+/** The block for a command that neither mode runs or shows in a form, otherwise undefined. */
+function controlBlock(command: string): Block | undefined {
+  if (!CONTROL_CHARACTER.test(command)) return undefined
+  return { block: true, reason: `the CAFleet member gate refuses a command holding a control character; ${ROUTE_COMMAND}` }
 }
+
+const approvalTitle = (command: string) => `CAFleet member gate: allow this bash command?\n\n$ ${command}`
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag(GATE_FLAG, {
@@ -426,6 +427,8 @@ export default function (pi: ExtensionAPI) {
   })
 
   async function gateBash(command: string, mode: GateMode, ctx: ExtensionContext): Promise<Block | undefined> {
+    const refused = controlBlock(command)
+    if (refused) return refused
     if (isAllowlisted(command)) return undefined
     if (mode === "cafleet") {
       return {

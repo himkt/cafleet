@@ -198,7 +198,7 @@ The extension registers the string flag `--cafleet-gate`. On `session_start` the
 |---|---|
 | Absent (a Director or an operator session) | Inert: every `tool_call` passes through the gate untouched |
 | `cafleet` | Enforces §3.3 with §3.4 for bash |
-| `cafleet-ask` | Enforces §3.3, and opens the §3.5 form for bash commands that §3.4 does not allow |
+| `cafleet-ask` | Enforces §3.3, and opens the §3.5 form for a bash command that holds no control character and that §3.4 does not allow |
 | Any other value | Blocks every tool call with `the CAFleet member gate received an unknown --cafleet-gate value '<value>'` |
 | Reading the flag fails | Blocks every tool call with `the CAFleet member gate could not read --cafleet-gate: <cause>` |
 
@@ -222,7 +222,7 @@ An active gate shows `ctx.ui.setStatus("cafleet-gate", "cafleet gate: <mode>")`,
 
 | Tool | `cafleet` | `cafleet-ask` |
 |---|---|---|
-| `bash` | §3.4 allow, otherwise block | §3.4 allow, otherwise the §3.5 form |
+| `bash` | Block a command holding a control character (§3.4 rule 1); §3.4 allow, otherwise block | Block a command holding a control character without a form; §3.4 allow, otherwise the §3.5 form |
 | `read` | Allow a path that is not a `.env` file | Same |
 | `grep`, `find`, `ls` | Allow a path that is not a `.env` file; a missing or empty `path` is `.`, pi's documented default | Same |
 | `edit`, `write` | Allow a path inside `ctx.cwd` that is not a `.env` file and not below a protected directory | Same |
@@ -230,8 +230,8 @@ An active gate shows `ctx.ui.setStatus("cafleet-gate", "cafleet gate: <mode>")`,
 | Any other tool, MCP and extension tools included | Block | Same |
 
 - **Path input.** `read`, `edit` and `write` require a non-empty string `path`. Without one, the call is blocked, because the gate cannot evaluate a path it cannot read.
-- A path resolves against `ctx.cwd` with `path.resolve`, without following symbolic links. A path is a `.env` file when its final component is `.env` or begins with `.env.`.
-- **Protected directories.** `edit` and `write` are blocked for a path any of whose components, relative to `ctx.cwd`, is `.git`, `.pi`, `.agents`, `.claude`, `.codex` or `.opencode`. These directories hold code and configuration that later run outside the allowlist:
+- A path resolves against `ctx.cwd` with `path.resolve`, without following symbolic links. A path is a `.env` file when its final component, compared case-insensitively, is `.env` or begins with `.env.`.
+- **Protected directories.** `edit` and `write` are blocked for a path any of whose components, relative to `ctx.cwd` and compared case-insensitively, is `.git`, `.pi`, `.agents`, `.claude`, `.codex` or `.opencode`. CAFleet ships a macOS build, and the default macOS file system is case-insensitive, so `.Git/hooks/pre-commit` names the `.git` hook; Git guards `.GIT` for the same reason. These directories hold code and configuration that later run outside the allowlist:
   - `.git/hooks/*` runs under the allowlisted `git commit *`.
   - `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a trusted-project pi session started from the same directory, such as the Director on its next start or `/reload` (pi `docs/security.md` § Resources protected by project trust).
   - `.claude`, `.codex` and `.opencode` hold the project configuration of the other backends, such as Claude Code hooks and permission rules, which a Claude Code, Codex or OpenCode session of a mixed-backend fleet loads from the same directory.
@@ -243,6 +243,7 @@ An active gate shows `ctx.ui.setStatus("cafleet-gate", "cafleet gate: <mode>")`,
 
 | Case | Reason |
 |---|---|
+| bash command holding a control character, either mode | `the CAFleet member gate refuses a command holding a control character; route the command to the Director if it is required` |
 | bash command not allowlisted, `cafleet` mode | `the CAFleet member gate allows only allowlisted simple commands; route the command to the Director if it is required` |
 | bash command not allowlisted, `cafleet-ask` mode in a session without the interactive TUI | `the approval form needs the interactive pi TUI; route the command to the Director if it is required` |
 | Form answered `Deny` | `the operator denied this command` |
@@ -258,6 +259,15 @@ An active gate shows `ctx.ui.setStatus("cafleet-gate", "cafleet gate: <mode>")`,
 
 Each bash and file-tool reason that the gate decides without the form ends with a routing clause, so the member follows member routing: `route the command` for bash, `route the read` for `read`, `grep`, `find` and `ls`, and `route the change` for `edit` and `write`.
 
+**Case-insensitive file-tool cases.** Both launch modes return these outcomes:
+
+| Call | Outcome | Reason |
+|---|---|---|
+| `write` to `.Git/hooks/x` | Blocked | The protected-directory reason; `.Git` compares equal to `.git` |
+| `read` of `.ENV` | Blocked | The `.env` reason for `read`; `.ENV` compares equal to `.env` |
+| `write` to `.ENV` | Blocked | The `.env` reason for `write` |
+| `write` to `src/.Github/x.yml` | Allowed | `.github` is no protected directory |
+
 #### 3.4 Bash allowlist and matching
 
 The allowlist translates the OpenCode `cafleet` preset's shell allowlist and is the gate's content contract:
@@ -266,29 +276,28 @@ The allowlist translates the OpenCode `cafleet` preset's shell allowlist and is 
 const MEMBER_ALLOWLIST = [
   "git add *", "git commit *", "git diff *", "git grep *", "git log *", "git ls-tree *",
   "git ls-files *", "git branch *", "git status", "grep *", "ls", "ls *", "stat *",
-  "tree", "tree *", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
+  "tree", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
   "mise //:typecheck", "mise //:build", "wc *", "cafleet *",
 ];
 ```
 
 A command is *allowlisted* when all of these hold:
 
-1. **Simple.** The command, trimmed of surrounding whitespace, is a single simple command.
+1. **Simple.** The command holds no control character, and, trimmed of surrounding whitespace, is a single simple command.
+   - **Control characters.** In both launch modes, a bash command holding a C0 control character other than tab (U+0000–U+0008, U+000A–U+001F), DEL (U+007F) or a C1 control (U+0080–U+009F), anywhere and quoted or not, is blocked with the control-character reason (§3.3) before any allowlist check or approval form. A newline or carriage return separates commands, and bash removes a backslash-newline pair even inside double quotes. pi 1.5.0 passes the form title to the terminal without stripping control sequences, so an escape sequence or carriage return would render an operation other than the command bash runs.
    - A lexer tracks single quotes, double quotes and backslash escapes, and splits the command into words at unquoted spaces and tabs, removing quotes and escapes.
-   - The command is not simple when it contains a newline or carriage return anywhere, quoted or unquoted, because bash removes a backslash-newline pair even inside double quotes.
-   - The command is also not simple when an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)` or backtick, or a backtick inside double quotes, appears, or when a quote is unterminated.
+   - The command is not simple when an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)` or backtick, or a backtick inside double quotes, appears, or when a quote is unterminated.
    - **The `$` rule.** An unescaped `$` outside single quotes, unquoted or inside double quotes, is accepted only when the next character starts a name (`A-Z`, `a-z` or `_`). Any other `$` makes the command not simple: `$[`, `$(`, `${`, `$'`, `$"`, `$((`, `$?`, `$1`, `$$` and a trailing `$` among them. The rule is an allow-list, because several `$` forms hide a command substitution from the lexer, such as the legacy arithmetic expansion `$[...]`, which bash expands even inside its single quotes.
    - Single-quoted text is literal.
-2. **Literal git and tree words.** A command whose first word is `git` or `tree` has no word holding a `$` outside single quotes or an unquoted `*`, `?`, `[` or `{`. Bash expands such a word after the gate checks it, so parameter, brace and pathname expansion could build an option word the gate never sees; a member can create a file named `-O<cmd>` with `write`.
+2. **Literal git words.** A command whose first word is `git` has no word holding a `$` outside single quotes or an unquoted `*`, `?`, `[` or `{`. Bash expands such a word after the gate checks it, so parameter, brace and pathname expansion could build an option word the gate never sees; a member can create a file named `-O<cmd>` with `write`.
 3. **No command-running or file-writing option.** These options run a command or write chosen text to any path, including the protected directories and paths outside the cwd:
    - A `git` command has no word that begins with a single `-` and contains `O` (`git grep -O<cmd>`, also bundled as `-iO<cmd>`), and no word beginning with `--` whose name before any `=` is `output` or a prefix of `open-files-in-pager` at least two characters long, because git grep accepts abbreviated long options.
-   - A `tree` command has no word that begins with a single `-` and contains `o` (`tree -o <file>`, also bundled as `-ao`).
    - The rule over-blocks harmless words such as `git log -SFOO`, which the member routes.
 4. **Matching.** The whole trimmed command matches at least one pattern, where `*` matches any character sequence, spaces included, and every other character matches itself.
 
-`grep`, `ls`, `stat` and `wc` keep globs and `$NAME`, because none of them has an option that runs a command or writes a file. The lexer makes compound-command handling a decided rule. OpenCode records compound matching as unverified. A leading `NAME=value` assignment matches no pattern, so a member passes `--database-url` instead.
+`grep`, `ls`, `stat` and `wc` keep globs and `$NAME`, because none of them has an option that runs a command or writes a file. `tree` runs only bare, through the exact `tree` pattern, because its options write files: `-o` writes the listing to a chosen path, and `-R` writes `00Tree.html` into every listed directory, protected directories included. The lexer makes compound-command handling a decided rule. OpenCode records compound matching as unverified. A leading `NAME=value` assignment matches no pattern, so a member passes `--database-url` instead.
 
-**Gate case table.** The project's tests are Rust-only and the gate is TypeScript, so A-M runs this table through a gated member as the gate's acceptance check (§7). `<own id>` is the member's literal ID, and `<newline>` is a line break inside the command.
+**Gate case table.** The project's tests are Rust-only and the gate is TypeScript, so A-M runs this table through a gated member as the gate's acceptance check (§7). `<own id>` is the member's literal ID, `<newline>` is a line break inside the command, and `<ESC>` is the byte U+001B.
 
 | # | Command | Outcome under `cafleet` | Rule |
 |---|---|---|---|
@@ -301,52 +310,56 @@ A command is *allowlisted* when all of these hold:
 | 7 | `ls *.md` | Allowed | `ls` words may hold a glob |
 | 8 | `git grep -e 'a*b' -- '*.rs'` | Allowed | A single-quoted glob is literal |
 | 9 | `cafleet message poll <own id> --json` | Allowed | `cafleet *` |
-| 10 | `git status; rm x` | Blocked | Unquoted `;` |
-| 11 | `git status && true` | Blocked | Unquoted `&` |
-| 12 | <code>git log &#124; head</code> | Blocked | Unquoted pipe |
-| 13 | `ls > f` | Blocked | Unquoted `>` |
-| 14 | `git log $(id)` | Blocked | `$` rule: unquoted `$(` |
-| 15 | `git log "$(id)"` | Blocked | `$` rule: `$(` inside double quotes |
-| 16 | ``git log `id` `` | Blocked | Backtick |
-| 17 | `ls "a` | Blocked | Unterminated quote |
-| 18 | `git status` and `ls` on two lines | Blocked | Newline |
-| 19 | `git log "--\<newline>output=f"` | Blocked | Newline inside double quotes (bash removes the backslash-newline pair) |
-| 20 | `git grep "--\<newline>open-files-in-pager=echo x" -e y` | Blocked | Newline inside double quotes |
-| 21 | `tree "\<newline>-o" f` | Blocked | Newline inside double quotes |
-| 22 | `ls $'\'' ; echo BYPASSED # '` | Blocked | `$` rule: unquoted `$'` (ANSI-C quoting) |
-| 23 | `ls $"a;b"` | Blocked | `$` rule: unquoted `$"` (locale quoting) |
-| 24 | `ls "${HOME}"` | Blocked | `$` rule: `${` inside double quotes |
-| 25 | `git grep "${HOME/*/-Oecho x}" -e y` | Blocked | `$` rule: `${` inside double quotes (parameter expansion) |
-| 26 | `ls $['$(id)'0]` | Blocked | `$` rule: unquoted `$[` (legacy arithmetic expansion) |
-| 27 | `stat $[a['$(id)']]` | Blocked | `$` rule: unquoted `$[` (array subscript inside arithmetic) |
-| 28 | `ls "$[1]"` | Blocked | `$` rule: `$[` inside double quotes |
-| 29 | `ls $?` | Blocked | `$` rule: a special parameter |
-| 30 | `git log "$HOME"` | Blocked | A git word holds `$` |
-| 31 | `git grep {-O,-O}"echo x" -e y` | Blocked | A git word holds an unquoted `{` (brace expansion) |
-| 32 | `git grep -e y *` | Blocked | A git word holds an unquoted `*` (pathname expansion) |
-| 33 | `git grep -O"echo x" -e y` | Blocked | A single-dash git word contains `O` |
-| 34 | `git grep -iO"echo x" -e y` | Blocked | A single-dash git word contains `O` (bundled) |
-| 35 | `git grep --open-files="echo x" -e y` | Blocked | `--open-files` abbreviates `--open-files-in-pager` |
-| 36 | `git diff --output=f` | Blocked | `--output=` |
-| 37 | `git log --output f` | Blocked | `--output` |
-| 38 | `tree -o f` | Blocked | A single-dash tree word contains `o` |
-| 39 | `tree -ao f` | Blocked | A single-dash tree word contains `o` (bundled) |
-| 40 | `FOO=1 cafleet message poll <own id>` | Blocked | Leading assignment matches no pattern |
-| 41 | `git push` | Blocked | No pattern matches |
-| 42 | `echo hi` | Blocked | No pattern matches |
+| 10 | `tree` | Allowed | Exact pattern |
+| 11 | `git status; rm x` | Blocked | Unquoted `;` |
+| 12 | `git status && true` | Blocked | Unquoted `&` |
+| 13 | <code>git log &#124; head</code> | Blocked | Unquoted pipe |
+| 14 | `ls > f` | Blocked | Unquoted `>` |
+| 15 | `git log $(id)` | Blocked | `$` rule: unquoted `$(` |
+| 16 | `git log "$(id)"` | Blocked | `$` rule: `$(` inside double quotes |
+| 17 | ``git log `id` `` | Blocked | Backtick |
+| 18 | `ls "a` | Blocked | Unterminated quote |
+| 19 | `git status` and `ls` on two lines | Blocked in both modes, no form | Control character: newline |
+| 20 | `git log "--\<newline>output=f"` | Blocked in both modes, no form | Control character: newline inside double quotes (bash removes the backslash-newline pair) |
+| 21 | `git grep "--\<newline>open-files-in-pager=echo x" -e y` | Blocked in both modes, no form | Control character: newline inside double quotes |
+| 22 | `tree "\<newline>-o" f` | Blocked in both modes, no form | Control character: newline inside double quotes |
+| 23 | `ls <ESC>[2K` | Blocked in both modes, no form | Control character: ESC |
+| 24 | `ls $'\'' ; echo BYPASSED # '` | Blocked | `$` rule: unquoted `$'` (ANSI-C quoting) |
+| 25 | `ls $"a;b"` | Blocked | `$` rule: unquoted `$"` (locale quoting) |
+| 26 | `ls "${HOME}"` | Blocked | `$` rule: `${` inside double quotes |
+| 27 | `git grep "${HOME/*/-Oecho x}" -e y` | Blocked | `$` rule: `${` inside double quotes (parameter expansion) |
+| 28 | `ls $['$(id)'0]` | Blocked | `$` rule: unquoted `$[` (legacy arithmetic expansion) |
+| 29 | `stat $[a['$(id)']]` | Blocked | `$` rule: unquoted `$[` (array subscript inside arithmetic) |
+| 30 | `ls "$[1]"` | Blocked | `$` rule: `$[` inside double quotes |
+| 31 | `ls $?` | Blocked | `$` rule: a special parameter |
+| 32 | `git log "$HOME"` | Blocked | A git word holds `$` |
+| 33 | `git grep {-O,-O}"echo x" -e y` | Blocked | A git word holds an unquoted `{` (brace expansion) |
+| 34 | `git grep -e y *` | Blocked | A git word holds an unquoted `*` (pathname expansion) |
+| 35 | `git grep -O"echo x" -e y` | Blocked | A single-dash git word contains `O` |
+| 36 | `git grep -iO"echo x" -e y` | Blocked | A single-dash git word contains `O` (bundled) |
+| 37 | `git grep --open-files="echo x" -e y` | Blocked | `--open-files` abbreviates `--open-files-in-pager` |
+| 38 | `git diff --output=f` | Blocked | `--output=` |
+| 39 | `git log --output f` | Blocked | `--output` |
+| 40 | `tree -o f` | Blocked | No pattern matches |
+| 41 | `tree -ao f` | Blocked | No pattern matches |
+| 42 | `tree -R -L 1` | Blocked | No pattern matches |
+| 43 | `FOO=1 cafleet message poll <own id>` | Blocked | Leading assignment matches no pattern |
+| 44 | `git push` | Blocked | No pattern matches |
+| 45 | `echo hi` | Blocked | No pattern matches |
 
-Each blocked case returns the §3.3 bash reason, and none of them runs. Under `cafleet-ask` every blocked case opens the §3.5 form instead.
+None of the blocked cases runs. A control-character case returns the control-character reason in both launch modes and opens no form. Every other blocked case returns the `cafleet` bash reason (§3.3), and under `cafleet-ask` opens the §3.5 form instead.
 
 #### 3.5 The `cafleet-ask` approval form
 
-The gate calls `ctx.ui.select(title, ["Allow once", "Deny"])` with this CAFleet-authored title:
+For a bash command that holds no control character and is not allowlisted, the gate calls `ctx.ui.select(title, ["Allow once", "Deny"])` with this CAFleet-authored title:
 
 ```
 CAFleet member gate: allow this bash command?
 
-$ <first command line>
-  <each further command line, prefixed with two spaces>
+$ <command>
 ```
+
+A command holding a control character never reaches the form (§3.4 rule 1), so the title shows the command on one line, exactly as bash runs it.
 
 | Result | Gate action |
 |---|---|
@@ -364,13 +377,13 @@ $ <first command line>
 
 | Surface | Limit |
 |---|---|
-| Allowed tooling | An allowed command also runs the code and hooks it executes: `mise //:test *` runs workspace test code, and `git commit *` runs `.git/hooks`. §3.4 refuses the git and tree options that run a command or write a chosen file |
+| Allowed tooling | An allowed command also runs the code and hooks it executes: `mise //:test *` runs workspace test code, and `git commit *` runs `.git/hooks`. §3.4 refuses the git options that run a command or write a chosen file, and allows `tree` only bare |
 | No sandbox | pi has no OS sandbox. `read`/`grep`/`find`/`ls` reach any path, and a symbolic link inside the cwd can target a path outside it |
 | `.env` files | The `.env` rule refuses only a `read`, `grep`, `find`, `ls`, `edit` or `write` call whose path names a `.env` file. A directory search (`grep` on `.`) and allowlisted commands (`grep '' .env`, `git grep`, `git diff`, `git log -p` on a tracked `.env`) still read `.env` contents |
 | Protected directories | `edit` and `write` are blocked below `.git/`, `.pi/`, `.agents/`, `.claude/`, `.codex/` and `.opencode/` in both launch modes (§3.3), so a member cannot plant a Git hook, a project pi resource or another backend's project configuration that a later session runs. The path check follows no symbolic link, so a link elsewhere in the cwd that targets one of these directories stays writable. An allowlisted command writes where its own tool writes, as `git` does under `.git/` |
 | Project files | Project-root configuration files such as `opencode.json` and context files such as `AGENTS.md` and `CLAUDE.md` stay writable, because members edit them as ordinary work. A later session of any backend loads what a member writes there |
 | Delivery fallback | Escape interrupts a running pi turn and cancels an open form. While coverage is `tested`, profile delivery queues instead of falling back to Escape; a `coverage=unknown` member's Escape-first delivery interrupts its run or dismisses the form |
-| Multi-line commands | Every command holding a newline is refused, including `cafleet message send` with a multi-line positional body (observed in the round-2 re-check). A member sends a multi-line body with `--file PATH` from a file written inside the cwd |
+| Multi-line commands | Every command holding a newline is blocked in both launch modes without a form, including `cafleet message send` with a multi-line positional body (observed in the round-2 re-check). A member sends a multi-line body with `--file PATH` from a file written inside the cwd |
 
 ### 4. Director extension
 
@@ -528,10 +541,10 @@ Fixtures live in `src/coding_agent/native/pi.json` with ids `pi-1.5.0-<screen>-<
 | Note | Applies at |
 |---|---|
 | The CAFleet pi extension (`<base>/extensions/cafleet.ts` with its `cafleet.executable` record) auto-loads in every pi session. It provides `cafleet_listen`, `cafleet_ask`, `/cafleet-goal` and the goal tools, each verifying its literal `director_id` and otherwise refusing with `cafleet tools run only in a Director session: <stderr>` | `{decision_surface}`; `cafleet/reference/cli.md` § `setup` and `doctor`; `cafleet/roles/director.md` § Director wake; `cafleet/roles/member.md` § Reconsider, then route |
-| Default `cafleet` mode (class `auto`): the member gate runs each allowlisted simple command. It blocks every other bash command, including any command holding a newline or carriage return, quoted or not, any `$` outside single quotes that is not followed by a name character (`A-Z`, `a-z` or `_`), such as `$(`, `${`, `$[`, `$'`, `$?` or `$1`, a `git` or `tree` word holding `$` or an unquoted `*`, `?`, `[` or `{`, and the options `git grep -O`/`--open-files-in-pager`, `--output` and `tree -o`, with a reason ending in `route the command to the Director if it is required`, and every tool outside bash, read, grep, find, ls, edit and write. `read`, `edit` and `write` need a non-empty `path`, and a file-tool reason ends in `route the read …` or `route the change …`. Route a required blocked command or file access | `{permission_flags}`; `cafleet/roles/member.md` § Reconsider, then route; `cafleet/roles/director.md` § Director-side dispatch |
-| In both launch modes, `edit` and `write` are blocked below `.git/`, `.pi/`, `.agents/`, `.claude/`, `.codex/` and `.opencode/` with `the CAFleet member gate protects .git, .pi, .agents, .claude, .codex and .opencode from edit and write; route the change to the Director if it is required`, because Git hooks, project pi resources and other backends' project configuration run outside the allowlist in later sessions. Project-root files such as `opencode.json`, `AGENTS.md` and `CLAUDE.md` stay writable. The path check follows no symbolic link. The `.env` rule refuses only a file-tool call whose path names a `.env` file; a directory search and allowlisted commands such as `grep '' .env` or `git diff` still read `.env` contents | `{permission_flags}`; `cafleet/roles/member.md` § Reconsider, then route; `cafleet/roles/director.md` § Director-side dispatch |
+| Default `cafleet` mode (class `auto`): the member gate runs each allowlisted simple command, with `tree` only bare. It blocks every other bash command, including any `$` outside single quotes that is not followed by a name character (`A-Z`, `a-z` or `_`), such as `$(`, `${`, `$[`, `$'`, `$?` or `$1`, a `git` word holding `$` or an unquoted `*`, `?`, `[` or `{`, and the options `git grep -O`/`--open-files-in-pager` and `--output`, with a reason ending in `route the command to the Director if it is required`, and every tool outside bash, read, grep, find, ls, edit and write. In both launch modes, a command holding a C0 control character other than tab, DEL or a C1 control, such as a newline, carriage return or ESC, quoted or not, is blocked without a form with `the CAFleet member gate refuses a command holding a control character; route the command to the Director if it is required`. `read`, `edit` and `write` need a non-empty `path`, and a file-tool reason ends in `route the read …` or `route the change …`. Route a required blocked command or file access | `{permission_flags}`; `cafleet/roles/member.md` § Reconsider, then route; `cafleet/roles/director.md` § Director-side dispatch |
+| In both launch modes, `edit` and `write` are blocked below `.git/`, `.pi/`, `.agents/`, `.claude/`, `.codex/` and `.opencode/`, compared case-insensitively (`.Git/hooks` included), with `the CAFleet member gate protects .git, .pi, .agents, .claude, .codex and .opencode from edit and write; route the change to the Director if it is required`, because Git hooks, project pi resources and other backends' project configuration run outside the allowlist in later sessions. Project-root files such as `opencode.json`, `AGENTS.md` and `CLAUDE.md` stay writable. The path check follows no symbolic link. The `.env` rule refuses only a file-tool call whose path names a `.env` file, compared case-insensitively (`.ENV` included); a directory search and allowlisted commands such as `grep '' .env` or `git diff` still read `.env` contents | `{permission_flags}`; `cafleet/roles/member.md` § Reconsider, then route; `cafleet/roles/director.md` § Director-side dispatch |
 | The gate refuses a bash command holding a newline, so a pi member sends a one-line body as the positional `TEXT`, and a multi-line body with `--file PATH` from a file it writes inside the working directory | `cafleet/SKILL.md` § Send (Unicast); `cafleet/reference/cli.md` § `message send` |
-| Explicit `cafleet-ask` (class `manual`): an unmatched bash command opens the `CAFleet member gate` form. The member waits while the Director answers it; a deny returns `the operator denied this command` to the member, which continues its run | `{permission_flags}`; `cafleet/roles/director.md` § Consume observed interactions; `cafleet/roles/member.md` § Native interactions |
+| Explicit `cafleet-ask` (class `manual`): an unmatched bash command without a control character opens the `CAFleet member gate` form. The member waits while the Director answers it; a deny returns `the operator denied this command` to the member, which continues its run | `{permission_flags}`; `cafleet/roles/director.md` § Consume observed interactions; `cafleet/roles/member.md` § Native interactions |
 | A pane runs `pi --cafleet-gate <mode> --no-approve --tui-mode fullscreen --name <name>`. Optional `--model` and `--thinking` follow, then `--` and the prompt, as a fresh session. `member create` forwards a set `PI_CODING_AGENT_DIR`, and a gated member whose extension cannot register `--cafleet-gate` exits at startup (`runner_exited`) | `{permission_flags}`; `cafleet/reference/cli.md` § `member create` |
 | Leading-`!` input runs the command and stores its output without starting a turn. After `member exec`, send an explicit continuation message so the member acts on the output | `cafleet/roles/director.md` § Director-side dispatch; `cafleet/reference/cli.md` § `member exec` |
 | Escape interrupts a running pi turn and dismisses an open gate form, and Enter while the member works queues the text as a steering message | `cafleet/roles/member.md` § Command execution; `cafleet/reference/cli.md` § `member prompt` |
@@ -583,6 +596,7 @@ Each row's verdict is written only from its observed result. A failed run record
 | Review round 1 | Director decision: in both launch modes, `edit` and `write` are blocked below `.git/`, `.pi/` and `.agents/` (§3.3, §3.6, the `{permission_flags}` Note) |
 | Review round 2 | Director decisions: a command holding a newline or carriage return, quoted or not, is not simple (§3.4); `.claude`, `.codex` and `.opencode` join the protected directories, while project-root files such as `opencode.json`, `AGENTS.md` and `CLAUDE.md` stay writable (§3.3, §3.6, the `{permission_flags}` Note) |
 | Review round 3 | Director decisions: an unescaped `$` outside single quotes is accepted only before a name character, and every other `$` makes a command not simple (§3.4, the `{permission_flags}` Note). Four unobserved acceptance steps are accepted with their bases (§7 Director decisions): threshold compaction by construction of the `context` hook, the restart re-arm continuation from its observed parts, and `member delete` of a Director-shaped probe and the Escape-first delivery effect as not applicable |
+| Review round 4 | Director decisions: `tree` runs only bare, and the tree option rule is dropped, because tree kept exposing file-writing options (`-o`, `-R`) (§3.4); protected-directory components and the `.env` basename compare case-insensitively (§3.3); in both launch modes a bash command holding a C0 control character other than tab, DEL or a C1 control is blocked before any allowlist check or form with its own reason (§3.3–§3.5, the `{permission_flags}` Note) |
 | C3, C4 | Members pass `--no-approve`; the tools verify the Director, and the gate blocks `cafleet_*` tools in members |
 | D1, D2 | `followUp` delivery with `session_shutdown` cleanup; the goal port with `appendEntry` persistence, a `context`-hook goal message on every request, `agent_before_settle` continuation tracked by extension flags, the 3-idle stop and the 50 cap |
 | D3 | `cafleet_ask` is pi's `{decision_surface}`, gaining `director_id` and `database_url` for Director verification |
@@ -698,3 +712,4 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 | 2026-11-08 | Review round (implementation). Changes by area:<br>• Lexer: unquoted `$'` and `$"`, and `${` unquoted or inside double quotes, make a command not simple (§3.4).<br>• Allowlist: `git` and `tree` words must be literal, and the git `-O`/`--open-files-in-pager`/`--output` and `tree -o` options are refused, bundled and abbreviated forms included; the gate case table gains the escape rows (§3.4).<br>• File tools: `read`, `edit` and `write` without a usable `path` are blocked; every block reason is listed, and the `.env` reason for reads routes the read (§3.3).<br>• Limits: the `.env` rule covers only a file-tool path naming a `.env` file (§3.6, Notes).<br>• Goal context: the goal message is appended only while the goal is `active` (§4.4). |
 | 2026-11-08 | Review round 2 (implementation). Changes by area:<br>• Lexer: a command holding a newline or carriage return, quoted or not, is not simple, because bash removes a backslash-newline pair inside double quotes; the gate case table gains three quoted-newline rows (§3.4, Notes).<br>• Protected directories: `.claude`, `.codex` and `.opencode` join `.git`, `.pi` and `.agents`, and the block reason names all six (§3.3, Notes).<br>• Limits: project-root files such as `opencode.json`, `AGENTS.md` and `CLAUDE.md` stay writable (§3.6). |
 | 2026-11-08 | Review round 3 (implementation). Changes by area:<br>• Lexer: the `$` rule accepts an unescaped `$` outside single quotes only before a name character, so `$[`, `$((`, special and positional parameters and a trailing `$` join the refused forms; the gate case table gains four `$` rows (§3.4, Notes).<br>• Acceptance: Director decisions accept four unobserved A-P/A-M steps with their bases, and the A-P and A-M rows list what ran (§7, §8).<br>• A-P: the member check covers the `cafleet_*` tools, and the operator-typed `/cafleet-goal` works in any session (§4.1, §7).<br>• Limits: Escape-first delivery applies only to a `coverage=unknown` member (§3.6). |
+| 2026-11-08 | Review round 4 (implementation). Changes by area:<br>• Allowlist: `tree *` and the tree option rule are removed, so only bare `tree` runs; the gate case table gains `tree` (Allowed) and `tree -R -L 1`, and the `tree -o` rows match no pattern (§3.4, Notes).<br>• File tools: protected-directory components and the `.env` basename compare case-insensitively, with `.Git/hooks/x` and `.ENV` cases (§3.3, Notes).<br>• Control characters: in both launch modes a bash command holding a C0 control character other than tab, DEL or a C1 control is blocked before any allowlist check or form, with its own reason; the newline rows move to this rule, the table gains an ESC row, and the form title shows the command on one line (§3.3–§3.6, Notes). |
