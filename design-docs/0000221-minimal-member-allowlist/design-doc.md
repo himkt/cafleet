@@ -1,7 +1,7 @@
 # Minimal member broker allowlist with ask-by-default routing
 
 **Status**: Approved
-**Progress**: 0/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-11-08
 
 ## Overview
@@ -10,13 +10,13 @@ The OpenCode `cafleet` / `cafleet-ask` presets and the pi member gate shrink the
 
 ## Success Criteria
 
-- [ ] `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` each have a `shell` map of exactly the `"*"` base plus the four allow entries of § 2, and their `description` and body paragraphs match § 4.
-- [ ] `MEMBER_ALLOWLIST` in `extensions/pi/cafleet.ts` holds exactly the four § 2 patterns; the git/mise literal-word rule and option rules and their helpers are gone; the control-character rule, the simple-command lexer and the `$` rule remain; the `cafleet`-mode bash reason is the § 5.4 text.
-- [ ] An omitted `--permission-mode` on OpenCode and pi resolves to `cafleet-ask` with `mode_source=default` and argv `["--agent","cafleet-ask"]` / `["--cafleet-gate","cafleet-ask"]`; explicit `cafleet` records `mode_source=explicit`; `--permission-mode` help reads `opencode: cafleet, cafleet-ask (default cafleet-ask)` and `pi: cafleet, cafleet-ask (default cafleet-ask)`.
-- [ ] `SPEC.md` § Role requirements accepts a classified `auto` or `manual` default mode, and the OpenCode and pi Member eligibility rows rest on the `cafleet-ask` approval-form coverage of their bundled profiles.
-- [ ] `presets/codex/cafleet.rules` and the Claude spawn rule `Bash(cafleet message *)` are byte-for-byte unchanged.
-- [ ] The § 9 consistency grep finds no mention of a removed allowlist entry, the removed gate rules, the old block reason or an all-`auto` default in `SPEC.md`, `docs/`, `skills/`, `presets/` or `extensions/`.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` each have a `shell` map of exactly the `"*"` base plus the four allow entries of § 2, and their `description` and body paragraphs match § 4.
+- [x] `MEMBER_ALLOWLIST` in `extensions/pi/cafleet.ts` holds exactly the four § 2 patterns; the git/mise literal-word rule and option rules and their helpers are gone; the control-character rule, the simple-command lexer and the `$` rule remain; the `cafleet`-mode bash reason is the § 5.4 text.
+- [x] An omitted `--permission-mode` on OpenCode and pi resolves to `cafleet-ask` with `mode_source=default` and argv `["--agent","cafleet-ask"]` / `["--cafleet-gate","cafleet-ask"]`; explicit `cafleet` records `mode_source=explicit`; `--permission-mode` help reads `opencode: cafleet, cafleet-ask (default cafleet-ask)` and `pi: cafleet, cafleet-ask (default cafleet-ask)`.
+- [x] `SPEC.md` § Role requirements accepts a classified `auto` or `manual` default mode, and the OpenCode and pi Member eligibility rows rest on the `cafleet-ask` approval-form coverage of their bundled profiles.
+- [x] `presets/codex/cafleet.rules` and the Claude spawn rule `Bash(cafleet message *)` are byte-for-byte unchanged.
+- [x] The § 9 consistency grep finds no mention of a removed allowlist entry, the removed gate rules, the old block reason or an all-`auto` default in `SPEC.md`, `docs/`, `skills/`, `presets/` or `extensions/`.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
 
@@ -356,58 +356,58 @@ grep -rnE 'git (add|commit|diff|grep|log|ls-tree|ls-files|branch) \*|"cafleet \*
 
 ### Step 1: SPEC.md
 
-- [ ] §6.3: `--permission-mode` option row and help string (§ 7, § 3.1) <!-- completed: -->
-- [ ] §6.7 Role requirements and Role eligibility (§ 3.2, § 3.3) <!-- completed: -->
-- [ ] §6.7 posture table rows and the following paragraph; opencode preset section, its Limits table included (§ 2, § 7, § 7.2) <!-- completed: -->
-- [ ] §6.7 pi member gate: allowlist constant, matching rules, block reason, path-rule paragraph (protected-directory rationale and closing sentence) and Limits (§ 5) <!-- completed: -->
-- [ ] §6.9 Launch policy and capability registry: table, default sentence, choice sentences and run-record rows (§ 3.1, § 7) <!-- completed: -->
+- [x] §6.3: `--permission-mode` option row and help string (§ 7, § 3.1) <!-- completed: 2026-11-08T07:19 -->
+- [x] §6.7 Role requirements and Role eligibility (§ 3.2, § 3.3) <!-- completed: 2026-11-08T07:19 -->
+- [x] §6.7 posture table rows and the following paragraph; opencode preset section, its Limits table included (§ 2, § 7, § 7.2) <!-- completed: 2026-11-08T07:19 -->
+- [x] §6.7 pi member gate: allowlist constant, matching rules, block reason, path-rule paragraph (protected-directory rationale and closing sentence) and Limits (§ 5) <!-- completed: 2026-11-08T07:19 -->
+- [x] §6.9 Launch policy and capability registry: table, default sentence, choice sentences and run-record rows (§ 3.1, § 7) <!-- completed: 2026-11-08T07:19 -->
 
 ### Step 2: Documentation site
 
-- [ ] `docs/docs/concepts/coding-agents.md`: Launch modes, OpenCode configuration and pi configuration (§ 7) <!-- completed: -->
-- [ ] `docs/docs/concepts/members.md`: Choose a native policy (§ 7) <!-- completed: -->
-- [ ] `docs/docs/quickstart.md`: OpenCode and pi member posture paragraphs (§ 7) <!-- completed: -->
+- [x] `docs/docs/concepts/coding-agents.md`: Launch modes, OpenCode configuration and pi configuration (§ 7) <!-- completed: 2026-11-08T07:20 -->
+- [x] `docs/docs/concepts/members.md`: Choose a native policy (§ 7) <!-- completed: 2026-11-08T07:20 -->
+- [x] `docs/docs/quickstart.md`: OpenCode and pi member posture paragraphs (§ 7) <!-- completed: 2026-11-08T07:20 -->
 
 ### Step 3: README.md
 
-- [ ] Confirm `README.md` carries no allowlist or default-mode text and needs no edit <!-- completed: -->
+- [x] Confirm `README.md` carries no allowlist or default-mode text and needs no edit <!-- completed: 2026-11-08T07:20 -->
 
 ### Step 4: Skills
 
-- [ ] `skills/cafleet/reference/coding-agents.md`: Role requirements, opencode and pi Runtime bindings, Notes and Role eligibility (§ 3.2, § 3.3, § 7, § 7.1) <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md`: permission choices and setup sentence (§ 7) <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md`: Member launch policy and Stall Response (§ 3.5, § 7) <!-- completed: -->
-- [ ] `skills/cafleet/roles/member.md`: routing guidance sentence (§ 6) <!-- completed: -->
+- [x] `skills/cafleet/reference/coding-agents.md`: Role requirements, opencode and pi Runtime bindings, Notes and Role eligibility (§ 3.2, § 3.3, § 7, § 7.1) <!-- completed: 2026-11-08T07:22 -->
+- [x] `skills/cafleet/reference/cli.md`: permission choices and setup sentence (§ 7) <!-- completed: 2026-11-08T07:22 -->
+- [x] `skills/cafleet/roles/director.md`: Member launch policy and Stall Response (§ 3.5, § 7) <!-- completed: 2026-11-08T07:22 -->
+- [x] `skills/cafleet/roles/member.md`: routing guidance sentence (§ 6) <!-- completed: 2026-11-08T07:22 -->
 
 ### Step 5: Registry default
 
-- [ ] `src/coding_agent/mod.rs`: `default_policy` returns `cafleet-ask` for `Opencode` and `Pi` (§ 3.1) <!-- completed: -->
-- [ ] Update the `src/coding_agent/mod.rs` tests listed in § 8 and add the OpenCode launch-policy test <!-- completed: -->
-- [ ] Update `launch_policy_omits_the_backend_default_and_resolves_every_configured_case` in `src/runtime/observation.rs` and any other test the default change breaks (§ 8) <!-- completed: -->
-- [ ] Update the `src/cli/setup.rs` doctor preset-check tests to the renamed checks (§ 3.1, § 8) <!-- completed: -->
+- [x] `src/coding_agent/mod.rs`: `default_policy` returns `cafleet-ask` for `Opencode` and `Pi` (§ 3.1) <!-- completed: 2026-11-08T07:26 -->
+- [x] Update the `src/coding_agent/mod.rs` tests listed in § 8 and add the OpenCode launch-policy test <!-- completed: 2026-11-08T07:26 -->
+- [x] Update `launch_policy_omits_the_backend_default_and_resolves_every_configured_case` in `src/runtime/observation.rs` and any other test the default change breaks (§ 8) <!-- completed: 2026-11-08T07:26 -->
+- [x] Update the `src/cli/setup.rs` doctor preset-check tests to the renamed checks (§ 3.1, § 8) <!-- completed: 2026-11-08T07:26 -->
 
 ### Step 6: OpenCode presets
 
-- [ ] `presets/opencode/cafleet.md`: shell map, `description`, body paragraphs 1 and 2 (§ 4) <!-- completed: -->
-- [ ] `presets/opencode/cafleet-ask.md`: shell map, `description`, body paragraphs 1 and 2 (§ 4) <!-- completed: -->
-- [ ] Check both files against § Preset file format: key order, indentation, three paragraphs, one trailing newline <!-- completed: -->
+- [x] `presets/opencode/cafleet.md`: shell map, `description`, body paragraphs 1 and 2 (§ 4) <!-- completed: 2026-11-08T07:23 -->
+- [x] `presets/opencode/cafleet-ask.md`: shell map, `description`, body paragraphs 1 and 2 (§ 4) <!-- completed: 2026-11-08T07:23 -->
+- [x] Check both files against § Preset file format: key order, indentation, three paragraphs, one trailing newline <!-- completed: 2026-11-08T07:23 -->
 
 ### Step 7: pi member gate
 
-- [ ] `extensions/pi/cafleet.ts`: `MEMBER_ALLOWLIST` (§ 5.1) <!-- completed: -->
-- [ ] Delete the git/mise helpers and `Word`; replace `simpleWords` with `isSimpleCommand`; update `isAllowlisted` (§ 5.3) <!-- completed: -->
-- [ ] Reword the `cafleet`-mode bash reason (§ 5.4) <!-- completed: -->
-- [ ] Review the gate against the § 5.6 cases <!-- completed: -->
+- [x] `extensions/pi/cafleet.ts`: `MEMBER_ALLOWLIST` (§ 5.1) <!-- completed: 2026-11-08T07:25 -->
+- [x] Delete the git/mise helpers and `Word`; replace `simpleWords` with `isSimpleCommand`; update `isAllowlisted` (§ 5.3) <!-- completed: 2026-11-08T07:25 -->
+- [x] Reword the `cafleet`-mode bash reason (§ 5.4) <!-- completed: 2026-11-08T07:25 -->
+- [x] Review the gate against the § 5.6 cases <!-- completed: 2026-11-08T07:25 -->
 
 ### Step 8: Validation
 
-- [ ] `mise //:test` passes <!-- completed: -->
-- [ ] `mise //:lint` passes <!-- completed: -->
-- [ ] `mise //docs:build` passes, and the rendered pi configuration and Launch modes tables keep their cells intact <!-- completed: -->
+- [x] `mise //:test` passes <!-- completed: 2026-11-08T07:26 -->
+- [x] `mise //:lint` passes <!-- completed: 2026-11-08T07:26 -->
+- [x] `mise //docs:build` passes, and the rendered pi configuration and Launch modes tables keep their cells intact <!-- completed: 2026-11-08T07:26 -->
 
 ### Step 9: Final consistency
 
-- [ ] Run the § 9 grep and resolve every hit; confirm `presets/codex/cafleet.rules` and the Claude `Bash(cafleet message *)` spawn rule are unchanged <!-- completed: -->
+- [x] Run the § 9 grep and resolve every hit; confirm `presets/codex/cafleet.rules` and the Claude `Bash(cafleet message *)` spawn rule are unchanged <!-- completed: 2026-11-08T07:26 -->
 
 ---
 
