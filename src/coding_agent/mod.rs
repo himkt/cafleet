@@ -248,9 +248,9 @@ impl CodingAgent {
         match self {
             Self::Claude => "auto",
             Self::Codex => "approve-for-me",
-            Self::Opencode => "cafleet",
+            Self::Opencode => "cafleet-ask",
             Self::Hermes => "smart",
-            Self::Pi => "cafleet",
+            Self::Pi => "cafleet-ask",
         }
     }
     pub(crate) fn permission_mode_help() -> String {
