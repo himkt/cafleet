@@ -1,7 +1,7 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 37/52 tasks complete
+**Progress**: 38/52 tasks complete
 **Last Updated**: 2026-11-07
 
 ## Overview
@@ -590,7 +590,7 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 
 - [x] `mise //:test` <!-- completed: 2026-11-08T00:06 -->
 - [x] `mise //:lint` <!-- completed: 2026-11-08T00:06 -->
-- [ ] Run A-S with the built binary against a temporary `PI_CODING_AGENT_DIR` and database (§7) <!-- completed: -->
+- [x] Run A-S with the built binary against a temporary `PI_CODING_AGENT_DIR` and database (§7) <!-- completed: 2026-11-08T00:09 -->
 
 ### Step 10: Captures and the pi profile
 
