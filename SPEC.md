@@ -1772,12 +1772,30 @@ The permission argv stays independent of the pi base, so runtime observation re-
 | Tool | `cafleet` | `cafleet-ask` |
 |---|---|---|
 | `bash` | Allowlist match runs; otherwise blocked | Allowlist match runs; otherwise the approval form |
-| `read`, `grep`, `find`, `ls` | Allowed, except a path whose final component is `.env` or begins with `.env.` | Same |
-| `edit`, `write` | Allowed for a path inside `ctx.cwd`, except the `.env` rule and the protected directories | Same |
-| A tool whose name begins with `cafleet_` | Blocked: `cafleet tools run only in a Director session` | Same |
-| Any other tool, MCP and extension tools included | Blocked: `the CAFleet member gate allows only bash, read, grep, find, ls, edit and write` | Same |
+| `read` | Allowed for a path that is not a `.env` file | Same |
+| `grep`, `find`, `ls` | Allowed for a path that is not a `.env` file; a missing or empty `path` is `.`, pi's documented default | Same |
+| `edit`, `write` | Allowed for a path inside `ctx.cwd` that is not a `.env` file and not below a protected directory | Same |
+| A tool whose name begins with `cafleet_` | Blocked | Same |
+| Any other tool, MCP and extension tools included | Blocked | Same |
 
-A path resolves against `ctx.cwd` with `path.resolve`, following no symbolic link. `edit` and `write` are blocked for a path any of whose components relative to `ctx.cwd` is `.git`, `.pi` or `.agents`, with `the CAFleet member gate protects .git, .pi and .agents from edit and write; route the change to the Director if it is required`: `.git/hooks` runs under the allowlisted `git commit *`, and `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a later trusted-project pi session from the same directory. A block reason reaches the member as the tool's error result, and each bash block reason ends with `; route the command to the Director if it is required`. Leading-`!` input runs as pi's `user_bash`, outside `tool_call`, so Director-dispatched `member exec` commands stay under the Director's authorization.
+`read`, `edit` and `write` require a non-empty string `path`; without one the call is blocked, because the gate cannot evaluate a path it cannot read. A path resolves against `ctx.cwd` with `path.resolve`, following no symbolic link, and is a `.env` file when its final component is `.env` or begins with `.env.`. `edit` and `write` are blocked for a path any of whose components relative to `ctx.cwd` is `.git`, `.pi` or `.agents`: `.git/hooks` runs under the allowlisted `git commit *`, and `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a later trusted-project pi session from the same directory. Leading-`!` input runs as pi's `user_bash`, outside `tool_call`, so Director-dispatched `member exec` commands stay under the Director's authorization.
+
+**Block reasons.** A block reason reaches the member as the tool's error result. Besides the activation failures above, the gate returns exactly these reasons, where `<tool>` is the tool name; a file tool checks the path input, then the `.env` rule, then the working directory, then the protected directories:
+
+| Case | Reason |
+|---|---|
+| Bash command not allowlisted, `cafleet` mode | `the CAFleet member gate allows only allowlisted simple commands; route the command to the Director if it is required` |
+| Bash command not allowlisted, `cafleet-ask` mode in a session without the interactive TUI | `the approval form needs the interactive pi TUI; route the command to the Director if it is required` |
+| Form answered `Deny` | `the operator denied this command` |
+| Form dismissed | `the approval form was dismissed; the command did not run` |
+| `read` without a path input | `the CAFleet member gate cannot read the path input of read; route the read to the Director if it is required` |
+| `read`, `grep`, `find` or `ls` on a `.env` file | `the CAFleet member gate protects .env files from <tool>; route the read to the Director if it is required` |
+| `edit` or `write` without a path input | `the CAFleet member gate cannot read the path input of <tool>; route the change to the Director if it is required` |
+| `edit` or `write` on a `.env` file | `the CAFleet member gate protects .env files from <tool>; route the change to the Director if it is required` |
+| `edit` or `write` outside `ctx.cwd` | `the CAFleet member gate allows edit and write only inside the working directory; route the change to the Director if it is required` |
+| `edit` or `write` below a protected directory | `the CAFleet member gate protects .git, .pi and .agents from edit and write; route the change to the Director if it is required` |
+| A tool whose name begins with `cafleet_` | `cafleet tools run only in a Director session` |
+| Any other tool | `the CAFleet member gate allows only bash, read, grep, find, ls, edit and write` |
 
 **Bash allowlist.** The gate's patterns are a constant in the extension and its content contract:
 
@@ -1790,12 +1808,14 @@ const MEMBER_ALLOWLIST = [
 ];
 ```
 
-A command is allowlisted when both hold:
+A command is allowlisted when all of these hold:
 
-1. **Simple.** The command, trimmed of surrounding whitespace, is one simple command. A lexer tracks single quotes, double quotes and backslash escapes; single-quoted text is literal. The command is not simple when an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)`, backtick or newline appears, when `$(` or a backtick appears unquoted or inside double quotes, or when a quote is unterminated.
-2. **Matching.** The whole trimmed command matches at least one pattern, where `*` matches any character sequence, spaces included, and every other character matches itself.
+1. **Simple.** The command, trimmed of surrounding whitespace, is one simple command. A lexer tracks single quotes, double quotes and backslash escapes, and splits the command into words at unquoted spaces and tabs, removing quotes and escapes; single-quoted text is literal. The command is not simple when an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)`, backtick or newline appears, when an unquoted `$'` (ANSI-C quoting) or `$"` (locale quoting) appears, when `$(`, `${` or a backtick appears unquoted or inside double quotes, or when a quote is unterminated.
+2. **Literal git and tree words.** A command whose first word is `git` or `tree` has no word holding a `$` outside single quotes or an unquoted `*`, `?`, `[` or `{`, because bash expands such a word after the gate checks it.
+3. **No command-running or file-writing option.** A `git` command has no word that begins with a single `-` and contains `O`, and no word beginning with `--` whose name before any `=` is `output` or a prefix of `open-files-in-pager` at least two characters long. A `tree` command has no word that begins with a single `-` and contains `o`. These cover `git grep -O<cmd>` (also bundled, as `-iO<cmd>`, or abbreviated, as `--open-files`), which runs a command, and `git diff`/`git log` `--output` and `tree -o`, which write chosen text to any path.
+4. **Matching.** The whole trimmed command matches at least one pattern, where `*` matches any character sequence, spaces included, and every other character matches itself.
 
-A leading `NAME=value` assignment matches no pattern, so a member passes `--database-url` instead.
+A leading `NAME=value` assignment matches no pattern, so a member passes `--database-url` instead. Rule 3 also refuses harmless words such as `git log -SFOO`, which the member routes. `grep`, `ls`, `stat` and `wc` words may expand, because none of these commands has an option that runs a command or writes a file.
 
 **Approval form.** Under `cafleet-ask` the gate calls `ctx.ui.select(title, ["Allow once", "Deny"])` with the title:
 
@@ -1819,7 +1839,8 @@ The form has no timeout. Concurrent bash calls of one assistant message are eval
 | Surface | Limit |
 |---|---|
 | Allowed tooling | An allowed command also runs the code and hooks it executes: `mise //:test *` runs workspace test code, and `git commit *` runs `.git/hooks` |
-| No sandbox | `read`, `grep`, `find` and `ls` reach any path outside `.env` files, and a symbolic link inside the cwd can target a path outside it |
+| No sandbox | `read`, `grep`, `find` and `ls` reach any path, and a symbolic link inside the cwd can target a path outside it |
+| `.env` files | The `.env` rule refuses only a `read`, `grep`, `find`, `ls`, `edit` or `write` call whose path names a `.env` file; a directory search (`grep` on `.`) and allowlisted commands (`grep '' .env`, and `git grep`, `git diff` or `git log -p` on a tracked `.env`) still read `.env` contents |
 | Protected directories | The path check follows no symbolic link, so a link elsewhere in the cwd that targets `.git`, `.pi` or `.agents` stays writable; an allowlisted command writes where its own tool writes, as `git` does under `.git/` |
 | Delivery fallback | Escape interrupts a running pi turn and cancels an open form, so a delivery that falls back to Escape interrupts the member's run or dismisses the form |
 
@@ -1939,7 +1960,7 @@ For a `session_shutdown` reason of `reload`, `new`, `resume` or `fork`, the pi p
 - **Tracking.** pi 1.5.0 skips `before_agent_start` for a continuation that `agent_before_settle` requests, so the extension tracks runs with two in-memory flags. `pendingContinuation` is set whenever the extension starts a continuation (a returned `continue: true`, or the set and resume messages); `progressed` is set by every `cafleet_goal_progress` or `cafleet_goal_complete` execution. Each `agent_before_settle` reads both flags and clears them before it returns, a returned continuation sets `pendingContinuation` again, and an aborted run clears both at `agent_settled`.
 - **Interrupt.** `agent_settled` with `event.aborted` on an `active` goal pauses it and shows `[cafleet goal] paused: the run was interrupted; the operator resumes it with /cafleet-goal resume` through `ctx.ui.notify`.
 - **Stale continuations.** The `context` hook removes each `cafleet-goal` continuation after the last assistant message whose generation differs from the stored one or whose goal is not `active`; earlier history stays intact.
-- **Goal context.** The `context` hook runs before every model request, inside a continuation chain too. While the goal is `active` or `paused`, it appends one transient user-role message, `[cafleet goal] Active CAFleet goal (<status>): <objective>`, after the last message of `event.messages`; the message is never persisted and is rebuilt on every request, so it survives manual and threshold compaction and keeps the provider's cached prefix intact. A `complete` or `cleared` goal appends nothing.
+- **Goal context.** The `context` hook runs before every model request, inside a continuation chain too. While the goal is `active`, it appends one transient user-role message, `[cafleet goal] Active CAFleet goal: <objective>`, after the last message of `event.messages`; the message is never persisted and is rebuilt on every request, so it survives manual and threshold compaction and keeps the provider's cached prefix intact. A `paused`, `complete` or `cleared` goal appends nothing, so a paused goal gives the model no standing instruction; resume sends the objective again in its continuation message.
 - **Restart.** `pi --continue` (or `--session <id>`) on the same session restores the state at `session_start`; the Director's re-arming `cafleet_listen` turn then ends at `agent_before_settle`, which continues an active goal without further input.
 - **Failures.** Each handler is wrapped in `try`/`catch` and logs a failure's cause. While the goal is `active`, a failure also pauses the goal and shows `[cafleet goal] paused: the goal cannot continue (<cause>); the operator resumes it with /cafleet-goal resume`.
 

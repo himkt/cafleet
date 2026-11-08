@@ -26,6 +26,7 @@ const GATE_MODES = ["cafleet", "cafleet-ask"] as const
 const GATE_TOOLS = "bash, read, grep, find, ls, edit and write"
 const ROUTE_COMMAND = "route the command to the Director if it is required"
 const ROUTE_CHANGE = "route the change to the Director if it is required"
+const ROUTE_READ = "route the read to the Director if it is required"
 const PROTECTED_DIRECTORIES = [".git", ".pi", ".agents"]
 const ALLOW_ONCE = "Allow once"
 const DENY = "Deny"
@@ -106,31 +107,79 @@ const directorParameters = {
   ),
 }
 
-/** True when `command` is one simple command: no unquoted operator, redirection, subshell or newline. */
-function isSimpleCommand(command: string): boolean {
+/** A shell word after quote removal; `expands` marks a `$` outside single quotes or an unquoted glob or brace. */
+interface Word {
+  text: string
+  expands: boolean
+}
+
+/** The words of `command` when it is one simple command, otherwise undefined. */
+function simpleWords(command: string): Word[] | undefined {
+  const words: Word[] = []
+  let word: Word | undefined
   let quote: "'" | '"' | undefined
+  const append = (text: string, expands = false) => {
+    word ??= { text: "", expands: false }
+    word.text += text
+    word.expands ||= expands
+  }
   for (let index = 0; index < command.length; index++) {
     const char = command[index]
     const next = command[index + 1]
     if (quote === "'") {
       if (char === "'") quote = undefined
+      else append(char)
       continue
     }
     if (quote === '"') {
-      if (char === "\\") index++
-      else if (char === '"') quote = undefined
-      else if (char === "`" || (char === "$" && next === "(")) return false
+      if (char === '"') quote = undefined
+      else if (char === "`" || (char === "$" && (next === "(" || next === "{"))) return undefined
+      else if (char === "\\" && next !== undefined && '$`"\\\n'.includes(next)) {
+        append(next)
+        index++
+      } else append(char, char === "$")
+      continue
+    }
+    if (char === " " || char === "\t") {
+      if (word) words.push(word)
+      word = undefined
       continue
     }
     if (char === "\\") {
-      if (next === undefined || next === "\n" || next === "\r") return false
+      if (next === undefined || next === "\n" || next === "\r") return undefined
+      append(next)
       index++
       continue
     }
-    if (char === "'" || char === '"') quote = char
-    else if (";&|<>()`\n\r".includes(char) || (char === "$" && next === "(")) return false
+    if (char === "'" || char === '"') {
+      quote = char
+      append("")
+      continue
+    }
+    if (";&|<>()`\n\r".includes(char)) return undefined
+    if (char === "$" && next !== undefined && "({'\"".includes(next)) return undefined
+    append(char, "$*?[{".includes(char))
   }
-  return quote === undefined
+  if (quote !== undefined) return undefined
+  if (word) words.push(word)
+  return words
+}
+
+const isShortOptionWith = (text: string, letter: string) => text.startsWith("-") && !text.startsWith("--") && text.includes(letter)
+
+function isRefusedGitWord(text: string): boolean {
+  if (isShortOptionWith(text, "O")) return true
+  if (!text.startsWith("--")) return false
+  const name = text.slice(2).split("=")[0]
+  return name === "output" || (name.length >= 2 && "open-files-in-pager".startsWith(name))
+}
+
+/** True when a git or tree word expands or names an option that runs a command or writes a chosen file. */
+function hasRefusedWord(words: Word[]): boolean {
+  const program = words[0]?.text
+  if (program === "git") return words.some((word) => word.expands || isRefusedGitWord(word.text))
+  if (program === "tree") return words.some((word) => word.expands || isShortOptionWith(word.text, "o"))
+  return false
 }
 
 const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
@@ -140,25 +189,40 @@ const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
 
 function isAllowlisted(command: string): boolean {
   const trimmed = command.trim()
-  return isSimpleCommand(trimmed) && ALLOWLIST_RULES.some((rule) => rule.test(trimmed))
+  const words = simpleWords(trimmed)
+  return words !== undefined && !hasRefusedWord(words) && ALLOWLIST_RULES.some((rule) => rule.test(trimmed))
 }
 
-function resolveToolPath(cwd: string, raw: unknown): string {
-  const value = typeof raw === "string" && raw.trim() ? raw.trim() : "."
+const DEFAULT_PATH_TOOLS = ["grep", "find", "ls"]
+
+/** The tool's path text; without a usable `path`, grep, find and ls default to "." and the others have none. */
+function toolPathText(toolName: string, raw: unknown): string | undefined {
+  const value = typeof raw === "string" ? raw.trim() : ""
   const stripped = value.startsWith("@") ? value.slice(1) : value
-  if (stripped === "~") return homedir()
-  if (stripped.startsWith("~/")) return join(homedir(), stripped.slice(2))
-  return resolve(cwd, stripped)
+  if (stripped) return stripped
+  return DEFAULT_PATH_TOOLS.includes(toolName) ? "." : undefined
+}
+
+function resolveToolPath(cwd: string, text: string): string {
+  if (text === "~") return homedir()
+  if (text.startsWith("~/")) return join(homedir(), text.slice(2))
+  return resolve(cwd, text)
 }
 
 const isEnvFile = (path: string) => basename(path) === ".env" || basename(path).startsWith(".env.")
 
 function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: string): Block | undefined {
-  const path = resolveToolPath(cwd, input.path)
-  if (isEnvFile(path)) {
-    return { block: true, reason: `the CAFleet member gate protects .env files from ${toolName}; ${ROUTE_CHANGE}` }
+  const changes = toolName === "edit" || toolName === "write"
+  const route = changes ? ROUTE_CHANGE : ROUTE_READ
+  const text = toolPathText(toolName, input.path)
+  if (text === undefined) {
+    return { block: true, reason: `the CAFleet member gate cannot read the path input of ${toolName}; ${route}` }
   }
-  if (toolName !== "edit" && toolName !== "write") return undefined
+  const path = resolveToolPath(cwd, text)
+  if (isEnvFile(path)) {
+    return { block: true, reason: `the CAFleet member gate protects .env files from ${toolName}; ${route}` }
+  }
+  if (!changes) return undefined
   const inside = relative(cwd, path)
   if (inside.startsWith("..") || isAbsolute(inside)) {
     return {
@@ -610,10 +674,10 @@ export default function (pi: ExtensionAPI) {
         changed ||= !keep
         return keep
       })
-      if (current.status === "active" || current.status === "paused") {
+      if (current.status === "active") {
         messages.push({
           role: "user",
-          content: [{ type: "text", text: `${GOAL_PREFIX}Active CAFleet goal (${current.status}): ${current.objective}` }],
+          content: [{ type: "text", text: `${GOAL_PREFIX}Active CAFleet goal: ${current.objective}` }],
           timestamp: Date.now(),
         })
         changed = true

@@ -79,7 +79,7 @@ The backends differ in reasoning effort, pane titles and sandbox isolation, as t
 
 A Hermes member's session can keep accepted work and background processes running after its pane's client exits. `cafleet member delete` stops that session's work and registered background processes, keeping the member when it cannot verify the stop; CAFleet never touches your Hermes gateway or sessions it does not own.
 
-A pi member has no OS-level sandbox: the CAFleet member gate decides which tools and shell commands it runs, but its file reads reach any path outside `.env` files.
+A pi member has no OS-level sandbox: the CAFleet member gate decides which tools and shell commands it runs, but its file reads reach any path, and `.env` contents stay readable through directory searches and allowed commands.
 
 ## Backend configuration
 
@@ -173,14 +173,14 @@ pi has no per-tool approval and no OS-level sandbox, so the member gate is a pi 
 | Operation | `cafleet` | `cafleet-ask` |
 |---|---|---|
 | A shell command on the gate's allowlist, run as one simple command | Runs | Runs |
-| Any other shell command, including a compound line or a leading `NAME=value` assignment | Blocked; the member asks the Director to run it | Opens the gate's approval form for the Director to answer |
-| Reading and searching files | Allowed, except `.env` files | Same |
-| Editing and writing files | Allowed inside the working directory, except `.env` files and anything below `.git/`, `.pi/` or `.agents/` | Same |
+| Any other shell command, including a compound line, a leading `NAME=value` assignment, or a `git` or `tree` command that expands its words or passes an option that runs a command or writes a file | Blocked; the member asks the Director to run it | Opens the gate's approval form for the Director to answer |
+| Reading and searching files | Allowed, except a call that names a `.env` file | Same |
+| Editing and writing files | Allowed inside the working directory, except a `.env` file and anything below `.git/`, `.pi/` or `.agents/` | Same |
 | Any other tool, including MCP and other extension tools | Blocked | Same |
 
-The protected directories keep a member from planting a Git hook or a project pi resource that a later trusted pi session runs. An allowed command still runs the code it executes, such as test code and Git hooks, and file reads reach any path outside `.env` files; use the `codex` backend for kernel-enforced isolation.
+The protected directories keep a member from planting a Git hook or a project pi resource that a later trusted pi session runs. An allowed command still runs the code it executes, such as test code and Git hooks. The `.env` rule refuses only a file read, search, edit or write whose path names a `.env` file: a search of a whole directory and allowed commands such as `grep` or `git diff` still read `.env` contents, and file reads reach any path. Use the `codex` backend for kernel-enforced isolation.
 
-While a goal is active the extension continues the session turn by turn, pausing the goal after three continuation turns without reported progress, after 50 continuations or when you interrupt the run; `/cafleet-goal resume` restarts it with a fresh continuation budget. The goal survives compaction and `pi --continue` on the same session.
+While a goal is active the extension continues the session turn by turn, pausing the goal after three continuation turns without reported progress, after 50 continuations or when you interrupt the run; `/cafleet-goal resume` restarts it with a fresh continuation budget. Only an active goal is shown to the model, so a paused goal stops steering the Director until you resume it. The goal survives compaction and `pi --continue` on the same session.
 
 | Symptom | Cause | Resolution |
 |---|---|---|
