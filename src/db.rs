@@ -5,7 +5,7 @@ use rusqlite::OptionalExtension;
 use std::time::Duration;
 use std::time::Instant;
 
-const BASELINE_SQL: &str = include_str!("../migrations/V1__baseline.sql");
+const BASELINE_SQL: &str = include_str!("../assets/migrations/V1__baseline.sql");
 
 fn baseline() -> refinery::Migration {
     let sql = format!(

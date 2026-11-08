@@ -4,20 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    println!("cargo:rerun-if-changed=migrations");
-    println!("cargo:rerun-if-changed=skills");
-    println!("cargo:rerun-if-changed=presets");
-    println!("cargo:rerun-if-changed=extensions");
+    println!("cargo:rerun-if-changed=assets");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by cargo");
-    let skills = Path::new(&manifest_dir).join("skills");
-    let presets = Path::new(&manifest_dir).join("presets");
-    let extensions = Path::new(&manifest_dir).join("extensions");
+    let assets = Path::new(&manifest_dir).join("assets");
 
     let mut generated = String::new();
-    emit_table(&mut generated, "SKILLS", &skills);
-    emit_table(&mut generated, "PRESETS", &presets);
-    emit_table(&mut generated, "EXTENSIONS", &extensions);
+    emit_table(&mut generated, "SKILLS", &assets.join("skills"));
+    emit_table(&mut generated, "PRESETS", &assets.join("presets"));
+    emit_table(&mut generated, "EXTENSIONS", &assets.join("extensions"));
 
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by cargo"))
         .join("embedded_data.rs");

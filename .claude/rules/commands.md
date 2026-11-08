@@ -20,8 +20,8 @@ A CAFleet member runs commands directly through its available shell tool under t
 
 ### Owning protocols
 
-- Member authority and observed-result reporting: `skills/cafleet/roles/member.md`.
-- Required denied-command routing: `skills/cafleet/roles/member.md` § Reconsider, then route.
+- Member authority and observed-result reporting: `assets/skills/cafleet/roles/member.md`.
+- Required denied-command routing: `assets/skills/cafleet/roles/member.md` § Reconsider, then route.
 - `cafleet member exec` visibly submits native `! COMMAND`. Use the host's actual output; the Director inspects completion and sends explicit continuation when needed.
 
 Run one command per shell invocation, preserve literal IDs and use a file writer for output. The selected backend's runtime bindings define its permission posture. A broad tool permission remains subject to the assigned role and Director-owned lifecycle/Git boundaries.

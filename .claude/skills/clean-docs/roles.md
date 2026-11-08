@@ -16,8 +16,8 @@ then complete these reads before substantive work:
 
 | # | Read | Required action and timing |
 |---|---|---|
-| 1 | Your backend's [runtime bindings](../../../skills/cafleet/reference/coding-agents.md#<name>) | Resolve the named backend and loader before loading skills or using tokens. |
-| 2 | [CAFleet core](../../../skills/cafleet/SKILL.md), [BASE](../../../skills/cafleet/roles/member.md#base) and [member startup](../../../skills/cafleet/roles/member.md) | Load `cafleet` through the resolved loader; follow BASE/member states and role-first prerequisites, with ready as the first operational broker command. |
+| 1 | Your backend's [runtime bindings](../../../assets/skills/cafleet/reference/coding-agents.md#<name>) | Resolve the named backend and loader before loading skills or using tokens. |
+| 2 | [CAFleet core](../../../assets/skills/cafleet/SKILL.md), [BASE](../../../assets/skills/cafleet/roles/member.md#base) and [member startup](../../../assets/skills/cafleet/roles/member.md) | Load `cafleet` through the resolved loader; follow BASE/member states and role-first prerequisites, with ready as the first operational broker command. |
 | 3 | [Clean-docs shared spine](SKILL.md) | Load `clean-docs`; read coordination and review/application gates. Scanners read full-file staging before application. |
 | 4 | Your complete workflow section: [residue](SKILL.md#residue), [affirmative](SKILL.md#affirmative) or [simplification](SKILL.md#simplification) | Read its classes, required references and your role's obligations/checks before scanning or reviewing. |
 

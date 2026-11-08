@@ -31,9 +31,9 @@ there.
 ## Required reading
 
 Identify the executing backend (members use `CODING AGENT`), resolve its
-[runtime bindings](../../../skills/cafleet/reference/coding-agents.md), and load
+[runtime bindings](../../../assets/skills/cafleet/reference/coding-agents.md), and load
 `cafleet` for BASE, member startup or Director orchestration. Read
-[coordination](../../../skills/cafleet-design-doc/reference/coordination.md) for
+[coordination](../../../assets/skills/cafleet-design-doc/reference/coordination.md) for
 verbs, pointers and marker pairing, then this shared spine once. Read the
 selected workflow section and its required references before scanning or
 reviewing. Resolve model tokens from the selected spawn backend's Role defaults
@@ -127,7 +127,7 @@ ownership.
 ## Coordination
 
 Use the `cafleet` verb + pointer schema
-(`skills/cafleet-design-doc/reference/coordination.md`) with these skill-local
+(`assets/skills/cafleet-design-doc/reference/coordination.md`) with these skill-local
 extensions:
 
 - Add the `scanner` role for `COMMENT(scanner)` markers.
@@ -142,7 +142,7 @@ extensions:
 2. **Bootstrap** — run `cafleet doctor`, then
    `cafleet fleet create --name <name> --coding-agent <backend> --json`; retain
    the returned literal IDs, then follow
-   [Director wake](../../../skills/cafleet/roles/director.md#director-wake).
+   [Director wake](../../../assets/skills/cafleet/roles/director.md#director-wake).
 3. **Spawn workers** — scanners for disjoint slices using the other-member
    defaults, plus a reviewer using `--model {reviewer_model}` and supported
    reviewer effort. Render prompts per [Spawn deltas](#spawn-deltas) at
@@ -195,7 +195,7 @@ is the deliverable; the run artifact is its audit record.
 ## BASE convention
 
 Resolve task-scoped BASE through the shared
-[task-scope resolver](../../../skills/cafleet-design-doc/reference/guidelines.md#task-scope-resolution):
+[task-scope resolver](../../../assets/skills/cafleet-design-doc/reference/guidelines.md#task-scope-resolution):
 `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder per run).
 Use dot-prefixed folders for agent-only scratch: `.prompts/` for spawn renders
 and `.apply/` for staged harness-denied writes.
@@ -203,7 +203,7 @@ and `.apply/` for staged harness-denied writes.
 ## Spawn deltas
 
 Render each member prompt from the
-[canonical spawn skeleton](../../../skills/cafleet/roles/director.md#canonical-spawn-prompt-skeleton)
+[canonical spawn skeleton](../../../assets/skills/cafleet/roles/director.md#canonical-spawn-prompt-skeleton)
 with the role file referenced by absolute path and this delta. Render each
 IMPORTANT item as a separate prompt line, verbatim with `<run pointer>`
 substituted.
@@ -454,7 +454,7 @@ Preserve these surfaces while editing surrounding prose:
 
 - **Contract detail:** `SPEC.md`'s exact CLI options, error strings, schemas,
   key order and text layouts; command facts in
-  `skills/cafleet/reference/cli.md`; command examples in skills and docs.
+  `assets/skills/cafleet/reference/cli.md`; command examples in skills and docs.
 - **Behavioral-contract lines:** IMPORTANT lines, spawn-skeleton lossless-rule
   items, hard role constraints and start cues survive verbatim in meaning.
 - **Backend neutrality:** base skills retain neutral instructions under
