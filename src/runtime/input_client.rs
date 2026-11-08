@@ -2687,22 +2687,31 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         };
         let (settings, run, placement) = service_target(fixture);
-        let current = inspect_permission(
-            &mut fixture.fixture.conn,
-            &settings,
-            &PermissionInspectInput {
-                event_id,
-                interaction_id,
-                director_member_id: run.director_member_id,
-            },
-            Deadline::until(until),
-        )
-        .unwrap();
-        assert!(
-            current
+        let current = loop {
+            let current = inspect_permission(
+                &mut fixture.fixture.conn,
+                &settings,
+                &PermissionInspectInput {
+                    event_id,
+                    interaction_id,
+                    director_member_id: run.director_member_id,
+                },
+                Deadline::until(until),
+            )
+            .unwrap();
+            if current
                 .supported_decisions
                 .contains(&PermissionDecision::Allow)
-        );
+            {
+                break current;
+            }
+            assert!(
+                Instant::now() < until,
+                "opened request became answerable under the original command budget: {:?}",
+                current.capability_reason
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        };
         let input = PermissionRespondInput {
             event_id,
             interaction_id,

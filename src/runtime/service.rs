@@ -2622,6 +2622,19 @@ pub(crate) mod test_support {
             );
         }
 
+        /// `synthetic` with a writer slice no scheduler delay exhausts, for a test that asserts
+        /// the exact event sequence and so cannot tolerate a storage-pressure gap.
+        pub(crate) fn synthetic_with_unhurried_writer(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            spec: &mut crate::runtime::SpawnSpec,
+        ) {
+            synthetic(fixture, spec);
+            let path = fixture._dir.path().join("observation-services.json");
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            config["writer_work_slice_ms"] = json!(30_000);
+            std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
+        }
+
         pub(crate) struct Clock;
         impl ObservationClock for Clock {
             fn sample(&self) -> ObservationMoment {
@@ -2636,8 +2649,12 @@ pub(crate) mod test_support {
         }
         pub(crate) struct Hooks {
             pub(crate) directory: std::path::PathBuf,
+            pub(crate) work_slice: Duration,
         }
         impl WriterHooks for Hooks {
+            fn work_slice(&self) -> Duration {
+                self.work_slice
+            }
             fn before(
                 &self,
                 boundary: WriterBoundary,
@@ -2683,6 +2700,13 @@ pub(crate) mod test_support {
                 clock: Arc::new(Clock),
                 writer_hooks: Arc::new(Hooks {
                     directory: config.parent().unwrap().to_path_buf(),
+                    work_slice: match value.get("writer_work_slice_ms") {
+                        None => crate::runtime::writer::WORK_SLICE,
+                        Some(ms) => Duration::from_millis(
+                            ms.as_u64()
+                                .expect("writer_work_slice_ms is a millisecond count"),
+                        ),
+                    },
                 }),
                 capture: None,
                 observation_hooks: crate::runtime::service::test_support::injected_failures::hooks(
