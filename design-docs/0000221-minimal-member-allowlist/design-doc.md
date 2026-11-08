@@ -1,6 +1,6 @@
 # Minimal member broker allowlist with ask-by-default routing
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-11-08
 
