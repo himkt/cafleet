@@ -1844,6 +1844,7 @@ The form has no timeout. Concurrent bash calls of one assistant message are eval
 | Protected directories | The path check follows no symbolic link, so a link elsewhere in the cwd that targets a protected directory stays writable; an allowlisted command writes where its own tool writes, as `git` does under `.git/` |
 | Project files | Project-root configuration files such as `opencode.json` and context files such as `AGENTS.md` and `CLAUDE.md` stay writable, because members edit them as ordinary work; a later session of any backend loads what a member writes there |
 | Delivery fallback | Escape interrupts a running pi turn and cancels an open form, so a delivery that falls back to Escape interrupts the member's run or dismisses the form |
+| Multi-line commands | Every command holding a newline is refused, including `cafleet message send` with a multi-line positional body; a member sends a multi-line body with `--file PATH` from a file written inside the cwd |
 
 #### Contract error strings
 
