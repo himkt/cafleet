@@ -1,6 +1,6 @@
 # pi coding-agent backend
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 52/52 tasks complete
 **Last Updated**: 2026-11-08
 
@@ -10,14 +10,14 @@ Add the pi coding agent (earendil-works/pi, 1.5.0 minimum) as the CAFleet backen
 
 ## Success Criteria
 
-- [ ] `pi` is a registry token everywhere the backend registry applies: `--coding-agent`, `member_placements.coding_agent`, the `member_runs.backend` CHECK, `cafleet setup` and `cafleet doctor`. It is last in registry order.
-- [ ] `member create --coding-agent pi` builds exactly the argv of §1.2 for every launch mode, model and effort combination, and rejects the §1.3–§1.4 inputs with their exact usage errors before any side effect.
-- [ ] `cafleet setup --coding-agent pi` installs the skills and the extension with its executable record under the resolved pi base. `cafleet doctor` reports `pi.extension` `ok`, and `error` for a tampered extension or an unusable record.
-- [ ] Under the omitted `cafleet` mode, a pi member runs every allowlisted command without a form, and every other bash command is blocked with the gate's reason. Under `cafleet-ask`, an unmatched command opens the gate's approval form. The runner reports that form as `interaction_opened`, and `cafleet permission respond` answers it allow or deny on tmux and herdr. Every pi launch mode runs the gate.
-- [ ] The pi profile from `1.5.0` is in `bundled.json`, backed by native fixtures in `src/coding_agent/native/pi.json` captured on tmux and herdr, and passes the catalog build guard.
-- [ ] Live runs A-P and A-M (§7) pass on pi 1.5.0, and their observed results are recorded: subscribe probe, extension-goal minimum bar, `cafleet_ask`, and Member runner acceptance on both multiplexers. A failed run records `no` with the observed failure, and the other role still ships.
-- [ ] `SPEC.md`, the docs site, the skills (a complete `## pi` section in `skills/cafleet/reference/coding-agents.md`, plus `cli.md`, `director.md` and `model-selection.md`) describe the shipped behavior, and `README.md` matches the docs index.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] `pi` is a registry token everywhere the backend registry applies: `--coding-agent`, `member_placements.coding_agent`, the `member_runs.backend` CHECK, `cafleet setup` and `cafleet doctor`. It is last in registry order.
+- [x] `member create --coding-agent pi` builds exactly the argv of §1.2 for every launch mode, model and effort combination, and rejects the §1.3–§1.4 inputs with their exact usage errors before any side effect.
+- [x] `cafleet setup --coding-agent pi` installs the skills and the extension with its executable record under the resolved pi base. `cafleet doctor` reports `pi.extension` `ok`, and `error` for a tampered extension or an unusable record.
+- [x] Under the omitted `cafleet` mode, a pi member runs every allowlisted command without a form, and every other bash command is blocked with the gate's reason. Under `cafleet-ask`, an unmatched command opens the gate's approval form. The runner reports that form as `interaction_opened`, and `cafleet permission respond` answers it allow or deny on tmux and herdr. Every pi launch mode runs the gate.
+- [x] The pi profile from `1.5.0` is in `bundled.json`, backed by native fixtures in `src/coding_agent/native/pi.json` captured on tmux and herdr, and passes the catalog build guard.
+- [x] Live runs A-P and A-M (§7) pass on pi 1.5.0, and their observed results are recorded: subscribe probe, extension-goal minimum bar, `cafleet_ask`, and Member runner acceptance on both multiplexers. A failed run records `no` with the observed failure, and the other role still ships.
+- [x] `SPEC.md`, the docs site, the skills (a complete `## pi` section in `skills/cafleet/reference/coding-agents.md`, plus `cli.md`, `director.md` and `model-selection.md`) describe the shipped behavior, and `README.md` matches the docs index.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
 
