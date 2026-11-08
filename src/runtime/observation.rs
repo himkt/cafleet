@@ -9640,11 +9640,20 @@ pub(crate) mod native_capture {
                             approved.id
                         );
                     }
-                    for approved in APPROVED_CASES
-                        .iter()
-                        .filter(|approved| approved.backend == CodingAgent::Opencode)
-                    {
-                        assert_eq!(approved.requested_mode(), Some("cafleet-ask"));
+                    for approved in APPROVED_CASES.iter().filter(|approved| {
+                        matches!(approved.backend, CodingAgent::Opencode | CodingAgent::Pi)
+                    }) {
+                        assert_eq!(approved.requested_mode(), None, "{}", approved.id);
+                        assert_eq!(
+                            approved
+                                .backend
+                                .resolve_policy(None)
+                                .unwrap()
+                                .resolved_mode(),
+                            approved.permission_mode,
+                            "{}",
+                            approved.id
+                        );
                     }
                 }
 

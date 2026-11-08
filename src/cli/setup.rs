@@ -1323,8 +1323,8 @@ mod tests {
             CheckStatus::Info
         );
         for name in [
+            "opencode.preset.cafleet",
             "opencode.preset",
-            "opencode.preset.cafleet-ask",
             "opencode.installation",
             "claude.installation",
             "codex.installation",
@@ -1429,8 +1429,8 @@ mod tests {
             assert_eq!(
                 names[position + 1..position + 5],
                 [
+                    "opencode.preset.cafleet",
                     "opencode.preset",
-                    "opencode.preset.cafleet-ask",
                     "opencode.extension",
                     "opencode.installation"
                 ],

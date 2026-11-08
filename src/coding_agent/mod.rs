@@ -782,7 +782,7 @@ mod tests {
             (CodingAgent::Codex, vec!["codex", "--approve-for-me"]),
             (
                 CodingAgent::Opencode,
-                vec!["opencode", "mini", "--standalone", "--agent", "cafleet"],
+                vec!["opencode", "mini", "--standalone", "--agent", "cafleet-ask"],
             ),
             (
                 CodingAgent::Hermes,
@@ -793,7 +793,7 @@ mod tests {
                 vec![
                     "pi",
                     "--cafleet-gate",
-                    "cafleet",
+                    "cafleet-ask",
                     "--no-approve",
                     "--tui-mode",
                     "fullscreen",
@@ -946,7 +946,7 @@ mod tests {
             );
             probe = probe.with_binary(agent.name(), &installed);
             if *agent == CodingAgent::Opencode {
-                let preset = config.join("agents/cafleet.md");
+                let preset = config.join(format!("agents/{mode}.md"));
                 std::fs::create_dir_all(preset.parent().unwrap()).unwrap();
                 std::fs::write(&preset, "preset").unwrap();
             }
@@ -1041,6 +1041,31 @@ mod tests {
     }
 
     #[test]
+    fn opencode_launch_policy_records_the_agent_for_the_omitted_and_explicit_modes() {
+        let omitted = CodingAgent::Opencode.resolve_policy(None).unwrap();
+        assert_eq!(omitted.requested_mode(), None);
+        assert_eq!(omitted.resolved_mode(), "cafleet-ask");
+        assert_eq!(omitted.mode_source(), ModeSource::Default);
+        assert_eq!(omitted.permission_argv(), ["--agent", "cafleet-ask"]);
+        let config = Path::new("/fixture/preset-base");
+        assert_eq!(
+            CodingAgent::Opencode.required_preset(config, omitted.resolved_mode()),
+            Some(config.join("agents/cafleet-ask.md"))
+        );
+        let explicit = CodingAgent::Opencode
+            .resolve_policy(Some("cafleet"))
+            .unwrap();
+        assert_eq!(explicit.requested_mode(), Some("cafleet"));
+        assert_eq!(explicit.resolved_mode(), "cafleet");
+        assert_eq!(explicit.mode_source(), ModeSource::Explicit);
+        assert_eq!(explicit.permission_argv(), ["--agent", "cafleet"]);
+        assert_eq!(
+            CodingAgent::Opencode.policy_choices(),
+            ["cafleet", "cafleet-ask"]
+        );
+    }
+
+    #[test]
     fn selected_preflight_reads_only_the_selected_opencode_preset_with_the_shipped_error() {
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("preset-base");
@@ -1048,7 +1073,7 @@ mod tests {
             .with_env("OPENCODE_CONFIG_DIR", config.to_str().unwrap());
         let agents = config.join("agents");
         std::fs::create_dir_all(&agents).unwrap();
-        let default_preset = agents.join("cafleet.md");
+        let deny_preset = agents.join("cafleet.md");
         let ask_preset = agents.join("cafleet-ask.md");
         let assert_missing = |mode: &str, preset: &Path| {
             let failure = CodingAgent::Opencode
@@ -1072,22 +1097,22 @@ mod tests {
             assert!(!cause.is_empty(), "the read cause is carried: {text}");
         };
 
-        std::fs::write(&default_preset, "default preset").unwrap();
+        std::fs::write(&deny_preset, "deny preset").unwrap();
         CodingAgent::Opencode
             .ensure_available(&probe, "cafleet")
             .unwrap();
         assert_missing("cafleet-ask", &ask_preset);
 
-        std::fs::remove_file(&default_preset).unwrap();
+        std::fs::remove_file(&deny_preset).unwrap();
         std::fs::write(&ask_preset, "ask preset").unwrap();
         assert_eq!(
             CodingAgent::Opencode
                 .ensure_available(&probe, "cafleet-ask")
                 .unwrap(),
             PathBuf::from("/fixture/bin/opencode"),
-            "the unselected default preset is not consulted"
+            "the unselected cafleet preset is not consulted"
         );
-        assert_missing("cafleet", &default_preset);
+        assert_missing("cafleet", &deny_preset);
 
         std::fs::remove_file(&ask_preset).unwrap();
         std::fs::create_dir(&ask_preset).unwrap();
@@ -1456,15 +1481,15 @@ mod tests {
     }
 
     #[test]
-    fn runtime_policy_omission_selects_each_backends_automatic_default_argv() {
+    fn runtime_policy_omission_selects_each_backends_default_argv() {
         for &backend in CodingAgent::all() {
             let selection = backend.resolve_policy(None).unwrap();
             let expected_mode = match backend {
                 CodingAgent::Claude => "auto",
                 CodingAgent::Codex => "approve-for-me",
-                CodingAgent::Opencode => "cafleet",
+                CodingAgent::Opencode => "cafleet-ask",
                 CodingAgent::Hermes => "smart",
-                CodingAgent::Pi => "cafleet",
+                CodingAgent::Pi => "cafleet-ask",
             };
             assert_eq!(selection.requested_mode(), None, "{backend:?}");
             assert_eq!(selection.resolved_mode(), expected_mode, "{backend:?}");
@@ -1584,10 +1609,10 @@ mod tests {
     }
 
     #[test]
-    fn runtime_policy_help_lists_every_catalog_with_the_automatic_defaults() {
+    fn runtime_policy_help_lists_every_catalog_with_its_default() {
         assert_eq!(
             CodingAgent::permission_mode_help(),
-            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart); pi: cafleet, cafleet-ask (default cafleet)"
+            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet-ask); hermes: smart, manual (default smart); pi: cafleet, cafleet-ask (default cafleet-ask)"
         );
     }
 
@@ -1812,7 +1837,7 @@ mod tests {
          {
             let prompt = "assignment {member_id}\n'quoted'";
             for (requested, mode) in [
-                (None, "cafleet"),
+                (None, "cafleet-ask"),
                 (Some("cafleet"), "cafleet"),
                 (Some("cafleet-ask"), "cafleet-ask"),
             ] {
@@ -1894,19 +1919,19 @@ mod tests {
         fn pi_launch_policy_records_the_gate_pair_for_the_omitted_and_explicit_modes() {
             let omitted = policy(None);
             assert_eq!(omitted.requested_mode(), None);
-            assert_eq!(omitted.resolved_mode(), "cafleet");
+            assert_eq!(omitted.resolved_mode(), "cafleet-ask");
             assert_eq!(omitted.mode_source(), ModeSource::Default);
             assert_eq!(
                 omitted.permission_argv(),
-                strings(&["--cafleet-gate", "cafleet"])
-            );
-            let ask = policy(Some("cafleet-ask"));
-            assert_eq!(ask.requested_mode(), Some("cafleet-ask"));
-            assert_eq!(ask.resolved_mode(), "cafleet-ask");
-            assert_eq!(ask.mode_source(), ModeSource::Explicit);
-            assert_eq!(
-                ask.permission_argv(),
                 strings(&["--cafleet-gate", "cafleet-ask"])
+            );
+            let explicit = policy(Some("cafleet"));
+            assert_eq!(explicit.requested_mode(), Some("cafleet"));
+            assert_eq!(explicit.resolved_mode(), "cafleet");
+            assert_eq!(explicit.mode_source(), ModeSource::Explicit);
+            assert_eq!(
+                explicit.permission_argv(),
+                strings(&["--cafleet-gate", "cafleet"])
             );
             assert_eq!(CodingAgent::Pi.policy_choices(), MODES);
         }
@@ -2234,7 +2259,7 @@ mod tests {
             }
             assert!(
                 CodingAgent::Pi
-                    .validate_spawn_policy_argv(&built, &policy(Some("cafleet-ask")))
+                    .validate_spawn_policy_argv(&built, &policy(Some("cafleet")))
                     .is_err()
             );
         }
