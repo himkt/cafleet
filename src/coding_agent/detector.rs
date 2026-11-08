@@ -5109,4 +5109,417 @@ mod tests {
             assert_no_request(&observe(&unboxed), "the form text in model output");
         }
     }
+
+    mod pi_profile {
+        use crate::coding_agent::detector::tests::*;
+
+        const VERSION: &str = "1.5.0";
+        const REQUEST: &str = "pi-gate-approval";
+        const IDLE: &str = "pi-idle-composer";
+        const CHOICES: [&str; 2] = ["Allow once", "Deny"];
+        const TITLE: &str = " CAFleet member gate: allow this bash command?";
+        const FOOTER: &str = " ↑↓ navigate  enter select  escape/ctrl+c cancel";
+        const CAPTURES: [&str; 4] = ["tmux-120", "tmux-049", "herdr-120", "herdr-049"];
+        const NARROW_CAPTURES: [&str; 2] = ["tmux-049", "herdr-049"];
+
+        /// Each captured form screen, its displayed command and the choice its marker focuses.
+        const FORMS: [(&str, &str, &str); 3] = [
+            ("allow-pre-stage", "./permission-probe allow", "allow-once"),
+            ("deny-pre-stage-1", "./permission-probe deny", "allow-once"),
+            ("deny-pre-stage-2", "./permission-probe deny", "deny-once"),
+        ];
+        const IDLE_SCREENS: [&str; 5] = [
+            "idle-composer",
+            "exec-empty-composer",
+            "allow-continuation",
+            "deny-continuation",
+            "exec-post-submit",
+        ];
+        const BUSY_OR_DRAFT_SCREENS: [&str; 3] = [
+            "prompt-typed-literal",
+            "exec-typed-literal",
+            "prompt-post-submit",
+        ];
+
+        fn id(screen: &str, capture: &str) -> String {
+            format!("pi-{VERSION}-{screen}-{capture}-1")
+        }
+
+        fn replay(
+            screen: &str,
+            capture: &str,
+            change: impl FnOnce(&mut Vec<String>),
+        ) -> ScreenSnapshot {
+            replay_as_captured(&id(screen, capture), change, None)
+        }
+
+        fn observe(screen: &ScreenSnapshot) -> ScreenObservation {
+            observe_bundled(CodingAgent::Pi, VERSION, screen)
+        }
+
+        fn observed(screen: &str, capture: &str) -> ScreenObservation {
+            observe(&replay(screen, capture, |_| {}))
+        }
+
+        fn plan(decision: PermissionDecision) -> AnswerPlan {
+            ProfileCatalog::bundled()
+                .answer_plan(
+                    CodingAgent::Pi,
+                    VERSION,
+                    REQUEST,
+                    &AnswerKey::Decision(decision),
+                )
+                .expect("measured bundled pi answer plan")
+        }
+
+        fn matched(screen: &ScreenSnapshot, decision: PermissionDecision) -> Option<AnswerMatch> {
+            bundled_detector(CodingAgent::Pi, VERSION)
+                .match_answer(screen, &plan(decision))
+                .unwrap()
+        }
+
+        fn row(lines: &[String], text: &str) -> usize {
+            lines
+                .iter()
+                .rposition(|line| line.starts_with(text))
+                .unwrap_or_else(|| panic!("a row starts with {text:?}"))
+        }
+
+        /// Inserts `rows` below `after`, dropping as many masked empty rows from the top so the
+        /// screen keeps its captured geometry.
+        fn insert_rows(lines: &mut Vec<String>, after: usize, rows: &[String]) {
+            for (offset, inserted) in rows.iter().enumerate() {
+                lines.insert(after + 1 + offset, inserted.clone());
+            }
+            lines.drain(..rows.len());
+        }
+
+        fn assert_request(observation: &ScreenObservation, operation: &str, case: &str) {
+            assert_eq!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+            assert_eq!(observation.rule_id, REQUEST, "{case}");
+            assert_eq!(
+                observation.match_evidence,
+                MatchEvidence::Complete,
+                "{case}"
+            );
+            assert_eq!(observation.raw_evidence["operation"], operation, "{case}");
+            assert_eq!(
+                observation.raw_evidence["operation_rows"],
+                operation.split('\n').count(),
+                "{case}"
+            );
+            assert_eq!(
+                observation.raw_evidence["choices"],
+                json!(CHOICES),
+                "{case}"
+            );
+            assert_eq!(
+                observation.raw_evidence["native_version"], VERSION,
+                "{case}"
+            );
+            assert_eq!(
+                observation.raw_evidence["native_request_id"],
+                Value::Null,
+                "{case}"
+            );
+            assert!(!observation.verified_noninteraction, "{case}");
+            assert!(observation.fingerprint.is_some(), "{case}");
+        }
+
+        fn assert_no_request(observation: &ScreenObservation, case: &str) {
+            assert_ne!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+            assert_ne!(observation.rule_id, REQUEST, "{case}");
+        }
+
+        fn assert_idle(observation: &ScreenObservation, case: &str) {
+            assert_eq!(observation.kind, ObservationKind::ComposerEmpty, "{case}");
+            assert_eq!(observation.rule_id, IDLE, "{case}");
+            assert_eq!(
+                observation.match_evidence,
+                MatchEvidence::Complete,
+                "{case}"
+            );
+            assert!(observation.verified_noninteraction, "{case}");
+            assert_eq!(observation.raw_evidence["operation"], Value::Null, "{case}");
+            assert!(observation.fingerprint.is_none(), "{case}");
+        }
+
+        fn assert_not_idle(observation: &ScreenObservation, case: &str) {
+            assert_ne!(observation.kind, ObservationKind::ComposerEmpty, "{case}");
+            assert!(!observation.verified_noninteraction, "{case}");
+        }
+
+        #[test]
+        fn pi_detects_each_captured_gate_form_on_both_multiplexers_and_widths() {
+            for capture in CAPTURES {
+                for (screen, operation, _) in FORMS {
+                    let case = id(screen, capture);
+                    assert_request(&observed(screen, capture), operation, &case);
+                }
+            }
+        }
+
+        #[test]
+        fn pi_focus_follows_the_marker_row_for_both_plans() {
+            for capture in CAPTURES {
+                for (screen, _, focus) in FORMS {
+                    let case = id(screen, capture);
+                    let replayed = replay(screen, capture, |_| {});
+                    for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                        let matched = matched(&replayed, decision)
+                            .unwrap_or_else(|| panic!("{case} matches its {decision:?} plan"));
+                        assert_eq!(matched.choices(), CHOICES.map(str::to_owned), "{case}");
+                        assert_eq!(matched.focused_choice_id(), Some(focus), "{case}");
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn pi_form_without_its_focus_marker_is_no_request_and_matches_no_plan() {
+            for capture in CAPTURES {
+                for (screen, _, _) in FORMS {
+                    let case = id(screen, capture);
+                    let unfocused = replay(screen, capture, |lines| {
+                        let marked = row(lines, " → ");
+                        lines[marked] = lines[marked].replacen(" → ", "   ", 1);
+                    });
+                    assert_no_request(&observe(&unfocused), &case);
+                    for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                        assert!(
+                            matched(&unfocused, decision).is_none(),
+                            "{case} {decision:?}"
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn pi_allow_plan_is_one_enter_gated_on_the_allow_once_focus() {
+            let allow = plan(PermissionDecision::Allow);
+            assert_eq!(allow.choice_id(), "allow-once");
+            let stages = allow
+                .stages()
+                .iter()
+                .map(|stage| (stage.bytes().to_vec(), stage.required_focus_choice_id()))
+                .collect::<Vec<_>>();
+            assert_eq!(stages, [(b"\r".to_vec(), Some("allow-once"))]);
+        }
+
+        #[test]
+        fn pi_deny_plan_moves_with_j_then_enters_without_any_escape_byte() {
+            let deny = plan(PermissionDecision::Deny);
+            assert_eq!(deny.choice_id(), "deny-once");
+            let stages = deny
+                .stages()
+                .iter()
+                .map(|stage| (stage.bytes().to_vec(), stage.required_focus_choice_id()))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                stages,
+                [
+                    (b"j".to_vec(), Some("allow-once")),
+                    (b"\r".to_vec(), Some("deny-once")),
+                ]
+            );
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                for stage in plan(decision).stages() {
+                    assert!(
+                        !stage.bytes().contains(&0x1b),
+                        "{decision:?}: Escape dismisses the gate form"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn pi_stage_gates_hold_on_their_captured_pre_stage_screens() {
+            let allow = plan(PermissionDecision::Allow);
+            let deny = plan(PermissionDecision::Deny);
+            for capture in CAPTURES {
+                let focus = |screen: &str, decision| {
+                    matched(&replay(screen, capture, |_| {}), decision)
+                        .unwrap_or_else(|| panic!("{screen} {capture} matches"))
+                        .focused_choice_id()
+                        .map(str::to_owned)
+                };
+                for (screen, decision, gate) in [
+                    (
+                        "allow-pre-stage",
+                        PermissionDecision::Allow,
+                        &allow.stages()[0],
+                    ),
+                    (
+                        "deny-pre-stage-1",
+                        PermissionDecision::Deny,
+                        &deny.stages()[0],
+                    ),
+                    (
+                        "deny-pre-stage-2",
+                        PermissionDecision::Deny,
+                        &deny.stages()[1],
+                    ),
+                ] {
+                    assert_eq!(
+                        focus(screen, decision).as_deref(),
+                        gate.required_focus_choice_id(),
+                        "{screen} {capture}"
+                    );
+                }
+                assert_ne!(
+                    focus("deny-pre-stage-2", PermissionDecision::Allow).as_deref(),
+                    allow.stages()[0].required_focus_choice_id(),
+                    "{capture}: the allow gate fails once Deny holds the focus"
+                );
+            }
+        }
+
+        #[test]
+        fn pi_deny_stage_moves_only_the_focus_of_the_same_request() {
+            for capture in CAPTURES {
+                let before = matched(
+                    &replay("deny-pre-stage-1", capture, |_| {}),
+                    PermissionDecision::Deny,
+                )
+                .unwrap();
+                let after = matched(
+                    &replay("deny-pre-stage-2", capture, |_| {}),
+                    PermissionDecision::Deny,
+                )
+                .unwrap();
+                assert!(before.semantic() == after.semantic(), "{capture}");
+                assert_eq!(before.focus_capture(), after.focus_capture(), "{capture}");
+                assert_ne!(before.focus(), after.focus(), "{capture}");
+            }
+        }
+
+        #[test]
+        fn pi_form_with_any_row_below_its_single_operation_row_yields_no_request() {
+            let extra_rows: [&[&str]; 3] = [
+                &["   --second line"],
+                &["   second line", "   third line"],
+                &["   $ ./permission-probe allow"],
+            ];
+            for capture in CAPTURES {
+                for (screen, _, _) in FORMS {
+                    for rows in extra_rows {
+                        let case = format!("{}: {rows:?}", id(screen, capture));
+                        let extended = replay(screen, capture, |lines| {
+                            let command = row(lines, " $ ");
+                            let rows = rows.iter().map(|&text| text.to_owned()).collect::<Vec<_>>();
+                            insert_rows(lines, command, &rows);
+                        });
+                        assert_no_request(&observe(&extended), &case);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn pi_command_line_equal_to_a_choice_label_yields_no_request() {
+            for capture in CAPTURES {
+                let screen = replay("deny-pre-stage-1", capture, |lines| {
+                    let command = row(lines, " $ ");
+                    insert_rows(lines, command, &["   Deny".into()]);
+                });
+                assert_no_request(&observe(&screen), capture);
+            }
+        }
+
+        #[test]
+        fn pi_forms_past_their_layout_limits_yield_no_request() {
+            for capture in CAPTURES {
+                let wrapped = replay("allow-pre-stage", capture, |lines| {
+                    let command = row(lines, " $ ");
+                    insert_rows(lines, command, &[" xxxxxxxx".into()]);
+                });
+                assert_no_request(&observe(&wrapped), &format!("{capture}: wrapped command"));
+                let tall = replay("allow-pre-stage", capture, |lines| {
+                    let command = row(lines, " $ ");
+                    let rows = (0..20).map(|n| format!("   line {n}")).collect::<Vec<_>>();
+                    insert_rows(lines, command, &rows);
+                });
+                assert_no_request(&observe(&tall), &format!("{capture}: taller than max_rows"));
+            }
+            for capture in NARROW_CAPTURES {
+                let below_min = replay("allow-pre-stage", capture, |lines| {
+                    let footer = row(lines, FOOTER);
+                    lines[footer] = " ↑↓ navigate  enter select  escape/ctrl+c".into();
+                    lines[footer + 1] = "cancel".into();
+                });
+                assert_no_request(
+                    &observe(&below_min),
+                    &format!("{capture}: wrapped hint row"),
+                );
+            }
+        }
+
+        #[test]
+        fn pi_gate_form_text_outside_a_live_form_is_no_request() {
+            for capture in CAPTURES {
+                let form = fixture_lines(&id("allow-pre-stage", capture));
+                let top = row(&form, TITLE);
+                let footer = row(&form, FOOTER);
+                let without_footer = form[top..footer].to_vec();
+                let transcript = replay("idle-composer", capture, |lines| {
+                    lines[20..20 + without_footer.len()].clone_from_slice(&without_footer);
+                });
+                assert_no_request(
+                    &observe(&transcript),
+                    &format!("{capture}: form text above the idle editor"),
+                );
+                let quoted = replay("allow-pre-stage", capture, |lines| {
+                    for row in &mut lines[top..=footer] {
+                        if !row.is_empty() {
+                            *row = format!("    {row}");
+                        }
+                    }
+                });
+                assert_no_request(&observe(&quoted), &format!("{capture}: quoted form"));
+                let primary = observe(&replay_native_fixture(
+                    &bundled_screen(&id("allow-pre-stage", capture)),
+                    |_| {},
+                    false,
+                    None,
+                ));
+                assert_no_request(&primary, &format!("{capture}: primary screen"));
+            }
+        }
+
+        #[test]
+        fn pi_idle_editor_is_a_verified_empty_composer_after_every_captured_boundary() {
+            for capture in CAPTURES {
+                for screen in IDLE_SCREENS {
+                    assert_idle(&observed(screen, capture), &id(screen, capture));
+                }
+            }
+        }
+
+        #[test]
+        fn pi_draft_working_turn_and_cursor_outside_the_editor_are_not_idle() {
+            for capture in CAPTURES {
+                for screen in BUSY_OR_DRAFT_SCREENS {
+                    assert_not_idle(&observed(screen, capture), &id(screen, capture));
+                }
+                for (screen, _, _) in FORMS {
+                    assert_not_idle(&observed(screen, capture), &id(screen, capture));
+                }
+                let away = observe(&replay_as_captured(
+                    &id("idle-composer", capture),
+                    |_| {},
+                    Some((0, 0)),
+                ));
+                assert_not_idle(&away, &format!("{capture}: cursor outside the editor"));
+            }
+        }
+    }
 }

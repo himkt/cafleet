@@ -40,7 +40,10 @@ pub(crate) enum CodingAgent {
     Codex,
     Opencode,
     Hermes,
+    Pi,
 }
+
+const PI_THINKING_LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 impl CodingAgent {
     pub(crate) fn all() -> &'static [Self] {
@@ -53,6 +56,7 @@ impl CodingAgent {
             Self::Codex => "codex",
             Self::Opencode => "opencode",
             Self::Hermes => "hermes",
+            Self::Pi => "pi",
         }
     }
 
@@ -62,6 +66,7 @@ impl CodingAgent {
             Self::Codex => "CODEX_HOME",
             Self::Opencode => "OPENCODE_CONFIG_DIR",
             Self::Hermes => "HERMES_HOME",
+            Self::Pi => "PI_CODING_AGENT_DIR",
         }
     }
 
@@ -75,6 +80,7 @@ impl CodingAgent {
             Self::Codex => home.join(".codex"),
             Self::Opencode => crate::config::opencode_skills_base(home),
             Self::Hermes => home.join(".hermes"),
+            Self::Pi => home.join(".pi/agent"),
         };
         crate::config::resolve(self.config_variable(), env, default)
     }
@@ -106,6 +112,25 @@ impl CodingAgent {
                 "--model for the opencode backend must be '<provider-id>/<model-id>' (got '{model}')."
             )));
         }
+        if self == Self::Pi
+            && let Some(model) = model
+            && model
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| PI_THINKING_LEVELS.contains(&suffix))
+        {
+            return Err(CafleetError::Usage(format!(
+                "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '{model}')."
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_prompt(self, prompt: &str) -> Result<(), CafleetError> {
+        if self == Self::Pi && prompt.starts_with('@') {
+            return Err(CafleetError::Usage(
+                "a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -117,6 +142,7 @@ impl CodingAgent {
             Self::Hermes => &[
                 "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
             ][..],
+            Self::Pi => &PI_THINKING_LEVELS[..],
             Self::Opencode => {
                 return Err(CafleetError::Usage(
                     "opencode does not support reasoning effort.".into(),
@@ -148,6 +174,12 @@ impl CodingAgent {
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;
         }
+        if self == Self::Pi {
+            let extension = pi_extension(&config);
+            std::fs::read(&extension).map_err(|error| CafleetError::App(format!(
+                "cannot read the CAFleet pi extension at {}: {error}; run 'cafleet setup --coding-agent pi' first", extension.display()
+            )))?;
+        }
         Ok(executable)
     }
 
@@ -176,6 +208,10 @@ impl CodingAgent {
         argv[0] = program.into();
         Ok(argv)
     }
+}
+
+pub(crate) fn pi_extension(base: &Path) -> PathBuf {
+    base.join("extensions/cafleet.ts")
 }
 
 pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
@@ -214,6 +250,7 @@ impl CodingAgent {
             Self::Codex => "approve-for-me",
             Self::Opencode => "cafleet",
             Self::Hermes => "smart",
+            Self::Pi => "cafleet",
         }
     }
     pub(crate) fn permission_mode_help() -> String {
@@ -245,6 +282,7 @@ impl CodingAgent {
             Self::Codex => &["on-request", "never", "approve-for-me"],
             Self::Opencode => &["cafleet", "cafleet-ask"],
             Self::Hermes => &["smart", "manual"],
+            Self::Pi => &["cafleet", "cafleet-ask"],
         }
     }
     fn permission_arguments(self, mode: &str) -> Vec<String> {
@@ -259,6 +297,7 @@ impl CodingAgent {
             ],
             Self::Opencode => vec!["--agent".into(), mode.into()],
             Self::Hermes => vec![],
+            Self::Pi => vec!["--cafleet-gate".into(), mode.into()],
         }
     }
     pub(crate) fn resolve_policy(
@@ -302,6 +341,10 @@ impl CodingAgent {
     ) -> Result<Vec<String>, CafleetError> {
         self.validate_model(model)?;
         self.validate_effort(effort)?;
+        assert!(
+            self.validate_prompt(prompt).is_ok(),
+            "member create validates the spawn prompt before argv construction"
+        );
         let mut argv = vec![self.name().into()];
         match self {
             Self::Opencode => argv.extend(["mini".into(), "--standalone".into()]),
@@ -314,7 +357,7 @@ impl CodingAgent {
                 })?;
                 argv.extend(["chat", "--cli", "--source", "tool", "--in", cwd].map(String::from));
             }
-            Self::Claude | Self::Codex => {}
+            Self::Claude | Self::Codex | Self::Pi => {}
         }
         argv.extend(policy.permission_argv.clone());
         if self == Self::Claude {
@@ -327,6 +370,15 @@ impl CodingAgent {
                 display_name.into(),
             ]);
         }
+        if self == Self::Pi {
+            argv.extend([
+                "--no-approve".into(),
+                "--tui-mode".into(),
+                "fullscreen".into(),
+                "--name".into(),
+                display_name.into(),
+            ]);
+        }
         if let Some(model) = model {
             argv.extend(["--model".into(), model.into()]);
         }
@@ -335,12 +387,14 @@ impl CodingAgent {
                 Self::Claude => argv.extend(["--effort".into(), effort.into()]),
                 Self::Codex => argv.push(format!("--config=model_reasoning_effort={effort}")),
                 Self::Hermes => argv.extend(["--reasoning".into(), effort.into()]),
+                Self::Pi => argv.extend(["--thinking".into(), effort.into()]),
                 Self::Opencode => unreachable!("effort validated before argv construction"),
             }
         }
         match self {
             Self::Opencode => argv.push("--prompt".into()),
             Self::Hermes => argv.push("-q".into()),
+            Self::Pi => argv.push("--".into()),
             Self::Claude | Self::Codex => {}
         }
         argv.push(prompt.into());
@@ -366,13 +420,13 @@ impl CodingAgent {
             }
             _ => Path::new("/"),
         };
-        let flag_prompt = usize::from(matches!(self, Self::Opencode | Self::Hermes));
+        let flag_prompt = usize::from(matches!(self, Self::Opencode | Self::Hermes | Self::Pi));
         let baseline = self.build_spawn_argv_with_policy("", "", cwd, None, None, policy)?;
-        let name_index = (self == Self::Claude).then(|| {
+        let name_index = matches!(self, Self::Claude | Self::Pi).then(|| {
             baseline
                 .iter()
                 .position(|value| value == "--name")
-                .expect("Claude name option")
+                .expect("Claude and pi name option")
                 + 1
         });
         let display_name = match name_index {
@@ -390,6 +444,11 @@ impl CodingAgent {
         let effort = if argv.len() > cursor + 1 {
             match self {
                 Self::Claude if argv[cursor] == "--effort" => {
+                    let value = argv.get(cursor + 1).ok_or_else(invalid)?;
+                    cursor += 2;
+                    Some(value.as_str())
+                }
+                Self::Pi if argv[cursor] == "--thinking" => {
                     let value = argv.get(cursor + 1).ok_or_else(invalid)?;
                     cursor += 2;
                     Some(value.as_str())
@@ -416,6 +475,7 @@ impl CodingAgent {
             (_, []) => None,
             (Self::Opencode, [flag, prompt]) if flag == "--prompt" => Some(prompt.as_str()),
             (Self::Hermes, [flag, prompt]) if flag == "-q" => Some(prompt.as_str()),
+            (Self::Pi, [flag, prompt]) if flag == "--" => Some(prompt.as_str()),
             (Self::Claude | Self::Codex, [prompt]) => Some(prompt.as_str()),
             _ => return Err(invalid()),
         };
@@ -568,7 +628,7 @@ impl CodingAgent {
     pub(crate) fn version_from_line(self, line: &str) -> Result<&str, &'static str> {
         match self {
             Self::Hermes => hermes_version(line),
-            Self::Claude | Self::Codex | Self::Opencode => version_token(line),
+            Self::Claude | Self::Codex | Self::Opencode | Self::Pi => version_token(line),
         }
     }
 }
@@ -728,6 +788,19 @@ mod tests {
                 CodingAgent::Hermes,
                 vec!["hermes", "chat", "--cli", "--source", "tool", "--in", CWD],
             ),
+            (
+                CodingAgent::Pi,
+                vec![
+                    "pi",
+                    "--cafleet-gate",
+                    "cafleet",
+                    "--no-approve",
+                    "--tui-mode",
+                    "fullscreen",
+                    "--name",
+                    "display name",
+                ],
+            ),
         ] {
             for configured in [false, true] {
                 let mut expected = base
@@ -752,11 +825,15 @@ mod tests {
                     (CodingAgent::Hermes, Some(value)) => {
                         expected.extend(["--reasoning".into(), value.into()])
                     }
+                    (CodingAgent::Pi, Some(value)) => {
+                        expected.extend(["--thinking".into(), value.into()])
+                    }
                     _ => {}
                 }
                 match agent {
                     CodingAgent::Opencode => expected.push("--prompt".into()),
                     CodingAgent::Hermes => expected.push("-q".into()),
+                    CodingAgent::Pi => expected.push("--".into()),
                     _ => {}
                 }
                 expected.push(prompt.into());
@@ -807,6 +884,11 @@ mod tests {
                     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
                 ][..],
                 "HIGH",
+            ),
+            (
+                CodingAgent::Pi,
+                &["off", "minimal", "low", "medium", "high", "xhigh", "max"][..],
+                "none",
             ),
         ] {
             for effort in valid {
@@ -868,6 +950,11 @@ mod tests {
                 std::fs::create_dir_all(preset.parent().unwrap()).unwrap();
                 std::fs::write(&preset, "preset").unwrap();
             }
+            if *agent == CodingAgent::Pi {
+                let extension = config.join("extensions/cafleet.ts");
+                std::fs::create_dir_all(extension.parent().unwrap()).unwrap();
+                std::fs::write(&extension, "extension").unwrap();
+            }
             assert_eq!(agent.ensure_available(&probe, mode).unwrap(), installed);
         }
         assert!(coding_agent("Claude").is_none());
@@ -880,6 +967,7 @@ mod tests {
             "CODEX_HOME" => Some("/cfg/codex".into()),
             "OPENCODE_CONFIG_DIR" => Some("/cfg/opencode".into()),
             "HERMES_HOME" => Some("/cfg/hermes home".into()),
+            "PI_CODING_AGENT_DIR" => Some("/cfg/pi agent".into()),
             _ => None,
         })
     }
@@ -1016,6 +1104,7 @@ mod tests {
             CodingAgent::Codex => ".codex",
             CodingAgent::Opencode => ".config/opencode",
             CodingAgent::Hermes => ".hermes",
+            CodingAgent::Pi => ".pi/agent",
         })
     }
 
@@ -1362,6 +1451,7 @@ mod tests {
             ],
             CodingAgent::Opencode => vec!["--agent".into(), selected.into()],
             CodingAgent::Hermes => vec![],
+            CodingAgent::Pi => vec!["--cafleet-gate".into(), selected.into()],
         }
     }
 
@@ -1374,6 +1464,7 @@ mod tests {
                 CodingAgent::Codex => "approve-for-me",
                 CodingAgent::Opencode => "cafleet",
                 CodingAgent::Hermes => "smart",
+                CodingAgent::Pi => "cafleet",
             };
             assert_eq!(selection.requested_mode(), None, "{backend:?}");
             assert_eq!(selection.resolved_mode(), expected_mode, "{backend:?}");
@@ -1431,6 +1522,16 @@ mod tests {
                         "--in".into(),
                         CWD.into(),
                     ],
+                    CodingAgent::Pi => vec![
+                        "pi".into(),
+                        "--cafleet-gate".into(),
+                        mode.into(),
+                        "--no-approve".into(),
+                        "--tui-mode".into(),
+                        "fullscreen".into(),
+                        "--name".into(),
+                        "fixture name".into(),
+                    ],
                 };
                 expected.extend(["--model".into(), "provider/model".into()]);
                 let effort = (backend != CodingAgent::Opencode).then_some("high");
@@ -1442,6 +1543,9 @@ mod tests {
                     CodingAgent::Opencode => expected.push("--prompt".into()),
                     CodingAgent::Hermes => {
                         expected.extend(["--reasoning".into(), "high".into(), "-q".into()])
+                    }
+                    CodingAgent::Pi => {
+                        expected.extend(["--thinking".into(), "high".into(), "--".into()])
                     }
                 }
                 expected.push("literal '$x' `text` assignment".into());
@@ -1483,7 +1587,7 @@ mod tests {
     fn runtime_policy_help_lists_every_catalog_with_the_automatic_defaults() {
         assert_eq!(
             CodingAgent::permission_mode_help(),
-            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart)"
+            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart); pi: cafleet, cafleet-ask (default cafleet)"
         );
     }
 
@@ -1627,6 +1731,511 @@ mod tests {
             assert_eq!(
                 availability_error(&probe).message(),
                 "binary hermes not found on PATH"
+            );
+        }
+    }
+
+    mod pi {
+        use crate::coding_agent::tests::*;
+
+        const MODES: [&str; 2] = ["cafleet", "cafleet-ask"];
+        const THINKING: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+        const PROMPT_ERROR: &str = "a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).";
+
+        fn policy(mode: Option<&str>) -> LaunchPolicySelection {
+            CodingAgent::Pi.resolve_policy(mode).unwrap()
+        }
+
+        fn argv(
+            prompt: &str,
+            model: Option<&str>,
+            effort: Option<&str>,
+            mode: Option<&str>,
+        ) -> Result<Vec<String>, CafleetError> {
+            CodingAgent::Pi.build_spawn_argv_with_policy(
+                prompt,
+                "pi worker",
+                cwd(),
+                model,
+                effort,
+                &policy(mode),
+            )
+        }
+
+        fn strings(values: &[&str]) -> Vec<String> {
+            values.iter().map(|value| (*value).to_owned()).collect()
+        }
+
+        fn pi_probe(base: &Path) -> FakeProbe {
+            FakeProbe::installed(&home()).with_env("PI_CODING_AGENT_DIR", base.to_str().unwrap())
+        }
+
+        fn install_extension(base: &Path) -> PathBuf {
+            let extension = base.join("extensions/cafleet.ts");
+            std::fs::create_dir_all(extension.parent().unwrap()).unwrap();
+            std::fs::write(&extension, "export default function () {}").unwrap();
+            extension
+        }
+
+        fn assert_missing_extension(failure: CafleetError, extension: &Path) {
+            assert!(
+                matches!(failure, CafleetError::App(_)),
+                "exit 1: {}",
+                failure.message()
+            );
+            let text = failure.message();
+            let cause = text
+                .strip_prefix(&format!(
+                    "cannot read the CAFleet pi extension at {}: ",
+                    extension.display()
+                ))
+                .and_then(|rest| rest.strip_suffix("; run 'cafleet setup --coding-agent pi' first"))
+                .unwrap_or_else(|| panic!("shipped missing-extension error: {text}"));
+            assert!(!cause.is_empty(), "the read cause is carried: {text}");
+        }
+
+        #[test]
+        fn pi_is_the_last_registry_token_with_its_config_variable() {
+            assert_eq!(CodingAgent::all().last(), Some(&CodingAgent::Pi));
+            assert_eq!(CodingAgent::Pi.name(), "pi");
+            assert_eq!(coding_agent("pi"), Some(CodingAgent::Pi));
+            assert_eq!(CodingAgent::Pi.config_variable(), "PI_CODING_AGENT_DIR");
+            assert_eq!(
+                CodingAgent::from_str("pi", false).unwrap(),
+                CodingAgent::Pi,
+                "--coding-agent pi parses"
+            );
+        }
+
+        #[test]
+        fn pi_argv_for_every_mode_carries_the_gate_trust_layout_and_name_then_the_prompt_after_a_separator()
+         {
+            let prompt = "assignment {member_id}\n'quoted'";
+            for (requested, mode) in [
+                (None, "cafleet"),
+                (Some("cafleet"), "cafleet"),
+                (Some("cafleet-ask"), "cafleet-ask"),
+            ] {
+                let head = strings(&[
+                    "pi",
+                    "--cafleet-gate",
+                    mode,
+                    "--no-approve",
+                    "--tui-mode",
+                    "fullscreen",
+                    "--name",
+                    "pi worker",
+                ]);
+                for (model, effort) in [
+                    (None, None),
+                    (Some("openrouter/moonshotai/kimi-k2.6"), None),
+                    (None, Some("xhigh")),
+                    (Some("kimi k2"), Some("off")),
+                ] {
+                    let mut expected = head.clone();
+                    if let Some(model) = model {
+                        expected.extend(strings(&["--model", model]));
+                    }
+                    if let Some(effort) = effort {
+                        expected.extend(strings(&["--thinking", effort]));
+                    }
+                    expected.extend(strings(&["--", prompt]));
+                    assert_eq!(
+                        argv(prompt, model, effort, requested).unwrap(),
+                        expected,
+                        "{requested:?} {model:?} {effort:?}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn pi_argv_keeps_a_prompt_beginning_with_a_dash_positional_after_the_separator() {
+            for prompt in ["--model other", "-n", "--"] {
+                let built = argv(prompt, None, None, None).unwrap();
+                assert_eq!(
+                    built[built.len() - 2..],
+                    strings(&["--", prompt]),
+                    "{prompt}"
+                );
+                assert!(
+                    !built.iter().any(|value| value == "--model"),
+                    "the prompt adds no option token: {built:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn pi_argv_starts_a_fresh_session_without_resume_options() {
+            let built = argv(
+                "assignment",
+                Some("provider/id"),
+                Some("high"),
+                Some("cafleet-ask"),
+            )
+            .unwrap();
+            for option in [
+                "--continue",
+                "-c",
+                "--resume",
+                "-r",
+                "--session",
+                "--session-id",
+                "--fork",
+            ] {
+                assert!(
+                    !built.iter().any(|value| value == option),
+                    "{option}: {built:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn pi_launch_policy_records_the_gate_pair_for_the_omitted_and_explicit_modes() {
+            let omitted = policy(None);
+            assert_eq!(omitted.requested_mode(), None);
+            assert_eq!(omitted.resolved_mode(), "cafleet");
+            assert_eq!(omitted.mode_source(), ModeSource::Default);
+            assert_eq!(
+                omitted.permission_argv(),
+                strings(&["--cafleet-gate", "cafleet"])
+            );
+            let ask = policy(Some("cafleet-ask"));
+            assert_eq!(ask.requested_mode(), Some("cafleet-ask"));
+            assert_eq!(ask.resolved_mode(), "cafleet-ask");
+            assert_eq!(ask.mode_source(), ModeSource::Explicit);
+            assert_eq!(
+                ask.permission_argv(),
+                strings(&["--cafleet-gate", "cafleet-ask"])
+            );
+            assert_eq!(CodingAgent::Pi.policy_choices(), MODES);
+        }
+
+        #[test]
+        fn pi_unknown_launch_mode_fails_with_the_exact_usage_error() {
+            let failure = CodingAgent::Pi
+                .resolve_policy(Some("auto"))
+                .expect_err("an unknown pi mode fails");
+            assert!(matches!(failure, CafleetError::Usage(_)));
+            assert_eq!(failure.exit_code(), 2);
+            assert_eq!(
+                failure.message(),
+                "--permission-mode for pi must be one of cafleet, cafleet-ask (got 'auto')"
+            );
+        }
+
+        #[test]
+        fn pi_model_with_a_thinking_suffix_fails_with_the_exact_usage_error() {
+            for level in THINKING {
+                let model = format!("openrouter/moonshotai/kimi-k2.6:{level}");
+                let failure = CodingAgent::Pi
+                    .validate_model(Some(&model))
+                    .expect_err("a thinking suffix is rejected");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                assert_eq!(failure.exit_code(), 2);
+                assert_eq!(
+                    failure.message(),
+                    format!(
+                        "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '{model}')."
+                    )
+                );
+                assert!(argv("assignment", Some(&model), None, None).is_err());
+            }
+            for model in ["kimi:high", "provider/model:free:max"] {
+                assert!(
+                    CodingAgent::Pi.validate_model(Some(model)).is_err(),
+                    "the text after the last ':' decides: {model}"
+                );
+            }
+        }
+
+        #[test]
+        fn pi_model_passes_through_verbatim_when_no_thinking_level_follows_its_last_colon() {
+            for model in [
+                "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+                "openrouter/moonshotai/kimi-k2.6",
+                "claude-opus-5-5",
+                "kimi k2",
+                "provider/model:high:free",
+                "model:",
+            ] {
+                CodingAgent::Pi
+                    .validate_model(Some(model))
+                    .unwrap_or_else(|error| panic!("{model}: {}", error.message()));
+                let built = argv("assignment", Some(model), None, None).unwrap();
+                let index = built.iter().position(|value| value == "--model").unwrap();
+                assert_eq!(built[index + 1], model);
+            }
+        }
+
+        #[test]
+        fn pi_effort_forwards_every_thinking_level_as_the_thinking_option() {
+            for level in THINKING {
+                CodingAgent::Pi.validate_effort(Some(level)).unwrap();
+                let built = argv("assignment", None, Some(level), None).unwrap();
+                let index = built
+                    .iter()
+                    .position(|value| value == "--thinking")
+                    .unwrap();
+                assert_eq!(built[index + 1], level);
+                assert!(!built.iter().any(|value| value == "--effort"), "{built:?}");
+            }
+        }
+
+        #[test]
+        fn pi_effort_outside_the_thinking_levels_fails_with_the_exact_usage_error() {
+            for value in ["none", "ultra", "HIGH", ""] {
+                let failure = CodingAgent::Pi
+                    .validate_effort(Some(value))
+                    .expect_err("an unknown pi effort fails");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                assert_eq!(failure.exit_code(), 2);
+                assert_eq!(
+                    failure.message(),
+                    format!(
+                        "--effort for the pi backend must be one of off, minimal, low, medium, high, xhigh, max (got '{value}')."
+                    )
+                );
+                assert!(argv("assignment", None, Some(value), None).is_err());
+            }
+        }
+
+        #[test]
+        fn pi_prompt_beginning_with_an_at_sign_fails_with_the_exact_usage_error() {
+            for prompt in ["@notes.md", "@", "@{member_id} assignment"] {
+                let failure = CodingAgent::Pi
+                    .validate_prompt(prompt)
+                    .expect_err("a leading '@' is rejected for pi");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                assert_eq!(failure.exit_code(), 2);
+                assert_eq!(failure.message(), PROMPT_ERROR);
+            }
+        }
+
+        #[test]
+        fn pi_prompt_validation_accepts_every_prompt_whose_first_character_is_not_an_at_sign() {
+            for prompt in [
+                "assignment",
+                " @notes.md",
+                "\n@notes.md",
+                "mail me@example.com",
+                "-x",
+                "{member_id}",
+                "",
+            ] {
+                CodingAgent::Pi
+                    .validate_prompt(prompt)
+                    .unwrap_or_else(|error| panic!("{prompt:?}: {}", error.message()));
+            }
+        }
+
+        #[test]
+        fn every_other_backend_accepts_a_prompt_beginning_with_an_at_sign() {
+            for &agent in CodingAgent::all() {
+                if agent == CodingAgent::Pi {
+                    continue;
+                }
+                for prompt in ["@notes.md", "@", "assignment"] {
+                    agent.validate_prompt(prompt).unwrap_or_else(|error| {
+                        panic!("{agent:?} {prompt:?}: {}", error.message())
+                    });
+                }
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn pi_argv_construction_asserts_that_the_prompt_passed_validation() {
+            let _ = argv("@notes.md", None, None, None);
+        }
+
+        #[test]
+        fn pi_availability_checks_the_base_then_the_binary_then_the_extension() {
+            let dir = tempfile::tempdir().unwrap();
+            let base = dir.path().join("pi agent");
+            for mode in MODES {
+                let mut probe =
+                    FakeProbe::installed(&home()).with_env("PI_CODING_AGENT_DIR", "relative");
+                probe.binaries.clear();
+                assert_eq!(
+                    CodingAgent::Pi
+                        .ensure_available(&probe, mode)
+                        .unwrap_err()
+                        .message(),
+                    "PI_CODING_AGENT_DIR must be an absolute path (got 'relative')",
+                    "{mode}: the base resolves first"
+                );
+                probe = probe.with_env("PI_CODING_AGENT_DIR", base.to_str().unwrap());
+                assert_eq!(
+                    CodingAgent::Pi
+                        .ensure_available(&probe, mode)
+                        .unwrap_err()
+                        .message(),
+                    "binary pi not found on PATH",
+                    "{mode}: the binary precedes the extension"
+                );
+            }
+        }
+
+        #[test]
+        fn pi_availability_reads_the_extension_in_every_launch_mode() {
+            let dir = tempfile::tempdir().unwrap();
+            let base = dir.path().join("pi agent");
+            let probe = pi_probe(&base);
+            let extension = base.join("extensions/cafleet.ts");
+            for mode in MODES {
+                assert_missing_extension(
+                    CodingAgent::Pi
+                        .ensure_available(&probe, mode)
+                        .expect_err("a missing extension fails the preflight"),
+                    &extension,
+                );
+            }
+            install_extension(&base);
+            for mode in MODES {
+                assert_eq!(
+                    CodingAgent::Pi.ensure_available(&probe, mode).unwrap(),
+                    PathBuf::from("/fixture/bin/pi"),
+                    "{mode}"
+                );
+            }
+            std::fs::remove_file(&extension).unwrap();
+            std::fs::create_dir(&extension).unwrap();
+            for mode in MODES {
+                assert_missing_extension(
+                    CodingAgent::Pi
+                        .ensure_available(&probe, mode)
+                        .expect_err("an unreadable extension fails the preflight"),
+                    &extension,
+                );
+            }
+        }
+
+        #[test]
+        fn pi_availability_reads_the_extension_under_the_default_base() {
+            let dir = tempfile::tempdir().unwrap();
+            let probe = FakeProbe::installed(dir.path());
+            let base = dir.path().join(".pi/agent");
+            assert_missing_extension(
+                CodingAgent::Pi
+                    .ensure_available(&probe, "cafleet")
+                    .expect_err("the default base has no extension"),
+                &base.join("extensions/cafleet.ts"),
+            );
+            install_extension(&base);
+            CodingAgent::Pi.ensure_available(&probe, "cafleet").unwrap();
+        }
+
+        #[test]
+        fn pi_config_dir_defaults_to_the_pi_agent_directory_and_honors_the_override() {
+            assert_eq!(
+                CodingAgent::Pi.config_dir(&|_| Ok(None), &home()).unwrap(),
+                home().join(".pi/agent")
+            );
+            assert_eq!(
+                CodingAgent::Pi
+                    .config_dir(&only("PI_CODING_AGENT_DIR", "/srv/pi agent"), &home())
+                    .unwrap(),
+                PathBuf::from("/srv/pi agent")
+            );
+            assert_eq!(
+                CodingAgent::Pi
+                    .forwarded_config(&only("PI_CODING_AGENT_DIR", "/srv/pi agent"))
+                    .unwrap(),
+                Some(("PI_CODING_AGENT_DIR".to_owned(), "/srv/pi agent".to_owned()))
+            );
+            assert_eq!(
+                CodingAgent::Pi.forwarded_config(&|_| Ok(None)).unwrap(),
+                None
+            );
+        }
+
+        #[test]
+        fn pi_version_probe_records_the_single_version_token() {
+            assert_eq!(CodingAgent::Pi.version_from_line("1.5.0"), Ok("1.5.0"));
+            assert_eq!(CodingAgent::Pi.version_from_line("v1.5.0"), Ok("1.5.0"));
+            assert_eq!(
+                CodingAgent::Pi.version_from_line("pi"),
+                Err("printed no version token")
+            );
+        }
+
+        #[test]
+        fn pi_launch_argv_replaces_only_the_program_with_the_resolved_executable() {
+            let launched = CodingAgent::Pi
+                .launch_argv(
+                    Path::new("/opt/pi/bin/pi"),
+                    "assignment",
+                    "pi worker",
+                    cwd(),
+                    None,
+                    None,
+                    &policy(None),
+                )
+                .unwrap();
+            let bare = argv("assignment", None, None, None).unwrap();
+            assert_eq!(launched[0], "/opt/pi/bin/pi");
+            assert_eq!(launched[1..], bare[1..]);
+        }
+
+        #[test]
+        fn pi_capture_argv_validation_accepts_the_built_argv_with_or_without_the_prompt_tail() {
+            for mode in MODES {
+                let selection = policy(Some(mode));
+                for (model, effort) in [(None, None), (Some("provider/id"), Some("max"))] {
+                    let built = CodingAgent::Pi
+                        .launch_argv(
+                            Path::new("/opt/pi/bin/pi"),
+                            "-assignment",
+                            "pi worker",
+                            cwd(),
+                            model,
+                            effort,
+                            &selection,
+                        )
+                        .unwrap();
+                    CodingAgent::Pi
+                        .validate_spawn_policy_argv(&built, &selection)
+                        .unwrap();
+                    let without_prompt = &built[..built.len() - 2];
+                    assert_eq!(built[built.len() - 2], "--");
+                    CodingAgent::Pi
+                        .validate_spawn_policy_argv(without_prompt, &selection)
+                        .unwrap();
+                }
+            }
+        }
+
+        #[test]
+        fn pi_capture_argv_validation_rejects_an_added_flag_a_missing_separator_or_another_mode() {
+            let selection = policy(None);
+            let built = CodingAgent::Pi
+                .launch_argv(
+                    Path::new("/opt/pi/bin/pi"),
+                    "assignment",
+                    "pi worker",
+                    cwd(),
+                    None,
+                    None,
+                    &selection,
+                )
+                .unwrap();
+            let mut added = built.clone();
+            added.insert(1, "--continue".into());
+            let mut unseparated = built.clone();
+            unseparated.remove(built.len() - 2);
+            for argv in [added, unseparated] {
+                assert!(
+                    CodingAgent::Pi
+                        .validate_spawn_policy_argv(&argv, &selection)
+                        .is_err(),
+                    "{argv:?}"
+                );
+            }
+            assert!(
+                CodingAgent::Pi
+                    .validate_spawn_policy_argv(&built, &policy(Some("cafleet-ask")))
+                    .is_err()
             );
         }
     }

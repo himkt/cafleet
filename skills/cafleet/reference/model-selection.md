@@ -22,7 +22,7 @@ When the operator names a model rather than a backend ("please create a member w
 | 4 | Any other bare name whose key equals the key of exactly one OpenCode candidate ID (normalization step 1) — `glm-5.3`, `kimi-k3.1-pro` | `opencode` | `--coding-agent opencode --model <token>`, token from OpenCode token selection |
 | 5 | Anything else — no key-equal ID, or more than one (e.g. `o3-mini`, `gemini`) | none | Request an explicit backend/model pair through Model routing failures |
 
-Apply these rows only when the operator names no backend. Inference never selects `hermes`: a Hermes member requires an operator-named backend or a Hermes fleet backend ([backend-resolution](../roles/director.md#model-selection) steps 1 and 3), and a provider-prefixed model for a Hermes-named member follows the Hermes explicit mapping.
+Apply these rows only when the operator names no backend. Inference never selects `hermes` or `pi`: a Hermes or pi member requires an operator-named backend or a fleet backend of that name ([backend-resolution](../roles/director.md#model-selection) steps 1 and 3), and a provider-prefixed model for a Hermes- or pi-named member follows that backend's explicit mapping.
 
 Row 1 wins over row 2 for `anthropic/claude-sonnet-4-6`, which contains both `claude` and a `/`: a provider-prefixed token is itself an explicit OpenCode request. A bare name infers `opencode` only through row 4; Claude and GPT names select their native backends even when either OpenCode table lists the model.
 
@@ -85,6 +85,14 @@ Require each Role-default and family-word token to exist in the Console table, a
 |---|---|
 | No model, a family word or a backend-only request | None: omit `--model` and `--effort`, so the operator's configured default applies |
 | Any model token, provider-prefixed or bare | The token, verbatim; Hermes rejects an unknown model at launch |
+
+**pi.** pi has no maintained catalog, and its Role defaults are `—`.
+
+| Reference given with the pi request | Resolved `--model` |
+|---|---|
+| No model, a family word or a backend-only request | None: omit `--model` and `--effort`, so the operator's configured pi default applies |
+| A model token ending in `:<thinking>` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` after its last `:`) | The token without that suffix, verbatim, with the level as `--effort`; `member create` refuses the suffix in `--model` |
+| Any other model token (`provider/id`, an exact id or a fuzzy name) | The token, verbatim; pi rejects an unknown model at launch |
 
 ## OpenCode token selection
 

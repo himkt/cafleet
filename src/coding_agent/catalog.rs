@@ -1419,11 +1419,13 @@ pub(crate) mod test_support {
     const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
     const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
     const HERMES_FIXTURES: &[u8] = include_bytes!("native/hermes.json");
+    const PI_FIXTURES: &[u8] = include_bytes!("native/pi.json");
     pub(crate) const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
         ("native/claude.json", CLAUDE_FIXTURES),
         ("native/codex.json", CODEX_FIXTURES),
         ("native/opencode.json", OPENCODE_FIXTURES),
         ("native/hermes.json", HERMES_FIXTURES),
+        ("native/pi.json", PI_FIXTURES),
     ];
 
     fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
@@ -5653,6 +5655,30 @@ mod tests {
         }
 
         #[test]
+        fn pi_composer_plans_submit_a_prompt_and_a_native_exec_in_separate_stages() {
+            let bundled = ProfileCatalog::bundled();
+            for (operation, name, literal, typed) in [
+                (
+                    ComposerOperation::Prompt,
+                    "prompt",
+                    "-leading dash",
+                    b"-leading dash".to_vec(),
+                ),
+                (
+                    ComposerOperation::Exec,
+                    "exec",
+                    "echo cafleet-220-exec",
+                    b"! echo cafleet-220-exec".to_vec(),
+                ),
+            ] {
+                let plan = bundled
+                    .composer_plan(CodingAgent::Pi, "1.5.0", operation)
+                    .unwrap_or_else(|| panic!("{name} plan"));
+                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
+            }
+        }
+
+        #[test]
         fn bundled_submission_fixtures_replay_their_composer_stages_through_the_production_catalog()
         {
             let bundled = ProfileCatalog::bundled();
@@ -5661,6 +5687,7 @@ mod tests {
                 (CodingAgent::Claude, "2.1.308"),
                 (CodingAgent::Codex, "0.163.0"),
                 (CodingAgent::Opencode, "2.1.4"),
+                (CodingAgent::Pi, "1.5.0"),
             ] {
                 let detector = Detector::new(bundled, backend, Some(run));
                 let profile = definitions["profiles"]

@@ -5908,6 +5908,8 @@ pub(crate) mod native_capture {
         const DRIVER_NARROW_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 57 };
         const DRIVER_COMPACT_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 55 };
         const DRIVER_MIN_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 36 };
+        // The narrowest width at which the pi gate form's key-hint row stays on one row.
+        const DRIVER_PI_MIN_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 49 };
         // One space and 400 `x` characters, so the command outgrows the form's command box at 57 columns.
         const DRIVER_LONG_COMMAND_ARGUMENT: &str = concat!(
             "allow ",
@@ -5933,7 +5935,7 @@ pub(crate) mod native_capture {
             ("TERM_PROGRAM_VERSION", "0.9.5"),
             ("HERDR_ENV", "1"),
         ];
-        static APPROVED_CASES: [ApprovedCase; 98] = [
+        static APPROVED_CASES: [ApprovedCase; 118] = [
             ApprovedCase {
                 id: "cells-002",
                 backend: CodingAgent::Claude,
@@ -6842,6 +6844,186 @@ pub(crate) mod native_capture {
             .bash("allow")
             .panel(DRIVER_PANEL_SIZE)
             .answer("allow", &["31"], "claude-panel-auto-tip-cells-001"),
+            ApprovedCase::pi(
+                "pi-allow-120",
+                Some("allow"),
+                &[],
+                &["0d"],
+                "pa120.db",
+                "pa120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-deny-001-120",
+                Some("deny"),
+                &[],
+                &["6a", "0d"],
+                "pd1120.db",
+                "pd1120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-deny-002-120",
+                Some("deny"),
+                &["6a"],
+                &["0d"],
+                "pd2120.db",
+                "pd2120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-prompt-120",
+                None,
+                &[],
+                &[],
+                "pp120.db",
+                "pp120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-exec-120",
+                None,
+                &[],
+                &[],
+                "pe120.db",
+                "pe120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-allow-049",
+                Some("allow"),
+                &[],
+                &["0d"],
+                "pa049.db",
+                "pa049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-deny-001-049",
+                Some("deny"),
+                &[],
+                &["6a", "0d"],
+                "pd1049.db",
+                "pd1049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-deny-002-049",
+                Some("deny"),
+                &["6a"],
+                &["0d"],
+                "pd2049.db",
+                "pd2049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-prompt-049",
+                None,
+                &[],
+                &[],
+                "pp049.db",
+                "pp049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-exec-049",
+                None,
+                &[],
+                &[],
+                "pe049.db",
+                "pe049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-allow-120",
+                Some("allow"),
+                &[],
+                &["0d"],
+                "pha120.db",
+                "pha120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-deny-001-120",
+                Some("deny"),
+                &[],
+                &["6a", "0d"],
+                "phd1120.db",
+                "phd1120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-deny-002-120",
+                Some("deny"),
+                &["6a"],
+                &["0d"],
+                "phd2120.db",
+                "phd2120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-prompt-120",
+                None,
+                &[],
+                &[],
+                "php120.db",
+                "php120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-exec-120",
+                None,
+                &[],
+                &[],
+                "phe120.db",
+                "phe120",
+                DRIVER_FULL_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-allow-049",
+                Some("allow"),
+                &[],
+                &["0d"],
+                "pha049.db",
+                "pha049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-deny-001-049",
+                Some("deny"),
+                &[],
+                &["6a", "0d"],
+                "phd1049.db",
+                "phd1049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-deny-002-049",
+                Some("deny"),
+                &["6a"],
+                &["0d"],
+                "phd2049.db",
+                "phd2049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-prompt-049",
+                None,
+                &[],
+                &[],
+                "php049.db",
+                "php049",
+                DRIVER_PI_MIN_SIZE,
+            ),
+            ApprovedCase::pi(
+                "pi-herdr-exec-049",
+                None,
+                &[],
+                &[],
+                "phe049.db",
+                "phe049",
+                DRIVER_PI_MIN_SIZE,
+            ),
         ];
         const DRIVER_READ: FileProbe = FileProbe::Read { probe: "probe.txt" };
         impl ApprovedCase {
@@ -6886,6 +7068,39 @@ pub(crate) mod native_capture {
                     prefix_hex,
                     stage_hex,
                     probe_argument,
+                    file_probe: None,
+                    database,
+                    socket,
+                    claude_config: None,
+                    nudge: None,
+                    baseline: None,
+                    panel_probe: false,
+                    batched: false,
+                    size,
+                }
+            }
+            const fn pi(
+                id: &'static str,
+                decision: Option<&'static str>,
+                prefix_hex: &'static [&'static str],
+                stage_hex: &'static [&'static str],
+                database: &'static str,
+                socket: &'static str,
+                size: TerminalSize,
+            ) -> Self {
+                Self {
+                    id,
+                    backend: CodingAgent::Pi,
+                    permission_mode: "cafleet-ask",
+                    mode: if decision.is_some() {
+                        DriverMode::AnswerStage
+                    } else {
+                        DriverMode::NoAnswer
+                    },
+                    decision,
+                    prefix_hex,
+                    stage_hex,
+                    probe_argument: decision,
                     file_probe: None,
                     database,
                     socket,
@@ -7089,6 +7304,9 @@ pub(crate) mod native_capture {
             fn child_environment(&self) -> Vec<(String, String)> {
                 let herdr: &[(&str, &str)] = match self.id {
                     "opencode-herdr-env-cells-001" => &DRIVER_HERDR_CHILD_ENVIRONMENT,
+                    id if self.backend == CodingAgent::Pi && id.starts_with("pi-herdr-") => {
+                        &DRIVER_HERDR_CHILD_ENVIRONMENT
+                    }
                     _ => &[],
                 };
                 herdr
@@ -7190,6 +7408,15 @@ pub(crate) mod native_capture {
                     (Some(argument), CodingAgent::Hermes) => format!(
                         "Use the terminal tool to run exactly {} {argument} as one foreground command. Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                         helper.display()
+                    ),
+                    // The relative helper keeps the gate form's operation row on one row at the
+                    // profile's narrowest width; pi runs bash in the case directory.
+                    (Some(argument), CodingAgent::Pi) => format!(
+                        "Use the bash tool to run exactly ./{} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                        helper
+                            .file_name()
+                            .expect("the helper is a file in the case directory")
+                            .to_string_lossy()
                     ),
                     (None, _) => DRIVER_TOOL_FREE_PROMPT.into(),
                 }

@@ -44,7 +44,7 @@ The global option `--database-url <url>`, accepted before or after the subcomman
 
 A member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. One that omits it on a custom-database fleet reaches the default database: absent, the command fails with `no cafleet database; run 'cafleet setup'`; present, its literal IDs may match another fleet.
 
-Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR` and `HERMES_HOME` (default `~/.hermes`) require absolute paths: `Error: <VAR> must be an absolute path (got '<value>')`, exit 1; a set override or `HOME` that is not valid UTF-8 fails with `Error: <VAR> is not valid UTF-8`, exit 1. Creation forwards only the selected backend's set override, and launches the runner with `--database-url sqlite:///<canonical path>`.
+Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR`, `HERMES_HOME` (default `~/.hermes`) and `PI_CODING_AGENT_DIR` (default `~/.pi/agent`) require absolute paths: `Error: <VAR> must be an absolute path (got '<value>')`, exit 1; a set override or `HOME` that is not valid UTF-8 fails with `Error: <VAR> is not valid UTF-8`, exit 1. Creation forwards only the selected backend's set override, and launches the runner with `--database-url sqlite:///<canonical path>`.
 
 ## Output shapes
 
@@ -209,11 +209,11 @@ Pane operations require active placement; opaque pane IDs may be pending. Prompt
 
 `cafleet member create --fleet-id ID --name NAME --description DESCRIPTION [--coding-agent AGENT] [--model MODEL] [--permission-mode MODE] [--event-evidence POLICY] [--event-redaction-file PATH] [--effort LEVEL] (PROMPT | --file PATH) [--json]`
 
-Registers and spawns, resolving the acting Director from the fleet. Omitted backend inherits its placement backend. Description is one sentence; only Claude displays the name as pane title. Model forwards to the native CLI; OpenCode requires `<provider-id>/<model-id>`, and Hermes passes any value through. Hermes argv: `hermes chat --cli --source tool --in <cwd>`, then optional `--model MODEL` and `--reasoning LEVEL`, then `-q PROMPT`; it never carries `--provider`, `--resume`, `--continue` or `--create-if-missing`.
+Registers and spawns, resolving the acting Director from the fleet. Omitted backend inherits its placement backend. Description is one sentence; only Claude and pi display the name as pane title. Model forwards to the native CLI; OpenCode requires `<provider-id>/<model-id>`, Hermes passes any value through, and pi passes any value without a `:<thinking>` suffix through. Hermes argv: `hermes chat --cli --source tool --in <cwd>`, then optional `--model MODEL` and `--reasoning LEVEL`, then `-q PROMPT`; it never carries `--provider`, `--resume`, `--continue` or `--create-if-missing`. pi argv: `pi --cafleet-gate MODE --no-approve --tui-mode fullscreen --name NAME`, then optional `--model MODEL` and `--thinking LEVEL`, then `-- PROMPT`, as a fresh session.
 
 Evidence defaults to `metadata`; `redacted` requires an absolute readable UTF-8 redaction file. Invalid policy/configuration combinations exit 2 before registration.
 
-Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2. Mode classes (documentation only; argv and run records are unchanged): `auto` (native automatic review or a fixed allow/deny policy) is claude `auto`, `dontAsk`, `bypassPermissions`; codex `approve-for-me`, `never`; opencode `cafleet`; hermes `smart`. `manual` (native interactive approval) is claude `default`, `manual`, `acceptEdits`, `plan`; codex `on-request`; opencode `cafleet-ask`; hermes `manual`. Hermes choices emit no permission argv (`permission_argv_json` `[]`) and are recorded only; the operator configuration's `approvals.mode` governs the session. Every default is `auto`.
+Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart); pi: cafleet, cafleet-ask (default cafleet)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2. Mode classes (documentation only; argv and run records are unchanged): `auto` (native automatic review or a fixed allow/deny policy) is claude `auto`, `dontAsk`, `bypassPermissions`; codex `approve-for-me`, `never`; opencode `cafleet`; hermes `smart`; pi `cafleet`. `manual` (native interactive approval) is claude `default`, `manual`, `acceptEdits`, `plan`; codex `on-request`; opencode `cafleet-ask`; hermes `manual`; pi `cafleet-ask`. pi choices emit `--cafleet-gate MODE` and select the CAFleet member gate's mode. Hermes choices emit no permission argv (`permission_argv_json` `[]`) and are recorded only; the operator configuration's `approvals.mode` governs the session. Every default is `auto`.
 
 Effort validation precedes side effects. An unlisted level exits 2 with `Error: --effort for the BACKEND backend must be one of LEVELS (got '<value>').`, LEVELS exactly as listed; any `--effort` for opencode exits 2 with `Error: opencode does not support reasoning effort.`
 
@@ -222,10 +222,13 @@ Effort validation precedes side effects. An unlisted level exits 2 with `Error: 
 | claude | low, medium, high, xhigh, max |
 | codex | minimal, low, medium, high, xhigh |
 | hermes | none, minimal, low, medium, high, xhigh, max, ultra |
+| pi | off, minimal, low, medium, high, xhigh, max |
 
-Hermes forwards the level as `--reasoning`.
+Hermes forwards the level as `--reasoning`, and pi as `--thinking`.
 
-Invalid OpenCode model: `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`, exit 2.
+Invalid OpenCode model: `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`, exit 2. A pi model whose text after its last `:` is a thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`): `Error: --model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '<value>').`, exit 2; other text after a `:`, such as `:free`, passes through.
+
+A pi prompt body beginning with `@` exits 2 before registration with `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).`; start the prompt with text.
 
 The split reference (session, window, Director pane) and the multiplexer server come from the Director's recorded placement; the new placement copies its server.
 
@@ -238,9 +241,11 @@ Hermes availability preflight runs `hermes config path` under the member's `HERM
 
 The member environment forwards a set `HERMES_HOME`.
 
+A pi spawn requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts` in every launch mode: `Error: cannot read the CAFleet pi extension at <path>: <cause>; run 'cafleet setup --coding-agent pi' first`, exit 1 before registration. The member environment forwards a set `PI_CODING_AGENT_DIR`. A gated member whose extension cannot register `--cafleet-gate` exits at startup with `Error: Unknown option: --cafleet-gate`, reported as `runner_exited`.
+
 Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}` into literal lines; `{database_url}` renders `default` for the default database and `sqlite:///<canonical path>` otherwise. A non-default database with a prompt lacking `{database_url}` exits 1 before registration: `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url`. Double literal braces `{{`/`}}`; malformed/unknown placeholders exit 2 before registration (§ Error messages).
 
-Probe native `--version`; select the greatest bundled `min_version` not exceeding it by SemVer precedence (ignore build metadata). Newer versions reuse the newest profile. Below-minimum versions fail before registration/pane creation: `unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`, exit 1. Hermes takes its version from a first line matching `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$` (`Hermes Agent vunknown (2026.9.24)` records `2026.9.24`). Failed probes, including a first line with zero or several SemVer tokens or a non-matching Hermes line, warn `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and continue with unknown coverage/fallback. Creation waits for native-child startup.
+Probe native `--version`; select the greatest bundled `min_version` not exceeding it by SemVer precedence (ignore build metadata). Newer versions reuse the newest profile. Below-minimum versions fail before registration/pane creation: `unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`, exit 1. Hermes takes its version from a first line matching `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$` (`Hermes Agent vunknown (2026.9.24)` records `2026.9.24`); pi prints the bare token (`1.5.0` records `1.5.0`). Failed probes, including a first line with zero or several SemVer tokens or a non-matching Hermes line, warn `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and continue with unknown coverage/fallback. Creation waits for native-child startup.
 
 Failure compensation shuts down owned runner/child, closes pane, removes descriptor, marks run `failed` and deregisters/removes placement, retaining the primary exit category. Cleanup diagnostics include `cleanup failed for pane <id>: <detail>`, `owned child cleanup remains unconfirmed`, descriptor/run/deregistration errors and `pane ID unknown; pane cleanup unconfirmed`. Inspect unconfirmed resources.
 
@@ -428,7 +433,12 @@ Result fields: `member_id,run_id,outcome,replayed_count,inbox_count,archived_cou
 
 `cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>`, `failed to enable hermes plugin cafleet in <config path>: <cause>` or config-path error. One installation record per backend covers its skills, presets and extensions.
 
-Codex receives `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; OpenCode the `cafleet` and `cafleet-ask` presets (`"cafleet *": "allow"` shell rule, `"cafleet": "deny"` tool permission) and the plugin `<preset base>/plugins/cafleet.ts`; Hermes the plugin under `<hermes home>/plugins/cafleet/`, enabled with gateway injection in the file `hermes config path` reports, refusing when `plugins.disabled` lists `cafleet`. Each plugin runs only the `cafleet` recorded in its executable record by the setup that installed it. Setup writes no Director-only deny, ask or prompt entry. `--coding-agent hermes` requires `hermes` on `PATH`; plain setup without it installs the skills, records the installation and prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`.
+Codex receives `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; OpenCode the `cafleet` and `cafleet-ask` presets (`"cafleet *": "allow"` shell rule, `"cafleet": "deny"` tool permission) and the plugin `<preset base>/plugins/cafleet.ts`; Hermes the plugin under `<hermes home>/plugins/cafleet/`, enabled with gateway injection in the file `hermes config path` reports, refusing when `plugins.disabled` lists `cafleet`; pi the extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record, without running `pi`. Each plugin and extension runs only the `cafleet` recorded in its executable record by the setup that installed it. Setup writes no Director-only deny, ask or prompt entry. `--coding-agent hermes` requires `hermes` on `PATH`; plain setup without it installs the skills, records the installation and prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`. `cafleet setup --coding-agent pi` prints:
+
+```
+pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
+pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
+```
 
 `cafleet doctor [--verbose] [--json]` runs every check without aborting. Statuses are `ok`, `info`, `warn` and `error`; doctor exits 1 with `Error: doctor found errors` after printing when any check is `error`, otherwise 0, `warn` included.
 
@@ -440,13 +450,14 @@ Codex receives `<codex home>/rules/cafleet.rules`, allowing every `cafleet` comm
 
 A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, an identical phrase listed once (`info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets from cafleet 0.30.0 (this is 0.31.1) — run 'cafleet setup --coding-agent codex'`. A recorded version other than the CLI's, or no installation recorded, is `warn`.
 
-Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, and `hermes.plugin_enabled` follows `hermes.extension`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
+Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
 
 | Check | `ok` detail | `error` details |
 |---|---|---|
 | `opencode.extension` | The plugin path | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent opencode'`; `<record path>: <cause>; run 'cafleet setup --coding-agent opencode'` |
 | `hermes.extension` | The plugin directory | `cannot read hermes configuration through 'hermes config path': <cause>`; `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent hermes'`; `<record path>: <cause>; run 'cafleet setup --coding-agent hermes'` |
 | `hermes.plugin_enabled` | `cafleet enabled with gateway injection` | `cannot read hermes configuration through 'hermes config get': <cause>`; `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'`; `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
+| `pi.extension` | The extension path | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent pi'`; `<record path>: <cause>; run 'cafleet setup --coding-agent pi'` |
 
 An extension check is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable file. Their summary phrases are `extension <path> is missing or differs from the embedded copy` and `extension executable record <path> is unusable: <cause>` (setup fix), the two `cannot read hermes configuration through …` details above and `hermes plugins.disabled lists cafleet` (no setup fix), `hermes plugin cafleet is not enabled: <key>, …` (setup fix) and `info` `no Hermes home at <base>` (setup fix).
 
@@ -480,6 +491,8 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `message listen --codex-thread` | `codex` is missing, or no Codex ancestor process exists | The startup errors under § `message listen` |
 | `member create` | The selected opencode preset is missing or unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` |
 | `member create` | `hermes config path` is unreadable | The preflight errors under § `member create` |
+| `member create` | The CAFleet pi extension is missing or unreadable | `Error: cannot read the CAFleet pi extension at <path>: <cause>; run 'cafleet setup --coding-agent pi' first` |
+| `member create` | A pi prompt begins with `@` (exit 2) | The prompt error under § `member create` |
 | `member create` | A non-default database and a prompt without `{database_url}` | The placeholder error under § `member create` |
 | `member delete` | A `hermes` run's work stop cannot be verified | The settlement error under § `member delete` |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` |

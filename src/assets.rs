@@ -13,7 +13,14 @@ pub(crate) struct AgentPaths {
     base: PathBuf,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
-    plugins_dir: Option<PathBuf>,
+    extension: Option<FileExtension>,
+}
+
+/// A backend whose extension is a set of embedded files installed beside one executable record.
+struct FileExtension {
+    prefix: &'static str,
+    dir: PathBuf,
+    record: &'static str,
 }
 
 /// How setup reaches Hermes for the plugin configuration.
@@ -33,6 +40,8 @@ pub(crate) const OPENCODE_EXECUTABLE_RECORD: &str = "cafleet.executable";
 pub(crate) const HERMES_EXTENSION_PREFIX: &str = "hermes/cafleet/";
 pub(crate) const HERMES_PLUGIN_DIR: &str = "plugins/cafleet";
 pub(crate) const HERMES_EXECUTABLE_RECORD: &str = "executable";
+pub(crate) const PI_EXTENSION_PREFIX: &str = "pi/";
+pub(crate) const PI_EXECUTABLE_RECORD: &str = "cafleet.executable";
 
 pub(crate) fn agent_paths(
     env: EnvLookup<'_>,
@@ -60,20 +69,36 @@ pub(crate) fn agent_paths(
                 (format!("opencode/{mode}.md"), target)
             })
             .collect(),
-        CodingAgent::Hermes => vec![],
+        CodingAgent::Hermes | CodingAgent::Pi => vec![],
     };
-    let plugins_dir = (agent == CodingAgent::Opencode).then(|| opencode_plugins_dir(&base));
+    let extension = match agent {
+        CodingAgent::Opencode => Some(FileExtension {
+            prefix: OPENCODE_EXTENSION_PREFIX,
+            dir: opencode_plugins_dir(&base),
+            record: OPENCODE_EXECUTABLE_RECORD,
+        }),
+        CodingAgent::Pi => Some(FileExtension {
+            prefix: PI_EXTENSION_PREFIX,
+            dir: pi_extensions_dir(&base),
+            record: PI_EXECUTABLE_RECORD,
+        }),
+        CodingAgent::Claude | CodingAgent::Codex | CodingAgent::Hermes => None,
+    };
     Ok(AgentPaths {
         identity: base.display().to_string(),
         base,
         skills_dir,
         presets,
-        plugins_dir,
+        extension,
     })
 }
 
 pub(crate) fn opencode_plugins_dir(preset_base: &Path) -> PathBuf {
     preset_base.join("plugins")
+}
+
+pub(crate) fn pi_extensions_dir(pi_base: &Path) -> PathBuf {
+    pi_base.join("extensions")
 }
 
 impl AgentPaths {
@@ -158,8 +183,8 @@ pub(crate) fn install_agent(
             target.display()
         )
     };
-    if let Some(plugins) = &paths.plugins_dir {
-        for target in install_opencode_extension(plugins)? {
+    if let Some(extension) = &paths.extension {
+        for target in install_file_extension(extension)? {
             report(extension_line(&target))?;
         }
     }
@@ -191,19 +216,19 @@ fn extension_failure(target: &Path, cause: impl std::fmt::Display) -> CafleetErr
     ))
 }
 
-/// Writes each OpenCode plugin file, then the executable record, and returns the plugin files.
-fn install_opencode_extension(plugins: &Path) -> Result<Vec<PathBuf>, CafleetError> {
+/// Writes each embedded extension file, then the executable record, and returns the files.
+fn install_file_extension(extension: &FileExtension) -> Result<Vec<PathBuf>, CafleetError> {
     let mut installed = Vec::new();
-    for (relative, bytes) in embedded_extension(OPENCODE_EXTENSION_PREFIX) {
-        let target = plugins.join(relative);
+    for (relative, bytes) in embedded_extension(extension.prefix) {
+        let target = extension.dir.join(relative);
         let fail = |error: std::io::Error| extension_failure(&target, error);
-        std::fs::create_dir_all(target.parent().expect("plugin file has a parent"))
+        std::fs::create_dir_all(target.parent().expect("extension file has a parent"))
             .map_err(fail)?;
         remove_existing_target(&target).map_err(fail)?;
         std::fs::write(&target, bytes).map_err(fail)?;
         installed.push(target);
     }
-    write_executable_record(&plugins.join(OPENCODE_EXECUTABLE_RECORD))?;
+    write_executable_record(&extension.dir.join(extension.record))?;
     Ok(installed)
 }
 
@@ -557,7 +582,7 @@ mod tests {
 
     fn expected_presets(agent: CodingAgent, base: &Path) -> Vec<(&'static str, PathBuf)> {
         match agent {
-            CodingAgent::Claude | CodingAgent::Hermes => vec![],
+            CodingAgent::Claude | CodingAgent::Hermes | CodingAgent::Pi => vec![],
             CodingAgent::Codex => vec![("codex/cafleet.rules", base.join("rules/cafleet.rules"))],
             CodingAgent::Opencode => vec![
                 ("opencode/cafleet.md", base.join("agents/cafleet.md")),
@@ -578,6 +603,7 @@ mod tests {
             CodingAgent::Claude | CodingAgent::Codex => return vec![],
             CodingAgent::Opencode => (OPENCODE_EXTENSION_PREFIX, base.join("plugins")),
             CodingAgent::Hermes => (HERMES_EXTENSION_PREFIX, fake.plugin_dir()),
+            CodingAgent::Pi => ("pi/", base.join("extensions")),
         };
         embedded_extension(prefix)
             .into_iter()
@@ -590,6 +616,7 @@ mod tests {
             CodingAgent::Claude | CodingAgent::Codex => None,
             CodingAgent::Opencode => Some(base.join("plugins/cafleet.executable")),
             CodingAgent::Hermes => Some(fake.plugin_dir().join("executable")),
+            CodingAgent::Pi => Some(base.join("extensions/cafleet.executable")),
         }
     }
 
@@ -680,7 +707,7 @@ mod tests {
                 symlink(external.join("keep"), target).unwrap();
             }
             match agent {
-                CodingAgent::Opencode => {
+                CodingAgent::Opencode | CodingAgent::Pi => {
                     for (_, target) in &extensions {
                         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
                         symlink(external.join("keep"), target).unwrap();
@@ -778,7 +805,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             match agent {
-                CodingAgent::Opencode => expected.extend(
+                CodingAgent::Opencode | CodingAgent::Pi => expected.extend(
                     extensions
                         .iter()
                         .map(|(_, target)| extension_line(*agent, "9.8.7", target)),
@@ -947,6 +974,175 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(recorded, [base.display().to_string()]);
+    }
+
+    mod pi {
+        use crate::assets::tests::*;
+
+        struct Installed {
+            result: Result<(), CafleetError>,
+            lines: Vec<String>,
+        }
+
+        fn install(conn: &mut Connection, home: &Path, base: Option<&Path>) -> Installed {
+            let paths = agent_paths(
+                &|name| {
+                    Ok(base
+                        .filter(|_| name == "PI_CODING_AGENT_DIR")
+                        .map(|base| base.display().to_string()))
+                },
+                home,
+                CodingAgent::Pi,
+            )
+            .unwrap();
+            let mut output = Vec::new();
+            let result = install_agent(
+                conn,
+                CodingAgent::Pi,
+                &paths,
+                "1.0.0",
+                HermesSetup::Absent,
+                &mut output,
+            );
+            Installed {
+                result,
+                lines: output_lines(output),
+            }
+        }
+
+        fn extension_target(base: &Path) -> PathBuf {
+            base.join("extensions/cafleet.ts")
+        }
+
+        fn skills_line_matches(line: &str, base: &Path) -> bool {
+            line.starts_with("pi: installed ")
+                && line.ends_with(&format!(" (v1.0.0) -> {}", base.join("skills").display()))
+        }
+
+        #[test]
+        fn pi_default_installation_writes_skills_extension_and_record_under_the_pi_agent_directory()
+        {
+            let home = tempfile::tempdir().unwrap();
+            let mut conn = crate::db::test_support::migrated_conn(&home);
+            install(&mut conn, home.path(), None).result.unwrap();
+            let base = home.path().join(".pi/agent");
+            for (relative, bytes) in SKILLS {
+                assert_eq!(
+                    std::fs::read(base.join("skills").join(relative)).unwrap(),
+                    *bytes
+                );
+            }
+            assert_embedded_extensions(&extension_targets(
+                CodingAgent::Pi,
+                &base,
+                &FakeHermes::new(),
+            ));
+            assert_eq!(
+                std::fs::read(extension_target(&base)).unwrap(),
+                lookup(EXTENSIONS, "pi/cafleet.ts").unwrap()
+            );
+            assert_executable_record(&base.join("extensions/cafleet.executable"));
+            let recorded: Vec<String> = conn
+                .prepare("SELECT path FROM asset_installs WHERE coding_agent='pi'")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(recorded, [base.display().to_string()]);
+        }
+
+        #[test]
+        fn pi_installation_prints_the_skills_line_then_the_extension_line() {
+            let home = tempfile::tempdir().unwrap();
+            let base = home.path().join("pi agent");
+            let mut conn = crate::db::test_support::migrated_conn(&home);
+            let installed = install(&mut conn, home.path(), Some(&base));
+            installed.result.unwrap();
+            assert_eq!(installed.lines.len(), 2, "{:?}", installed.lines);
+            assert!(
+                skills_line_matches(&installed.lines[0], &base),
+                "{:?}",
+                installed.lines
+            );
+            assert_eq!(
+                installed.lines[1],
+                format!(
+                    "pi: installed extension (v1.0.0) -> {}",
+                    extension_target(&base).display()
+                )
+            );
+        }
+
+        #[test]
+        fn pi_rerun_prints_the_same_lines_and_leaves_identical_bytes_and_one_record() {
+            let home = tempfile::tempdir().unwrap();
+            let base = home.path().join("pi agent");
+            let mut conn = crate::db::test_support::migrated_conn(&home);
+            let first = install(&mut conn, home.path(), Some(&base));
+            first.result.unwrap();
+            let extension = std::fs::read(extension_target(&base)).unwrap();
+            let record = std::fs::read(base.join("extensions/cafleet.executable")).unwrap();
+            let second = install(&mut conn, home.path(), Some(&base));
+            second.result.unwrap();
+            assert_eq!(second.lines, first.lines);
+            assert_eq!(std::fs::read(extension_target(&base)).unwrap(), extension);
+            assert_eq!(
+                std::fs::read(base.join("extensions/cafleet.executable")).unwrap(),
+                record
+            );
+            assert_eq!(asset_install_count(&conn), 1);
+        }
+
+        #[test]
+        fn pi_installation_keeps_operator_extensions_beside_the_cafleet_extension() {
+            let home = tempfile::tempdir().unwrap();
+            let base = home.path().join("pi agent");
+            let extensions = base.join("extensions");
+            std::fs::create_dir_all(extensions.join("tools")).unwrap();
+            std::fs::write(extensions.join("operator.ts"), "operator extension").unwrap();
+            std::fs::write(extensions.join("tools/index.ts"), "operator package").unwrap();
+            let mut conn = crate::db::test_support::migrated_conn(&home);
+            install(&mut conn, home.path(), Some(&base)).result.unwrap();
+            assert_eq!(
+                std::fs::read(extensions.join("operator.ts")).unwrap(),
+                b"operator extension"
+            );
+            assert_eq!(
+                std::fs::read(extensions.join("tools/index.ts")).unwrap(),
+                b"operator package"
+            );
+        }
+
+        #[test]
+        fn pi_extension_failure_fails_installation_and_records_nothing() {
+            let home = tempfile::tempdir().unwrap();
+            let base = home.path().join("pi agent");
+            std::fs::create_dir_all(&base).unwrap();
+            std::fs::write(base.join("extensions"), "blocked parent").unwrap();
+            let mut conn = crate::db::test_support::migrated_conn(&home);
+            let installed = install(&mut conn, home.path(), Some(&base));
+            let failure = installed
+                .result
+                .expect_err("a blocked extension target fails installation");
+            assert!(matches!(failure, CafleetError::App(_)));
+            assert_eq!(failure.exit_code(), 1);
+            assert!(
+                failure.message().starts_with(&format!(
+                    "failed to install extension into {}: ",
+                    extension_target(&base).display()
+                )),
+                "{}",
+                failure.message()
+            );
+            assert_eq!(asset_install_count(&conn), 0);
+            assert_eq!(installed.lines.len(), 1, "{:?}", installed.lines);
+            assert!(skills_line_matches(&installed.lines[0], &base));
+            assert_eq!(
+                std::fs::read(base.join("extensions")).unwrap(),
+                b"blocked parent"
+            );
+        }
     }
 
     mod hermes {
