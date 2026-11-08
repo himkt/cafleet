@@ -1,7 +1,7 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 42/52 tasks complete
+**Progress**: 45/52 tasks complete
 **Last Updated**: 2026-11-08
 
 ## Overview
@@ -602,10 +602,10 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 - [x] After every implementation member is deleted and no executing member depends on the installed assets, reinstall the CLI (`mise tasks --all` names the install task) and run `cafleet setup --coding-agent pi` in the real home <!-- completed: 2026-11-08T01:19 -->
 - [x] Run A-F on tmux and herdr, and convert the captures into `src/coding_agent/native/pi.json` <!-- completed: 2026-11-08T01:48 -->
 - [x] `src/coding_agent/bundled.json`: the pi profile from `1.5.0` with `pi-gate-approval`, `pi-idle-composer`, the allow and deny stages, the composer plans and the fixture entries (§5) <!-- completed: 2026-11-08T01:48 -->
-- [ ] `src/coding_agent/catalog.rs`: embed `native/pi.json` in the fixture registry <!-- completed: -->
-- [ ] Unit tests in the owning implementation files: the catalog guard accepts the pi fixtures; detection, focus resolution and both answer plans replay on the form fixtures; the idle composer and both submission plans replay <!-- completed: -->
+- [x] `src/coding_agent/catalog.rs`: embed `native/pi.json` in the fixture registry <!-- completed: 2026-11-08T01:54 -->
+- [x] Unit tests in the owning implementation files: the catalog guard accepts the pi fixtures; detection, focus resolution and both answer plans replay on the form fixtures; the idle composer and both submission plans replay <!-- completed: 2026-11-08T01:54 -->
 - [x] Write the §6.9 pi profile tables in SPEC.md and the layout-limit Note in coding-agents.md from the captures <!-- completed: 2026-11-08T01:51 -->
-- [ ] `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] `mise //:test` and `mise //:lint` <!-- completed: 2026-11-08T01:55 -->
 
 ### Step 11: Live acceptance and evidence
 
