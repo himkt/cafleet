@@ -1,8 +1,8 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 38/52 tasks complete
-**Last Updated**: 2026-11-07
+**Progress**: 42/52 tasks complete
+**Last Updated**: 2026-11-08
 
 ## Overview
 
@@ -429,22 +429,27 @@ The profile applies to pi under every pi launch mode. Only `cafleet-ask` shows a
 |---|---|---|
 | Detection | `tested` | Request rule `pi-gate-approval`: the §3.5 form, anchored on the `CAFleet member gate: allow this bash command?` title row, the `$ ` operation rows, the `Allow once` and `Deny` choice rows and pi's select hint row. The operation is the `$ ` row plus its two-space continuation rows. |
 | Allow answer | `tested` | One stage: Enter (`0d`) gated on focus `allow-once`, as `allow-once` |
-| Deny answer | `tested` | Two stages: Down gated on focus `allow-once`, then Enter gated on focus `deny-once`, as `deny-once` |
+| Deny answer | `tested` | Two stages: `j` (`6a`) gated on focus `allow-once`, then Enter (`0d`) gated on focus `deny-once`, as `deny-once` |
 | Empty-composer observation | `tested` | `pi-idle-composer`: the idle editor between its two full-width `─` border rows, with the terminal cursor in the editor |
-| Prompt submission | `tested` | Composer plan `prompt` |
-| Native-exec submission | `tested` | Composer plan `exec` for `! COMMAND` |
+| Prompt submission | `tested` | Composer plan `prompt`, submit `0d` |
+| Native-exec submission | `tested` | Composer plan `exec` for `! COMMAND`, submit `0d` |
 | Annotations | `unknown` | None declared |
 
-The captures (§7 A-F) establish:
+The captures (§7 A-F) establish these values, which SPEC §6.9 records with the rule patterns:
 
-- the exact row patterns, the focus marker and its `focus_style`
-- the cursor condition and the Down byte sequence
-- the composer plans' bytes and settle intervals
-- `W_min` and the recorded layout limits, such as a wrapped title or command row, a form taller than the pane, or a resize while the form is open
+| Element | Measured value |
+|---|---|
+| Screen | The alternate screen (`--tui-mode fullscreen`) |
+| Focus | A textual `→ ` marker before the focused label, so the focus matcher declares `focus_style` `marker` |
+| Deny stage 1 | pi's selector alias `j` (`6a`). The Down key's CSI bytes begin with Escape, which answer stages never contain and which dismisses the form |
+| Cursor | Hidden; on the form it sits on the footer or the focused choice row (`cursor` `any`), and in the idle editor on the editor row (`cursor` `inside`) |
+| Composer plans | Prefix `""` (prompt) or `2120` (exec), submit `0d`, with the shared 500 ms settle interval |
+| `W_min` | 49 columns; at 48 the hint row wraps |
+| Recorded layout limits | A pane narrower than `W_min`, a wrapped command line, and a form taller than 24 rows or the pane. A resize while the form is open redraws it and is not a limit |
 
 A form inside a recorded layout limit opens no `interaction_opened` event and is answered manually on the native surface. The deny answer sends no Escape, because Escape dismisses the form (§3.5).
 
-Fixtures live in `src/coding_agent/native/pi.json` with ids `pi-1.5.0-<screen>-<n>`. They are captured on tmux and on herdr at 120 columns and at `W_min`, and cover the form, each answer's pre-stage screen, the idle composer and both submission plans. `src/coding_agent/catalog.rs` embeds the file beside the other backend fixture files.
+Fixtures live in `src/coding_agent/native/pi.json` with ids `pi-1.5.0-<screen>-<multiplexer>-<width>-1`. They are captured on tmux and with herdr's terminal identity at 120 columns and at `W_min`, and cover the form, each answer's pre-stage screen, the idle composer and both submission plans. The test fixture registry in `src/coding_agent/catalog.rs` embeds the file beside the other backend fixture files.
 
 ### 6. Backend documentation content
 
@@ -594,12 +599,12 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 
 ### Step 10: Captures and the pi profile
 
-- [ ] After every implementation member is deleted and no executing member depends on the installed assets, reinstall the CLI (`mise tasks --all` names the install task) and run `cafleet setup --coding-agent pi` in the real home <!-- completed: -->
-- [ ] Run A-F on tmux and herdr, and convert the captures into `src/coding_agent/native/pi.json` <!-- completed: -->
-- [ ] `src/coding_agent/bundled.json`: the pi profile from `1.5.0` with `pi-gate-approval`, `pi-idle-composer`, the allow and deny stages, the composer plans and the fixture entries (§5) <!-- completed: -->
+- [x] After every implementation member is deleted and no executing member depends on the installed assets, reinstall the CLI (`mise tasks --all` names the install task) and run `cafleet setup --coding-agent pi` in the real home <!-- completed: 2026-11-08T01:19 -->
+- [x] Run A-F on tmux and herdr, and convert the captures into `src/coding_agent/native/pi.json` <!-- completed: 2026-11-08T01:48 -->
+- [x] `src/coding_agent/bundled.json`: the pi profile from `1.5.0` with `pi-gate-approval`, `pi-idle-composer`, the allow and deny stages, the composer plans and the fixture entries (§5) <!-- completed: 2026-11-08T01:48 -->
 - [ ] `src/coding_agent/catalog.rs`: embed `native/pi.json` in the fixture registry <!-- completed: -->
 - [ ] Unit tests in the owning implementation files: the catalog guard accepts the pi fixtures; detection, focus resolution and both answer plans replay on the form fixtures; the idle composer and both submission plans replay <!-- completed: -->
-- [ ] Write the §6.9 pi profile tables in SPEC.md and the layout-limit Note in coding-agents.md from the captures <!-- completed: -->
+- [x] Write the §6.9 pi profile tables in SPEC.md and the layout-limit Note in coding-agents.md from the captures <!-- completed: 2026-11-08T01:51 -->
 - [ ] `mise //:test` and `mise //:lint` <!-- completed: -->
 
 ### Step 11: Live acceptance and evidence

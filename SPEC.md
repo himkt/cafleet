@@ -2379,26 +2379,68 @@ The pi profile from `1.5.0` applies to pi under every pi launch mode; only `cafl
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | Request rule `pi-gate-approval`: the gate's form, anchored on the `CAFleet member gate: allow this bash command?` title row, the `$ ` operation rows, the `Allow once` and `Deny` choice rows and pi's select hint row. The operation is the `$ ` row plus its two-space continuation rows |
-| Allow answer | `tested` | One stage: Enter (`0d`) gated on focus `allow-once`, as `allow-once` |
-| Deny answer | `tested` | Two stages: Down gated on focus `allow-once`, then Enter (`0d`) gated on focus `deny-once`, as `deny-once` |
-| Empty-composer observation | `tested` | `pi-idle-composer`: the idle editor between its two full-width `─` border rows, with the terminal cursor in the editor |
-| Prompt submission | `tested` | Composer plan `prompt` (§ Executable native plans) |
-| Native-exec submission | `tested` | Composer plan `exec` for `! COMMAND` (§ Executable native plans) |
+| Detection | `tested` | Request rule `pi-gate-approval`: the gate's form on the alternate screen, from the `CAFleet member gate: allow this bash command?` title row to pi's select hint row within 24 rows, with the `$ ` operation rows, the focused choice and the `Allow once` and `Deny` choice rows. The operation is the `$ ` row plus its two-space continuation rows |
+| Allow answer | `tested` | Answer rule `pi-gate-allow-once`: one stage, Enter (`0d`) gated on focus `allow-once`, as `allow-once` |
+| Deny answer | `tested` | Answer rule `pi-gate-deny-once`: two stages, `j` (`6a`) gated on focus `allow-once`, then Enter (`0d`) gated on focus `deny-once`, as `deny-once` |
+| Empty-composer observation | `tested` | `pi-idle-composer`: the idle editor between its two full-width `─` border rows, with the terminal cursor in the editor; a verified non-interaction boundary |
+| Prompt submission | `tested` | Composer plan `prompt`, submit `0d` (§ Executable native plans) |
+| Native-exec submission | `tested` | Composer plan `exec` for `! COMMAND`, submit `0d` (§ Executable native plans) |
 | Annotations | `unknown` | None declared |
 
-The title, the `Allow once` and `Deny` labels and the `$ ` operation prefix are CAFleet-authored, so they stay fixed across pi versions; pi renders the select list, its focus marker and its hint row. `Allow once` is the first choice and holds the initial focus, and the list moves with Up/Down. The deny answer sends no Escape, because Escape dismisses the form and the gate then blocks the command with the dismissal reason. A form inside a recorded layout limit opens no `interaction_opened` event and is answered manually on the native surface.
+The title, the `Allow once` and `Deny` labels and the `$ ` operation prefix are CAFleet-authored, so they stay fixed across pi versions; pi renders the select list, its focus marker and its hint row. The form sits between two full-width `─` rules in place of the editor:
 
-| Element | Value |
+```text
+ CAFleet member gate: allow this bash command?
+
+ $ <first command line>
+   <each further command line>
+
+ → Allow once
+   Deny
+
+ ↑↓ navigate  enter select  escape/ctrl+c cancel
+```
+
+`Allow once` is the first choice and holds the initial focus. The focused choice carries the `→ ` marker in the accent colour, so the `focus` matcher uses `focus_style` `marker` (§ Focused-choice resolution). The list moves with Up/Down and with `j`/`k`, and stops at either end. The deny answer moves the focus with `j`, because the Down key's bytes begin with Escape. It sends no Escape, because Escape dismisses the form and the gate then blocks the command with the dismissal reason. pi hides the terminal cursor and places it on the footer or the focused choice row while the form shows, so the request rule matches with cursor `any`.
+
+| Rule | Element | Pattern |
+|---|---|---|
+| `pi-gate-approval` | Region | Start `^ CAFleet member gate: allow this bash command\? *$`, end `^ ↑↓ navigate  enter select  escape/ctrl\+c cancel *$`, 24 rows, cursor `any` |
+| `pi-gate-approval` | `heading`, `footer` (line) | The region's start and end patterns |
+| `pi-gate-approval` | `operation` (region) | <code>(?m)^ CAFleet member gate: allow this bash command\? *\n *\n \$ (?P&lt;operation&gt;[^\n]*(?:\n   [^\n]*)*)\n *\n (?:→ &#124;  )Allow once *$</code>, with `row_margin` three spaces and `margin_rows` `continuation` |
+| `pi-gate-approval` | `focus`, `allow`, `deny` (line) | <code>^ → (?:Allow once&#124;Deny) *$</code> with `focus_style` `marker`, <code>^ (?:→ &#124;  )(?P&lt;label&gt;Allow once) *$</code>, <code>^ (?:→ &#124;  )(?P&lt;label&gt;Deny) *$</code> |
+| `pi-idle-composer` | Region | Start and end `^─+ *$`, 3 rows, cursor `inside` |
+| `pi-idle-composer` | `editor` (region) | `\A─+ *\n *\n─+ *\z` |
+
+The operation rows keep the gate's layout: the first command line follows `$ `, and each further line follows the one-space margin and the gate's two-space continuation prefix, which the extraction removes. A command line too long for its row wraps onto a row with only the one-space margin, which the operation matcher does not accept. The `operation` evidence reports the command lines joined with `\n`.
+
+`pi-idle-composer` matches the empty editor row between the two rules with the cursor on it. A draft fills the editor row, a multi-line draft adds rows, and a running turn titles the upper rule `── ⠋ Working ──`, so none of them matches. The transcript draws a `! COMMAND` result between `─` rules too, but the cursor stays in the editor below it.
+
+| Answer | Native surface in the captures | Continuation |
+|---|---|---|
+| Allow | The form closes and pi runs the command once; the tool result shows its output | The member continues on its own |
+| Deny | The form closes and nothing runs; the tool result reads `the operator denied this command` | The member continues its run with that result |
+
+| Operation | Native result in the captures |
 |---|---|
-| Row patterns of `pi-gate-approval` and `pi-idle-composer` | pending (capture run A-F) |
-| Focus marker and `focus_style` | pending (capture run A-F) |
-| Cursor condition | pending (capture run A-F) |
-| Down byte sequence | pending (capture run A-F) |
-| Composer plan bytes and settle intervals | pending (capture run A-F) |
-| `W_min` and recorded layout limits | pending (capture run A-F) |
+| Prompt | The literal fills the editor; Enter clears it and starts a turn |
+| Native exec | `! COMMAND` fills the editor; Enter runs the command locally, adds a `$ COMMAND` block with its output to the transcript, starts no turn and leaves the editor idle |
 
-The pi fixtures live in `coding_agent/native/pi.json` with ids `pi-1.5.0-<screen>-<n>`, captured on tmux and herdr at 120 columns and at `W_min`, and cover the form, each answer's pre-stage screen, the idle composer and both submission plans. Their geometry, masked rows and fixture table are pending (capture run A-F).
+`W_min` is 49 columns, the narrowest width at which the hint row stays on one row. A resize while the form is open redraws it at the new width. The fixtures are native 36-row captures with rows 0–19 and 34 masked, covering the startup header with the installed skill list, earlier transcript and the token, cost and model footer:
+
+| Fixtures (each `pi-1.5.0-<screen>-<multiplexer>-<width>-1`) | Geometry | Supports |
+|---|---|---|
+| `allow-pre-stage`, `deny-pre-stage-1`, `deny-pre-stage-2` | 36x120 and 36x49, `tmux` and `herdr` | Detection with `Allow once` or `Deny` focused, and each answer stage |
+| `idle-composer`, `exec-empty-composer`, `allow-continuation`, `deny-continuation`, `exec-post-submit` | Same | The empty editor, including after each answer and after a native exec |
+| `prompt-typed-literal`, `prompt-post-submit`, `exec-typed-literal` | Same | The submission plans' literal and post-submit screens |
+
+The `herdr` fixtures were captured with herdr's terminal identity (`TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION` and `HERDR_ENV`) in the native child's environment. The pi limits apply as follows:
+
+| Limit | Behavior |
+|---|---|
+| A pane narrower than `W_min`; a command line that wraps; a form taller than `max_rows` or the pane | No request matches and the form is answered manually on the native surface |
+| A command line equal to a choice label, such as `Deny` | The label matchers match twice, so no request matches |
+| The `cafleet` launch mode | Shows no approval form; the profile supplies the composer and submission plans only |
 
 A backend fixture file has exactly these required fields:
 
@@ -2493,7 +2535,7 @@ An answer definition retains its validated `choice_id`, `focus_matcher_id` and o
 | `required_focus_choice_id` | The plan's focus matcher resolves this choice id as focused on the request form |
 | `required_screen_rule_id` | This `permission_continuation` rule matches as the continuation of the bound request (§ Continuation screens) |
 
-A stage without a gate is focus-independent; every bundled stage is ungated except the two `claude-auto-default-decline` stages and the OpenCode stages. The catalog fails to load unless:
+A stage without a gate is focus-independent; every bundled stage is ungated except the two `claude-auto-default-decline` stages, the OpenCode stages and the pi stages. The catalog fails to load unless:
 
 - every focus gate names a choice of the request rule;
 - every screen gate names a `permission_continuation` rule whose `continues_rule_id` is the answer's request rule, and the stage immediately before it is gated on that rule's `continues_choice_id`;
@@ -2513,7 +2555,7 @@ A focus matcher with `focus_style: "background"` resolves the focused choice fro
 
 The majority rule holds in every layout: the OpenCode compact layout has no left margin and its highlight covers the focused label plus one cell on each side, so with a focused first or last choice neither edge cell carries the row background.
 
-A focus on an option without a choice entry, on several options or on none resolves to no choice, and a gate that does not hold is never written. The focus value compared in the observed request, the answer match and the write-time binding is the resolved focused choice id (or none) together with a capture that depends on the focus style. Under `background` the capture is the focus matcher's capture; the focus text alone does not change when a styling-only focus moves, so the resolved choice id makes a styling-only focus change start a new request generation. Under `marker` the capture is the choice-label row layout, the row each choice label matched, which stays constant while only the `❯` marker moves (the focus matcher's own text changes), so a between-stage focus gate compares an unchanged capture and only a change in the choice rows' layout changes it.
+A focus on an option without a choice entry, on several options or on none resolves to no choice, and a gate that does not hold is never written. The focus value compared in the observed request, the answer match and the write-time binding is the resolved focused choice id (or none) together with a capture that depends on the focus style. Under `background` the capture is the focus matcher's capture; the focus text alone does not change when a styling-only focus moves, so the resolved choice id makes a styling-only focus change start a new request generation. Under `marker` the capture is the choice-label row layout, the row each choice label matched, which stays constant while only the marker moves (the focus matcher's own text changes), so a between-stage focus gate compares an unchanged capture and only a change in the choice rows' layout changes it.
 
 The composer object at `capabilities.composer` has required `rule_ids,fixture_ids` and `submission`; every bundled profile declares `submission`, and an explicitly selected test catalog may omit it to exercise missing-plan fallback. `submission` has exactly the required operation definitions `prompt,exec`, each an object with exactly `prefix_hex,submit_hex,fixture_ids`. Prompt has an empty prefix; exec has prefix `2120`, the UTF-8 bytes of `! `; `submit_hex` is the measured native submit key, never an assumed Enter mapping. Prompt and exec carry independent provenance. Every plan's fixture references follow the profile's interval provenance (§ Profile selection by minimum version) and establish the complete composer/work boundary for that operation. Unknown fields and incomplete or incompatible provenance fail validation.
 
