@@ -1,12 +1,39 @@
 name: Release
 
 on:
-  release:
+  pull_request:
     types:
-      - published
+      - closed
+    branches:
+      - main
 
 jobs:
+  create:
+    if: >-
+      github.event.pull_request.merged &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'bump-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.draft.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - id: draft
+        name: Create the draft release with generated notes
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          gh release create "$version" --draft --target "$merge_sha" --title "$version" --generate-notes
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          merge_sha: ${{ github.event.pull_request.merge_commit_sha }}
+          GH_TOKEN: ${{ github.token }}
+
   build:
+    needs: create
     strategy:
       matrix:
         include:
@@ -22,8 +49,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
+    env:
+      version: ${{ needs.create.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
       - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           experimental: true
@@ -41,13 +72,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" cafleet
-          gh release upload "${{ github.event.release.tag_name }}" "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" --clobber
+          tar -czf "cafleet-v${version}-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" cafleet
+          gh release upload "$version" "cafleet-v${version}-${{ matrix.target }}.tar.gz" --clobber
       - name: Package and upload the bottle
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "keg/cafleet/${{ github.event.release.tag_name }}/bin"
-          cp "target/${{ matrix.target }}/release/cafleet" "keg/cafleet/${{ github.event.release.tag_name }}/bin/cafleet"
-          tar -czf "cafleet-${{ github.event.release.tag_name }}.${{ matrix.bottle_tag }}.bottle.tar.gz" -C keg cafleet
-          gh release upload "${{ github.event.release.tag_name }}" "cafleet-${{ github.event.release.tag_name }}.${{ matrix.bottle_tag }}.bottle.tar.gz" --clobber
+          mkdir -p "keg/cafleet/${version}/bin"
+          cp "target/${{ matrix.target }}/release/cafleet" "keg/cafleet/${version}/bin/cafleet"
+          tar -czf "cafleet-${version}.${{ matrix.bottle_tag }}.bottle.tar.gz" -C keg cafleet
+          gh release upload "$version" "cafleet-${version}.${{ matrix.bottle_tag }}.bottle.tar.gz" --clobber
+
+  publish:
+    needs:
+      - create
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        run: gh release edit "$version" --draft=false
+        env:
+          version: ${{ needs.create.outputs.version }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
