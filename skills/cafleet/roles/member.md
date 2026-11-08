@@ -54,6 +54,8 @@ Try an authorized command, inspect the result, reconsider paths/flags, and use a
 cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "Need to run: <command>. My harness denied it."
 ```
 
+When a step needs several such commands, name them all in one request.
+
 Include the exact attempted command, absolute cwd, required environment overrides and observed refusal. For a hard-to-quote command, write the exact one-line command under the supplied BASE and name its path. A denied file edit needs a host allow rule or Director edit. If broker sending is also denied, report both failures to the operator.
 
 Stop dependent work and end the turn. The Director authorizes separate native dispatch and inspects its result; continue from actual native output when your host resumes you or the Director explicitly prompts continuation. A separately dispatched native command is a new action, not an answer to a pending permission request.

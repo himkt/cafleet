@@ -63,7 +63,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 ### Member launch policy
 
-Spawn every member with the omitted `--permission-mode`, which selects the backend's default `auto` mode. Pass `--permission-mode` only when the user explicitly requests that mode for that member; [member create](../reference/cli.md#member-create) and each backend's `{permission_flags}` note list its choices and their `auto`/`manual` classes.
+Spawn every member with the omitted `--permission-mode`, which selects the backend's default mode. Pass `--permission-mode` only when the user explicitly requests that mode for that member; [member create](../reference/cli.md#member-create) and each backend's `{permission_flags}` note list its choices and their `auto`/`manual` classes.
 
 A backend's `{permission_flags}` note names any first-launch or nudge dialog its default mode shows. That dialog follows the question rules of [Consume observed interactions](#consume-observed-interactions), which cover listed and unlisted choices; any other first-launch dialog, such as a folder-trust prompt, follows that section too.
 
@@ -325,7 +325,7 @@ Explicit cancellation, a required user decision, a concrete unrecoverable failur
 
 ### Stall Response
 
-Start with your inbox and assignment/artifact state, then take a read-only `cafleet member capture <member-id> --lines <depth>` for complete backend UI evidence. A quiet or ambiguous pane calls for inspection rather than an inferred failure: timeouts, idle duration and unread counts alone establish no failure, so check the assignment's expected ready/reply point.
+Start with your inbox and assignment/artifact state, then take a read-only `cafleet member capture <member-id> --lines <depth>` for complete backend UI evidence. A quiet or ambiguous pane calls for inspection rather than an inferred failure: timeouts, idle duration and unread counts alone establish no failure, so check the assignment's expected ready/reply point. A capture showing an approval form with no matching `interaction_opened` event is a form inside a recorded layout limit: decide it as step 5 of [Consume observed interactions](#consume-observed-interactions) directs, then press the backend's allow or deny keys with explicitly authorized [`member press`](#member-press), or ask the user to answer it on the member's native surface.
 
 #### Escalation
 
