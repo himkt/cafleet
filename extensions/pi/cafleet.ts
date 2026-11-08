@@ -27,7 +27,7 @@ const GATE_TOOLS = "bash, read, grep, find, ls, edit and write"
 const ROUTE_COMMAND = "route the command to the Director if it is required"
 const ROUTE_CHANGE = "route the change to the Director if it is required"
 const ROUTE_READ = "route the read to the Director if it is required"
-const PROTECTED_DIRECTORIES = [".git", ".pi", ".agents"]
+const PROTECTED_DIRECTORIES = [".git", ".pi", ".agents", ".claude", ".codex", ".opencode"]
 const ALLOW_ONCE = "Allow once"
 const DENY = "Deny"
 
@@ -115,6 +115,7 @@ interface Word {
 
 /** The words of `command` when it is one simple command, otherwise undefined. */
 function simpleWords(command: string): Word[] | undefined {
+  if (/[\n\r]/.test(command)) return undefined
   const words: Word[] = []
   let word: Word | undefined
   let quote: "'" | '"' | undefined
@@ -134,7 +135,7 @@ function simpleWords(command: string): Word[] | undefined {
     if (quote === '"') {
       if (char === '"') quote = undefined
       else if (char === "`" || (char === "$" && (next === "(" || next === "{"))) return undefined
-      else if (char === "\\" && next !== undefined && '$`"\\\n'.includes(next)) {
+      else if (char === "\\" && next !== undefined && '$`"\\'.includes(next)) {
         append(next)
         index++
       } else append(char, char === "$")
@@ -146,7 +147,7 @@ function simpleWords(command: string): Word[] | undefined {
       continue
     }
     if (char === "\\") {
-      if (next === undefined || next === "\n" || next === "\r") return undefined
+      if (next === undefined) return undefined
       append(next)
       index++
       continue
@@ -156,7 +157,7 @@ function simpleWords(command: string): Word[] | undefined {
       append("")
       continue
     }
-    if (";&|<>()`\n\r".includes(char)) return undefined
+    if (";&|<>()`".includes(char)) return undefined
     if (char === "$" && next !== undefined && "({'\"".includes(next)) return undefined
     append(char, "$*?[{".includes(char))
   }
@@ -233,7 +234,7 @@ function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: st
   if (inside.split(sep).some((component) => PROTECTED_DIRECTORIES.includes(component))) {
     return {
       block: true,
-      reason: `the CAFleet member gate protects .git, .pi and .agents from edit and write; ${ROUTE_CHANGE}`,
+      reason: `the CAFleet member gate protects .git, .pi, .agents, .claude, .codex and .opencode from edit and write; ${ROUTE_CHANGE}`,
     }
   }
   return undefined
