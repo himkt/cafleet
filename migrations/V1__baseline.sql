@@ -67,7 +67,7 @@ CREATE TABLE member_runs (
     member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
     fleet_id INTEGER NOT NULL REFERENCES fleets(fleet_id) ON DELETE RESTRICT,
     director_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
-    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes')),
+    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes','pi')),
     database_identity_json TEXT NOT NULL CHECK(json_valid(database_identity_json) AND json_type(database_identity_json) = 'object'),
     launch_nonce TEXT NOT NULL CHECK(length(launch_nonce) = 64 AND launch_nonce NOT GLOB '*[^0-9a-f]*'),
     runtime_path TEXT NOT NULL CHECK(length(trim(runtime_path)) > 0),

@@ -399,6 +399,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         args.body.file.as_deref(),
         "--file",
     )?;
+    backend.validate_prompt(&prompt_body)?;
 
     let director = broker::director_placement(conn, fleet_id)?;
     let mux = crate::runtime::mux_for_placement(&director, None)?;

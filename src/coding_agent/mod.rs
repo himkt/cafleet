@@ -40,7 +40,10 @@ pub(crate) enum CodingAgent {
     Codex,
     Opencode,
     Hermes,
+    Pi,
 }
+
+const PI_THINKING_LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 impl CodingAgent {
     pub(crate) fn all() -> &'static [Self] {
@@ -53,6 +56,7 @@ impl CodingAgent {
             Self::Codex => "codex",
             Self::Opencode => "opencode",
             Self::Hermes => "hermes",
+            Self::Pi => "pi",
         }
     }
 
@@ -62,6 +66,7 @@ impl CodingAgent {
             Self::Codex => "CODEX_HOME",
             Self::Opencode => "OPENCODE_CONFIG_DIR",
             Self::Hermes => "HERMES_HOME",
+            Self::Pi => "PI_CODING_AGENT_DIR",
         }
     }
 
@@ -75,6 +80,7 @@ impl CodingAgent {
             Self::Codex => home.join(".codex"),
             Self::Opencode => crate::config::opencode_skills_base(home),
             Self::Hermes => home.join(".hermes"),
+            Self::Pi => home.join(".pi/agent"),
         };
         crate::config::resolve(self.config_variable(), env, default)
     }
@@ -106,6 +112,25 @@ impl CodingAgent {
                 "--model for the opencode backend must be '<provider-id>/<model-id>' (got '{model}')."
             )));
         }
+        if self == Self::Pi
+            && let Some(model) = model
+            && model
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| PI_THINKING_LEVELS.contains(&suffix))
+        {
+            return Err(CafleetError::Usage(format!(
+                "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '{model}')."
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_prompt(self, prompt: &str) -> Result<(), CafleetError> {
+        if self == Self::Pi && prompt.starts_with('@') {
+            return Err(CafleetError::Usage(
+                "a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -117,6 +142,7 @@ impl CodingAgent {
             Self::Hermes => &[
                 "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
             ][..],
+            Self::Pi => &PI_THINKING_LEVELS[..],
             Self::Opencode => {
                 return Err(CafleetError::Usage(
                     "opencode does not support reasoning effort.".into(),
@@ -148,6 +174,12 @@ impl CodingAgent {
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;
         }
+        if self == Self::Pi {
+            let extension = pi_extension(&config);
+            std::fs::read(&extension).map_err(|error| CafleetError::App(format!(
+                "cannot read the CAFleet pi extension at {}: {error}; run 'cafleet setup --coding-agent pi' first", extension.display()
+            )))?;
+        }
         Ok(executable)
     }
 
@@ -176,6 +208,10 @@ impl CodingAgent {
         argv[0] = program.into();
         Ok(argv)
     }
+}
+
+pub(crate) fn pi_extension(base: &Path) -> PathBuf {
+    base.join("extensions/cafleet.ts")
 }
 
 pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
@@ -214,6 +250,7 @@ impl CodingAgent {
             Self::Codex => "approve-for-me",
             Self::Opencode => "cafleet",
             Self::Hermes => "smart",
+            Self::Pi => "cafleet",
         }
     }
     pub(crate) fn permission_mode_help() -> String {
@@ -245,6 +282,7 @@ impl CodingAgent {
             Self::Codex => &["on-request", "never", "approve-for-me"],
             Self::Opencode => &["cafleet", "cafleet-ask"],
             Self::Hermes => &["smart", "manual"],
+            Self::Pi => &["cafleet", "cafleet-ask"],
         }
     }
     fn permission_arguments(self, mode: &str) -> Vec<String> {
@@ -259,6 +297,7 @@ impl CodingAgent {
             ],
             Self::Opencode => vec!["--agent".into(), mode.into()],
             Self::Hermes => vec![],
+            Self::Pi => vec!["--cafleet-gate".into(), mode.into()],
         }
     }
     pub(crate) fn resolve_policy(
@@ -302,6 +341,10 @@ impl CodingAgent {
     ) -> Result<Vec<String>, CafleetError> {
         self.validate_model(model)?;
         self.validate_effort(effort)?;
+        assert!(
+            self.validate_prompt(prompt).is_ok(),
+            "member create validates the spawn prompt before argv construction"
+        );
         let mut argv = vec![self.name().into()];
         match self {
             Self::Opencode => argv.extend(["mini".into(), "--standalone".into()]),
@@ -314,7 +357,7 @@ impl CodingAgent {
                 })?;
                 argv.extend(["chat", "--cli", "--source", "tool", "--in", cwd].map(String::from));
             }
-            Self::Claude | Self::Codex => {}
+            Self::Claude | Self::Codex | Self::Pi => {}
         }
         argv.extend(policy.permission_argv.clone());
         if self == Self::Claude {
@@ -327,6 +370,15 @@ impl CodingAgent {
                 display_name.into(),
             ]);
         }
+        if self == Self::Pi {
+            argv.extend([
+                "--no-approve".into(),
+                "--tui-mode".into(),
+                "fullscreen".into(),
+                "--name".into(),
+                display_name.into(),
+            ]);
+        }
         if let Some(model) = model {
             argv.extend(["--model".into(), model.into()]);
         }
@@ -335,12 +387,14 @@ impl CodingAgent {
                 Self::Claude => argv.extend(["--effort".into(), effort.into()]),
                 Self::Codex => argv.push(format!("--config=model_reasoning_effort={effort}")),
                 Self::Hermes => argv.extend(["--reasoning".into(), effort.into()]),
+                Self::Pi => argv.extend(["--thinking".into(), effort.into()]),
                 Self::Opencode => unreachable!("effort validated before argv construction"),
             }
         }
         match self {
             Self::Opencode => argv.push("--prompt".into()),
             Self::Hermes => argv.push("-q".into()),
+            Self::Pi => argv.push("--".into()),
             Self::Claude | Self::Codex => {}
         }
         argv.push(prompt.into());
@@ -366,13 +420,13 @@ impl CodingAgent {
             }
             _ => Path::new("/"),
         };
-        let flag_prompt = usize::from(matches!(self, Self::Opencode | Self::Hermes));
+        let flag_prompt = usize::from(matches!(self, Self::Opencode | Self::Hermes | Self::Pi));
         let baseline = self.build_spawn_argv_with_policy("", "", cwd, None, None, policy)?;
-        let name_index = (self == Self::Claude).then(|| {
+        let name_index = matches!(self, Self::Claude | Self::Pi).then(|| {
             baseline
                 .iter()
                 .position(|value| value == "--name")
-                .expect("Claude name option")
+                .expect("Claude and pi name option")
                 + 1
         });
         let display_name = match name_index {
@@ -390,6 +444,11 @@ impl CodingAgent {
         let effort = if argv.len() > cursor + 1 {
             match self {
                 Self::Claude if argv[cursor] == "--effort" => {
+                    let value = argv.get(cursor + 1).ok_or_else(invalid)?;
+                    cursor += 2;
+                    Some(value.as_str())
+                }
+                Self::Pi if argv[cursor] == "--thinking" => {
                     let value = argv.get(cursor + 1).ok_or_else(invalid)?;
                     cursor += 2;
                     Some(value.as_str())
@@ -416,6 +475,7 @@ impl CodingAgent {
             (_, []) => None,
             (Self::Opencode, [flag, prompt]) if flag == "--prompt" => Some(prompt.as_str()),
             (Self::Hermes, [flag, prompt]) if flag == "-q" => Some(prompt.as_str()),
+            (Self::Pi, [flag, prompt]) if flag == "--" => Some(prompt.as_str()),
             (Self::Claude | Self::Codex, [prompt]) => Some(prompt.as_str()),
             _ => return Err(invalid()),
         };
@@ -568,7 +628,7 @@ impl CodingAgent {
     pub(crate) fn version_from_line(self, line: &str) -> Result<&str, &'static str> {
         match self {
             Self::Hermes => hermes_version(line),
-            Self::Claude | Self::Codex | Self::Opencode => version_token(line),
+            Self::Claude | Self::Codex | Self::Opencode | Self::Pi => version_token(line),
         }
     }
 }
@@ -1798,10 +1858,9 @@ mod tests {
                     strings(&["--", prompt]),
                     "{prompt}"
                 );
-                assert_eq!(
-                    built.iter().filter(|value| *value == "--model").count(),
-                    usize::from(prompt == "--model other"),
-                    "only the prompt carries the dash text: {built:?}"
+                assert!(
+                    !built.iter().any(|value| value == "--model"),
+                    "the prompt adds no option token: {built:?}"
                 );
             }
         }

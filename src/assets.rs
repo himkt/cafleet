@@ -60,7 +60,7 @@ pub(crate) fn agent_paths(
                 (format!("opencode/{mode}.md"), target)
             })
             .collect(),
-        CodingAgent::Hermes => vec![],
+        CodingAgent::Hermes | CodingAgent::Pi => vec![],
     };
     let plugins_dir = (agent == CodingAgent::Opencode).then(|| opencode_plugins_dir(&base));
     Ok(AgentPaths {
