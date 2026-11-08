@@ -1910,6 +1910,446 @@
       "cols": 40,
       "source_ref": "native/hermes.json",
       "sha256": "f0356b529d812c694328b1c2b5756556fcf1d47cf18a50eb879cd83d4c21f179"
+    },
+    {
+      "id": "pi-1.5.0-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "3dd704605c67549ea0704c4777855a88b41df698516fed87ff4215dad05a2a16"
+    },
+    {
+      "id": "pi-1.5.0-allow-continuation-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "0a048cb6e2e5a43be2f7776833f94ed84a453a4a8169f4feda5a897b9801053c"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-1-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "7738ac86cbfa0d481b5910d6379be503e74932088795b72250b057ac2f64ae96"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-2-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "6a4904ab3ee687466d526cbf5e745c2a9a7071457131b1f20ad596db925784f2"
+    },
+    {
+      "id": "pi-1.5.0-deny-continuation-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "f8632982a153c68d35595d8bf0d88cf05033204f491c9908b0c5f4b4cc669526"
+    },
+    {
+      "id": "pi-1.5.0-idle-composer-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "2fed47509922df85ae591a29767b50041d854cf7390a371cbcabc836c092220b"
+    },
+    {
+      "id": "pi-1.5.0-prompt-typed-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "0f16b05758a50ed20f6be30908cca94e11b3ca3e0b9f88e3ffdc681f62372858"
+    },
+    {
+      "id": "pi-1.5.0-prompt-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "28e37fd725bc289796050544ac51e523a59405496a805813d3e2b1a499465126"
+    },
+    {
+      "id": "pi-1.5.0-exec-empty-composer-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "447e1836e55fc4d6dbe42afcf66290865bfcc79a362f6bd401a8078686b3a4f3"
+    },
+    {
+      "id": "pi-1.5.0-exec-typed-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "1fe162aea32150892fefcd7480657056e0ec198b897573791bf134fd00565dfc"
+    },
+    {
+      "id": "pi-1.5.0-exec-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "44bccbd9fd339a6aa6d8404fc63c87bcd4371f3d9427bb6533029c1f9a7cd575"
+    },
+    {
+      "id": "pi-1.5.0-allow-pre-stage-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "16e500714f18651f8074d495ed7e3211e043cd9c32e57983f809c554c32d94c6"
+    },
+    {
+      "id": "pi-1.5.0-allow-continuation-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "c62b8e0dfd6c979721d6232c818527b596edda54d817b014566a6a24fcab1b27"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-1-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "0f3a4fbdfa08d86f43e14674a350fd74e91cf7655a4906064714d03157181a1c"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-2-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "5ffc266a29251ffae7e8757db329bcde0be654b4424766584dff72e11e77a481"
+    },
+    {
+      "id": "pi-1.5.0-deny-continuation-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "c33c54c79c9219df5b49fb5f951b4ab0abb64b681fd349e0547da7bb63fd7575"
+    },
+    {
+      "id": "pi-1.5.0-idle-composer-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "7167ddf7d122b7488812910e998d272196fef58445781aafac6a95555836f7c1"
+    },
+    {
+      "id": "pi-1.5.0-prompt-typed-literal-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "db6a2b8a06ecc4126c4b4ae4f2416a08da805dc47732a54affa6f18a66e2be92"
+    },
+    {
+      "id": "pi-1.5.0-prompt-post-submit-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "7b0391a02f43a1ef9b230769f2ccccda9c678a1ffb57e44eca72863bfd0f1821"
+    },
+    {
+      "id": "pi-1.5.0-exec-empty-composer-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "733cf2b17cd6b0107e01b5164843a044a3e6f8f74e635c234adbed99d1ea57c1"
+    },
+    {
+      "id": "pi-1.5.0-exec-typed-literal-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "3deb177576a93d095865049bea37d43f5990a1d42eab34d1cbf5448318adf4df"
+    },
+    {
+      "id": "pi-1.5.0-exec-post-submit-tmux-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "be6c8ecbf24ecfe8b36fe157e32637f98dc89bad3b6bfb74739de47f4e9b2ae6"
+    },
+    {
+      "id": "pi-1.5.0-allow-pre-stage-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "b5e7c7ed72978282cb3ea74dec3ed54c96aa248c1a3a2191c21fa8f5582b2c1d"
+    },
+    {
+      "id": "pi-1.5.0-allow-continuation-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "b529464cea1572258392105bcf8c84745d2cbfb514f7a73cb98dbc93ec38007d"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-1-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "b8af96316adf3ecc5f517cc852bc932a0d725b49374f26161385fcd60ecfe1e3"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-2-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "ddab5da7837082a529c9aa2bb7d594086126e14b9278c289ad3c30c8c3b1cf8c"
+    },
+    {
+      "id": "pi-1.5.0-deny-continuation-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "e77fbdfa99d848d4613f18a1ee428f462699cf4c5c65b9d8a6137df73fad74e0"
+    },
+    {
+      "id": "pi-1.5.0-idle-composer-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "5796f40ece7def6e1db7cd30420fc40a0fec29b1b00efc66bef8a34f36cfe6d2"
+    },
+    {
+      "id": "pi-1.5.0-prompt-typed-literal-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "ad0e201cb05decff8d7955566f397b5b224e15dc8ebf14033ea85a24c9223d88"
+    },
+    {
+      "id": "pi-1.5.0-prompt-post-submit-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "109d97742d61103a53fcd700552128f8e40fa64cbdd88937795635c9ffab859f"
+    },
+    {
+      "id": "pi-1.5.0-exec-empty-composer-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "28eb58f429b3840b29a5197b0050df1503c06432176385e2bb0b844f05511bd4"
+    },
+    {
+      "id": "pi-1.5.0-exec-typed-literal-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "998b86bd41e3c056c39f29f6f2b39dcd3f46eceed935b880bc81c284f72ec7fd"
+    },
+    {
+      "id": "pi-1.5.0-exec-post-submit-herdr-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "6a4ba2f0b51dafbabdff6d2b4c94bcc04b7f37f061d68fd3cb48bf5d75fb3959"
+    },
+    {
+      "id": "pi-1.5.0-allow-pre-stage-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "bac10c7a052617fefc6fed2f10fafb384288852438e7afc464a9a80034a43a14"
+    },
+    {
+      "id": "pi-1.5.0-allow-continuation-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "0959908200103e713a124fd7d7a5cfe8053f5c1531cfa575b01e07086babbcf4"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-1-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "341e7670e6c80054237284a230a83d198dccbc947e28141f7b9c5920128a2a01"
+    },
+    {
+      "id": "pi-1.5.0-deny-pre-stage-2-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "51297dfb4ac55290c5ca83fa616a70e129c4ed017a364e14f3e78afe4a2ed0a2"
+    },
+    {
+      "id": "pi-1.5.0-deny-continuation-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "bbd2b0a960fab66b0f9f9108adde6d3eeedb4599bcf9209f91a90e1248645358"
+    },
+    {
+      "id": "pi-1.5.0-idle-composer-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "97c3b01141bc7c1a48a1ad31219399d7f48fa7159693b69e73079431f9af27d0"
+    },
+    {
+      "id": "pi-1.5.0-prompt-typed-literal-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "6fb5056f1bffeb1e57d72b375847e47bdb7b7eb4dad63a09fffdc3fff0f8b47e"
+    },
+    {
+      "id": "pi-1.5.0-prompt-post-submit-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "87aa42fb230c16de8f47d890f81c3b264db9e6401405be44c3a2e4dbaa00cb73"
+    },
+    {
+      "id": "pi-1.5.0-exec-empty-composer-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "ed2fc462f7bd4a570a841e0f11e9e938ba737ee4380e4ea57d34e38400d7d840"
+    },
+    {
+      "id": "pi-1.5.0-exec-typed-literal-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "925e9d160f0824cff930ffb8e524f61aa74d9fb90ffc8b1411c8f1922a43f963"
+    },
+    {
+      "id": "pi-1.5.0-exec-post-submit-herdr-049-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 36,
+      "cols": 49,
+      "source_ref": "native/pi.json",
+      "sha256": "88dd56d1f9982e8175ee20d9befcb6a28a1a57d1b76a1555d242f71327b5a3e6"
     }
   ],
   "profiles": [
@@ -4436,6 +4876,253 @@
               "hermes-2026.9.24-override-herdr-040-1",
               "hermes-2026.9.24-override-survey-tmux-028-1",
               "hermes-2026.9.24-override-deny-focus-tmux-057-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "backend": "pi",
+      "min_version": "1.5.0",
+      "rules": [
+        {
+          "id": "pi-gate-approval",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ CAFleet member gate: allow this bash command\\? *$",
+            "end_pattern": "^ ↑↓ navigate  enter select  escape/ctrl\\+c cancel *$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ CAFleet member gate: allow this bash command\\? *$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^ CAFleet member gate: allow this bash command\\? *\\n *\\n \\$ (?P<operation>[^\\n]*(?:\\n   [^\\n]*)*)\\n *\\n (?:→ |  )Allow once *$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ → (?:Allow once|Deny) *$",
+              "focus_style": "marker"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ (?:→ |  )(?P<label>Allow once) *$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ (?:→ |  )(?P<label>Deny) *$"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^ ↑↓ navigate  enter select  escape/ctrl\\+c cancel *$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "   ",
+              "margin_rows": "continuation"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "pi-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^─+ *$",
+            "end_pattern": "^─+ *$",
+            "max_rows": 3,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "editor",
+              "scope": "region",
+              "pattern": "\\A─+ *\\n *\\n─+ *\\z"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "annotations": null,
+        "detection": {
+          "rule_ids": [
+            "pi-gate-approval"
+          ],
+          "fixture_ids": [
+            "pi-1.5.0-allow-pre-stage-tmux-120-1",
+            "pi-1.5.0-deny-pre-stage-1-tmux-120-1",
+            "pi-1.5.0-deny-pre-stage-2-tmux-120-1",
+            "pi-1.5.0-allow-pre-stage-tmux-049-1",
+            "pi-1.5.0-deny-pre-stage-1-tmux-049-1",
+            "pi-1.5.0-deny-pre-stage-2-tmux-049-1",
+            "pi-1.5.0-allow-pre-stage-herdr-120-1",
+            "pi-1.5.0-deny-pre-stage-1-herdr-120-1",
+            "pi-1.5.0-deny-pre-stage-2-herdr-120-1",
+            "pi-1.5.0-allow-pre-stage-herdr-049-1",
+            "pi-1.5.0-deny-pre-stage-1-herdr-049-1",
+            "pi-1.5.0-deny-pre-stage-2-herdr-049-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "pi-idle-composer"
+          ],
+          "fixture_ids": [
+            "pi-1.5.0-idle-composer-tmux-120-1",
+            "pi-1.5.0-exec-empty-composer-tmux-120-1",
+            "pi-1.5.0-allow-continuation-tmux-120-1",
+            "pi-1.5.0-deny-continuation-tmux-120-1",
+            "pi-1.5.0-exec-post-submit-tmux-120-1",
+            "pi-1.5.0-idle-composer-tmux-049-1",
+            "pi-1.5.0-exec-empty-composer-tmux-049-1",
+            "pi-1.5.0-allow-continuation-tmux-049-1",
+            "pi-1.5.0-deny-continuation-tmux-049-1",
+            "pi-1.5.0-exec-post-submit-tmux-049-1",
+            "pi-1.5.0-idle-composer-herdr-120-1",
+            "pi-1.5.0-exec-empty-composer-herdr-120-1",
+            "pi-1.5.0-allow-continuation-herdr-120-1",
+            "pi-1.5.0-deny-continuation-herdr-120-1",
+            "pi-1.5.0-exec-post-submit-herdr-120-1",
+            "pi-1.5.0-idle-composer-herdr-049-1",
+            "pi-1.5.0-exec-empty-composer-herdr-049-1",
+            "pi-1.5.0-allow-continuation-herdr-049-1",
+            "pi-1.5.0-deny-continuation-herdr-049-1",
+            "pi-1.5.0-exec-post-submit-herdr-049-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "pi-1.5.0-idle-composer-tmux-120-1",
+                "pi-1.5.0-prompt-typed-literal-tmux-120-1",
+                "pi-1.5.0-prompt-post-submit-tmux-120-1",
+                "pi-1.5.0-idle-composer-tmux-049-1",
+                "pi-1.5.0-prompt-typed-literal-tmux-049-1",
+                "pi-1.5.0-prompt-post-submit-tmux-049-1",
+                "pi-1.5.0-idle-composer-herdr-120-1",
+                "pi-1.5.0-prompt-typed-literal-herdr-120-1",
+                "pi-1.5.0-prompt-post-submit-herdr-120-1",
+                "pi-1.5.0-idle-composer-herdr-049-1",
+                "pi-1.5.0-prompt-typed-literal-herdr-049-1",
+                "pi-1.5.0-prompt-post-submit-herdr-049-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "pi-1.5.0-exec-empty-composer-tmux-120-1",
+                "pi-1.5.0-exec-typed-literal-tmux-120-1",
+                "pi-1.5.0-exec-post-submit-tmux-120-1",
+                "pi-1.5.0-exec-empty-composer-tmux-049-1",
+                "pi-1.5.0-exec-typed-literal-tmux-049-1",
+                "pi-1.5.0-exec-post-submit-tmux-049-1",
+                "pi-1.5.0-exec-empty-composer-herdr-120-1",
+                "pi-1.5.0-exec-typed-literal-herdr-120-1",
+                "pi-1.5.0-exec-post-submit-herdr-120-1",
+                "pi-1.5.0-exec-empty-composer-herdr-049-1",
+                "pi-1.5.0-exec-typed-literal-herdr-049-1",
+                "pi-1.5.0-exec-post-submit-herdr-049-1"
+              ]
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "pi-gate-approval",
+            "answer_rule_id": "pi-gate-allow-once",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "pi-gate-approval",
+                "required_choice_id": "allow-once",
+                "required_focus_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "pi-1.5.0-allow-pre-stage-tmux-120-1",
+              "pi-1.5.0-allow-pre-stage-tmux-049-1",
+              "pi-1.5.0-allow-pre-stage-herdr-120-1",
+              "pi-1.5.0-allow-pre-stage-herdr-049-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "pi-gate-approval",
+            "answer_rule_id": "pi-gate-deny-once",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "6a",
+                "required_rule_id": "pi-gate-approval",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "allow-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "pi-gate-approval",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "pi-1.5.0-deny-pre-stage-1-tmux-120-1",
+              "pi-1.5.0-deny-pre-stage-2-tmux-120-1",
+              "pi-1.5.0-deny-pre-stage-1-tmux-049-1",
+              "pi-1.5.0-deny-pre-stage-2-tmux-049-1",
+              "pi-1.5.0-deny-pre-stage-1-herdr-120-1",
+              "pi-1.5.0-deny-pre-stage-2-herdr-120-1",
+              "pi-1.5.0-deny-pre-stage-1-herdr-049-1",
+              "pi-1.5.0-deny-pre-stage-2-herdr-049-1"
             ]
           }
         ]

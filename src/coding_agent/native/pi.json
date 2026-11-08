@@ -1,0 +1,5815 @@
+{
+  "schema_version": 1,
+  "backend": "pi",
+  "provenance": "native",
+  "screens": {
+    "pi-1.5.0-allow-pre-stage-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 19158,
+      "cursor_row": 34,
+      "cursor_col": 120,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?                                                                          ",
+        "                                                                                                                        ",
+        " $ ./permission-probe allow                                                                                             ",
+        "",
+        " → Allow once                                                                                                           ",
+        "   Deny                                                                                                                 ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-allow-120 • cafleet-194-pi-allow-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-allow-continuation-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 19159,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The command ./permission-probe allow was executed and it created a file /tmp/cafleet-194/pi-allow-120/allow.executed.",
+        " There was no native permission request from the operator - the command just ran directly and output that it created a",
+        " file. Let me verify by checking if the file exists.",
+        "",
+        " Result: The command executed without prompting for a permission decision.",
+        "",
+        " - Stdout: permission-probe: created /tmp/cafleet-194/pi-allow-120/allow.executed",
+        " - Exit code: 0 (success)",
+        " - File created: /tmp/cafleet-194/pi-allow-120/allow.executed",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-allow-120 • cafleet-194-pi-allow-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-1-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 24108,
+      "cursor_row": 34,
+      "cursor_col": 120,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?                                                                          ",
+        "                                                                                                                        ",
+        " $ ./permission-probe deny                                                                                              ",
+        "",
+        " → Allow once                                                                                                           ",
+        "   Deny                                                                                                                 ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-deny-001-120 • cafleet-194-pi-deny-001-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-2-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 27781,
+      "cursor_row": 28,
+      "cursor_col": 120,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?                                                                          ",
+        "                                                                                                                        ",
+        " $ ./permission-probe deny                                                                                              ",
+        "",
+        "   Allow once                                                                                                           ",
+        " → Deny                                                                                                                 ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-deny-002-120 • cafleet-194-pi-deny-002-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-continuation-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 27782,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " This seems to be a test or probe that checks permission handling. The result indicates that the operator (or the",
+        " system) denied the command. I should report this result clearly.",
+        "",
+        " Result from ./permission-probe deny:",
+        "",
+        " Actual result: the operator denied this command",
+        "",
+        " The permission request was denied by the operator/system.",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-deny-002-120 • cafleet-194-pi-deny-002-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-idle-composer-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 11034,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word \"ready\" and then wait. No action needed beyond that.                   ",
+        "",
+        " ready                                                                                                                  ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                                                                                                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-prompt-120 • cafleet-194-pi-prompt-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-typed-literal-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 11035,
+      "cursor_row": 31,
+      "cursor_col": 32,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word \"ready\" and then wait. No action needed beyond that.",
+        "",
+        " ready",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply with the single word done.",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-prompt-120 • cafleet-194-pi-prompt-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-post-submit-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 11036,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word \"ready\" and then wait. No action needed beyond that.",
+        "",
+        " ready",
+        "",
+        "",
+        " Reply with the single word done.",
+        "",
+        "",
+        "",
+        "",
+        "── ⠸ Working ───────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-prompt-120 • cafleet-194-pi-prompt-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-empty-composer-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 9517,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word \"ready\" and then wait. This is straightforward.                        ",
+        "",
+        " ready                                                                                                                  ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                                                                                                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-exec-120 • cafleet-194-pi-exec-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-typed-literal-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 9518,
+      "cursor_row": 31,
+      "cursor_col": 23,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word \"ready\" and then wait. This is straightforward.",
+        "",
+        " ready",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "! echo cafleet-220-exec",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-exec-120 • cafleet-194-pi-exec-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-post-submit-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 9519,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " ready",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " $ echo cafleet-220-exec",
+        "",
+        " cafleet-220-exec",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-exec-120 • cafleet-194-pi-exec-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-allow-pre-stage-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 20487,
+      "cursor_row": 34,
+      "cursor_col": 49,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?   ",
+        "                                                 ",
+        " $ ./permission-probe allow                      ",
+        "",
+        " → Allow once                                    ",
+        "   Deny                                          ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel ",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-allow-049 • cafleet-194-pi...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-allow-continuation-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 20488,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " There was no native permission request (no",
+        " prompt for the operator). The result is that",
+        " the command executed successfully and created",
+        " that file.",
+        "",
+        " Result: The command ./permission-probe allow",
+        " executed successfully without triggering a",
+        " native permission request. It created the file",
+        " allow.executed in the current directory.",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-allow-049 • cafleet-194-pi...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-1-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 20919,
+      "cursor_row": 34,
+      "cursor_col": 49,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?   ",
+        "                                                 ",
+        " $ ./permission-probe deny                       ",
+        "",
+        " → Allow once                                    ",
+        "   Deny                                          ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel ",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-deny-001-049 • cafleet-194...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-2-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 29141,
+      "cursor_row": 28,
+      "cursor_col": 49,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?   ",
+        "                                                 ",
+        " $ ./permission-probe deny                       ",
+        "",
+        "   Allow once                                    ",
+        " → Deny                                          ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel ",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-deny-002-049 • cafleet-194...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-continuation-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 29142,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " I should report this result clearly and stop as",
+        " instructed.",
+        "",
+        " The operator denied the command",
+        " ./permission-probe deny.",
+        "",
+        " Result: denied — \"the operator denied this",
+        " command\"",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-deny-002-049 • cafleet-194...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-idle-composer-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 10387,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " Enter keys may not work. Add `set -g            ",
+        " extended-keys on` to ~/.tmux.conf and restart   ",
+        " tmux.                                           ",
+        "",
+        " The user wants me to reply with the single word ",
+        " \"ready\" and then wait. This is a simple request ",
+        " - just output that word and stop.               ",
+        "",
+        " ready                                           ",
+        "",
+        "─────────────────────────────────────────────────",
+        "                                                 ",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-prompt-049 • cafleet-194-p...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-typed-literal-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 10388,
+      "cursor_row": 31,
+      "cursor_col": 32,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " Enter keys may not work. Add `set -g",
+        " extended-keys on` to ~/.tmux.conf and restart",
+        " tmux.",
+        "",
+        " The user wants me to reply with the single word",
+        " \"ready\" and then wait. This is a simple request",
+        " - just output that word and stop.",
+        "",
+        " ready",
+        "",
+        "─────────────────────────────────────────────────",
+        "Reply with the single word done.",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-prompt-049 • cafleet-194-p...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-post-submit-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 10389,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word",
+        " \"ready\" and then wait. This is a simple request",
+        " - just output that word and stop.",
+        "",
+        " ready",
+        "",
+        "",
+        " Reply with the single word done.",
+        "",
+        "",
+        "── ⠸ Working ────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-prompt-049 • cafleet-194-p...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-empty-composer-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 15517,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user asked me to reply with the single word ",
+        " \"ready\" and then wait. This is a simple         ",
+        " instruction - I should just say \"ready\" and     ",
+        " then stop, waiting for further input.           ",
+        "                                                 ",
+        " There's no need to use any tools or do any file ",
+        " operations. Just respond with the word \"ready\". ",
+        "",
+        " ready                                           ",
+        "",
+        "─────────────────────────────────────────────────",
+        "                                                 ",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-exec-049 • cafleet-194-pi-...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-typed-literal-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 15518,
+      "cursor_row": 31,
+      "cursor_col": 23,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user asked me to reply with the single word",
+        " \"ready\" and then wait. This is a simple",
+        " instruction - I should just say \"ready\" and",
+        " then stop, waiting for further input.",
+        "",
+        " There's no need to use any tools or do any file",
+        " operations. Just respond with the word \"ready\".",
+        "",
+        " ready",
+        "",
+        "─────────────────────────────────────────────────",
+        "! echo cafleet-220-exec",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-exec-049 • cafleet-194-pi-...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-post-submit-tmux-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 15519,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " ready",
+        "",
+        "─────────────────────────────────────────────────",
+        " $ echo cafleet-220-exec",
+        "",
+        " cafleet-220-exec",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-exec-049 • cafleet-194-pi-...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-allow-pre-stage-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 19591,
+      "cursor_row": 34,
+      "cursor_col": 120,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?                                                                          ",
+        "                                                                                                                        ",
+        " $ ./permission-probe allow                                                                                             ",
+        "",
+        " → Allow once                                                                                                           ",
+        "   Deny                                                                                                                 ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-allow-120 • cafleet-194-pi-herdr-allow-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-allow-continuation-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 19592,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " Result: The command executed successfully with no native permission request.",
+        "",
+        " Output:",
+        "",
+        " ```",
+        "   permission-probe: created /tmp/cafleet-194/pi-herdr-allow-120/allow.executed",
+        " ```",
+        "",
+        " The probe created the file allow.executed in the current directory, indicating the operation was allowed.",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-allow-120 • cafleet-194-pi-herdr-allow-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-1-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 29256,
+      "cursor_row": 34,
+      "cursor_col": 120,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?                                                                          ",
+        "                                                                                                                        ",
+        " $ ./permission-probe deny                                                                                              ",
+        "",
+        " → Allow once                                                                                                           ",
+        "   Deny                                                                                                                 ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-deny-001-120 • cafleet-194-pi-herdr-deny-001-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-2-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 15971,
+      "cursor_row": 28,
+      "cursor_col": 120,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?                                                                          ",
+        "                                                                                                                        ",
+        " $ ./permission-probe deny                                                                                              ",
+        "",
+        "   Allow once                                                                                                           ",
+        " → Deny                                                                                                                 ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-deny-002-120 • cafleet-194-pi-herdr-deny-002-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-continuation-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 15972,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " Took 2.8s",
+        "",
+        "",
+        " The command ./permission-probe deny ran and produced the output: \"the operator denied this command\". The user asked to",
+        " report the actual result and stop after the native decision.",
+        "",
+        " Result: ./permission-probe deny was executed. The native permission request was presented to the operator, and the",
+        " operator denied the command.",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-deny-002-120 • cafleet-194-pi-herdr-deny-002-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-idle-composer-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 12575,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with just the word \"ready\" and then wait for further instructions. No tools needed.         ",
+        "",
+        " ready                                                                                                                  ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                                                                                                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-prompt-120 • cafleet-194-pi-herdr-prompt-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-typed-literal-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 12576,
+      "cursor_row": 31,
+      "cursor_col": 32,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with just the word \"ready\" and then wait for further instructions. No tools needed.",
+        "",
+        " ready",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply with the single word done.",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-prompt-120 • cafleet-194-pi-herdr-prompt-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-post-submit-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 12577,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with just the word \"ready\" and then wait for further instructions. No tools needed.",
+        "",
+        " ready",
+        "",
+        "",
+        " Reply with the single word done.",
+        "",
+        "",
+        "",
+        "",
+        "── ⠸ Working ───────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-prompt-120 • cafleet-194-pi-herdr-prompt-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-empty-composer-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 13238,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word \"ready\" and then wait. This is a simple request.                       ",
+        "",
+        " ready                                                                                                                  ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                                                                                                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-exec-120 • cafleet-194-pi-herdr-exec-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-typed-literal-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 13239,
+      "cursor_row": 31,
+      "cursor_col": 23,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " The user wants me to reply with the single word \"ready\" and then wait. This is a simple request.",
+        "",
+        " ready",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "! echo cafleet-220-exec",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-exec-120 • cafleet-194-pi-herdr-exec-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-post-submit-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 13240,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " ready",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " $ echo cafleet-220-exec",
+        "",
+        " cafleet-220-exec",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-exec-120 • cafleet-194-pi-herdr-exec-120",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-allow-pre-stage-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 22777,
+      "cursor_row": 34,
+      "cursor_col": 49,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?   ",
+        "                                                 ",
+        " $ ./permission-probe allow                      ",
+        "",
+        " → Allow once                                    ",
+        "   Deny                                          ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel ",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-allow-049 • cafleet-...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-allow-continuation-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 22778,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " created the file. The result is that the probe",
+        " succeeded and created the marker file. I should",
+        " report this clearly and stop as instructed.",
+        "",
+        " Result: ./permission-probe allow executed",
+        " without prompting the operator.",
+        " Output: permission-probe: created",
+        " /tmp/cafleet-194/pi-herdr-allow-049/allow.execu",
+        " ted",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-allow-049 • cafleet-...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-1-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 25883,
+      "cursor_row": 34,
+      "cursor_col": 49,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?   ",
+        "                                                 ",
+        " $ ./permission-probe deny                       ",
+        "",
+        " → Allow once                                    ",
+        "   Deny                                          ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel ",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-deny-001-049 • cafle...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-pre-stage-2-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 23171,
+      "cursor_row": 28,
+      "cursor_col": 49,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        " CAFleet member gate: allow this bash command?   ",
+        "                                                 ",
+        " $ ./permission-probe deny                       ",
+        "",
+        "   Allow once                                    ",
+        " → Deny                                          ",
+        "",
+        " ↑↓ navigate  enter select  escape/ctrl+c cancel ",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-deny-002-049 • cafle...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-deny-continuation-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 23172,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " I should report this result concisely to the",
+        " user as requested.",
+        "",
+        " Result of ./permission-probe deny:",
+        "",
+        " the operator denied this command",
+        "",
+        " No further action taken; work is contained to",
+        " this single operation.",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-deny-002-049 • cafle...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-idle-composer-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 10840,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " extended-keys on` to ~/.tmux.conf and restart   ",
+        " tmux.                                           ",
+        "",
+        " The user asked me to reply with the single word ",
+        " \"ready\" and then wait. I should do exactly that ",
+        " - just output the word \"ready\" and nothing      ",
+        " else. No tool calls, no additional text.        ",
+        "",
+        " ready                                           ",
+        "",
+        "─────────────────────────────────────────────────",
+        "                                                 ",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-prompt-049 • cafleet...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-typed-literal-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 10841,
+      "cursor_row": 31,
+      "cursor_col": 32,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " extended-keys on` to ~/.tmux.conf and restart",
+        " tmux.",
+        "",
+        " The user asked me to reply with the single word",
+        " \"ready\" and then wait. I should do exactly that",
+        " - just output the word \"ready\" and nothing",
+        " else. No tool calls, no additional text.",
+        "",
+        " ready",
+        "",
+        "─────────────────────────────────────────────────",
+        "Reply with the single word done.",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-prompt-049 • cafleet...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-prompt-post-submit-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 10842,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " \"ready\" and then wait. I should do exactly that",
+        " - just output the word \"ready\" and nothing",
+        " else. No tool calls, no additional text.",
+        "",
+        " ready",
+        "",
+        "",
+        " Reply with the single word done.",
+        "",
+        "",
+        "── ⠸ Working ────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-prompt-049 • cafleet...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-empty-composer-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 9138,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " extended-keys on` to ~/.tmux.conf and restart   ",
+        " tmux.                                           ",
+        "",
+        " The user wants me to reply with the single word ",
+        " \"ready\" and then wait. This is a simple         ",
+        " instruction - just output the word and then     ",
+        " stop until they provide further input.          ",
+        "",
+        " ready                                           ",
+        "",
+        "─────────────────────────────────────────────────",
+        "                                                 ",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-exec-049 • cafleet-1...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-typed-literal-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 9139,
+      "cursor_row": 31,
+      "cursor_col": 23,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " extended-keys on` to ~/.tmux.conf and restart",
+        " tmux.",
+        "",
+        " The user wants me to reply with the single word",
+        " \"ready\" and then wait. This is a simple",
+        " instruction - just output the word and then",
+        " stop until they provide further input.",
+        "",
+        " ready",
+        "",
+        "─────────────────────────────────────────────────",
+        "! echo cafleet-220-exec",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-exec-049 • cafleet-1...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "pi-1.5.0-exec-post-submit-herdr-049-1": {
+      "rows": 36,
+      "cols": 49,
+      "alternate_screen": true,
+      "screen_seq": 9140,
+      "cursor_row": 31,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        " ready",
+        "",
+        "─────────────────────────────────────────────────",
+        " $ echo cafleet-220-exec",
+        "",
+        " cafleet-220-exec",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "",
+        "─────────────────────────────────────────────────",
+        "/tmp/cafleet-194/pi-herdr-exec-049 • cafleet-1...",
+        "",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 13,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 14,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 16,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 17,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 19,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 34,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    }
+  }
+}
