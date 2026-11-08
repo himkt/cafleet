@@ -6,11 +6,8 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 
 | Entry | Responsibility |
 |---|---|
-| `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs`, which embeds `skills/`, `presets/` and `extensions/`; `src/coding_agent/native/` holds one native screen fixture file per backend with catalogued screens |
-| `migrations/` | Embedded SQL schema baseline |
-| `skills/` | Installed agent-facing skills, roles and references |
-| `presets/` | Backend permission/configuration assets |
-| `extensions/` | One directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate |
+| `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs` together with the embedded `assets/` tree |
+| `assets/` | Data the binary embeds at build time: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate; `assets/migrations/` the SQL schema baseline; `assets/profiles/` the bundled runner-profile catalog and one native screen fixture file per backend with catalogued screens |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
 | `design-docs/` | Numbered design documents and local evidence |
 
@@ -77,7 +74,7 @@ Evaluate a candidate backend against the role bar before it ships:
 2. Check each role's Eligible-tier requirements in [SPEC §6.7 Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) against an installed native version, recording the version per requirement group: official documentation and installed `--help` / `--version` for host capabilities, CAFleet PTY probes on each registered multiplexer for runtime behavior. Record the Director `goal` and `listen` sources (`native` or `extension`) and the `listen` at the highest tier established: `subscribe` delivery from a passing [subscribe probe](#run-a-cafleet-subscribe-probe), or `compromise` delivery from a passing [stream probe](#run-a-cafleet-stream-probe) together with the negative evidence Role requirements defines.
 3. A verdict is `yes` only when every requirement is established, otherwise `no` with "not established" or the observed failure; the Director `verdict` is `yes` only when `goal` and `listen` are both `yes`, otherwise it names the unmet requirements.
 4. For a Member-eligible candidate, claim detection and request-bound allow and deny answers for every approval form the default mode renders, and record the profile's layout limits (`W_min`, wrapped or clipped operations, uncaptured geometries); a default mode rendering no approval form needs no request rules. Claim other bundled-support capabilities with the evidence in the table below; an unclaimed optional capability ships as `unknown` coverage.
-5. On shipping, copy the rows into the SPEC Role eligibility table, summarize each role as a `Role | Eligible | Basis` row (sources, delivery, checked versions and runtime caveats) in the backend's Role eligibility subsection of `skills/cafleet/reference/coding-agents.md`, and ship only the roles marked `yes`.
+5. On shipping, copy the rows into the SPEC Role eligibility table, summarize each role as a `Role | Eligible | Basis` row (sources, delivery, checked versions and runtime caveats) in the backend's Role eligibility subsection of `assets/skills/cafleet/reference/coding-agents.md`, and ship only the roles marked `yes`.
 
 | Capability | Required native evidence |
 |---|---|

@@ -2,7 +2,7 @@
 
 Rules for keeping the project's documentation in sync with its code. These apply
 to every change that touches a user- or contract-facing surface; the design-doc
-numbering/format rules live in the shared [design-document guidelines](../../skills/cafleet-design-doc/reference/guidelines.md#file-layout).
+numbering/format rules live in the shared [design-document guidelines](../../assets/skills/cafleet-design-doc/reference/guidelines.md#file-layout).
 
 ## Three audiences
 
@@ -10,13 +10,13 @@ numbering/format rules live in the shared [design-document guidelines](../../ski
 |---|---|---|
 | Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire. §6.7 Coding-agent backends covers role requirements, per-backend role eligibility, Director extensions, backend argv, model/effort validation, the permission posture contract (recommended user permission profiles are `docs/` content), presets and host evidence. |
 | Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs, stated as user-visible behavior and the decisions a user makes; numbered Director procedures live in the skills, and mechanism and exact contract detail is a link to `SPEC.md`. `docs/docs/concepts/coding-agents.md` explains backend differences, selection and configuration. |
-| Agents | `skills/` | Necessary-and-sufficient instructions to drive cafleet: `skills/cafleet/reference/cli.md` carries the command facts an agent acts on (invocations, flags, outputs it reads, errors it must recognize, next commands), role files carry procedure and link `cli.md` for command behavior, and implementation timing, concurrency and internal mechanics stay in `SPEC.md`. `skills/cafleet/reference/coding-agents.md` owns the runtime overlay. |
+| Agents | `assets/skills/` | Necessary-and-sufficient instructions to drive cafleet: `assets/skills/cafleet/reference/cli.md` carries the command facts an agent acts on (invocations, flags, outputs it reads, errors it must recognize, next commands), role files carry procedure and link `cli.md` for command behavior, and implementation timing, concurrency and internal mechanics stay in `SPEC.md`. `assets/skills/cafleet/reference/coding-agents.md` owns the runtime overlay. |
 
 Skills never link `docs/` or `SPEC.md`; they carry the facts they need. `SPEC.md` never links `docs/`.
 
 ## Implementation Order
 
-When implementing a design document, ALWAYS update documentation FIRST before writing any code, in this order: `SPEC.md`, then `docs/` pages, then `README.md`, then the affected `skills/` files, then project rules if needed. Only after documentation is complete should code implementation begin.
+When implementing a design document, ALWAYS update documentation FIRST before writing any code, in this order: `SPEC.md`, then `docs/` pages, then `README.md`, then the affected `assets/skills/` files, then project rules if needed. Only after documentation is complete should code implementation begin.
 
 ## First-class documentation targets
 
@@ -27,11 +27,11 @@ Every target below is updated in the same design-doc cycle as the change that to
 | `SPEC.md` | Any change to a contract surface — CLI options, `CAFLEET_*` configuration, the SQLite schema, error strings, JSON key order, text layouts, runtime, multiplexer, backend or preset behavior (maintained via the `/update-readme` skill) | The single authoritative specification no longer matches the shipped contract |
 | `docs/` | Any change to features, architecture, usage, setup or configuration a user performs (a new architectural axis gets its own Concepts page) | The user documentation goes stale |
 | `README.md` | The thin entry point itself changes — the pitch drifts from `docs/docs/index.md`, the install commands change, or a docs-site section is added or removed (sync via the `/update-readme` skill) | The entry point misleads new users |
-| `skills/*/SKILL.md` and skill references | Any change to CLI commands, flags, environment variables, required arguments, output formats, or the expected invocation workflow | Agents load stale skills as ground truth and produce broken tool calls |
-| `skills/cafleet/reference/cli.md` | Any change to a `SPEC.md` fact that `cli.md` carries, updated in the same change | Agents run stale commands |
+| `assets/skills/*/SKILL.md` and skill references | Any change to CLI commands, flags, environment variables, required arguments, output formats, or the expected invocation workflow | Agents load stale skills as ground truth and produce broken tool calls |
+| `assets/skills/cafleet/reference/cli.md` | Any change to a `SPEC.md` fact that `cli.md` carries, updated in the same change | Agents run stale commands |
 | `.claude/rules/` | The project convention the rule captures changes | Agents follow outdated conventions |
 
-`SPEC.md` edits preserve its section numbering (an empty numbered section is removed without renumbering the others) and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice. Paths that are part of a specified contract (embedded preset paths and their install targets, the schema baseline) are `SPEC.md` content.
+`SPEC.md` edits preserve its section numbering (an empty numbered section is removed without renumbering the others) and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice. Paths that are part of a specified contract (the embedded `assets/` tree, embedded preset paths and their install targets, the schema baseline) are `SPEC.md` content.
 
 Each `SPEC.md` fact class has one owning section. Every other section keeps only its own interaction with the fact plus a `§` pointer to the owner.
 
@@ -156,7 +156,7 @@ Write CAFleet base instructions so they read the same on every backend: family `
 
 ### Where backend specifics live
 
-`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained backend section contains these five subsections in order:
+`assets/skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained backend section contains these five subsections in order:
 
 1. **Runtime bindings**: the five runtime placeholders for decision surface, permission flags, pane title, skill loader, and effort levels.
 2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog (or are `—` when the backend has no maintained catalog) and effort matches its runtime capability.
@@ -164,11 +164,11 @@ Write CAFleet base instructions so they read the same on every backend: family `
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
 5. **Role eligibility**: a `Role | Eligible | Basis` table with a Director row and a Member row. Basis carries each requirement's source, delivery and checked native version plus the runtime caveats an agent acts on, while the evidence prose lives in `SPEC.md` § Role eligibility.
 
-Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection, whose resolution procedures live in `skills/cafleet/reference/model-selection.md`. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile boundary or `Evidence:` line changes; structural reorganization preserves the model freshness date.
+Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `assets/skills/cafleet/roles/director.md` § Model selection, whose resolution procedures live in `assets/skills/cafleet/reference/model-selection.md`. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile boundary or `Evidence:` line changes; structural reorganization preserves the model freshness date.
 
 ### How the base and overlay connect
 
-Each reader entry point places its runtime overlay first in its Required-reading block — as the first table row or the first prose reference — gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The reader resolves the overlay with the procedure in `skills/cafleet/SKILL.md` § Resolve your overlay, which owns the subject selection, materialization, note application, emission self-check and documented neutral defaults. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
+Each reader entry point places its runtime overlay first in its Required-reading block — as the first table row or the first prose reference — gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The reader resolves the overlay with the procedure in `assets/skills/cafleet/SKILL.md` § Resolve your overlay, which owns the subject selection, materialization, note application, emission self-check and documented neutral defaults. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
 
 State shared operational facts in each home for its audience.
 
@@ -190,7 +190,7 @@ Set `{reviewer_model}` and `{other_model}` to catalog tokens or aliases. A backe
 
 #### Model catalog
 
-List exact spawn tokens, valid aliases, reviewed most-to-least capability ordering, classes, and standard provider USD/MTok input/output prices. Include relevant context windows and availability constraints, required prefixes and official pricing/availability/configuration sources. Follow the freshness contract and [Director policy](../../skills/cafleet/roles/director.md#model-selection). A backend without a maintained catalog states "No maintained catalog", its `--model` pass-through rule and the source of the operator's configured default instead.
+List exact spawn tokens, valid aliases, reviewed most-to-least capability ordering, classes, and standard provider USD/MTok input/output prices. Include relevant context windows and availability constraints, required prefixes and official pricing/availability/configuration sources. Follow the freshness contract and [Director policy](../../assets/skills/cafleet/roles/director.md#model-selection). A backend without a maintained catalog states "No maintained catalog", its `--model` pass-through rule and the source of the operator's configured default instead.
 
 #### Note → applies at
 

@@ -1,7 +1,7 @@
 ---
 name: cafleet-model-list-refresh
 description: >-
-  Refresh the CAFleet model list at skills/cafleet/reference/coding-agents.md
+  Refresh the CAFleet model list at assets/skills/cafleet/reference/coding-agents.md
   from the approved official pricing and capability sources. Use when a
   maintainer asks to refresh, update, or re-verify the model list, its token
   prices, its context windows, or its freshness, or when a Director reports
@@ -12,12 +12,12 @@ description: >-
 # CAFleet Model List Refresh
 
 Refresh the repository's model catalogs and canonical Role defaults in
-`skills/cafleet/reference/coding-agents.md` — from the approved official
+`assets/skills/cafleet/reference/coding-agents.md` — from the approved official
 sources, under explicit maintainer review. The repository file is the release
 source: a running Director reads only its deployed skill replica, so a refresh
 reaches Directors exclusively through the release/deployment transaction below.
 
-This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. A backend whose Model catalog states "No maintained catalog" is outside the refresh scope: leave its Model catalog and its `—` Role defaults unchanged. Preserve Runtime bindings, bound runtime notes and Role eligibility as runtime documentation, and preserve the Director's worked model selections under its [model-selection policy](../../../skills/cafleet/roles/director.md#model-selection). The [Coding-agent overlay rule](../../rules/documentation-maintenance.md#coding-agent-overlay) owns maintenance responsibilities and backend scaffolding in its [Template](../../rules/documentation-maintenance.md#template). Keep the catalog preamble's last-refreshed date for model data, standard provider USD per MTok as planning estimates, and reviewed capability ordering.
+This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. A backend whose Model catalog states "No maintained catalog" is outside the refresh scope: leave its Model catalog and its `—` Role defaults unchanged. Preserve Runtime bindings, bound runtime notes and Role eligibility as runtime documentation, and preserve the Director's worked model selections under its [model-selection policy](../../../assets/skills/cafleet/roles/director.md#model-selection). The [Coding-agent overlay rule](../../rules/documentation-maintenance.md#coding-agent-overlay) owns maintenance responsibilities and backend scaffolding in its [Template](../../rules/documentation-maintenance.md#template). Keep the catalog preamble's last-refreshed date for model data, standard provider USD per MTok as planning estimates, and reviewed capability ordering.
 
 ## Approved sources (exhaustive allowlist)
 
@@ -96,7 +96,7 @@ sites, and social posts are never model-list authority.
    because `[1m]` is a glob pattern that fails an unquoted zsh invocation.
 7. **Propose, then apply atomically.** Generate a concise proposed diff and
    require explicit maintainer approval before applying the model-data changes in
-   `skills/cafleet/reference/coding-agents.md`. Preserve the common catalog
+   `assets/skills/cafleet/reference/coding-agents.md`. Preserve the common catalog
    preamble contract described above. Apply catalogs, provenance/context notes,
    Role defaults, and the *last refreshed* date together after approval and
    successful validation. The Director's staleness check reads that date, so
@@ -178,7 +178,7 @@ last-refreshed date covers both tables.
    that `opencode-go/` is part of the `--model` value. Explain that these tokens
    require configured providers that include an OpenCode Go subscription and
    that the Director checks availability per spawn under
-   [Director model selection](../../../skills/cafleet/roles/director.md#model-selection).
+   [Director model selection](../../../assets/skills/cafleet/roles/director.md#model-selection).
 
    Explain beneath the table that prices are USD per MTok counted against
    subscription usage limits, and that Extra Usage bills usage beyond the
@@ -208,8 +208,8 @@ refresh a running Director's asset copy. To deploy a refreshed model list, the
 maintainer:
 
 1. Bumps the CAFleet release version.
-2. Builds the release binary with the repository `skills/` tree embedded,
-   including `skills/cafleet/reference/coding-agents.md`, and publishes the
+2. Builds the release binary with the repository `assets/skills/` tree embedded,
+   including `assets/skills/cafleet/reference/coding-agents.md`, and publishes the
    per-target release archives.
 3. Upgrades the installed CLI to that release and runs `cafleet setup`, which
    installs its embedded skill payload for the selected backends, including
