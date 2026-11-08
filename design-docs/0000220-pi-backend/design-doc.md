@@ -1,7 +1,7 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 31/52 tasks complete
+**Progress**: 37/52 tasks complete
 **Last Updated**: 2026-11-07
 
 ## Overview
@@ -581,15 +581,15 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 
 ### Step 8: Setup and doctor
 
-- [ ] `src/assets.rs`: pi skills and extension targets, the executable record and output lines (§2.1) <!-- completed: -->
-- [ ] `src/cli/setup.rs`: the `pi.extension` doctor row and its summary folding (§2.2) <!-- completed: -->
-- [ ] Unit tests in `src/assets.rs`: installed bytes equal embedded bytes at the pi targets, the record content, output lines, rerun idempotence and a failure recording no installation <!-- completed: -->
-- [ ] Unit tests in `src/cli/setup.rs`: `pi.extension` `ok` and every `info`/`error` state, and the summary phrases <!-- completed: -->
+- [x] `src/assets.rs`: pi skills and extension targets, the executable record and output lines (§2.1) <!-- completed: 2026-11-08T00:06 -->
+- [x] `src/cli/setup.rs`: the `pi.extension` doctor row and its summary folding (§2.2) <!-- completed: 2026-11-08T00:06 -->
+- [x] Unit tests in `src/assets.rs`: installed bytes equal embedded bytes at the pi targets, the record content, output lines, rerun idempotence and a failure recording no installation <!-- completed: 2026-11-08T00:06 -->
+- [x] Unit tests in `src/cli/setup.rs`: `pi.extension` `ok` and every `info`/`error` state, and the summary phrases <!-- completed: 2026-11-08T00:06 -->
 
 ### Step 9: Validation and A-S
 
-- [ ] `mise //:test` <!-- completed: -->
-- [ ] `mise //:lint` <!-- completed: -->
+- [x] `mise //:test` <!-- completed: 2026-11-08T00:06 -->
+- [x] `mise //:lint` <!-- completed: 2026-11-08T00:06 -->
 - [ ] Run A-S with the built binary against a temporary `PI_CODING_AGENT_DIR` and database (§7) <!-- completed: -->
 
 ### Step 10: Captures and the pi profile

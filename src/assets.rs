@@ -13,7 +13,14 @@ pub(crate) struct AgentPaths {
     base: PathBuf,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
-    plugins_dir: Option<PathBuf>,
+    extension: Option<FileExtension>,
+}
+
+/// A backend whose extension is a set of embedded files installed beside one executable record.
+struct FileExtension {
+    prefix: &'static str,
+    dir: PathBuf,
+    record: &'static str,
 }
 
 /// How setup reaches Hermes for the plugin configuration.
@@ -33,6 +40,8 @@ pub(crate) const OPENCODE_EXECUTABLE_RECORD: &str = "cafleet.executable";
 pub(crate) const HERMES_EXTENSION_PREFIX: &str = "hermes/cafleet/";
 pub(crate) const HERMES_PLUGIN_DIR: &str = "plugins/cafleet";
 pub(crate) const HERMES_EXECUTABLE_RECORD: &str = "executable";
+pub(crate) const PI_EXTENSION_PREFIX: &str = "pi/";
+pub(crate) const PI_EXECUTABLE_RECORD: &str = "cafleet.executable";
 
 pub(crate) fn agent_paths(
     env: EnvLookup<'_>,
@@ -62,18 +71,34 @@ pub(crate) fn agent_paths(
             .collect(),
         CodingAgent::Hermes | CodingAgent::Pi => vec![],
     };
-    let plugins_dir = (agent == CodingAgent::Opencode).then(|| opencode_plugins_dir(&base));
+    let extension = match agent {
+        CodingAgent::Opencode => Some(FileExtension {
+            prefix: OPENCODE_EXTENSION_PREFIX,
+            dir: opencode_plugins_dir(&base),
+            record: OPENCODE_EXECUTABLE_RECORD,
+        }),
+        CodingAgent::Pi => Some(FileExtension {
+            prefix: PI_EXTENSION_PREFIX,
+            dir: pi_extensions_dir(&base),
+            record: PI_EXECUTABLE_RECORD,
+        }),
+        CodingAgent::Claude | CodingAgent::Codex | CodingAgent::Hermes => None,
+    };
     Ok(AgentPaths {
         identity: base.display().to_string(),
         base,
         skills_dir,
         presets,
-        plugins_dir,
+        extension,
     })
 }
 
 pub(crate) fn opencode_plugins_dir(preset_base: &Path) -> PathBuf {
     preset_base.join("plugins")
+}
+
+pub(crate) fn pi_extensions_dir(pi_base: &Path) -> PathBuf {
+    pi_base.join("extensions")
 }
 
 impl AgentPaths {
@@ -158,8 +183,8 @@ pub(crate) fn install_agent(
             target.display()
         )
     };
-    if let Some(plugins) = &paths.plugins_dir {
-        for target in install_opencode_extension(plugins)? {
+    if let Some(extension) = &paths.extension {
+        for target in install_file_extension(extension)? {
             report(extension_line(&target))?;
         }
     }
@@ -191,19 +216,19 @@ fn extension_failure(target: &Path, cause: impl std::fmt::Display) -> CafleetErr
     ))
 }
 
-/// Writes each OpenCode plugin file, then the executable record, and returns the plugin files.
-fn install_opencode_extension(plugins: &Path) -> Result<Vec<PathBuf>, CafleetError> {
+/// Writes each embedded extension file, then the executable record, and returns the files.
+fn install_file_extension(extension: &FileExtension) -> Result<Vec<PathBuf>, CafleetError> {
     let mut installed = Vec::new();
-    for (relative, bytes) in embedded_extension(OPENCODE_EXTENSION_PREFIX) {
-        let target = plugins.join(relative);
+    for (relative, bytes) in embedded_extension(extension.prefix) {
+        let target = extension.dir.join(relative);
         let fail = |error: std::io::Error| extension_failure(&target, error);
-        std::fs::create_dir_all(target.parent().expect("plugin file has a parent"))
+        std::fs::create_dir_all(target.parent().expect("extension file has a parent"))
             .map_err(fail)?;
         remove_existing_target(&target).map_err(fail)?;
         std::fs::write(&target, bytes).map_err(fail)?;
         installed.push(target);
     }
-    write_executable_record(&plugins.join(OPENCODE_EXECUTABLE_RECORD))?;
+    write_executable_record(&extension.dir.join(extension.record))?;
     Ok(installed)
 }
 

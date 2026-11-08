@@ -837,6 +837,9 @@ fn agent_checks(
             }
             checks.push(opencode_extension_check(paths, available));
         }
+        if agent == CodingAgent::Pi {
+            checks.push(pi_extension_check(paths, available));
+        }
         if agent == CodingAgent::Hermes {
             match hermes_reading.take().expect("one hermes backend")() {
                 Some((config_path, plugins)) => {
@@ -952,25 +955,47 @@ fn extension_files(root: &Path, prefix: &str) -> Vec<(PathBuf, &'static [u8])> {
 }
 
 fn opencode_extension_check(paths: &Result<PathBuf, CafleetError>, available: bool) -> Check {
-    const NAME: &str = "opencode.extension";
-    if let Some(row) = unavailable(NAME, paths, available) {
+    file_extension_check(
+        "opencode.extension",
+        paths,
+        available,
+        crate::assets::opencode_plugins_dir,
+        crate::assets::OPENCODE_EXTENSION_PREFIX,
+        crate::assets::OPENCODE_EXECUTABLE_RECORD,
+    )
+}
+
+fn pi_extension_check(paths: &Result<PathBuf, CafleetError>, available: bool) -> Check {
+    file_extension_check(
+        "pi.extension",
+        paths,
+        available,
+        crate::assets::pi_extensions_dir,
+        crate::assets::PI_EXTENSION_PREFIX,
+        crate::assets::PI_EXECUTABLE_RECORD,
+    )
+}
+
+/// Checks an extension installed as embedded files beside one executable record under its base.
+fn file_extension_check(
+    name: &str,
+    paths: &Result<PathBuf, CafleetError>,
+    available: bool,
+    extension_dir: fn(&Path) -> PathBuf,
+    prefix: &str,
+    record: &str,
+) -> Check {
+    if let Some(row) = unavailable(name, paths, available) {
         return row;
     }
-    let plugins = crate::assets::opencode_plugins_dir(
-        paths.as_ref().expect("an available backend has a base"),
-    );
-    let files = extension_files(&plugins, crate::assets::OPENCODE_EXTENSION_PREFIX);
+    let dir = extension_dir(paths.as_ref().expect("an available backend has a base"));
+    let files = extension_files(&dir, prefix);
     let ok_detail = files
         .iter()
         .map(|(target, _)| target.display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    extension_check(
-        NAME,
-        &files,
-        &plugins.join(crate::assets::OPENCODE_EXECUTABLE_RECORD),
-        ok_detail,
-    )
+    extension_check(name, &files, &dir.join(record), ok_detail)
 }
 
 fn hermes_extension_check(config_path: Result<String, String>) -> Check {
