@@ -113,6 +113,9 @@ interface Word {
   expands: boolean
 }
 
+/** A `$` outside single quotes is plain parameter expansion only when a name follows it. */
+const startsName = (char: string | undefined) => char !== undefined && /[A-Za-z_]/.test(char)
+
 /** The words of `command` when it is one simple command, otherwise undefined. */
 function simpleWords(command: string): Word[] | undefined {
   if (/[\n\r]/.test(command)) return undefined
@@ -134,7 +137,7 @@ function simpleWords(command: string): Word[] | undefined {
     }
     if (quote === '"') {
       if (char === '"') quote = undefined
-      else if (char === "`" || (char === "$" && (next === "(" || next === "{"))) return undefined
+      else if (char === "`" || (char === "$" && !startsName(next))) return undefined
       else if (char === "\\" && next !== undefined && '$`"\\'.includes(next)) {
         append(next)
         index++
@@ -158,7 +161,7 @@ function simpleWords(command: string): Word[] | undefined {
       continue
     }
     if (";&|<>()`".includes(char)) return undefined
-    if (char === "$" && next !== undefined && "({'\"".includes(next)) return undefined
+    if (char === "$" && !startsName(next)) return undefined
     append(char, "$*?[{".includes(char))
   }
   if (quote !== undefined) return undefined
