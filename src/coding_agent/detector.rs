@@ -5403,17 +5403,24 @@ mod tests {
         }
 
         #[test]
-        fn pi_multi_line_command_reports_each_line_without_the_continuation_prefix() {
+        fn pi_form_with_any_row_below_its_single_operation_row_yields_no_request() {
+            let extra_rows: [&[&str]; 3] = [
+                &["   --second line"],
+                &["   second line", "   third line"],
+                &["   $ ./permission-probe allow"],
+            ];
             for capture in CAPTURES {
-                let screen = replay("allow-pre-stage", capture, |lines| {
-                    let command = row(lines, " $ ");
-                    insert_rows(lines, command, &["   --second line".into()]);
-                });
-                assert_request(
-                    &observe(&screen),
-                    "./permission-probe allow\n--second line",
-                    capture,
-                );
+                for (screen, _, _) in FORMS {
+                    for rows in extra_rows {
+                        let case = format!("{}: {rows:?}", id(screen, capture));
+                        let extended = replay(screen, capture, |lines| {
+                            let command = row(lines, " $ ");
+                            let rows = rows.iter().map(|&text| text.to_owned()).collect::<Vec<_>>();
+                            insert_rows(lines, command, &rows);
+                        });
+                        assert_no_request(&observe(&extended), &case);
+                    }
+                }
             }
         }
 
