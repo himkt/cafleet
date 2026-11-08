@@ -35,17 +35,17 @@ For OpenCode and Hermes, `cafleet setup` installs the CAFleet plugin beside the 
 
 ## Launch modes
 
-New members run through the CAFleet PTY runner with a declared detection-coverage state. Each launch mode is `auto` (native automatic review or a fixed allow/deny policy) or `manual` (a human answers on the native surface for operations its rules do not settle). Omitting `--permission-mode` selects the backend's default mode, `auto` on every backend:
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Each launch mode is `auto` (native automatic review or a fixed allow/deny policy) or `manual` (a human answers on the native surface for operations its rules do not settle). Omitting `--permission-mode` selects the backend's default mode:
 
-| Backend | Default mode | Other `auto` modes | `manual` modes |
+| Backend | Default mode | Other `auto` modes | Other `manual` modes |
 |---|---|---|---|
-| `claude` | `auto` | `dontAsk`, `bypassPermissions` | `default`, `manual`, `acceptEdits`, `plan` |
-| `codex` | `approve-for-me` | `never` | `on-request` |
-| `opencode` | `cafleet` | — | `cafleet-ask` |
-| `hermes` | `smart` | — | `manual` |
-| `pi` | `cafleet` | — | `cafleet-ask` |
+| `claude` | `auto` (`auto`) | `dontAsk`, `bypassPermissions` | `default`, `manual`, `acceptEdits`, `plan` |
+| `codex` | `approve-for-me` (`auto`) | `never` | `on-request` |
+| `opencode` | `cafleet-ask` (`manual`) | `cafleet` | — |
+| `hermes` | `smart` (`auto`) | — | `manual` |
+| `pi` | `cafleet-ask` (`manual`) | `cafleet` | — |
 
-Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and your Hermes configuration's `approvals.mode` ([Hermes configuration](#hermes-configuration)) governs the session. pi has no native per-tool approval, so both pi modes run the CAFleet member gate: `cafleet` runs its allowlisted commands and blocks every other one without a prompt, and `cafleet-ask` opens the gate's approval form instead ([pi configuration](#pi-configuration)).
+Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and your Hermes configuration's `approvals.mode` ([Hermes configuration](#hermes-configuration)) governs the session. pi has no native per-tool approval, so both pi modes run the CAFleet member gate, which runs only the member's broker message commands: `cafleet-ask` opens the gate's approval form for every other command, and `cafleet` blocks it without a prompt ([pi configuration](#pi-configuration)).
 
 The Director handles an approval prompt the member's bundled runner profile recognizes as a [runtime event](members.md#consume-a-runtime-event); an unrecognized one, such as in a pane narrower than the profile's captured layouts, is answered manually on the member's native surface. A Member-eligible backend's profile recognizes every approval prompt its default mode can show outside its recorded layout limits ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements)). Each backend's launch configuration supplies broker access, subject to native and managed rules. [Choose a native policy](members.md#choose-a-native-policy) covers mode selection and profile coverage; the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 
@@ -134,7 +134,7 @@ That rule is enough for members. Keep the installed file for a Director session:
 
 ### OpenCode configuration
 
-`cafleet setup` installs both agent presets into `~/.config/opencode/agents/` and the CAFleet plugin as `~/.config/opencode/plugins/cafleet.ts`, with a `cafleet.executable` file naming the `cafleet` it runs; rerun setup after moving or upgrading the CLI. The `cafleet` preset allows its listed commands and denies every other shell command without a prompt; `cafleet-ask` instead opens a native permission form for the Director to answer. Neither preset is an OS-level sandbox: keep every loaded OpenCode configuration free of MCP servers, submit one shell command per invocation, and use the `codex` backend for kernel-enforced isolation.
+`cafleet setup` installs both agent presets into `~/.config/opencode/agents/` and the CAFleet plugin as `~/.config/opencode/plugins/cafleet.ts`, with a `cafleet.executable` file naming the `cafleet` it runs; rerun setup after moving or upgrading the CLI. Both presets allow only the member's broker message commands. The default `cafleet-ask` opens a native permission form for the Director to answer for every other shell command, and `cafleet` denies it without a prompt. Keep member panes wide enough that each form and its command show in full, or expect to answer some forms on the member's pane. A broker `message send --file` naming a `.env` file copies its contents into a message despite the presets' `.env` file-tool denials. Neither preset is an OS-level sandbox: keep every loaded OpenCode configuration free of MCP servers, submit one shell command per invocation, and use the `codex` backend for kernel-enforced isolation.
 
 While a goal is active the plugin continues the session turn by turn, pausing the goal after three continuation turns without reported progress or after 50 continuations; `/cafleet-goal resume` restarts it with a fresh continuation budget.
 
@@ -170,16 +170,18 @@ pi members use your existing pi configuration: the `defaultProvider` and `defaul
 
 pi has no per-tool approval and no OS-level sandbox, so the member gate is a pi member's whole permission posture:
 
-| Operation | `cafleet` | `cafleet-ask` |
+| Operation | `cafleet-ask` (default) | `cafleet` |
 |---|---|---|
-| A shell command on the gate's allowlist, run as one simple command | Runs | Runs |
-| A shell command holding a control character, such as a multi-line command or a terminal escape sequence | Blocked; the member asks the Director to run it | Blocked without a form; the member asks the Director to run it |
-| Any other shell command, including a compound command, a leading `NAME=value` assignment, a `cafleet` command other than the member's message send, poll, ack and show, a `git` command that expands its words or passes an option that runs a command or writes a file, a `mise` task given an option, an expanding word or another task (`:::` or a `//` task reference), or `tree` with any argument | Blocked; the member asks the Director to run it | Opens the gate's approval form for the Director to answer |
+| The member's broker message send, poll, ack or show, run as one simple command | Runs | Runs |
+| A shell command holding a control character, such as a multi-line command or a terminal escape sequence | Blocked without a form; the member asks the Director to run it | Blocked; the member asks the Director to run it |
+| Any other shell command, including a compound command, a leading `NAME=value` assignment, a Git command, a `mise` task or another `cafleet` command | Opens the gate's approval form for the Director to answer | Blocked; the member asks the Director to run it |
 | Reading and searching files | Allowed, except a call that names a `.env` file | Same |
 | Editing and writing files | Allowed inside the working directory, except a `.env` file and anything below `.git/`, `.pi/`, `.agents/`, `.claude/`, `.codex/` or `.opencode/` | Same |
 | Any other tool, including MCP and other extension tools | Blocked | Same |
 
-The gate constrains a cooperative member's tool calls; it is not containment. The protected directories, which hold Git hooks, project pi resources and other backends' project configuration such as Claude Code hooks, are closed only to the member's file edits and writes. The allowed `mise` tasks and `git commit` run workspace code and hooks that a member can edit, such as test code, `build.rs` and `mise.toml`, and that code can write anywhere you can, protected directories included. Both the protected-directory and the `.env` checks ignore letter case, so `.Git/` and `.ENV` count as well. The gate reads a file path the way pi does, and it refuses a `file:` URL path, so a member passes a plain path. Project-root files such as `opencode.json`, `AGENTS.md` and `CLAUDE.md` stay writable, because members edit them as ordinary work. The `.env` rule refuses only a file read, search, edit or write whose path names a `.env` file: a search of a whole directory and allowed commands such as `grep` or `git diff` still read `.env` contents, and file reads reach any path. Use the `codex` backend for kernel-enforced isolation.
+The gate constrains a cooperative member's tool calls; it is not containment. The protected directories, which hold Git hooks, project pi resources and other backends' project configuration such as Claude Code hooks, are closed only to the member's file edits and writes. A command the Director allows on the form or dispatches with `member exec` runs workspace code and hooks that a member can edit, such as test code, `build.rs` and `mise.toml`, and that code can write anywhere you can, protected directories included. Both the protected-directory and the `.env` checks ignore letter case, so `.Git/` and `.ENV` count as well. The gate reads a file path the way pi does, and it refuses a `file:` URL path, so a member passes a plain path. Project-root files such as `opencode.json`, `AGENTS.md` and `CLAUDE.md` stay writable, because members edit them as ordinary work. The `.env` rule refuses only a file read, search, edit or write whose path names a `.env` file: a search of a whole directory, a broker `message send --file` naming a `.env` file, which copies its contents into a message, and a command the Director allows or dispatches still read `.env` contents, and file reads reach any path. Use the `codex` backend for kernel-enforced isolation.
+
+Keep member panes wide enough that each command fits on one row of the approval form, or expect to answer some forms on the member's pane.
 
 While a goal is active the extension continues the session turn by turn, pausing the goal after three continuation turns without reported progress, after 50 continuations or when you interrupt the run; `/cafleet-goal resume` restarts it with a fresh continuation budget. Only an active goal is shown to the model, so a paused goal stops steering the Director until you resume it. The goal survives compaction and `pi --continue` on the same session.
 
