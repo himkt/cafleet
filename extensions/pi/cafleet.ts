@@ -35,7 +35,8 @@ const MEMBER_ALLOWLIST = [
   "git add *", "git commit *", "git diff *", "git grep *", "git log *", "git ls-tree *",
   "git ls-files *", "git branch *", "git status", "grep *", "ls", "ls *", "stat *",
   "tree", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
-  "mise //:typecheck", "mise //:build", "wc *", "cafleet *",
+  "mise //:typecheck", "mise //:build", "wc *", "cafleet message send *",
+  "cafleet message poll *", "cafleet message ack *", "cafleet message show *",
 ]
 
 type GoalStatus = "active" | "paused" | "complete" | "cleared"
@@ -177,9 +178,20 @@ function isRefusedGitWord(text: string): boolean {
   return name === "output" || (name.length >= 2 && "open-files-in-pager".startsWith(name))
 }
 
-/** True when a git word expands or names an option that runs a command or writes a chosen file. */
-const hasRefusedWord = (words: Word[]) =>
-  words[0]?.text === "git" && words.some((word) => word.expands || isRefusedGitWord(word.text))
+/** A mise task forwards its words to cargo, whose options can choose the command cargo runs or where it writes. */
+const isRefusedMiseWord = (text: string) => text.startsWith("-")
+
+/** The commands whose words must stay literal, each with its refused option words. */
+const LITERAL_WORD_COMMANDS = new Map([
+  ["git", isRefusedGitWord],
+  ["mise", isRefusedMiseWord],
+])
+
+/** True when a git or mise word expands, a git word names an option that runs a command or writes a chosen file, or a mise word is an option. */
+function hasRefusedWord(words: Word[]): boolean {
+  const refused = LITERAL_WORD_COMMANDS.get(words[0]?.text ?? "")
+  return refused !== undefined && words.some((word) => word.expands || refused(word.text))
+}
 
 const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
   (pattern) =>
@@ -193,7 +205,7 @@ function isAllowlisted(command: string): boolean {
 }
 
 const DEFAULT_PATH_TOOLS = ["grep", "find", "ls"]
-const UNICODE_SPACES = /[  -   　]/g
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g
 
 /** The tool's path text; without a non-empty `path`, grep, find and ls default to "." and the others have none. */
 function toolPathText(toolName: string, raw: unknown): string | undefined {
