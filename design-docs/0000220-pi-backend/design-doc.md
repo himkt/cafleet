@@ -1,7 +1,7 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 19/52 tasks complete
+**Progress**: 31/52 tasks complete
 **Last Updated**: 2026-11-07
 
 ## Overview
@@ -563,21 +563,21 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 
 ### Step 6: Registry, argv and validation
 
-- [ ] `src/coding_agent/mod.rs`: `Pi` in `CodingAgent` with `name`, `config_variable` (`PI_CODING_AGENT_DIR`), `config_dir` (`~/.pi/agent`), `default_policy`, `policy_choices`, `permission_arguments`, `validate_model`, `validate_effort`, `validate_prompt`, the gated-mode extension read in `ensure_available` and the §1.2 argv <!-- completed: -->
-- [ ] `src/cli/member.rs`: call `validate_prompt` on the resolved prompt body before registration, between `resolve_body` and `director_placement` (§1.2); `src/coding_agent/mod.rs`: the pi arm of `validate_spawn_policy_argv` <!-- completed: -->
-- [ ] `migrations/V1__baseline.sql`: add `'pi'` to the backend CHECK <!-- completed: -->
-- [ ] Unit tests in `src/coding_agent/mod.rs`: argv for every mode with and without model, effort and prompt; the thinking-suffix rejection and a `:free` pass-through; every effort level and a rejected one; `validate_prompt` rejecting a leading `@` for pi only, and the leading-`-` prompt kept positional after `--`; the precondition order and the missing-extension error in both modes; config-dir default and override; the `1.5.0` version token <!-- completed: -->
-- [ ] Unit test in `src/cli/member.rs`: `member create --coding-agent pi` with a prompt beginning with `@` exits 2 with the §1.2 error and leaves no member row, run or pane <!-- completed: -->
-- [ ] Update every exhaustive backend match and registry-driven test that the new variant reaches (`src/cli/mod.rs`, `src/cli/member.rs`, `src/db.rs`, `src/runtime/`), keeping backend-specific branches pi-free where pi needs no behavior <!-- completed: -->
+- [x] `src/coding_agent/mod.rs`: `Pi` in `CodingAgent` with `name`, `config_variable` (`PI_CODING_AGENT_DIR`), `config_dir` (`~/.pi/agent`), `default_policy`, `policy_choices`, `permission_arguments`, `validate_model`, `validate_effort`, `validate_prompt`, the gated-mode extension read in `ensure_available` and the §1.2 argv <!-- completed: 2026-11-08T00:03 -->
+- [x] `src/cli/member.rs`: call `validate_prompt` on the resolved prompt body before registration, between `resolve_body` and `director_placement` (§1.2); `src/coding_agent/mod.rs`: the pi arm of `validate_spawn_policy_argv` <!-- completed: 2026-11-08T00:03 -->
+- [x] `migrations/V1__baseline.sql`: add `'pi'` to the backend CHECK <!-- completed: 2026-11-08T00:03 -->
+- [x] Unit tests in `src/coding_agent/mod.rs`: argv for every mode with and without model, effort and prompt; the thinking-suffix rejection and a `:free` pass-through; every effort level and a rejected one; `validate_prompt` rejecting a leading `@` for pi only, and the leading-`-` prompt kept positional after `--`; the precondition order and the missing-extension error in both modes; config-dir default and override; the `1.5.0` version token <!-- completed: 2026-11-08T00:03 -->
+- [x] Unit test in `src/cli/member.rs`: `member create --coding-agent pi` with a prompt beginning with `@` exits 2 with the §1.2 error and leaves no member row, run or pane <!-- completed: 2026-11-08T00:03 -->
+- [x] Update every exhaustive backend match and registry-driven test that the new variant reaches (`src/cli/mod.rs`, `src/cli/member.rs`, `src/db.rs`, `src/runtime/`), keeping backend-specific branches pi-free where pi needs no behavior <!-- completed: 2026-11-08T00:03 -->
 
 ### Step 7: The CAFleet pi extension
 
-- [ ] `extensions/pi/cafleet.ts`: executable record, Director verification and member inertness (§4.1) <!-- completed: -->
-- [ ] `extensions/pi/cafleet.ts`: `cafleet_listen` with `followUp` delivery, closed notices, `session_shutdown` stop and the runtime-replaced notice (§4.2–4.3) <!-- completed: -->
-- [ ] `extensions/pi/cafleet.ts`: goal extension, with `pendingContinuation`/`progressed` tracking and the `context`-hook goal message (§4.4) <!-- completed: -->
-- [ ] `extensions/pi/cafleet.ts`: `cafleet_ask` (§4.5) <!-- completed: -->
-- [ ] `extensions/pi/cafleet.ts`: member gate with `--cafleet-gate` and the fail-closed mode promise, the tool policy with the protected `.git`/`.pi`/`.agents` directories, the allowlist lexer and matcher, the approval form and serialization (§3.2–3.5). The §3.4 gate case table is its acceptance check, run in A-M <!-- completed: -->
-- [ ] `build.rs`: confirm that the `EXTENSIONS` table embeds `extensions/pi/cafleet.ts` <!-- completed: -->
+- [x] `extensions/pi/cafleet.ts`: executable record, Director verification and member inertness (§4.1) <!-- completed: 2026-11-08T00:03 -->
+- [x] `extensions/pi/cafleet.ts`: `cafleet_listen` with `followUp` delivery, closed notices, `session_shutdown` stop and the runtime-replaced notice (§4.2–4.3) <!-- completed: 2026-11-08T00:03 -->
+- [x] `extensions/pi/cafleet.ts`: goal extension, with `pendingContinuation`/`progressed` tracking and the `context`-hook goal message (§4.4) <!-- completed: 2026-11-08T00:03 -->
+- [x] `extensions/pi/cafleet.ts`: `cafleet_ask` (§4.5) <!-- completed: 2026-11-08T00:03 -->
+- [x] `extensions/pi/cafleet.ts`: member gate with `--cafleet-gate` and the fail-closed mode promise, the tool policy with the protected `.git`/`.pi`/`.agents` directories, the allowlist lexer and matcher, the approval form and serialization (§3.2–3.5). The §3.4 gate case table is its acceptance check, run in A-M <!-- completed: 2026-11-08T00:03 -->
+- [x] `build.rs`: confirm that the `EXTENSIONS` table embeds `extensions/pi/cafleet.ts` <!-- completed: 2026-11-08T00:03 -->
 
 ### Step 8: Setup and doctor
 

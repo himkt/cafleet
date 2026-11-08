@@ -1,0 +1,627 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
+import { Type } from "typebox"
+import { execFile, spawn, type ChildProcess } from "node:child_process"
+import { accessSync, constants, readFileSync, statSync } from "node:fs"
+import { homedir } from "node:os"
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { createInterface } from "node:readline"
+import { fileURLToPath } from "node:url"
+
+const RECORD_PREFIX = "[cafleet listen record] "
+const CLOSED_PREFIX = "[cafleet listen closed] "
+const GOAL_PREFIX = "[cafleet goal] "
+const LISTEN_TYPE = "cafleet-listen"
+const GOAL_TYPE = "cafleet-goal"
+const GOAL_NOTICE_TYPE = "cafleet-goal-notice"
+const MEMBER_REFUSAL = "cafleet tools run only in a Director session"
+const SETUP_FIX = "run 'cafleet setup --coding-agent pi'"
+const RECEIVER_STOPPED = Symbol.for("cafleet.pi.receiver-stopped")
+const IDLE_LIMIT = 3
+const CONTINUATION_LIMIT = 50
+const VERIFY_TIMEOUT_MS = 10_000
+const RESUME_HINT = "the operator resumes it with /cafleet-goal resume"
+
+const GATE_FLAG = "cafleet-gate"
+const GATE_MODES = ["cafleet", "cafleet-ask"] as const
+const GATE_TOOLS = "bash, read, grep, find, ls, edit and write"
+const ROUTE_COMMAND = "route the command to the Director if it is required"
+const ROUTE_CHANGE = "route the change to the Director if it is required"
+const PROTECTED_DIRECTORIES = [".git", ".pi", ".agents"]
+const ALLOW_ONCE = "Allow once"
+const DENY = "Deny"
+
+const MEMBER_ALLOWLIST = [
+  "git add *", "git commit *", "git diff *", "git grep *", "git log *", "git ls-tree *",
+  "git ls-files *", "git branch *", "git status", "grep *", "ls", "ls *", "stat *",
+  "tree", "tree *", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
+  "mise //:typecheck", "mise //:build", "wc *", "cafleet *",
+]
+
+type GoalStatus = "active" | "paused" | "complete" | "cleared"
+
+interface Goal {
+  objective: string
+  status: GoalStatus
+  generation: number
+  continuations: number
+  idle_streak: number
+}
+
+interface DirectorInput {
+  director_id: number
+  database_url?: string
+}
+
+type GateMode = (typeof GATE_MODES)[number]
+type Gate = { kind: "inert" } | { kind: "active"; mode: GateMode } | { kind: "failed"; reason: string }
+type Block = { block: true; reason: string }
+
+const result = (fields: Record<string, unknown>) => ({
+  content: [{ type: "text" as const, text: JSON.stringify(fields) }],
+  details: undefined,
+  ...(fields.ok === false ? { isError: true } : {}),
+})
+
+function recordedExecutable(): string {
+  const record = fileURLToPath(new URL("./cafleet.executable", import.meta.url))
+  let target: string
+  try {
+    target = readFileSync(record, "utf8").trim()
+    if (!target) throw new Error("the record is empty")
+    if (!statSync(target).isFile()) throw new Error(`${target} is not a file`)
+    accessSync(target, constants.X_OK)
+  } catch (error) {
+    throw new Error(`executable record ${record}: ${(error as Error).message}; ${SETUP_FIX}`)
+  }
+  return target
+}
+
+const databaseArgs = (databaseURL?: string) => (databaseURL ? ["--database-url", databaseURL] : [])
+
+/** Resolves to undefined when `director_id` is a root Director, otherwise to the refusal text. */
+function directorRefusal({ director_id, database_url }: DirectorInput): Promise<string | undefined> {
+  let executable: string
+  try {
+    executable = recordedExecutable()
+  } catch (error) {
+    return Promise.resolve((error as Error).message)
+  }
+  const args = [...databaseArgs(database_url), "member", "show", String(director_id), "--json"]
+  return new Promise((done) => {
+    execFile(executable, args, { timeout: VERIFY_TIMEOUT_MS }, (error, stdout, stderr) => {
+      if (!error) {
+        try {
+          if (JSON.parse(stdout).kind === "director") return done(undefined)
+        } catch {}
+      }
+      done(`${MEMBER_REFUSAL}: ${String(stderr).trim() || (error?.message ?? "")}`)
+    })
+  })
+}
+
+const directorParameters = {
+  director_id: Type.Integer({ description: "The Director's literal member ID." }),
+  database_url: Type.Optional(
+    Type.String({ description: "The fleet's database URL when the Director's DATABASE URL line names one." }),
+  ),
+}
+
+/** True when `command` is one simple command: no unquoted operator, redirection, subshell or newline. */
+function isSimpleCommand(command: string): boolean {
+  let quote: "'" | '"' | undefined
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index]
+    const next = command[index + 1]
+    if (quote === "'") {
+      if (char === "'") quote = undefined
+      continue
+    }
+    if (quote === '"') {
+      if (char === "\\") index++
+      else if (char === '"') quote = undefined
+      else if (char === "`" || (char === "$" && next === "(")) return false
+      continue
+    }
+    if (char === "\\") {
+      if (next === undefined || next === "\n" || next === "\r") return false
+      index++
+      continue
+    }
+    if (char === "'" || char === '"') quote = char
+    else if (";&|<>()`\n\r".includes(char) || (char === "$" && next === "(")) return false
+  }
+  return quote === undefined
+}
+
+const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
+  (pattern) =>
+    new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join(".*")}$`, "s"),
+)
+
+function isAllowlisted(command: string): boolean {
+  const trimmed = command.trim()
+  return isSimpleCommand(trimmed) && ALLOWLIST_RULES.some((rule) => rule.test(trimmed))
+}
+
+function resolveToolPath(cwd: string, raw: unknown): string {
+  const value = typeof raw === "string" && raw.trim() ? raw.trim() : "."
+  const stripped = value.startsWith("@") ? value.slice(1) : value
+  if (stripped === "~") return homedir()
+  if (stripped.startsWith("~/")) return join(homedir(), stripped.slice(2))
+  return resolve(cwd, stripped)
+}
+
+const isEnvFile = (path: string) => basename(path) === ".env" || basename(path).startsWith(".env.")
+
+function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: string): Block | undefined {
+  const path = resolveToolPath(cwd, input.path)
+  if (isEnvFile(path)) {
+    return { block: true, reason: `the CAFleet member gate protects .env files from ${toolName}; ${ROUTE_CHANGE}` }
+  }
+  if (toolName !== "edit" && toolName !== "write") return undefined
+  const inside = relative(cwd, path)
+  if (inside.startsWith("..") || isAbsolute(inside)) {
+    return {
+      block: true,
+      reason: `the CAFleet member gate allows edit and write only inside the working directory; ${ROUTE_CHANGE}`,
+    }
+  }
+  if (inside.split(sep).some((component) => PROTECTED_DIRECTORIES.includes(component))) {
+    return {
+      block: true,
+      reason: `the CAFleet member gate protects .git, .pi and .agents from edit and write; ${ROUTE_CHANGE}`,
+    }
+  }
+  return undefined
+}
+
+function approvalTitle(command: string): string {
+  const [first, ...rest] = command.split("\n")
+  return ["CAFleet member gate: allow this bash command?", "", `$ ${first}`, ...rest.map((line) => `  ${line}`)].join(
+    "\n",
+  )
+}
+
+export default function (pi: ExtensionAPI) {
+  pi.registerFlag(GATE_FLAG, {
+    description: "CAFleet member gate mode (cafleet or cafleet-ask); set only by cafleet member create",
+    type: "string",
+  })
+
+  let settleGate: (gate: Gate) => void = () => undefined
+  const gate = new Promise<Gate>((done) => {
+    settleGate = done
+  })
+  let approvals: Promise<unknown> = Promise.resolve()
+
+  let goal: Goal | undefined
+  let pendingContinuation = false
+  let progressed = false
+
+  let receiver: ChildProcess | undefined
+  let receiverEnded = true
+  let receiverStopped = false
+
+  const notify = (ctx: ExtensionContext, text: string, level: "info" | "warning" | "error" = "info") => {
+    if (ctx.hasUI) ctx.ui.notify(text, level)
+  }
+
+  function restoreGoal(ctx: ExtensionContext) {
+    goal = undefined
+    for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type === "custom" && entry.customType === GOAL_TYPE) goal = entry.data as Goal
+    }
+  }
+
+  function storeGoal(next: Goal) {
+    goal = next
+    pi.appendEntry(GOAL_TYPE, next)
+  }
+
+  const continuationText = (objective: string) =>
+    `${GOAL_PREFIX}Continue working toward the active goal: ${objective}. ` +
+    "Call cafleet_goal_progress after each step and cafleet_goal_complete when it is achieved."
+
+  function sendContinuation(current: Goal) {
+    pendingContinuation = true
+    pi.sendMessage(
+      { customType: GOAL_TYPE, content: continuationText(current.objective), display: true, details: { generation: current.generation } },
+      { triggerTurn: true, deliverAs: "followUp" },
+    )
+  }
+
+  function pauseGoal(current: Goal, changes: Partial<Goal> = {}) {
+    storeGoal({ ...current, ...changes, status: "paused", generation: current.generation + 1 })
+  }
+
+  function failGoal(ctx: ExtensionContext, cause: unknown) {
+    console.error("[cafleet goal] handler failed:", cause)
+    if (goal?.status !== "active") return
+    try {
+      pauseGoal(goal)
+      notify(
+        ctx,
+        `${GOAL_PREFIX}paused: the goal cannot continue (${(cause as Error).message}); ${RESUME_HINT}`,
+        "error",
+      )
+    } catch (pauseError) {
+      console.error("[cafleet goal] pausing the goal failed:", pauseError)
+    }
+  }
+
+  function receiverLive() {
+    return receiver !== undefined && !receiverEnded
+  }
+
+  function sendListen(content: string) {
+    pi.sendMessage({ customType: LISTEN_TYPE, content, display: true }, { triggerTurn: true, deliverAs: "followUp" })
+  }
+
+  function stopReceiver() {
+    if (!receiverLive()) return false
+    receiverStopped = true
+    receiver!.kill("SIGTERM")
+    return true
+  }
+
+  function startReceiver({ director_id, database_url }: DirectorInput): ChildProcess {
+    const child = spawn(recordedExecutable(), [...databaseArgs(database_url), "message", "listen", String(director_id)], {
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    receiver = child
+    receiverEnded = false
+    receiverStopped = false
+    let sawClosed = false
+    let noticeSent = false
+    let lastStderr = ""
+    const closedNotice = (detail: string) => {
+      if (noticeSent || receiverStopped || sawClosed) return
+      noticeSent = true
+      try {
+        sendListen(`${CLOSED_PREFIX}${detail}`)
+      } catch (error) {
+        console.error("[cafleet listen] closed notice failed:", error)
+      }
+    }
+    const end = (detail: string) => {
+      if (receiver === child) receiverEnded = true
+      closedNotice(detail)
+    }
+    createInterface({ input: child.stdout! }).on("line", (line) => {
+      if (!line || noticeSent) return
+      sawClosed ||= line.startsWith('{"event":"closed"')
+      try {
+        sendListen(RECORD_PREFIX + line)
+      } catch (error) {
+        child.kill("SIGTERM")
+        if (receiver === child) receiverEnded = true
+        sawClosed = false
+        closedNotice(`delivery failed: ${(error as Error).message}`)
+      }
+    })
+    createInterface({ input: child.stderr! }).on("line", (line) => {
+      if (line.trim()) lastStderr = line.trim()
+    })
+    child.on("error", (error: NodeJS.ErrnoException) => end(`exit ${error.code ?? "error"}: ${error.message}`))
+    child.on("close", (code, signal) => end(`exit ${code ?? signal}: ${lastStderr}`))
+    return child
+  }
+
+  function readGate(): Gate {
+    const value = pi.getFlag(GATE_FLAG)
+    if (value === undefined) return { kind: "inert" }
+    if (typeof value === "string" && (GATE_MODES as readonly string[]).includes(value)) {
+      return { kind: "active", mode: value as GateMode }
+    }
+    return { kind: "failed", reason: `the CAFleet member gate received an unknown --cafleet-gate value '${String(value)}'` }
+  }
+
+  pi.on("session_start", async (_event, ctx) => {
+    let resolved: Gate = { kind: "failed", reason: "the CAFleet member gate could not read --cafleet-gate: unread" }
+    try {
+      resolved = readGate()
+      if (resolved.kind === "active" && ctx.hasUI) ctx.ui.setStatus("cafleet-gate", `cafleet gate: ${resolved.mode}`)
+    } catch (error) {
+      resolved = {
+        kind: "failed",
+        reason: `the CAFleet member gate could not read --cafleet-gate: ${(error as Error).message}`,
+      }
+    } finally {
+      settleGate(resolved)
+    }
+
+    try {
+      restoreGoal(ctx)
+    } catch (error) {
+      console.error("[cafleet goal] restoring the goal failed:", error)
+    }
+
+    const stopped = (globalThis as Record<symbol, unknown>)[RECEIVER_STOPPED] as { reason: string } | undefined
+    if (stopped) {
+      delete (globalThis as Record<symbol, unknown>)[RECEIVER_STOPPED]
+      sendListen(`${CLOSED_PREFIX}the extension runtime was replaced (${stopped.reason}); re-arm with cafleet_listen`)
+    }
+  })
+
+  pi.on("session_tree", async (_event, ctx) => {
+    try {
+      restoreGoal(ctx)
+    } catch (error) {
+      console.error("[cafleet goal] restoring the goal failed:", error)
+    }
+  })
+
+  pi.on("session_shutdown", async (event) => {
+    if (stopReceiver() && event.reason !== "quit") {
+      ;(globalThis as Record<symbol, unknown>)[RECEIVER_STOPPED] = { reason: event.reason }
+    }
+  })
+
+  async function gateBash(command: string, mode: GateMode, ctx: ExtensionContext): Promise<Block | undefined> {
+    if (isAllowlisted(command)) return undefined
+    if (mode === "cafleet") {
+      return {
+        block: true,
+        reason: `the CAFleet member gate allows only allowlisted simple commands; ${ROUTE_COMMAND}`,
+      }
+    }
+    if (!ctx.hasUI) {
+      return { block: true, reason: `the approval form needs the interactive pi TUI; ${ROUTE_COMMAND}` }
+    }
+    const choice = await ctx.ui.select(approvalTitle(command), [ALLOW_ONCE, DENY])
+    if (choice === ALLOW_ONCE) return undefined
+    if (choice === DENY) return { block: true, reason: "the operator denied this command" }
+    return { block: true, reason: "the approval form was dismissed; the command did not run" }
+  }
+
+  pi.on("tool_call", async (event, ctx) => {
+    const current = await gate
+    if (current.kind === "inert") return undefined
+    if (current.kind === "failed") return { block: true, reason: current.reason }
+    const input = event.input as Record<string, unknown>
+    switch (event.toolName) {
+      case "bash": {
+        const command = typeof input.command === "string" ? input.command : ""
+        const decision = approvals.then(() => gateBash(command, current.mode, ctx))
+        approvals = decision.catch(() => undefined)
+        return decision
+      }
+      case "read":
+      case "grep":
+      case "find":
+      case "ls":
+      case "edit":
+      case "write":
+        return fileToolBlock(event.toolName, input, ctx.cwd)
+      default:
+        if (event.toolName.startsWith("cafleet_")) return { block: true, reason: MEMBER_REFUSAL }
+        return { block: true, reason: `the CAFleet member gate allows only ${GATE_TOOLS}` }
+    }
+  })
+
+  pi.registerTool({
+    name: "cafleet_listen",
+    label: "CAFleet listen",
+    description:
+      "Start CAFleet Director reception for this session: every broker record addressed to the Director " +
+      "arrives as a message beginning '[cafleet listen record]'.",
+    parameters: Type.Object(directorParameters),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const input = params as DirectorInput
+      const refusal = await directorRefusal(input)
+      if (refusal !== undefined) return result({ ok: false, error: refusal })
+      const sessionId = ctx.sessionManager.getSessionId()
+      if (receiverLive()) return result({ ok: true, pid: receiver!.pid, sessionId, existing: true })
+      try {
+        const child = startReceiver(input)
+        if (child.pid === undefined) {
+          receiverStopped = true
+          receiverEnded = true
+          return result({ ok: false, error: "cafleet message listen did not start" })
+        }
+        return result({ ok: true, pid: child.pid, sessionId })
+      } catch (error) {
+        return result({ ok: false, error: (error as Error).message })
+      }
+    },
+  })
+
+  pi.registerTool({
+    name: "cafleet_ask",
+    label: "CAFleet ask",
+    description:
+      "Ask the operator one question with listed choices plus Other; an answered result records the decision.",
+    parameters: Type.Object({
+      ...directorParameters,
+      question: Type.String({ description: "The question shown to the operator." }),
+      choices: Type.Array(Type.String(), { description: "1 to 9 distinct non-empty choices, none named Other." }),
+    }),
+    executionMode: "sequential",
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const input = params as DirectorInput & { question: string; choices: string[] }
+      const refusal = await directorRefusal(input)
+      if (refusal !== undefined) return result({ ok: false, error: refusal })
+      if (!ctx.hasUI) return result({ ok: false, error: "cafleet_ask needs the interactive pi TUI" })
+      const { question, choices } = input
+      if (choices.length < 1 || choices.length > 9) {
+        return result({ ok: false, error: "choices must hold 1 to 9 entries" })
+      }
+      if (choices.some((choice) => !choice.trim())) return result({ ok: false, error: "choices must be non-empty" })
+      if (new Set(choices).size !== choices.length) return result({ ok: false, error: "choices must be distinct" })
+      if (choices.includes("Other")) return result({ ok: false, error: "choices must not include Other" })
+      const choice = await ctx.ui.select(question, [...choices, "Other"])
+      if (choice === undefined) return result({ ok: true, status: "cancelled" })
+      if (choice !== "Other") {
+        return result({ ok: true, status: "answered", answer: choice, choice: choices.indexOf(choice) + 1 })
+      }
+      const text = await ctx.ui.input(question, "")
+      if (!text?.trim()) return result({ ok: true, status: "cancelled" })
+      return result({ ok: true, status: "answered", answer: text, choice: null })
+    },
+  })
+
+  pi.registerTool({
+    name: "cafleet_goal_status",
+    label: "CAFleet goal status",
+    description: "Report the CAFleet goal of this session.",
+    parameters: Type.Object(directorParameters),
+    async execute(_toolCallId, params) {
+      const refusal = await directorRefusal(params as DirectorInput)
+      if (refusal !== undefined) return result({ ok: false, error: refusal })
+      return { content: [{ type: "text" as const, text: JSON.stringify(goal ?? null) }], details: undefined }
+    },
+  })
+
+  pi.registerTool({
+    name: "cafleet_goal_progress",
+    label: "CAFleet goal progress",
+    description: "Report a completed step toward the active CAFleet goal of this session.",
+    parameters: Type.Object({ ...directorParameters, note: Type.String() }),
+    async execute(_toolCallId, params) {
+      const refusal = await directorRefusal(params as DirectorInput)
+      if (refusal !== undefined) return result({ ok: false, error: refusal })
+      if (!goal) return result({ ok: false, error: "no CAFleet goal is set for this session" })
+      storeGoal({ ...goal, idle_streak: 0 })
+      progressed = true
+      return result({ ok: true })
+    },
+  })
+
+  pi.registerTool({
+    name: "cafleet_goal_complete",
+    label: "CAFleet goal complete",
+    description: "Mark the active CAFleet goal of this session as achieved.",
+    parameters: Type.Object({ ...directorParameters, summary: Type.String() }),
+    async execute(_toolCallId, params) {
+      const refusal = await directorRefusal(params as DirectorInput)
+      if (refusal !== undefined) return result({ ok: false, error: refusal })
+      if (!goal) return result({ ok: false, error: "no CAFleet goal is set for this session" })
+      storeGoal({ ...goal, status: "complete", generation: goal.generation + 1 })
+      progressed = true
+      return result({ ok: true })
+    },
+  })
+
+  pi.registerCommand("cafleet-goal", {
+    description: "Set a CAFleet goal (text), or report status / pause / resume / clear it.",
+    handler: async (args, ctx) => {
+      try {
+        const argument = (args ?? "").trim()
+        if (argument === "" || argument === "status") {
+          notify(ctx, `${GOAL_PREFIX}status: ${JSON.stringify(goal ?? null)}`)
+          return
+        }
+        if (["pause", "resume", "clear"].includes(argument)) {
+          if (!goal || goal.status === "cleared") {
+            notify(ctx, `${GOAL_PREFIX}no CAFleet goal is set for this session`, "error")
+            return
+          }
+          if (argument === "pause") pauseGoal(goal)
+          else if (argument === "clear") {
+            storeGoal({ ...goal, objective: "", status: "cleared", generation: goal.generation + 1 })
+          } else {
+            storeGoal({ ...goal, status: "active", generation: goal.generation + 1, continuations: 0, idle_streak: 0 })
+            sendContinuation(goal)
+          }
+          return
+        }
+        storeGoal({
+          objective: argument,
+          status: "active",
+          generation: (goal?.generation ?? 0) + 1,
+          continuations: 0,
+          idle_streak: 0,
+        })
+        sendContinuation(goal!)
+      } catch (error) {
+        failGoal(ctx, error)
+      }
+    },
+  })
+
+  pi.on("agent_before_settle", async (event, ctx) => {
+    const wasContinuation = pendingContinuation
+    const didProgress = progressed
+    pendingContinuation = false
+    progressed = false
+    if (goal?.status !== "active") return undefined
+    try {
+      const idle = wasContinuation && !didProgress ? goal.idle_streak + 1 : goal.idle_streak
+      const pausedNotice = (text: string) => ({
+        entries: [
+          ...event.entries,
+          { type: "custom_message" as const, customType: GOAL_NOTICE_TYPE, content: `${GOAL_PREFIX}paused: ${text}; ${RESUME_HINT}`, display: true },
+        ],
+        continue: false,
+      })
+      if (idle >= IDLE_LIMIT) {
+        pauseGoal(goal, { idle_streak: idle })
+        return pausedNotice(`no progress in ${IDLE_LIMIT} consecutive continuation turns`)
+      }
+      if (goal.continuations >= CONTINUATION_LIMIT) {
+        pauseGoal(goal, { idle_streak: idle })
+        return pausedNotice(`reached ${CONTINUATION_LIMIT} continuations`)
+      }
+      storeGoal({ ...goal, idle_streak: idle, continuations: goal.continuations + 1 })
+      pendingContinuation = true
+      return {
+        entries: [
+          ...event.entries,
+          {
+            type: "custom_message" as const,
+            customType: GOAL_TYPE,
+            content: continuationText(goal.objective),
+            display: true,
+            details: { generation: goal.generation },
+          },
+        ],
+        continue: true,
+      }
+    } catch (error) {
+      pendingContinuation = false
+      failGoal(ctx, error)
+      return undefined
+    }
+  })
+
+  pi.on("agent_settled", async (event, ctx) => {
+    if (!event.aborted) return
+    pendingContinuation = false
+    progressed = false
+    try {
+      if (goal?.status !== "active") return
+      pauseGoal(goal)
+      notify(ctx, `${GOAL_PREFIX}paused: the run was interrupted; ${RESUME_HINT}`, "warning")
+    } catch (error) {
+      failGoal(ctx, error)
+    }
+  })
+
+  pi.on("context", async (event, ctx) => {
+    if (!goal) return undefined
+    try {
+      const current = goal
+      const lastAssistant = event.messages.findLastIndex((message) => message.role === "assistant")
+      let changed = false
+      const messages = event.messages.filter((message, index) => {
+        if (index <= lastAssistant || message.role !== "custom" || message.customType !== GOAL_TYPE) return true
+        const generation = (message.details as { generation?: number } | undefined)?.generation
+        const keep = current.status === "active" && generation === current.generation
+        changed ||= !keep
+        return keep
+      })
+      if (current.status === "active" || current.status === "paused") {
+        messages.push({
+          role: "user",
+          content: [{ type: "text", text: `${GOAL_PREFIX}Active CAFleet goal (${current.status}): ${current.objective}` }],
+          timestamp: Date.now(),
+        })
+        changed = true
+      }
+      return changed ? { messages } : undefined
+    } catch (error) {
+      failGoal(ctx, error)
+      return undefined
+    }
+  })
+}
