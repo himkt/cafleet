@@ -174,7 +174,7 @@ pi has no per-tool approval and no OS-level sandbox, so the member gate is a pi 
 |---|---|---|
 | A shell command on the gate's allowlist, run as one simple command | Runs | Runs |
 | A shell command holding a control character, such as a multi-line command or a terminal escape sequence | Blocked; the member asks the Director to run it | Blocked without a form; the member asks the Director to run it |
-| Any other shell command, including a compound command, a leading `NAME=value` assignment, a `cafleet` command other than the member's message send, poll, ack and show, a `git` command that expands its words or passes an option that runs a command or writes a file, a `mise` task given an option or an expanding word, or `tree` with any argument | Blocked; the member asks the Director to run it | Opens the gate's approval form for the Director to answer |
+| Any other shell command, including a compound command, a leading `NAME=value` assignment, a `cafleet` command other than the member's message send, poll, ack and show, a `git` command that expands its words or passes an option that runs a command or writes a file, a `mise` task given an option, an expanding word or another task (`:::` or a `//` task reference), or `tree` with any argument | Blocked; the member asks the Director to run it | Opens the gate's approval form for the Director to answer |
 | Reading and searching files | Allowed, except a call that names a `.env` file | Same |
 | Editing and writing files | Allowed inside the working directory, except a `.env` file and anything below `.git/`, `.pi/`, `.agents/`, `.claude/`, `.codex/` or `.opencode/` | Same |
 | Any other tool, including MCP and other extension tools | Blocked | Same |

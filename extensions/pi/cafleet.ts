@@ -178,8 +178,11 @@ function isRefusedGitWord(text: string): boolean {
   return name === "output" || (name.length >= 2 && "open-files-in-pager".startsWith(name))
 }
 
-/** A mise task forwards its words to cargo, whose options can choose the command cargo runs or where it writes. */
-const isRefusedMiseWord = (text: string) => text.startsWith("-")
+/**
+ * A mise task forwards its words to cargo, whose options can choose the command cargo runs or where it writes,
+ * and a `:::` word or a task reference (`//…`, `:…`) makes mise run another task.
+ */
+const isRefusedMiseWord = (text: string) => text.startsWith("-") || text.startsWith(":") || text.startsWith("/")
 
 /** The commands whose words must stay literal, each with its refused option words. */
 const LITERAL_WORD_COMMANDS = new Map([
