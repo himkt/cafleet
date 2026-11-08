@@ -1778,9 +1778,9 @@ The permission argv stays independent of the pi base, so runtime observation re-
 | A tool whose name begins with `cafleet_` | Blocked | Same |
 | Any other tool, MCP and extension tools included | Blocked | Same |
 
-`read`, `edit` and `write` require a non-empty string `path`; without one the call is blocked, because the gate cannot evaluate a path it cannot read. A path resolves against `ctx.cwd` with `path.resolve`, following no symbolic link, and is a `.env` file when its final component, compared case-insensitively, is `.env` or begins with `.env.`. `edit` and `write` are blocked for a path any of whose components relative to `ctx.cwd`, compared case-insensitively, is `.git`, `.pi`, `.agents`, `.claude`, `.codex` or `.opencode`: `.git/hooks` runs under the allowlisted `git commit *`, `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a later trusted-project pi session from the same directory, and `.claude`, `.codex` and `.opencode` hold the project configuration, such as Claude Code hooks and permission rules, that a later Claude Code, Codex or OpenCode session from the same directory loads. The case-insensitive comparison covers a case-insensitive file system, such as the macOS default, where `.Git/hooks` names `.git/hooks`. Leading-`!` input runs as pi's `user_bash`, outside `tool_call`, so Director-dispatched `member exec` commands stay under the Director's authorization.
+`read`, `edit` and `write` require a non-empty string `path`; without one the call is blocked, because the gate cannot evaluate a path it cannot read. A path resolves in the order pi 1.5.0's file tools apply (`resolveToCwd`), so each rule judges the file the tool touches: U+00A0, U+2000–U+200A, U+202F, U+205F and U+3000 each become an ASCII space without trimming, and one leading `@` is removed. A text that then begins with `file:`, compared case-insensitively, is blocked, because pi percent-decodes a `file://` URL (`%2Egit` names `.git`) that `path.resolve` reads as a literal relative path. Otherwise `~` becomes the home directory, `~/<rest>` is joined to it, and the result resolves against `ctx.cwd` with `path.resolve`, following no symbolic link. A path is a `.env` file when its final component, compared case-insensitively, is `.env` or begins with `.env.`. `edit` and `write` are blocked for a path any of whose components relative to `ctx.cwd`, compared case-insensitively, is `.git`, `.pi`, `.agents`, `.claude`, `.codex` or `.opencode`: `.git/hooks` runs under the allowlisted `git commit *`, `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a later trusted-project pi session from the same directory, and `.claude`, `.codex` and `.opencode` hold the project configuration, such as Claude Code hooks and permission rules, that a later Claude Code, Codex or OpenCode session from the same directory loads. The case-insensitive comparison covers a case-insensitive file system, such as the macOS default, where `.Git/hooks` names `.git/hooks`. Leading-`!` input runs as pi's `user_bash`, outside `tool_call`, so Director-dispatched `member exec` commands stay under the Director's authorization.
 
-**Block reasons.** A block reason reaches the member as the tool's error result. Besides the activation failures above, the gate returns exactly these reasons, where `<tool>` is the tool name; a file tool checks the path input, then the `.env` rule, then the working directory, then the protected directories:
+**Block reasons.** A block reason reaches the member as the tool's error result. Besides the activation failures above, the gate returns exactly these reasons, where `<tool>` is the tool name; a file tool checks the path input, then the `file:` rule, then the `.env` rule, then the working directory, then the protected directories:
 
 | Case | Reason |
 |---|---|
@@ -1790,13 +1790,30 @@ The permission argv stays independent of the pi base, so runtime observation re-
 | Form answered `Deny` | `the operator denied this command` |
 | Form dismissed | `the approval form was dismissed; the command did not run` |
 | `read` without a path input | `the CAFleet member gate cannot read the path input of read; route the read to the Director if it is required` |
+| `read`, `grep`, `find` or `ls` on a `file:` path | `the CAFleet member gate refuses a file: URL path for <tool>; route the read to the Director if it is required` |
 | `read`, `grep`, `find` or `ls` on a `.env` file | `the CAFleet member gate protects .env files from <tool>; route the read to the Director if it is required` |
 | `edit` or `write` without a path input | `the CAFleet member gate cannot read the path input of <tool>; route the change to the Director if it is required` |
+| `edit` or `write` on a `file:` path | `the CAFleet member gate refuses a file: URL path for <tool>; route the change to the Director if it is required` |
 | `edit` or `write` on a `.env` file | `the CAFleet member gate protects .env files from <tool>; route the change to the Director if it is required` |
 | `edit` or `write` outside `ctx.cwd` | `the CAFleet member gate allows edit and write only inside the working directory; route the change to the Director if it is required` |
 | `edit` or `write` below a protected directory | `the CAFleet member gate protects .git, .pi, .agents, .claude, .codex and .opencode from edit and write; route the change to the Director if it is required` |
 | A tool whose name begins with `cafleet_` | `cafleet tools run only in a Director session` |
 | Any other tool | `the CAFleet member gate allows only bash, read, grep, find, ls, edit and write` |
+
+**File-tool cases.** With `ctx.cwd` `/work/proj` outside the home directory, both launch modes return:
+
+| Call | Outcome | Rule |
+|---|---|---|
+| `write` to `.Git/hooks/x` | Blocked | Protected directory; `.Git` compares equal to `.git` |
+| `read` of `.ENV` | Blocked | `.env` file |
+| `write` to `src/.Github/x.yml` | Allowed | `.github` is no protected directory |
+| `write` to `file:///work/proj/%2Egit/hooks/pre-commit` | Blocked | `file:` path; pi would write `.git/hooks/pre-commit` |
+| `read` of `file:///work/proj/%2Eenv` | Blocked | `file:` path |
+| `write` to `FILE:///tmp/x` | Blocked | `file:` path; `FILE:` compares equal to `file:` |
+| `write` to `@file:///tmp/x` | Blocked | `file:` path; the leading `@` is removed first |
+| `write` to `.git<U+00A0>/x` | Allowed | U+00A0 becomes a space, so the gate and pi both name `.git /x` |
+| `write` to `@.git/hooks/x` | Blocked | Protected directory; the leading `@` is removed first |
+| `write` to `~/x` | Blocked | Outside `ctx.cwd`; `~/x` names a path in the home directory |
 
 **Bash allowlist.** The gate's patterns are a constant in the extension and its content contract:
 

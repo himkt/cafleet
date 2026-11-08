@@ -193,19 +193,27 @@ function isAllowlisted(command: string): boolean {
 }
 
 const DEFAULT_PATH_TOOLS = ["grep", "find", "ls"]
+const UNICODE_SPACES = /[  -   　]/g
 
-/** The tool's path text; without a usable `path`, grep, find and ls default to "." and the others have none. */
+/** The tool's path text; without a non-empty `path`, grep, find and ls default to "." and the others have none. */
 function toolPathText(toolName: string, raw: unknown): string | undefined {
-  const value = typeof raw === "string" ? raw.trim() : ""
-  const stripped = value.startsWith("@") ? value.slice(1) : value
-  if (stripped) return stripped
+  if (typeof raw === "string" && raw !== "") return raw
   return DEFAULT_PATH_TOOLS.includes(toolName) ? "." : undefined
 }
 
-function resolveToolPath(cwd: string, text: string): string {
-  if (text === "~") return homedir()
-  if (text.startsWith("~/")) return join(homedir(), text.slice(2))
-  return resolve(cwd, text)
+/** pi 1.5.0 file tools resolve `path` through `resolveToCwd`, which maps these spaces and drops one leading `@` first. */
+function normalizeToolPath(text: string): string {
+  const spaced = text.replace(UNICODE_SPACES, " ")
+  return spaced.startsWith("@") ? spaced.slice(1) : spaced
+}
+
+/** pi percent-decodes a `file://` path, which `path.resolve` would read as a literal relative path. */
+const isFileURL = (normalized: string) => normalized.toLowerCase().startsWith("file:")
+
+function resolveToolPath(cwd: string, normalized: string): string {
+  if (normalized === "~") return homedir()
+  if (normalized.startsWith("~/")) return join(homedir(), normalized.slice(2))
+  return resolve(cwd, normalized)
 }
 
 function isEnvFile(path: string): boolean {
@@ -220,7 +228,11 @@ function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: st
   if (text === undefined) {
     return { block: true, reason: `the CAFleet member gate cannot read the path input of ${toolName}; ${route}` }
   }
-  const path = resolveToolPath(cwd, text)
+  const normalized = normalizeToolPath(text)
+  if (isFileURL(normalized)) {
+    return { block: true, reason: `the CAFleet member gate refuses a file: URL path for ${toolName}; ${route}` }
+  }
+  const path = resolveToolPath(cwd, normalized)
   if (isEnvFile(path)) {
     return { block: true, reason: `the CAFleet member gate protects .env files from ${toolName}; ${route}` }
   }
