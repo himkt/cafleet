@@ -38,9 +38,14 @@ pub(crate) enum WriterBoundary {
     Compact,
 }
 
+pub(in crate::runtime) const WORK_SLICE: Duration = Duration::from_millis(100);
+
 #[cfg(test)]
 pub(crate) trait WriterHooks: Send + Sync {
     fn before(&self, boundary: WriterBoundary, deadline: Instant) -> Result<()>;
+    fn work_slice(&self) -> Duration {
+        WORK_SLICE
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -91,8 +96,8 @@ impl Mailbox {
         self.gaps = self.gaps.checked_add(1).expect("writer gap count overflow");
         self.diagnostic = Some(cause.message().into_owned());
     }
-    fn work_deadline(&self) -> Instant {
-        let local = Instant::now() + Duration::from_millis(100);
+    fn work_deadline(&self, slice: Duration) -> Instant {
+        let local = Instant::now() + slice;
         self.deadline.map_or(local, |until| until.min(local))
     }
     // Compaction validates every retained frame in one attempt and each retry repeats that
@@ -195,6 +200,10 @@ impl EventWriter {
 
         let (sender, receiver) = mpsc::sync_channel(64);
         let mailbox = Arc::new(Mutex::new(Mailbox::default()));
+        #[cfg(not(test))]
+        let work_slice = WORK_SLICE;
+        #[cfg(test)]
+        let work_slice = hooks.work_slice();
         let worker = Worker {
             conn,
             spool,
@@ -205,6 +214,7 @@ impl EventWriter {
             queue: VecDeque::new(),
             committed: 0,
             compact: false,
+            work_slice,
             #[cfg(test)]
             hooks,
         };
@@ -454,6 +464,7 @@ struct Worker {
     queue: VecDeque<Pending>,
     committed: i64,
     compact: bool,
+    work_slice: Duration,
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
 }
@@ -508,7 +519,10 @@ impl Worker {
         self.refill_sequences()
     }
     fn work_deadline(&self) -> Instant {
-        self.mailbox.lock().expect("writer mailbox").work_deadline()
+        self.mailbox
+            .lock()
+            .expect("writer mailbox")
+            .work_deadline(self.work_slice)
     }
     /// Returns `false` when a test hook ends this pass before any persistence.
     fn receive(&mut self) -> Result<bool> {
@@ -542,7 +556,11 @@ impl Worker {
                 else {
                     unreachable!("effective policy updates are never spooled")
                 };
-                let until = self.mailbox.lock().expect("writer mailbox").work_deadline();
+                let until = self
+                    .mailbox
+                    .lock()
+                    .expect("writer mailbox")
+                    .work_deadline(self.work_slice);
                 self.spool.append_synced(
                     &mut self.conn,
                     transition,
@@ -603,7 +621,11 @@ impl Worker {
         let Some(pending) = self.queue.front() else {
             return Ok(());
         };
-        let until = self.mailbox.lock().expect("writer mailbox").work_deadline();
+        let until = self
+            .mailbox
+            .lock()
+            .expect("writer mailbox")
+            .work_deadline(self.work_slice);
         match &pending.work {
             Work::Event {
                 transition,
