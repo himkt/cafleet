@@ -190,10 +190,13 @@ const LITERAL_WORD_COMMANDS = new Map([
   ["mise", isRefusedMiseWord],
 ])
 
-/** True when a git or mise word expands, a git word names an option that runs a command or writes a chosen file, or a mise word is an option. */
+/**
+ * True when a git or mise word expands, or a word after the git subcommand or mise task names a refused option or task.
+ * The allowlist pins the first two words, so the mise task word `//:test` itself is checked only for expansion.
+ */
 function hasRefusedWord(words: Word[]): boolean {
   const refused = LITERAL_WORD_COMMANDS.get(words[0]?.text ?? "")
-  return refused !== undefined && words.some((word) => word.expands || refused(word.text))
+  return refused !== undefined && words.some((word, index) => word.expands || (index >= 2 && refused(word.text)))
 }
 
 const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
