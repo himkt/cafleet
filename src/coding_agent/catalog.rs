@@ -1168,7 +1168,7 @@ fn compile_profile(
     })
 }
 
-const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
+const BUNDLED_DEFINITIONS: &str = include_str!("../../assets/profiles/bundled.json");
 
 static BUNDLED: LazyLock<ProfileCatalog> = LazyLock::new(|| {
     let catalog = ProfileCatalog::from_definitions(
@@ -1415,11 +1415,11 @@ pub(crate) mod test_support {
             .ok_or_else(|| invalid("positive viewport bound required"))
     }
 
-    const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
-    const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
-    const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
-    const HERMES_FIXTURES: &[u8] = include_bytes!("native/hermes.json");
-    const PI_FIXTURES: &[u8] = include_bytes!("native/pi.json");
+    const CLAUDE_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/claude.json");
+    const CODEX_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/codex.json");
+    const OPENCODE_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/opencode.json");
+    const HERMES_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/hermes.json");
+    const PI_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/pi.json");
     pub(crate) const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
         ("native/claude.json", CLAUDE_FIXTURES),
         ("native/codex.json", CODEX_FIXTURES),
