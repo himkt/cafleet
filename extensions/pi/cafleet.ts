@@ -32,11 +32,7 @@ const ALLOW_ONCE = "Allow once"
 const DENY = "Deny"
 
 const MEMBER_ALLOWLIST = [
-  "git add *", "git commit *", "git diff *", "git grep *", "git log *", "git ls-tree *",
-  "git ls-files *", "git branch *", "git status", "grep *", "ls", "ls *", "stat *",
-  "tree", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
-  "mise //:typecheck", "mise //:build", "wc *", "cafleet message send *",
-  "cafleet message poll *", "cafleet message ack *", "cafleet message show *",
+  "cafleet message send *", "cafleet message poll *", "cafleet message ack *", "cafleet message show *",
 ]
 
 type GoalStatus = "active" | "paused" | "complete" | "cleared"
@@ -108,95 +104,38 @@ const directorParameters = {
   ),
 }
 
-/** A shell word after quote removal; `expands` marks a `$` outside single quotes or an unquoted glob or brace. */
-interface Word {
-  text: string
-  expands: boolean
-}
-
 /** A `$` outside single quotes is plain parameter expansion only when a name follows it. */
 const startsName = (char: string | undefined) => char !== undefined && /[A-Za-z_]/.test(char)
 
-/** The words of `command`, which holds no control character, when it is one simple command, otherwise undefined. */
-function simpleWords(command: string): Word[] | undefined {
-  const words: Word[] = []
-  let word: Word | undefined
+/** True when `command`, which holds no control character, is one simple command. */
+function isSimpleCommand(command: string): boolean {
   let quote: "'" | '"' | undefined
-  const append = (text: string, expands = false) => {
-    word ??= { text: "", expands: false }
-    word.text += text
-    word.expands ||= expands
-  }
   for (let index = 0; index < command.length; index++) {
     const char = command[index]
     const next = command[index + 1]
     if (quote === "'") {
       if (char === "'") quote = undefined
-      else append(char)
       continue
     }
     if (quote === '"') {
       if (char === '"') quote = undefined
-      else if (char === "`" || (char === "$" && !startsName(next))) return undefined
-      else if (char === "\\" && next !== undefined && '$`"\\'.includes(next)) {
-        append(next)
-        index++
-      } else append(char, char === "$")
-      continue
-    }
-    if (char === " " || char === "\t") {
-      if (word) words.push(word)
-      word = undefined
+      else if (char === "`" || (char === "$" && !startsName(next))) return false
+      else if (char === "\\" && next !== undefined && '$`"\\'.includes(next)) index++
       continue
     }
     if (char === "\\") {
-      if (next === undefined) return undefined
-      append(next)
+      if (next === undefined) return false
       index++
       continue
     }
     if (char === "'" || char === '"') {
       quote = char
-      append("")
       continue
     }
-    if (";&|<>()`".includes(char)) return undefined
-    if (char === "$" && !startsName(next)) return undefined
-    append(char, "$*?[{".includes(char))
+    if (";&|<>()`".includes(char)) return false
+    if (char === "$" && !startsName(next)) return false
   }
-  if (quote !== undefined) return undefined
-  if (word) words.push(word)
-  return words
-}
-
-const isShortOptionWith = (text: string, letter: string) => text.startsWith("-") && !text.startsWith("--") && text.includes(letter)
-
-function isRefusedGitWord(text: string): boolean {
-  if (isShortOptionWith(text, "O")) return true
-  if (!text.startsWith("--")) return false
-  const name = text.slice(2).split("=")[0]
-  return name === "output" || (name.length >= 2 && "open-files-in-pager".startsWith(name))
-}
-
-/**
- * A mise task forwards its words to cargo, whose options can choose the command cargo runs or where it writes,
- * and a `:::` word or a task reference (`//…`, `:…`) makes mise run another task.
- */
-const isRefusedMiseWord = (text: string) => text.startsWith("-") || text.startsWith(":") || text.startsWith("/")
-
-/** The commands whose words must stay literal, each with its refused option words. */
-const LITERAL_WORD_COMMANDS = new Map([
-  ["git", isRefusedGitWord],
-  ["mise", isRefusedMiseWord],
-])
-
-/**
- * True when a git or mise word expands, or a word after the git subcommand or mise task names a refused option or task.
- * The allowlist pins the first two words, so the mise task word `//:test` itself is checked only for expansion.
- */
-function hasRefusedWord(words: Word[]): boolean {
-  const refused = LITERAL_WORD_COMMANDS.get(words[0]?.text ?? "")
-  return refused !== undefined && words.some((word, index) => word.expands || (index >= 2 && refused(word.text)))
+  return quote === undefined
 }
 
 const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
@@ -206,8 +145,7 @@ const ALLOWLIST_RULES = MEMBER_ALLOWLIST.map(
 
 function isAllowlisted(command: string): boolean {
   const trimmed = command.trim()
-  const words = simpleWords(trimmed)
-  return words !== undefined && !hasRefusedWord(words) && ALLOWLIST_RULES.some((rule) => rule.test(trimmed))
+  return isSimpleCommand(trimmed) && ALLOWLIST_RULES.some((rule) => rule.test(trimmed))
 }
 
 const DEFAULT_PATH_TOOLS = ["grep", "find", "ls"]
@@ -463,7 +401,7 @@ export default function (pi: ExtensionAPI) {
     if (mode === "cafleet") {
       return {
         block: true,
-        reason: `the CAFleet member gate allows only allowlisted simple commands; ${ROUTE_COMMAND}`,
+        reason: `the CAFleet member gate runs only cafleet message send, poll, ack and show; ${ROUTE_COMMAND}`,
       }
     }
     if (!ctx.hasUI) {

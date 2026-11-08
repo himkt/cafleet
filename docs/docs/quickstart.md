@@ -106,9 +106,10 @@ writable_roots = ["/home/<you>/.local/share/cafleet"]
 3. Manage a goal with `/cafleet-goal <objective>` and its `status`, `pause`,
    `resume` and `clear` subcommands.
 
-Members run under the `cafleet` preset, which denies every shell command it
-does not list. Choose `--permission-mode cafleet-ask` for a member whose other
-commands should ask the Director instead.
+Members run under the `cafleet-ask` preset: their broker message commands run
+and every other shell command opens a native permission form for the Director.
+Choose `--permission-mode cafleet` for a member whose other commands should be
+denied and routed to the Director instead.
 
 ### Hermes
 
@@ -145,10 +146,11 @@ Run the Director in the TUI client: `hermes chat --tui`, or set
 5. Manage a goal with `/cafleet-goal <objective>` and its `status`,
    `pause`, `resume` and `clear` subcommands.
 
-Members run under the CAFleet member gate's `cafleet` mode, which blocks
-every shell command outside its allowlist. Choose
-`--permission-mode cafleet-ask` for a member whose other commands should ask
-the Director instead ([pi configuration](concepts/coding-agents.md#pi-configuration)).
+Members run under the CAFleet member gate's `cafleet-ask` mode: their broker
+message commands run and every other shell command opens a native permission
+form for the Director. Choose `--permission-mode cafleet` for a member whose
+other commands should be denied and routed to the Director instead
+([pi configuration](concepts/coding-agents.md#pi-configuration)).
 
 ### Trust the working directory
 
