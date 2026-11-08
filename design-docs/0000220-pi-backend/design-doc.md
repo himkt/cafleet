@@ -238,6 +238,7 @@ An active gate shows `ctx.ui.setStatus("cafleet-gate", "cafleet gate: <mode>")`,
   5. `~` becomes the home directory, and `~/<rest>` is joined to it.
   6. The result resolves against `ctx.cwd` with `path.resolve`, without following symbolic links.
 - A path is a `.env` file when its final component, compared case-insensitively, is `.env` or begins with `.env.`.
+- A path is inside `ctx.cwd` when its path relative to `ctx.cwd` is not absolute, not `..` and does not begin with `..` and the path separator. A component that only begins with two dots, such as `..foo`, stays inside.
 - **Protected directories.** `edit` and `write` are blocked for a path any of whose components, relative to `ctx.cwd` and compared case-insensitively, is `.git`, `.pi`, `.agents`, `.claude`, `.codex` or `.opencode`. CAFleet ships a macOS build, and the default macOS file system is case-insensitive, so `.Git/hooks/pre-commit` names the `.git` hook; Git guards `.GIT` for the same reason. These directories hold code and configuration that later run outside the allowlist:
   - `.git/hooks/*` runs under the allowlisted `git commit *`.
   - `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a trusted-project pi session started from the same directory, such as the Director on its next start or `/reload` (pi `docs/security.md` § Resources protected by project trust).
@@ -283,6 +284,8 @@ Each bash and file-tool reason that the gate decides without the form ends with 
 | `write` to `.git<U+00A0>/x` | Allowed | U+00A0 becomes a space, so the gate and pi both name `.git /x`, which is no protected directory |
 | `write` to `@.git/hooks/x` | Blocked | The protected-directory reason; the leading `@` is removed first |
 | `write` to `~/x` | Blocked | The working-directory reason; `~/x` names a path in the home directory |
+| `write` to `..foo` | Allowed | `..foo` is a file inside `ctx.cwd` whose name begins with two dots |
+| `write` to `../x` | Blocked | The working-directory reason; `../x` names a path in the parent directory |
 
 #### 3.4 Bash allowlist and matching
 
@@ -524,7 +527,7 @@ The profile applies to pi under every pi launch mode. Only `cafleet-ask` shows a
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | Request rule `pi-gate-approval`: the §3.5 form, anchored on the `CAFleet member gate: allow this bash command?` title row, the `$ ` operation rows, the `Allow once` and `Deny` choice rows and pi's select hint row. The operation is the `$ ` row plus its two-space continuation rows. |
+| Detection | `tested` | Request rule `pi-gate-approval`: the §3.5 form, anchored on the `CAFleet member gate: allow this bash command?` title row, the `$ ` operation row, the `Allow once` and `Deny` choice rows and pi's select hint row. The operation is the single `$ ` row, because a command holding a newline never reaches the form (§3.5). |
 | Allow answer | `tested` | One stage: Enter (`0d`) gated on focus `allow-once`, as `allow-once` |
 | Deny answer | `tested` | Two stages: `j` (`6a`) gated on focus `allow-once`, then Enter (`0d`) gated on focus `deny-once`, as `deny-once` |
 | Empty-composer observation | `tested` | `pi-idle-composer`: the idle editor between its two full-width `─` border rows, with the terminal cursor in the editor |
@@ -749,3 +752,4 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 | 2026-11-08 | Review round 6 (implementation). Changes by area:<br>• Allowlist: `cafleet *` becomes the four broker patterns `cafleet message send *`, `poll *`, `ack *` and `show *`, so Director-owned commands such as `member create` and `member exec` match no pattern, and a member passes `--database-url` after the subcommand (§3.4, Notes).<br>• mise: a `mise` word beginning with `-` is refused, so cargo options such as `--config` and `--target-dir` and the harness `--` are blocked while a test-name filter runs, and `mise` words stay literal, because a glob can expand to a file named like an option (§3.4, Notes).<br>• Cases: the gate case table gains the `--database-url`, Director-command and `mise` rows (§3.4).<br>• Limits: the gate constrains a cooperative member's tool calls and is not containment; allowlisted `mise` tasks and `git commit` run member-editable workspace code and hooks that can write protected directories (§3.6). |
 | 2026-11-08 | Review round 7 (implementation): the `cafleet_listen` spawn failure returns the fixed `cafleet message listen did not start` error (§4.2); the runtime-replaced notice follows only a shutdown that stopped a live receiver (§4.3); the SPEC capability row limits `cafleet-ask` forms to commands without a control character. |
 | 2026-11-08 | Review round 8 (implementation): a `mise` word beginning with `:` or `/` is refused, so the `:::` task chain and task references such as `//:install` no longer run another task after `mise //:test`; the git and mise option rules check only the words after the subcommand or task, so the task word `//:test` itself passes; the gate case table gains rows 50a and 50b (§3.4, Notes). |
+| 2026-11-08 | Review round 9 (implementation): a file-tool path is outside `ctx.cwd` only when its relative path is `..`, begins with `..` and the separator, or is absolute, so a cwd file such as `..foo` stays writable; the file-tool case table gains the `..foo` and `../x` rows (§3.3). The pi request rule's operation is the single `$ ` row, without continuation rows (§5). |

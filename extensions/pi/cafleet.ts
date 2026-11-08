@@ -256,7 +256,7 @@ function fileToolBlock(toolName: string, input: Record<string, unknown>, cwd: st
   }
   if (!changes) return undefined
   const inside = relative(cwd, path)
-  if (inside.startsWith("..") || isAbsolute(inside)) {
+  if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
     return {
       block: true,
       reason: `the CAFleet member gate allows edit and write only inside the working directory; ${ROUTE_CHANGE}`,

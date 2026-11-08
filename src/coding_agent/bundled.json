@@ -4905,7 +4905,7 @@
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^ CAFleet member gate: allow this bash command\\? *\\n *\\n \\$ (?P<operation>[^\\n]*(?:\\n   [^\\n]*)*)\\n *\\n (?:→ |  )Allow once *$"
+              "pattern": "(?m)^ CAFleet member gate: allow this bash command\\? *\\n *\\n \\$ (?P<operation>[^\\n]*?) *\\n *\\n (?:→ |  )Allow once *$"
             },
             {
               "id": "focus",
@@ -4932,9 +4932,7 @@
           "extract": {
             "operation": {
               "matcher_id": "operation",
-              "capture": "operation",
-              "row_margin": "   ",
-              "margin_rows": "continuation"
+              "capture": "operation"
             },
             "choices": [
               {
