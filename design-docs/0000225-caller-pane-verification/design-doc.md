@@ -1,6 +1,6 @@
 # Caller pane verification for `fleet create` and `doctor`
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 70/70 tasks complete
 **Last Updated**: 2026-11-11
 
