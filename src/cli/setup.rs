@@ -12,16 +12,26 @@ use crate::db;
 use crate::db::SchemaState;
 use crate::error::CafleetError;
 use crate::multiplexer::MultiplexerContext;
+use crate::multiplexer::caller;
+use crate::multiplexer::caller::Ancestry;
+use crate::multiplexer::caller::CallerMux;
+use crate::multiplexer::caller::Refusal;
+use crate::multiplexer::caller::Verification;
+use crate::runtime::ProcessTable;
+use crate::runtime::SystemProcessTable;
 use crate::runtime::control::CheckStatus;
 use crate::runtime::control::MemberState;
 use crate::runtime::system::SystemProbe;
+use crate::runtime::system::SystemRunner;
 use clap::Args;
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -246,12 +256,29 @@ impl Summary {
     }
 }
 
-/// The detected multiplexer's name and the caller pane's context.
-pub(crate) type MuxReading = Result<(&'static str, MultiplexerContext), CafleetError>;
+pub(crate) enum CallerReading {
+    /// Row 1 refused before any multiplexer command.
+    SharedServer { refusal: Refusal },
+    Resolved {
+        /// The backend name and its server.
+        mux: Result<(&'static str, String), CafleetError>,
+        /// `None` when `mux` failed.
+        pane: Option<Result<PaneReading, CafleetError>>,
+    },
+}
+
+pub(crate) enum PaneReading {
+    Verified {
+        variable: &'static str,
+        context: MultiplexerContext,
+    },
+    /// The `unverified_message` or `unset_message` body.
+    Unverified { detail: String },
+}
 
 /// Everything doctor reads from outside the process.
 pub(crate) struct DoctorInputs<'a> {
-    pub(crate) mux: &'a dyn Fn() -> MuxReading,
+    pub(crate) caller: &'a dyn Fn() -> CallerReading,
     pub(crate) settings: &'a Settings,
     pub(crate) probe: &'a dyn SpawnProbe,
     pub(crate) home: &'a Result<PathBuf, CafleetError>,
@@ -282,10 +309,18 @@ pub(crate) enum Mode {
 }
 
 pub(crate) fn doctor(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
+    doctor_with(settings, args, &SystemProcessTable)
+}
+
+pub(crate) fn doctor_with(
+    settings: &Settings,
+    args: DoctorArgs,
+    table: &dyn ProcessTable,
+) -> Result<(), CafleetError> {
     let home = crate::config::home_dir();
     let hermes = hermes_reader(&SystemProbe, &home);
     let report = gather(&DoctorInputs {
-        mux: &detect_mux,
+        caller: &|| detect_caller(table),
         settings,
         probe: &SystemProbe,
         home: &home,
@@ -319,29 +354,60 @@ fn hermes_reader(
     Some(HermesCli::new(executable, base))
 }
 
-fn detect_mux() -> MuxReading {
-    use crate::multiplexer::MuxBackend;
-    let env = crate::multiplexer::caller_env()?;
-    let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
-    let backend = MuxBackend::detect(lookup)?;
-    let runner: std::rc::Rc<dyn crate::multiplexer::CommandRunner> =
-        std::rc::Rc::new(crate::runtime::system::SystemRunner);
-    let server = crate::multiplexer::caller_server(backend, lookup, runner.as_ref())?;
-    let mux = backend.for_server(&server, runner);
-    mux.ensure_available()?;
-    let variable = match backend {
-        MuxBackend::Tmux => "TMUX_PANE",
-        MuxBackend::Herdr => "HERDR_PANE_ID",
+/// The `fleet create` verification without `--pane`, as doctor reports it.
+fn detect_caller(table: &dyn ProcessTable) -> CallerReading {
+    let unavailable = |cause: CafleetError| CallerReading::Resolved {
+        mux: Err(cause),
+        pane: None,
     };
-    let pane = lookup(variable)
-        .ok_or_else(|| CafleetError::App(format!("{variable} is not set")))?;
-    let context = mux.pane_context(&pane)?.ok_or_else(|| {
-        CafleetError::App(format!(
-            "pane {pane} was not found on the {} server {server}",
-            backend.name()
-        ))
-    })?;
-    Ok((mux.name(), context))
+    let env = match crate::multiplexer::caller_env() {
+        Ok(env) => env,
+        Err(cause) => return unavailable(cause),
+    };
+    let ancestry = caller::walk(table);
+    if let Some(refusal) = caller::shared_server(&ancestry) {
+        return CallerReading::SharedServer { refusal };
+    }
+    let mux = match caller::resolve_env_mux(&env, Rc::new(SystemRunner)) {
+        Ok(mux) => mux,
+        Err(cause) => return unavailable(cause),
+    };
+    CallerReading::Resolved {
+        mux: Ok((mux.backend.name(), mux.server.clone())),
+        pane: Some(read_caller_pane(&mux, &env, table, &ancestry)),
+    }
+}
+
+fn read_caller_pane(
+    mux: &CallerMux,
+    env: &HashMap<String, String>,
+    table: &dyn ProcessTable,
+    ancestry: &Ancestry,
+) -> Result<PaneReading, CafleetError> {
+    let Some(pane) = caller::env_pane(mux.backend, env) else {
+        return Ok(PaneReading::Unverified {
+            detail: caller::unset_message(mux.backend),
+        });
+    };
+    match caller::verify_pane(mux.mux.as_ref(), table, ancestry, &pane.pane)? {
+        Verification::Verified { .. } => {
+            let context = mux.mux.pane_context(&pane.pane)?.ok_or_else(|| {
+                CafleetError::App(format!(
+                    "pane {} was not found on the {} server {}",
+                    pane.pane,
+                    mux.backend.name(),
+                    mux.server
+                ))
+            })?;
+            Ok(PaneReading::Verified {
+                variable: pane.variable,
+                context,
+            })
+        }
+        Verification::Refused(refusal) => Ok(PaneReading::Unverified {
+            detail: caller::unverified_message(&pane, &refusal, mux),
+        }),
+    }
 }
 
 /// Runs every check: the Hermes batch starts first and overlaps the multiplexer, database,
@@ -361,7 +427,7 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
             let deadline = Instant::now() + HERMES_DOCTOR_BUDGET;
             scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline))
         });
-        let (mut checks, mut summary) = multiplexer_rows((inputs.mux)());
+        let (mut checks, mut summary) = multiplexer_rows((inputs.caller)());
         let (conn, schema) = database(inputs.settings);
         let (database_check, database_summary) = database_rows(inputs.settings, &schema);
         checks.push(database_check);
@@ -416,23 +482,85 @@ pub(crate) fn render(report: &Report, mode: Mode) -> String {
         .join("\n")
 }
 
-fn multiplexer_rows(reading: MuxReading) -> (Vec<Check>, Vec<Summary>) {
-    let (status, detail, short) = match reading {
-        Ok((name, context)) => (
-            CheckStatus::Ok,
-            format!(
-                "{name} session={} window={} pane={}",
-                context.session, context.window_id, context.pane_id
+/// The `multiplexer` and `multiplexer.caller_pane` checks and their folded summary line.
+fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
+    let ((mux_status, mux_detail), (pane_status, pane_detail), (status, short)) = match reading {
+        CallerReading::SharedServer { refusal } => {
+            let Refusal::SharedServer { label, pid } = &refusal else {
+                panic!("a shared-server reading carries a shared-server refusal");
+            };
+            let detail = caller::shared_server_message(&refusal);
+            (
+                (
+                    CheckStatus::Info,
+                    format!(
+                        "not checked: a shared {label} server (pid {pid}) supplies the caller environment"
+                    ),
+                ),
+                (CheckStatus::Warn, detail.clone()),
+                (CheckStatus::Warn, detail),
+            )
+        }
+        CallerReading::Resolved {
+            mux: Err(cause),
+            pane: None,
+        } => (
+            (CheckStatus::Error, cause.to_string()),
+            (
+                CheckStatus::Info,
+                "unavailable: the multiplexer is unavailable".to_owned(),
             ),
-            format!(
-                "{name} (session {}, pane {})",
-                context.session, context.pane_id
-            ),
+            (CheckStatus::Error, cause.to_string()),
         ),
-        Err(cause) => (CheckStatus::Error, cause.to_string(), cause.to_string()),
+        CallerReading::Resolved {
+            mux: Ok((name, server)),
+            pane: Some(pane),
+        } => {
+            let mux = (CheckStatus::Ok, format!("{name} server={server}"));
+            match pane {
+                Ok(PaneReading::Verified { variable, context }) => (
+                    mux,
+                    (
+                        CheckStatus::Ok,
+                        format!(
+                            "{variable}={} session={} window={}",
+                            context.pane_id, context.session, context.window_id
+                        ),
+                    ),
+                    (
+                        CheckStatus::Ok,
+                        format!(
+                            "{name} (session {}, pane {})",
+                            context.session, context.pane_id
+                        ),
+                    ),
+                ),
+                Ok(PaneReading::Unverified { detail }) => (
+                    mux,
+                    (CheckStatus::Warn, detail.clone()),
+                    (
+                        CheckStatus::Warn,
+                        format!("{name} (server {server}); {detail}"),
+                    ),
+                ),
+                Err(cause) => (
+                    mux,
+                    (CheckStatus::Error, cause.to_string()),
+                    (CheckStatus::Error, cause.to_string()),
+                ),
+            }
+        }
+        CallerReading::Resolved { mux, pane } => panic!(
+            "a resolved caller reading has a pane exactly when its multiplexer resolved (mux ok: {}, pane: {})",
+            mux.is_ok(),
+            pane.is_some()
+        ),
     };
     (
-        vec![Check::new("multiplexer", status, detail)],
+        vec![
+            Check::new("multiplexer", mux_status, mux_detail),
+            Check::new("multiplexer.caller_pane", pane_status, pane_detail),
+        ],
         vec![Summary::new("multiplexer", status, short)],
     )
 }

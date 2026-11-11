@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 39/70 tasks complete
+**Progress**: 50/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -566,20 +566,20 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 
 ### Step 10: `fleet create`
 
-- [ ] Add `CreateRequest`, split `create` (reads `caller_env`, injects the system runner and table) from `create_with`, and implement its seven steps; delete `caller_pane` and the Hermes refusal <!-- completed: -->
-- [ ] Unit-test that `--pane` never reads the process table (a table that panics on use), derives the backend, and still reports the pane-not-found error <!-- completed: -->
-- [ ] Unit-test the cross-multiplexer case from § Evidence fixtures end to end through `create_with`: the refusal with zero runner calls, then the `--pane %5 --mux-server …` rerun registering backend `tmux` <!-- completed: -->
-- [ ] Unit-test that an unset env pane, a malformed `--pane` and each refusal exit 1 with the exact message and leave no fleet row <!-- completed: -->
-- [ ] Unit-test that a verified env pane registers the pane's context <!-- completed: -->
-- [ ] Set the `--pane` and `--mux-server` help text from § `fleet create` <!-- completed: -->
+- [x] Add `CreateRequest`, split `create` (reads `caller_env`, injects the system runner and table) from `create_with`, and implement its seven steps; delete `caller_pane` and the Hermes refusal <!-- completed: 2026-11-11T12:05 -->
+- [x] Unit-test that `--pane` never reads the process table (a table that panics on use), derives the backend, and still reports the pane-not-found error <!-- completed: 2026-11-11T12:05 -->
+- [x] Unit-test the cross-multiplexer case from § Evidence fixtures end to end through `create_with`: the refusal with zero runner calls, then the `--pane %5 --mux-server …` rerun registering backend `tmux` <!-- completed: 2026-11-11T12:05 -->
+- [x] Unit-test that an unset env pane, a malformed `--pane` and each refusal exit 1 with the exact message and leave no fleet row <!-- completed: 2026-11-11T12:05 -->
+- [x] Unit-test that a verified env pane registers the pane's context <!-- completed: 2026-11-11T12:05 -->
+- [x] Set the `--pane` and `--mux-server` help text from § `fleet create` <!-- completed: 2026-11-11T12:05 -->
 
 ### Step 11: `doctor`
 
-- [ ] Add `doctor_with`, `CallerReading`, `PaneReading` and `detect_caller(table)`, and replace `DoctorInputs.mux` with `caller` <!-- completed: -->
-- [ ] Render the `multiplexer` and `multiplexer.caller_pane` rows and the folded summary line <!-- completed: -->
-- [ ] Unit-test every row of the doctor situation table and each summary-folding case in the summary, verbose and JSON views <!-- completed: -->
-- [ ] Make the doctor child-process tests call `doctor_with` with a `FixtureProcessTable` whose own pid is the child's `std::process::id()` (parent 1). Their `tmux` stub answers the pane-process read with `%1|$PPID`; the stub's `$PPID` is the child itself, so the healthy case verifies in every environment, Codex-daemon and nested-namespace hosts included <!-- completed: -->
-- [ ] Add a child-process case whose fixture table holds a `codex app-server` ancestor, and assert `info multiplexer` / `warn multiplexer.caller_pane` and exit 0 <!-- completed: -->
+- [x] Add `doctor_with`, `CallerReading`, `PaneReading` and `detect_caller(table)`, and replace `DoctorInputs.mux` with `caller` <!-- completed: 2026-11-11T12:05 -->
+- [x] Render the `multiplexer` and `multiplexer.caller_pane` rows and the folded summary line <!-- completed: 2026-11-11T12:05 -->
+- [x] Unit-test every row of the doctor situation table and each summary-folding case in the summary, verbose and JSON views <!-- completed: 2026-11-11T12:05 -->
+- [x] Make the doctor child-process tests call `doctor_with` with a `FixtureProcessTable` whose own pid is the child's `std::process::id()` (parent 1). Their `tmux` stub answers the pane-process read with `%1|$PPID`; the stub's `$PPID` is the child itself, so the healthy case verifies in every environment, Codex-daemon and nested-namespace hosts included <!-- completed: 2026-11-11T12:05 -->
+- [x] Add a child-process case whose fixture table holds a `codex app-server` ancestor, and assert `info multiplexer` / `warn multiplexer.caller_pane` and exit 0 <!-- completed: 2026-11-11T12:05 -->
 
 ### Step 12: Validation
 
