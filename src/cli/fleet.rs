@@ -1,4 +1,5 @@
 use crate::broker;
+use crate::broker::CreatedFleet;
 use crate::broker::DeletedFleet;
 use crate::broker::DeletedMember;
 use crate::broker::MemberRecord;
@@ -15,6 +16,9 @@ use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MuxBackend;
+use crate::multiplexer::caller;
+use crate::multiplexer::caller::CallerMux;
+use crate::multiplexer::caller::Verification;
 use crate::output::format_fleet_create;
 use crate::output::format_fleet_delete;
 use crate::output::format_fleet_list;
@@ -22,11 +26,14 @@ use crate::output::format_fleet_show;
 use crate::pane_lock::PaneLock;
 use crate::pane_lock::lock_deletion;
 use crate::pane_lock::lock_path;
+use crate::runtime::ProcessTable;
+use crate::runtime::SystemProcessTable;
 use crate::runtime::system::SystemRunner;
 use crate::time::Deadline;
 use clap::Subcommand;
 use rusqlite::Connection;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -40,10 +47,10 @@ pub(crate) enum FleetCommand {
         /// Director's coding agent.
         #[arg(long = "coding-agent", value_enum)]
         coding_agent: CodingAgent,
-        /// The Director's pane [default: the caller's pane from TMUX_PANE or HERDR_PANE_ID].
+        /// The Director's pane; its tmux %N or herdr <workspace>:<pane> form selects the multiplexer [default: the caller's TMUX_PANE or HERDR_PANE_ID, verified against the caller's process ancestry]
         #[arg(long, value_name = "PANE_ID")]
         pane: Option<String>,
-        /// The Director's tmux socket path or herdr session [default: the caller's server].
+        /// The Director's tmux socket path or herdr session [default: the caller's server on the pane's multiplexer]
         #[arg(long = "mux-server", value_name = "SERVER", requires = "pane")]
         mux_server: Option<String>,
         /// Output in JSON format.
@@ -84,7 +91,16 @@ pub(crate) fn run(
             pane,
             mux_server,
             json,
-        } => create(conn, &name, coding_agent, pane, mux_server, json),
+        } => create(
+            conn,
+            CreateRequest {
+                name: &name,
+                agent: coding_agent,
+                pane,
+                mux_server,
+            },
+            json,
+        ),
         FleetCommand::List { json } => {
             let fleets = broker::list_fleets(conn)?;
             let payload = Value::Array(
@@ -110,75 +126,94 @@ pub(crate) fn run(
     }
 }
 
+pub(crate) struct CreateRequest<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) agent: CodingAgent,
+    pub(crate) pane: Option<String>,
+    pub(crate) mux_server: Option<String>,
+}
+
 fn create(
     conn: &mut Connection,
-    name: &str,
-    agent: CodingAgent,
-    pane: Option<String>,
-    mux_server: Option<String>,
+    request: CreateRequest<'_>,
     json: bool,
 ) -> Result<(), CafleetError> {
     let env = crate::multiplexer::caller_env()?;
-    let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
-    let backend = MuxBackend::detect(lookup).map_err(|_| {
-        CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
-    })?;
-    let pane = match pane {
-        Some(pane) => pane,
-        None => caller_pane(backend, lookup)?,
-    };
-    let runner: Rc<dyn CommandRunner> = Rc::new(SystemRunner);
-    let server = match mux_server {
-        Some(server) => server,
-        None => crate::multiplexer::caller_server(backend, lookup, runner.as_ref())?,
-    };
-    let mux = backend.for_server(&server, runner);
-    mux.ensure_available()?;
-    let context = mux.pane_context(&pane)?.ok_or_else(|| {
-        CafleetError::App(format!(
-            "pane {pane} was not found on the {} server {server}; pass --pane and --mux-server for the Director's pane",
-            backend.name()
-        ))
-    })?;
-    let fleet = broker::create_fleet(
+    let fleet = create_with(
         conn,
-        Some(name),
-        &NewPlacement {
-            backend: backend.name().into(),
-            mux_session: context.session,
-            mux_window_id: context.window_id,
-            mux_pane_id: Some(context.pane_id),
-            coding_agent: agent.name().into(),
-            mux_server: server,
-        },
+        request,
+        &env,
+        Rc::new(SystemRunner),
+        &SystemProcessTable,
     )?;
     emit(json, &crate::output::json::created_fleet(&fleet), || {
         format_fleet_create(&fleet)
     })
 }
 
-/// The caller's own pane; a Hermes terminal tool runs in the shared gateway, so its pane
-/// variables may name another session's pane.
-fn caller_pane(
-    backend: MuxBackend,
-    lookup: impl Fn(&str) -> Option<String>,
-) -> Result<String, CafleetError> {
-    if lookup("HERMES_SESSION_ID").is_some() {
-        return Err(CafleetError::App(
-            "cafleet fleet create cannot identify its pane inside a Hermes session; pass --pane <pane-id>".into(),
-        ));
-    }
-    let (variable, missing) = match backend {
-        MuxBackend::Tmux => (
-            "TMUX_PANE",
-            "cafleet fleet create must be run inside a tmux or herdr session",
+fn refusal(body: String) -> CafleetError {
+    CafleetError::App(format!("cafleet fleet create {body}"))
+}
+
+/// Every external read is injected; tests call this directly.
+pub(crate) fn create_with(
+    conn: &mut Connection,
+    request: CreateRequest<'_>,
+    env: &HashMap<String, String>,
+    runner: Rc<dyn CommandRunner>,
+    table: &dyn ProcessTable,
+) -> Result<CreatedFleet, CafleetError> {
+    let (target, pane) = match request.pane {
+        Some(pane) => (
+            caller::resolve_pane_mux(&pane, request.mux_server, env, runner)?,
+            pane,
         ),
-        MuxBackend::Herdr => (
-            "HERDR_PANE_ID",
-            "cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>",
-        ),
+        None => verified_env_pane(env, runner, table)?,
     };
-    lookup(variable).ok_or_else(|| CafleetError::App(missing.into()))
+    let context = target.mux.pane_context(&pane)?.ok_or_else(|| {
+        CafleetError::App(format!(
+            "pane {pane} was not found on the {} server {}; pass --pane and --mux-server for the Director's pane",
+            target.backend.name(),
+            target.server
+        ))
+    })?;
+    broker::create_fleet(
+        conn,
+        Some(request.name),
+        &NewPlacement {
+            backend: target.backend.name().into(),
+            mux_session: context.session,
+            mux_window_id: context.window_id,
+            mux_pane_id: Some(context.pane_id),
+            coding_agent: request.agent.name().into(),
+            mux_server: target.server,
+        },
+    )
+}
+
+/// Steps 2–6 of `fleet create` without `--pane`: the caller's multiplexer and its verified pane.
+fn verified_env_pane(
+    env: &HashMap<String, String>,
+    runner: Rc<dyn CommandRunner>,
+    table: &dyn ProcessTable,
+) -> Result<(CallerMux, String), CafleetError> {
+    let ancestry = caller::walk(table);
+    if let Some(shared) = caller::shared_server(&ancestry) {
+        return Err(refusal(caller::shared_server_message(&shared)));
+    }
+    let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
+    let backend = MuxBackend::detect(lookup).map_err(|_| {
+        CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
+    })?;
+    let pane =
+        caller::env_pane(backend, env).ok_or_else(|| refusal(caller::unset_message(backend)))?;
+    let mux = caller::resolve_env_mux(env, runner)?;
+    match caller::verify_pane(mux.mux.as_ref(), table, &ancestry, &pane.pane)? {
+        Verification::Verified { .. } => Ok((mux, pane.pane)),
+        Verification::Refused(refused) => {
+            Err(refusal(caller::unverified_message(&pane, &refused, &mux)))
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]

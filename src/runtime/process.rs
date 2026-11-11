@@ -767,11 +767,11 @@ pub(crate) fn parse_nspid_nested(status: &str) -> Result<bool> {
     Ok(fields.len() > 1)
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code, reason = "the ps reader runs only outside Linux"))]
-pub(crate) fn parse_ps_output(
-    pid: i64,
-    output: &str,
-) -> Result<Option<ProcessEntry>> {
+#[cfg_attr(
+    target_os = "linux",
+    allow(dead_code, reason = "the ps reader runs only outside Linux")
+)]
+pub(crate) fn parse_ps_output(pid: i64, output: &str) -> Result<Option<ProcessEntry>> {
     let Some(line) = output.lines().find(|line| !line.trim().is_empty()) else {
         return Ok(None);
     };
@@ -782,7 +782,9 @@ pub(crate) fn parse_ps_output(
         .ok_or_else(|| CafleetError::App(format!("ps printed no parent for {pid}: {line}")))?;
     let argv: Vec<String> = fields.map(str::to_owned).collect();
     if argv.is_empty() {
-        return Err(CafleetError::App(format!("ps printed no command for {pid}: {line}")));
+        return Err(CafleetError::App(format!(
+            "ps printed no command for {pid}: {line}"
+        )));
     }
     Ok(Some(ProcessEntry { parent, argv }))
 }

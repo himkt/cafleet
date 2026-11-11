@@ -233,7 +233,10 @@ impl SharedServerSignature {
 
     pub(crate) fn matches(&self, argv: &[String]) -> bool {
         argv.iter().enumerate().any(|(index, token)| {
-            let program = token.rsplit('/').next().expect("rsplit yields a last segment");
+            let program = token
+                .rsplit('/')
+                .next()
+                .expect("rsplit yields a last segment");
             self.programs.contains(&program)
                 && argv[index + 1..]
                     .windows(self.subcommand.len())
