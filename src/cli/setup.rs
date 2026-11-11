@@ -2780,13 +2780,8 @@ mod tests {
         #[test]
         fn doctor_process_reads_a_real_hermes_and_prints_json_for_a_healthy_home() {
             let (home, database, stubs) = healthy_home();
-            let outcome = doctor_process(
-                home.path(),
-                &database,
-                &stubs,
-                &["doctor", "--json"],
-                None,
-            );
+            let outcome =
+                doctor_process(home.path(), &database, &stubs, &["doctor", "--json"], None);
             assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
             assert_eq!(outcome.stderr, "");
             let mut expected = vec!["ok multiplexer: tmux (session main, pane %1)".to_owned()];

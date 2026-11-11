@@ -341,11 +341,10 @@ mod tests {
     }
 
     fn table(own_pid: i64, chain: &[(i64, i64, &[&str])]) -> FixtureProcessTable {
-        chain
-            .iter()
-            .fold(FixtureProcessTable::new(own_pid), |table, (pid, parent, argv)| {
-                table.process(*pid, *parent, argv)
-            })
+        chain.iter().fold(
+            FixtureProcessTable::new(own_pid),
+            |table, (pid, parent, argv)| table.process(*pid, *parent, argv),
+        )
     }
 
     /// `30 → 20 → 10 → 1`: the caller, a shell and a multiplexer server.
@@ -502,10 +501,7 @@ mod tests {
         fn row_1_inspects_the_entries_recorded_before_an_unreadable_end() {
             let table = table(
                 30,
-                &[
-                    (30, 20, &["cafleet"]),
-                    (20, 412, &["codex", "app-server"]),
-                ],
+                &[(30, 20, &["cafleet"]), (20, 412, &["codex", "app-server"])],
             )
             .unreadable(412, UNREADABLE);
             assert_eq!(
@@ -681,7 +677,8 @@ mod tests {
             "--dangerously-bypass-approvals-and-sandbox",
             "<prompt>",
         ];
-        const OPENCODE: &str = "/root/.local/share/mise/installs/aqua-anomalyco-opencode/v2.2.5/opencode";
+        const OPENCODE: &str =
+            "/root/.local/share/mise/installs/aqua-anomalyco-opencode/v2.2.5/opencode";
         const TMUX_SERVER_PID: i64 = 399808;
         const TMUX_SERVER: &[&str] = &[
             "tmux",
@@ -747,17 +744,20 @@ mod tests {
             fn herdr_table(&self) -> FixtureProcessTable {
                 self.chain
                     .iter()
-                    .fold(FixtureProcessTable::new(self.own_pid), |table, (pid, parent, argv)| {
-                        if *parent == TMUX_SERVER_PID {
-                            table.process(*pid, Self::herdr_shell(*pid), argv).process(
-                                Self::herdr_shell(*pid),
-                                HERDR_SERVER_PID,
-                                &["/bin/sh"],
-                            )
-                        } else {
-                            table.process(*pid, *parent, argv)
-                        }
-                    })
+                    .fold(
+                        FixtureProcessTable::new(self.own_pid),
+                        |table, (pid, parent, argv)| {
+                            if *parent == TMUX_SERVER_PID {
+                                table.process(*pid, Self::herdr_shell(*pid), argv).process(
+                                    Self::herdr_shell(*pid),
+                                    HERDR_SERVER_PID,
+                                    &["/bin/sh"],
+                                )
+                            } else {
+                                table.process(*pid, *parent, argv)
+                            }
+                        },
+                    )
                     .process(HERDR_SERVER_PID, 1, HERDR_SERVER)
             }
 
@@ -1039,7 +1039,11 @@ mod tests {
             let table = table(
                 428897,
                 &[
-                    (428897, 428895, &["sh", "/tmp/cafleet-env-probe/capture.sh", "hermes"]),
+                    (
+                        428897,
+                        428895,
+                        &["sh", "/tmp/cafleet-env-probe/capture.sh", "hermes"],
+                    ),
                     (428895, 428596, &["/usr/bin/bash", "-c", "<script>"]),
                     (428596, 428571, HERMES_GATEWAY),
                     (428571, 428475, HERMES_CHAT),
@@ -1066,7 +1070,11 @@ mod tests {
             let table = table(
                 428897,
                 &[
-                    (428897, 428895, &["sh", "/tmp/cafleet-env-probe/capture.sh", "hermes"]),
+                    (
+                        428897,
+                        428895,
+                        &["sh", "/tmp/cafleet-env-probe/capture.sh", "hermes"],
+                    ),
                     (428895, 428596, &["/usr/bin/bash", "-c", "<script>"]),
                     (428596, 428571, HERMES_GATEWAY),
                     (428571, 428572, HERMES_CHAT),
@@ -1374,7 +1382,10 @@ mod tests {
         fn resolve_env_mux_detects_the_backend_and_its_caller_server() {
             let runner = FakeRunner::with_binary("tmux");
             let caller = resolve_env_mux(
-                &env(&[("TMUX", "/tmp/tmux-1000/default,123,0"), ("TMUX_PANE", "%3")]),
+                &env(&[
+                    ("TMUX", "/tmp/tmux-1000/default,123,0"),
+                    ("TMUX_PANE", "%3"),
+                ]),
                 runner.clone(),
             )
             .unwrap();
@@ -1496,7 +1507,13 @@ mod tests {
                 ]
             };
             for (backend, server, variable, pane, guidance) in [
-                (MuxBackend::Tmux, TMUX_SOCKET, "TMUX_PANE", "%3", TMUX_GUIDANCE),
+                (
+                    MuxBackend::Tmux,
+                    TMUX_SOCKET,
+                    "TMUX_PANE",
+                    "%3",
+                    TMUX_GUIDANCE,
+                ),
                 (
                     MuxBackend::Herdr,
                     HERDR_SESSION,

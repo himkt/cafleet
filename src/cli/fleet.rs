@@ -2751,7 +2751,11 @@ mod tests {
             let unreadable = "cannot read /proc/412/stat: Permission denied (os error 13)";
             for (table, pane_pid, refusal) in [
                 (plain_chain(), None, Refusal::PaneNotFound),
-                (plain_chain().nested(), Some(20), Refusal::NestedPidNamespace),
+                (
+                    plain_chain().nested(),
+                    Some(20),
+                    Refusal::NestedPidNamespace,
+                ),
                 (
                     FixtureProcessTable::new(30)
                         .process(30, 412, &["cafleet"])
