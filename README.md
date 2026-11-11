@@ -1,6 +1,6 @@
 # CAFleet
 
-[![cafleet](https://github.com/user-attachments/assets/75c1ec60-1056-4e04-813b-d7986897c499)](https://www.youtube.com/watch?v=Q4Jm420gN3A)
+[![cafleet](https://github.com/user-attachments/assets/79ca69e7-cde4-4c85-9c1d-ea738685bdd6)](https://youtu.be/cHlp1rJcJp4)
 
 CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable messages: collaborative coding across multiple coding-agent backends, with full code transparency. Use its CLI and skills to delegate research, implementation and review, then collect durable replies while your session continues the task.
 
