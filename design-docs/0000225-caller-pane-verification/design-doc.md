@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 54/70 tasks complete
+**Progress**: 70/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -587,32 +587,32 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 - [x] Run `mise //:lint`; no findings <!-- completed: 2026-11-11T12:08 -->
 - [x] Run `mise //docs:build`; the build and link check pass <!-- completed: 2026-11-11T12:08 -->
 - [x] Build the branch binary with `mise //:build` and use `<repo>/target/release/cafleet` by absolute path for live acceptance; run no install task, so the operator's installed binary and assets and the active execute fleet's runtime stay unchanged <!-- completed: 2026-11-11T12:08 -->
-- [ ] Run the scratch setup from § Live acceptance protocol and confirm that `<BASE>/.acceptance/home` holds the installed assets and that the operator's installed `cafleet` executable (`command -v cafleet`) and every CAFleet asset under the operator's config directories (the `cafleet` skill directories, the OpenCode and Hermes plugin files and the pi extension) have identical `sha256sum` listings before and after <!-- completed: -->
+- [x] Run the scratch setup from § Live acceptance protocol and confirm that `<BASE>/.acceptance/home` holds the installed assets and that the operator's installed `cafleet` executable (`command -v cafleet`) and every CAFleet asset under the operator's config directories (the `cafleet` skill directories, the OpenCode and Hermes plugin files and the pi extension) have identical `sha256sum` listings before and after <!-- completed: 2026-11-11T13:24 -->
 
 ### Step 13: Live acceptance — tmux
 
 Follow § Live acceptance protocol on `tmux -L cafleet-accept`, starting from a clean start check.
 
-- [ ] Codex through the shared daemon, pane A: `fleet create` refuses with the shared-server body (`codex app-server`); `doctor` shows `warn multiplexer` with `warn multiplexer.caller_pane`; the operator's tmux prompt reply and the rerun register pane A <!-- completed: -->
-- [ ] Codex through the shared daemon, pane C (pane A's variables): refuses at row 1; the rerun registers pane C <!-- completed: -->
-- [ ] Codex pane C after pane A closed: refuses at row 1; the rerun registers pane C <!-- completed: -->
-- [ ] Hermes panes A and B: both refuse at row 1 (`hermes gateway run`); the reruns register each pane <!-- completed: -->
-- [ ] Codex `--no-daemon`, Codex `--approve-for-me`, Claude Code, pi and OpenCode `--standalone`: each registers its own pane without `--pane`, and `doctor` shows `ok multiplexer` <!-- completed: -->
-- [ ] OpenCode `opencode serve --service`: the first client registers its pane; the second client refuses at row 7 <!-- completed: -->
-- [ ] Cross-multiplexer: with the Codex daemon started from a herdr pane, a Codex Director in a tmux pane is refused at row 1 with both guidances. The operator's tmux prompt reply and the rerun register backend `tmux` with the reported socket <!-- completed: -->
-- [ ] Record the Codex PID-namespace sandbox as not verified on this host (bwrap cannot create namespaces) <!-- completed: -->
+- [x] Codex through the shared daemon, pane A: `fleet create` refuses with the shared-server body (`codex app-server`); `doctor` shows `warn multiplexer` with `warn multiplexer.caller_pane`; the operator's tmux prompt reply and the rerun register pane A. Observed: `info multiplexer` (the doctor situation table's shared-server row) with `warn multiplexer.caller_pane` and summary `warn`. The user-run step was substituted at the operator's direction: the Director and the Verifier read the pane ID and server from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] Codex through the shared daemon, pane C (pane A's variables): refuses at row 1; the rerun registers pane C. The user-run step was substituted: the pane ID and server were read from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] Codex pane C after pane A closed: refuses at row 1; the rerun registers pane C. The user-run step was substituted: the pane ID and server were read from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] Hermes panes A and B: both refuse at row 1 (`hermes gateway run`); the reruns register each pane. The user-run step was substituted: the pane IDs and server were read from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] Codex `--no-daemon`, Codex `--approve-for-me`, Claude Code, pi and OpenCode `--standalone`: each registers its own pane without `--pane`, and `doctor` shows `ok multiplexer` <!-- completed: 2026-11-11T13:24 -->
+- [x] OpenCode `opencode serve --service`: the first client registers its pane; the second client refuses at row 7 <!-- completed: 2026-11-11T13:24 -->
+- [x] Cross-multiplexer: with the Codex daemon started from a herdr pane, a Codex Director in a tmux pane is refused at row 1 with both guidances. The operator's tmux prompt reply and the rerun register backend `tmux` with the reported socket. The user-run step was substituted: the pane ID and socket were read from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] Record the Codex PID-namespace sandbox as not verified on this host (bwrap cannot create namespaces). Recorded as not verified on this host <!-- completed: 2026-11-11T13:24 -->
 
 ### Step 14: Live acceptance — herdr
 
 Repeat Step 13 in a scratch herdr session after a clean start check. Refused cases use the herdr guidance, which the operator types into the scratch Director's composer.
 
-- [ ] Codex daemon panes A, C and C-after-A-closed: each refuses at row 1, and each rerun registers the true pane. `doctor` from pane C after pane A closed shows `warn multiplexer` with `warn multiplexer.caller_pane` instead of an `error` row (issue #450) <!-- completed: -->
-- [ ] Hermes panes A and B: both refuse at row 1; the reruns register each pane <!-- completed: -->
-- [ ] Codex `--no-daemon`, Codex `--approve-for-me`, Claude Code, pi and OpenCode `--standalone`: each registers its own pane without `--pane` <!-- completed: -->
-- [ ] OpenCode `opencode serve --service`: the first client accepts and the second refuses at row 7 <!-- completed: -->
-- [ ] Cross-multiplexer: with the Codex daemon started from a tmux pane, a Codex Director in a herdr pane is refused at row 1. The operator's herdr reply and the rerun register backend `herdr` with the reported session <!-- completed: -->
-- [ ] The real Director session (Claude Code in a herdr pane): `doctor` shows `ok multiplexer` with the verified pane <!-- completed: -->
-- [ ] Record the Codex PID-namespace sandbox as not verified on this host <!-- completed: -->
+- [x] Codex daemon panes A, C and C-after-A-closed: each refuses at row 1, and each rerun registers the true pane. `doctor` from pane C after pane A closed shows `warn multiplexer` with `warn multiplexer.caller_pane` instead of an `error` row (issue #450). Observed: `info multiplexer` (the doctor situation table's shared-server row) with `warn multiplexer.caller_pane` and no `error` row. The user-run step was substituted: the pane IDs and session were read from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] Hermes panes A and B: both refuse at row 1; the reruns register each pane. The user-run step was substituted: the pane IDs and session were read from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] Codex `--no-daemon`, Codex `--approve-for-me`, Claude Code, pi and OpenCode `--standalone`: each registers its own pane without `--pane` <!-- completed: 2026-11-11T13:24 -->
+- [x] OpenCode `opencode serve --service`: the first client accepts and the second refuses at row 7 <!-- completed: 2026-11-11T13:24 -->
+- [x] Cross-multiplexer: with the Codex daemon started from a tmux pane, a Codex Director in a herdr pane is refused at row 1. The operator's herdr reply and the rerun register backend `herdr` with the reported session. The user-run step was substituted: the pane ID and session were read from the scratch server <!-- completed: 2026-11-11T13:24 -->
+- [x] The real Director session (Claude Code in a herdr pane): `doctor` shows `ok multiplexer` with the verified pane. Confirmed from the Verifier's session and from the Director's own pane `w4:p3N`, where the branch binary's `doctor` showed `ok multiplexer` and `ok multiplexer.caller_pane HERDR_PANE_ID=w4:p3N` <!-- completed: 2026-11-11T13:24 -->
+- [x] Record the Codex PID-namespace sandbox as not verified on this host. Recorded as not verified on this host <!-- completed: 2026-11-11T13:24 -->
 
 ---
 
