@@ -2268,4 +2268,142 @@ mod tests {
             );
         }
     }
+
+    mod shared_server_signatures {
+        use crate::coding_agent::*;
+
+        const CODEX_DAEMON: &[&str] = &[
+            "/root/.codex/packages/app-server-daemon/releases/0.167.1-x86_64-unknown-linux-musl/bin/codex",
+            "app-server",
+            "--list",
+        ];
+        const HERMES_GATEWAY: &[&str] = &[
+            "/home/linuxbrew/.linuxbrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/python",
+            "-m",
+            "hermes_cli.main",
+            "--profile",
+            "default",
+            "gateway",
+            "run",
+            "--quiet",
+            "--idle-exit",
+        ];
+
+        fn matching_labels(argv: &[&str]) -> Vec<String> {
+            let argv: Vec<String> = argv.iter().map(|token| (*token).to_owned()).collect();
+            CodingAgent::all()
+                .iter()
+                .flat_map(|agent| {
+                    agent
+                        .shared_server_signatures()
+                        .iter()
+                        .map(move |signature| (*agent, signature))
+                })
+                .filter(|(_, signature)| signature.matches(&argv))
+                .map(|(agent, signature)| signature.label(agent))
+                .collect()
+        }
+
+        #[test]
+        fn codex_daemon_argv_matches_only_the_codex_app_server_signature() {
+            assert_eq!(matching_labels(CODEX_DAEMON), ["codex app-server"]);
+        }
+
+        #[test]
+        fn hermes_gateway_argv_with_options_before_the_subcommand_matches_only_hermes() {
+            assert_eq!(matching_labels(HERMES_GATEWAY), ["hermes gateway run"]);
+        }
+
+        #[test]
+        fn hermes_program_name_matches_the_gateway_signature() {
+            assert_eq!(
+                matching_labels(&["/usr/local/bin/hermes", "gateway", "run"]),
+                ["hermes gateway run"]
+            );
+        }
+
+        #[test]
+        fn non_server_argv_matches_no_signature() {
+            let cases: &[&[&str]] = &[
+                &[
+                    "codex",
+                    "--no-daemon",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "<prompt>",
+                ],
+                &[
+                    "codex",
+                    "--enable",
+                    "daemon_auto_start",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "<prompt>",
+                ],
+                &["hermes", "chat", "--tui"],
+                &["hermes", "gateway", "status"],
+                &["opencode", "serve", "--service"],
+                &["claude"],
+                &[],
+            ];
+            for argv in cases {
+                assert_eq!(matching_labels(argv), Vec::<String>::new(), "{argv:?}");
+            }
+        }
+
+        #[test]
+        fn subcommand_tokens_must_be_contiguous_and_in_order() {
+            for argv in [
+                &["hermes", "gateway", "--quiet", "run"][..],
+                &["hermes", "run", "gateway"][..],
+            ] {
+                assert_eq!(matching_labels(argv), Vec::<String>::new(), "{argv:?}");
+            }
+        }
+
+        #[test]
+        fn subcommand_before_the_program_token_does_not_match() {
+            assert_eq!(
+                matching_labels(&["app-server", "codex"]),
+                Vec::<String>::new()
+            );
+        }
+
+        #[test]
+        fn program_token_compares_the_whole_final_path_component() {
+            for argv in [
+                &["/usr/bin/codex-linux-sandbox", "app-server"][..],
+                &["/opt/xcodex", "app-server"][..],
+                &["/opt/codex/bin/node", "app-server"][..],
+            ] {
+                assert_eq!(matching_labels(argv), Vec::<String>::new(), "{argv:?}");
+            }
+        }
+
+        #[test]
+        fn only_codex_and_hermes_declare_signatures() {
+            for agent in CodingAgent::all() {
+                let expected = match agent {
+                    CodingAgent::Codex | CodingAgent::Hermes => 1,
+                    CodingAgent::Claude | CodingAgent::Opencode | CodingAgent::Pi => 0,
+                };
+                assert_eq!(
+                    agent.shared_server_signatures().len(),
+                    expected,
+                    "{}",
+                    agent.name()
+                );
+            }
+        }
+
+        #[test]
+        fn labels_name_the_backend_and_its_subcommand() {
+            let label = |agent: CodingAgent| {
+                let [signature] = agent.shared_server_signatures() else {
+                    panic!("{} declares exactly one signature", agent.name());
+                };
+                signature.label(agent)
+            };
+            assert_eq!(label(CodingAgent::Codex), "codex app-server");
+            assert_eq!(label(CodingAgent::Hermes), "hermes gateway run");
+        }
+    }
 }
