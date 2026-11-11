@@ -12,7 +12,7 @@ Select a member backend through the CLI’s `--coding-agent` choices; mixed-back
 
 Plain `cafleet setup` installs assets for every supported backend in one run, and `--coding-agent` narrows the selection; [Quickstart](../quickstart.md#configure) lists what setup installs for each backend and the configuration you add.
 
-- `cafleet fleet create --coding-agent` is required operator-declared metadata naming the backend the Director actually runs on: cafleet does not spawn the root Director's process and cannot detect what already runs in the calling pane. `fleet create` records the calling pane and its multiplexer server; a Hermes Director names its pane with `--pane <pane-id>`, and `--mux-server <server>` selects another server ([Hermes setup](../quickstart.md#hermes)).
+- `cafleet fleet create --coding-agent` is required operator-declared metadata naming the backend the Director actually runs on: cafleet does not spawn the root Director's process and cannot detect what already runs in the calling pane. `fleet create` records the calling pane and its multiplexer server after confirming the pane, and asks you for the pane ID and server when it cannot ([Director pane verification](members.md#director-pane-verification)).
 - `cafleet member create --coding-agent` selects the spawned backend and is recorded as placement metadata; when omitted, the member inherits the spawning Director's placement backend.
 
 Run the root Director on a backend whose Director verdict is `yes` and members on backends whose Member verdict is `yes`; a backend whose Director verdict is `no` runs only as a member. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence.
@@ -152,7 +152,7 @@ Hermes members use your existing Hermes configuration: your configured default p
 
 `cafleet setup --coding-agent hermes` installs the CAFleet plugin into `plugins/cafleet/` of the Hermes home that `hermes config path` reports, including an active profile's home, with an `executable` file naming the `cafleet` it runs. It then edits the reported file, keeping the rest of it: it adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain `cafleet setup` on a host without `hermes` installs the skills and skips the plugin.
 
-Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so a Hermes Director names its pane with `--pane`; the leading-`!` local shell runs in your pane's own environment. Each broker record arrives as its own turn, in the broker's delivery order.
+Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so registering a Hermes Director always asks you for its pane ID and server ([Director pane verification](members.md#director-pane-verification)). Each broker record arrives as its own turn, in the broker's delivery order.
 
 Under `approvals.mode: smart`, the default, commands Hermes does not consider dangerous run without review and its guardian model reviews the rest; a guardian escalation shows an approval prompt in the member's pane, which the Director answers. CAFleet needs no `approvals.deny` entries.
 

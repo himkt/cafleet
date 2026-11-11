@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 7/70 tasks complete
+**Progress**: 12/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -513,14 +513,14 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 
 ### Step 3: docs/
 
-- [ ] `concepts/members.md`: add `### Director pane verification` with the per-multiplexer user-run table and replace the Hermes sentence with a link <!-- completed: -->
-- [ ] `quickstart.md`: rewrite Hermes steps 3–4 and add the Codex Director note <!-- completed: -->
-- [ ] `mixed-backend-team.md`, `concepts/coding-agents.md`, `contributing.md`: replace the Hermes `--pane` / leading-`!` wording with the link <!-- completed: -->
-- [ ] Inspect the rendered HTML of every changed table cell that contains a literal `|` or a `#{…}` format <!-- completed: -->
+- [x] `concepts/members.md`: add `### Director pane verification` with the per-multiplexer user-run table and replace the Hermes sentence with a link <!-- completed: 2026-11-11T11:42 -->
+- [x] `quickstart.md`: rewrite Hermes steps 3–4 and add the Codex Director note <!-- completed: 2026-11-11T11:42 -->
+- [x] `mixed-backend-team.md`, `concepts/coding-agents.md`, `contributing.md`: replace the Hermes `--pane` / leading-`!` wording with the link <!-- completed: 2026-11-11T11:42 -->
+- [x] Inspect the rendered HTML of every changed table cell that contains a literal `|` or a `#{…}` format <!-- completed: 2026-11-11T11:42 -->
 
 ### Step 4: README.md
 
-- [ ] Confirm `README.md` needs no change (no fleet-create pane wording) <!-- completed: -->
+- [x] Confirm `README.md` needs no change (no fleet-create pane wording) <!-- completed: 2026-11-11T11:42 -->
 
 ### Step 5: Skills
 
