@@ -2631,6 +2631,14 @@ mod tests {
             }
         }
 
+        /// The child's `TMUX_PANE` and the pid the tmux stub reports for pane `%1`.
+        #[derive(Clone, Copy)]
+        enum ChildPane {
+            Own,
+            Unset,
+            Pid(i64),
+        }
+
         struct Outcome {
             code: Option<i32>,
             stdout: String,
@@ -2646,16 +2654,23 @@ mod tests {
             stubs: &[(&str, String)],
             args: &[&str],
             ancestor: Option<&[&str]>,
+            pane: ChildPane,
         ) -> Outcome {
             use crate::runtime::system::test_support::TestChild;
             use std::process::Stdio;
 
             let bin = tempfile::tempdir().unwrap();
             // `$PPID` is the doctor child that runs the stub, so the child's own pid is the pane pid.
+            let pane_pid = match pane {
+                ChildPane::Pid(pid) => pid.to_string(),
+                ChildPane::Own | ChildPane::Unset => "\"$PPID\"".to_owned(),
+            };
             crate::coding_agent::test_support::executable_stub(
                 bin.path(),
                 "tmux",
-                "case \" $* \" in *'#{pane_pid}'*) printf '%%1|%s\\n' \"$PPID\" ;; *' display-message '*) printf 'main|@1|%%1\\n' ;; esac",
+                &format!(
+                    "case \" $* \" in *'#{{pane_pid}}'*) printf '%%1|%s\\n' {pane_pid} ;; *' display-message '*) printf 'main|@1|%%1\\n' ;; esac"
+                ),
             );
             for (name, body) in stubs {
                 crate::coding_agent::test_support::executable_stub(bin.path(), name, body);
@@ -2681,9 +2696,12 @@ mod tests {
                 .env("PATH", bin.path())
                 .env("HOME", home)
                 .env("TMUX", "cafleet-test,1,0")
-                .env("TMUX_PANE", "%1")
+                .env_remove("TMUX_PANE")
                 .env_remove("HERDR_ENV")
                 .env("RUST_BACKTRACE", "0");
+            if !matches!(pane, ChildPane::Unset) {
+                command.env("TMUX_PANE", "%1");
+            }
             for agent in CodingAgent::all() {
                 command.env(agent.config_variable(), home.join(agent.name()));
             }
@@ -2780,8 +2798,14 @@ mod tests {
         #[test]
         fn doctor_process_reads_a_real_hermes_and_prints_json_for_a_healthy_home() {
             let (home, database, stubs) = healthy_home();
-            let outcome =
-                doctor_process(home.path(), &database, &stubs, &["doctor", "--json"], None);
+            let outcome = doctor_process(
+                home.path(),
+                &database,
+                &stubs,
+                &["doctor", "--json"],
+                None,
+                ChildPane::Own,
+            );
             assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
             assert_eq!(outcome.stderr, "");
             let mut expected = vec!["ok multiplexer: tmux (session main, pane %1)".to_owned()];
@@ -2809,6 +2833,7 @@ mod tests {
                     "app-server",
                     "--list",
                 ]),
+                ChildPane::Own,
             );
             assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
             assert_eq!(outcome.stderr, "");
@@ -2830,6 +2855,67 @@ mod tests {
             );
         }
 
+        fn assert_caller_pane_warning(outcome: &Outcome, detail: &str) {
+            assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
+            assert_eq!(outcome.stderr, "");
+            let mut expected = vec![format!(
+                "warn multiplexer: tmux (server cafleet-test); {detail}"
+            )];
+            expected.extend(ready_backend_lines());
+            assert_eq!(summary_lines(&outcome.stdout), expected);
+            assert_eq!(
+                check_lines(&outcome.stdout)[..2],
+                [
+                    "ok multiplexer: tmux server=cafleet-test".to_owned(),
+                    format!("warn multiplexer.caller_pane: {detail}"),
+                ]
+            );
+        }
+
+        #[test]
+        fn doctor_process_with_tmux_pane_unset_warns_on_the_caller_pane_and_exits_zero() {
+            let (home, database, stubs) = healthy_home();
+            let outcome = doctor_process(
+                home.path(),
+                &database,
+                &stubs,
+                &["doctor", "--json"],
+                None,
+                ChildPane::Unset,
+            );
+            assert_caller_pane_warning(&outcome, &unset_message(MuxBackend::Tmux));
+        }
+
+        #[test]
+        fn doctor_process_with_a_non_ancestor_pane_warns_unverified_and_exits_zero() {
+            const STRANGER: i64 = 405228;
+            let (home, database, stubs) = healthy_home();
+            let outcome = doctor_process(
+                home.path(),
+                &database,
+                &stubs,
+                &["doctor", "--json"],
+                None,
+                ChildPane::Pid(STRANGER),
+            );
+            let detail = unverified_message(
+                &CallerPane {
+                    variable: "TMUX_PANE",
+                    pane: "%1".to_string(),
+                },
+                &Refusal::PaneNotAncestor { pane_pid: STRANGER },
+                &CallerMux {
+                    backend: MuxBackend::Tmux,
+                    server: "cafleet-test".to_string(),
+                    mux: MuxBackend::Tmux.for_server(
+                        "cafleet-test",
+                        crate::multiplexer::test_support::FakeRunner::without_binaries(),
+                    ),
+                },
+            );
+            assert_caller_pane_warning(&outcome, &detail);
+        }
+
         #[test]
         fn doctor_process_without_hermes_or_a_database_prints_json_and_fails() {
             let home = crate::runtime::test_support::short_tempdir();
@@ -2840,6 +2926,7 @@ mod tests {
                 &[],
                 &["doctor", "--json", "--verbose"],
                 None,
+                ChildPane::Own,
             );
             assert_eq!(outcome.code, Some(1));
             assert_eq!(outcome.stderr, "Error: doctor found errors\n");
