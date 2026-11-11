@@ -380,7 +380,7 @@ The pane is then read on the chosen server — `tmux -S <server> display-message
 | `--pane` | `The Director's pane; its tmux %N or herdr <workspace>:<pane> form selects the multiplexer [default: the caller's TMUX_PANE or HERDR_PANE_ID, verified against the caller's process ancestry]` |
 | `--mux-server` | `The Director's tmux socket path or herdr session [default: the caller's server on the pane's multiplexer]` |
 
-`--pane` with `--mux-server` is the only override of caller pane verification.
+`--pane`, optionally with `--mux-server`, is the only override of caller pane verification.
 
 Registration follows the §6.2 Fleets bootstrap transaction. The Director has `name="Director"` and `description="Root Director for this fleet"`.
 
