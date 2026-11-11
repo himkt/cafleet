@@ -1366,7 +1366,7 @@ mod tests {
     #[test]
     fn expired_deadlines_start_no_native_command_or_optional_layout_restore() {
         let runner = test_support::FakeRunner::without_binaries();
-        let mux = HerdrMultiplexer::new(runner.clone(), test_support::env(&[]))
+        let mux = HerdrMultiplexer::for_server(runner.clone(), HERDR_SESSION)
             .bounded(crate::time::Deadline::until(std::time::Instant::now()));
         assert!(mux.close_pane("w1:p2", true).is_err());
         mux.restore_after_close().unwrap();

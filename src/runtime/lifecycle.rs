@@ -810,7 +810,7 @@ mod tests {
 
         fn with_native_host<T>(operation: impl FnOnce(&mut NativeLaunchHost<'_>) -> T) -> T {
             let runner = test_support::FakeRunner::without_binaries();
-            let mux = TmuxMultiplexer::new(runner.clone(), Default::default());
+            let mux = TmuxMultiplexer::for_server(runner.clone(), "/tmp/tmux-1000/default");
             let context = MultiplexerContext {
                 session: "readiness-fixture".into(),
                 window_id: "@1".into(),

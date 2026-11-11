@@ -2231,8 +2231,10 @@ mod tests {
         use crate::multiplexer::test_support::FakeRunner;
         let runner = FakeRunner::with_binary("tmux");
         runner.succeed(1);
-        let mux =
-            crate::multiplexer::tmux::TmuxMultiplexer::new(runner.clone(), Default::default());
+        let mux = crate::multiplexer::tmux::TmuxMultiplexer::for_server(
+            runner.clone(),
+            "/tmp/tmux-1000/default",
+        );
         let mut host = crate::cli::fleet::MultiplexerDeletionHost::new(&mux);
         let placement = crate::broker::Placement {
             backend: "tmux".into(),
