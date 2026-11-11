@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 0/70 tasks complete
+**Progress**: 7/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -500,16 +500,16 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 
 ### Step 1: Prerequisite
 
-- [ ] Rebase the implementation branch on `main`, which includes the merged PR #590 (Codex members launch with `--no-daemon`) <!-- completed: -->
+- [x] Rebase the implementation branch on `main`, which includes the merged PR #590 (Codex members launch with `--no-daemon`) <!-- completed: 2026-11-11T11:36 -->
 
 ### Step 2: SPEC.md
 
-- [ ] §6.3 `fleet create`: rewrite the Director pane row and add `##### Caller pane verification` (algorithm, `--pane` form, guidance and refusal tables). Add the `--pane` / `--mux-server` help text, update the error table, and delete the Hermes row and paragraph <!-- completed: -->
-- [ ] §6.3 `cafleet doctor`: update the check-rows table and add the summary folding rows for `multiplexer.caller_pane` <!-- completed: -->
-- [ ] §6.3 Error Messages: rewrite the `fleet create` situation <!-- completed: -->
-- [ ] §6.5: update Backend selection, add the `Pane process` Backend operations row and extend the pane context row to doctor <!-- completed: -->
-- [ ] §6.7: add `#### Shared-server signatures`, extend Interface, and update the codex and hermes Host evidence paragraphs <!-- completed: -->
-- [ ] §6.8 and §9: update the caller-environment sentence and the covered-behavior list <!-- completed: -->
+- [x] §6.3 `fleet create`: rewrite the Director pane row and add `##### Caller pane verification` (algorithm, `--pane` form, guidance and refusal tables). Add the `--pane` / `--mux-server` help text, update the error table, and delete the Hermes row and paragraph <!-- completed: 2026-11-11T11:40 -->
+- [x] §6.3 `cafleet doctor`: update the check-rows table and add the summary folding rows for `multiplexer.caller_pane` <!-- completed: 2026-11-11T11:40 -->
+- [x] §6.3 Error Messages: rewrite the `fleet create` situation <!-- completed: 2026-11-11T11:40 -->
+- [x] §6.5: update Backend selection, add the `Pane process` Backend operations row and extend the pane context row to doctor <!-- completed: 2026-11-11T11:40 -->
+- [x] §6.7: add `#### Shared-server signatures`, extend Interface, and update the codex and hermes Host evidence paragraphs <!-- completed: 2026-11-11T11:40 -->
+- [x] §6.8 and §9: update the caller-environment sentence and the covered-behavior list <!-- completed: 2026-11-11T11:40 -->
 
 ### Step 3: docs/
 

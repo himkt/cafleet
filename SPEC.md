@@ -355,14 +355,14 @@ Every fleet, member, message, event, input and permission command validates the 
 
 `cafleet fleet create --name NAME --coding-agent AGENT [--pane PANE_ID [--mux-server SERVER]] [--json]`
 
-`fleet create` and `doctor`'s `multiplexer` row are the only surfaces that read the caller's multiplexer environment. Require the selected backend token, then resolve each input, first match wins:
+`fleet create` and `doctor`'s `multiplexer` and `multiplexer.caller_pane` rows are the only surfaces that read the caller's multiplexer environment, and both verify the caller's pane against its process ancestry (§ Caller pane verification). Require the selected backend token, then resolve each input, first match wins:
 
 | Input | Source |
 |---|---|
-| Backend | `TMUX`/`HERDR_ENV` auto-detection (§6.5 Backend selection); a detection failure exits 1 with `cafleet fleet create must be run inside a tmux or herdr session` |
-| `mux_server` (tmux) | `--mux-server`; else everything before the last two commas of a non-empty `TMUX`, so a socket path containing `,` is kept whole; else `tmux display-message -p '#{socket_path}'` (the default server) |
-| `mux_server` (herdr) | `--mux-server`; else a non-empty `HERDR_SESSION`; else the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; else `default` |
-| Director pane | `--pane`; else a non-empty `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr); a tmux caller without `TMUX_PANE` exits 1 with the detection-failure message |
+| Backend | With `--pane`, its ID form (§ `--pane` ID form); else `TMUX`/`HERDR_ENV` auto-detection (§6.5 Backend selection) after the shared-server check, where a detection failure exits 1 with `cafleet fleet create must be run inside a tmux or herdr session` |
+| `mux_server` (tmux) | `--mux-server`; else everything before the last two commas of a non-empty `TMUX`, so a socket path containing `,` is kept whole; else `tmux display-message -p '#{socket_path}'` (the default server). With `--pane`, these environment sources apply only when the detected backend equals the pane's (§ `--pane` ID form) |
+| `mux_server` (herdr) | `--mux-server`; else a non-empty `HERDR_SESSION`; else the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; else `default`. With `--pane`, these environment sources apply only when the detected backend equals the pane's (§ `--pane` ID form) |
+| Director pane | `--pane`, an operator assertion checked only for existence on the chosen server; else a non-empty `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr), verified against the caller's process ancestry (§ Caller pane verification) |
 
 The pane is then read on the chosen server — `tmux -S <server> display-message -p -t <pane> '#{session_name}|#{window_id}|#{pane_id}'` or `herdr --session <server> pane current --pane <pane>` — and its session, window and pane are recorded with the server as the Director's placement (§6.5 Multiplexer context). tmux prints `||` and exits 0 for a missing pane, so a reply with an empty field, or whose `pane_id` differs from the requested pane, means the pane was not found. Each failure exits 1 before any write:
 
@@ -370,14 +370,136 @@ The pane is then read on the chosen server — `tmux -S <server> display-message
 |---|---|
 | tmux finds no server | `Error: no tmux server found; pass --mux-server <socket path>` |
 | The pane is not on the chosen server | `Error: pane <pane-id> was not found on the <backend> server <server>; pass --pane and --mux-server for the Director's pane` |
-| herdr without `--pane` and with `HERDR_PANE_ID` unset | `Error: cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>` |
-| `HERMES_SESSION_ID` is set and `--pane` is absent | `Error: cafleet fleet create cannot identify its pane inside a Hermes session; pass --pane <pane-id>` |
+| `--pane` is neither ID form | `Error: --pane <pane> is neither a tmux pane ID (%N) nor a herdr pane ID (<workspace>:<pane>)` |
+| Without `--pane`, an ancestor is a shared server | `Error: cafleet fleet create ` followed by the shared-server body (§ Refusal messages) |
+| Without `--pane`, `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr) is unset | `Error: cafleet fleet create ` followed by the unset body (§ Refusal messages) |
+| Without `--pane`, the env pane fails verification | `Error: cafleet fleet create ` followed by the unverified body (§ Refusal messages) |
 
-A Hermes terminal tool runs in the shared Hermes gateway and may carry another pane's `TMUX_PANE`, hence the Hermes refusal; Hermes's leading-`!` local shell runs in the client process with the pane's own environment (`! echo $TMUX_PANE` or `! echo $HERDR_PANE_ID`).
+| Option | Help |
+|---|---|
+| `--pane` | `The Director's pane; its tmux %N or herdr <workspace>:<pane> form selects the multiplexer [default: the caller's TMUX_PANE or HERDR_PANE_ID, verified against the caller's process ancestry]` |
+| `--mux-server` | `The Director's tmux socket path or herdr session [default: the caller's server on the pane's multiplexer]` |
+
+`--pane` with `--mux-server` is the only override of caller pane verification.
 
 Registration follows the §6.2 Fleets bootstrap transaction. The Director has `name="Director"` and `description="Root Director for this fleet"`.
 
 Run `fleet create` from the coding-agent session declared by `--coding-agent`; root-Director reception follows §6.3 `message listen` and §6.5 Push notifications.
+
+##### Caller pane verification
+
+A coding agent whose tool commands run in a long-lived shared server passes that server's environment to `cafleet`, and that environment can name another pane or another multiplexer. `fleet create` therefore trusts `TMUX_PANE` / `HERDR_PANE_ID` only when the pane's process is an ancestor of the `cafleet` process, and `doctor` reports the same verification (§ `cafleet doctor` — Environment Diagnosis).
+
+Without `--pane`, `fleet create` runs these steps in order and exits 1 at the first failure, before any write:
+
+1. **Shared-server check.** Walk the caller's ancestry (§ Ancestry walk) and apply row 1 (§ Verification rows), before any multiplexer command; the walk itself runs none.
+2. **Backend.** Detect the backend (§6.5 Backend selection).
+3. **Env pane.** Read a non-empty `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr); an unset variable fails with the unset body (§ Refusal messages).
+4. **Server.** Resolve the server and check availability (§ `fleet create`), keeping their error messages.
+5. **Verification.** Apply rows 2–7.
+6. **Registration.** Read the pane context and register it (§ `fleet create`).
+
+With `--pane`, `fleet create` reads no process entry: the pane's ID form selects the backend, the server follows § `--pane` ID form, availability is checked, then step 6 runs.
+
+###### Ancestry walk
+
+The walk starts at the `cafleet` process's own pid and is complete at pid 1. At any other pid it reads the process entry:
+
+| Entry | Walk |
+|---|---|
+| The process no longer exists | Stops at that pid |
+| The read fails | Ends unreadable at that pid, carrying the whole read error as its cause |
+| Parent `0` | Records the pid and argv, then stops at that pid |
+| Any other parent | Records the pid and argv, then continues at the parent |
+
+A walk that records 4096 entries stops at the last recorded pid.
+
+| Platform | Parent and argv | Nested PID namespace |
+|---|---|---|
+| Linux | `/proc/<pid>/stat` field 4 (the second field after the last `)`) is the parent, and `/proc/<pid>/cmdline` split on NUL is the argv, with a trailing empty segment dropped and an empty `cmdline` giving an empty argv. A `NotFound` read of either file means the process no longer exists | `/proc/self/status` `NSpid:` lists more than one pid; no `NSpid:` line means not nested |
+| Other (macOS) | `ps -o ppid= -o args= -p <pid>` with null stdin: the first whitespace field is the parent and the remaining fields are the argv. Output with no non-blank line means the process no longer exists | Never nested |
+
+| Reader | Condition | Error |
+|---|---|---|
+| Linux entry | A read error other than `NotFound`; `<file>` is `stat` or `cmdline` | `cannot read /proc/<pid>/<file>: <io error>` |
+| Linux entry | The parent field is absent or not an integer | `malformed /proc/<pid>/stat` |
+| Linux namespace | Reading `/proc/self/status` fails | `cannot read /proc/self/status: <io error>` |
+| Linux namespace | An `NSpid:` field is not an integer | `malformed /proc/self/status NSpid line: <line>` |
+| Other entry | `ps` cannot start | `cannot run ps: <io error>` |
+| Other entry | The first field is absent or not an integer | `ps printed no parent for <pid>: <line>` |
+| Other entry | No field follows the parent | `ps printed no command for <pid>: <line>` |
+
+The §6.3 Codex forwarding session pin reads entries through the same reader and propagates its errors.
+
+###### Verification rows
+
+The first matching row decides. Row 1 runs right after the walk, and rows 2–7 run after server availability:
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | A recorded ancestor's argv matches a shared-server signature of any backend (§6.7 Shared-server signatures), nearest to the caller first | Refused with the shared-server body |
+| 2 | The pane process read (§6.5 Backend operations) finds no such pane on the server | Refused with the unverified body |
+| 3 | The caller runs in a nested PID namespace | Refused with the unverified body |
+| 4 | The pane's pid equals a recorded ancestor pid | Verified |
+| 5 | The walk ended unreadable | Refused with the unverified body |
+| 6 | The walk stopped | Refused with the unverified body |
+| 7 | Otherwise (the walk completed) | Refused with the unverified body |
+
+Row 1 runs first because a daemon started from pane A can serve a session in pane C while pane A's process is still an ancestor, so row 4 alone would accept pane A. It also refuses a cross-multiplexer caller before its stale environment selects a backend or server. Row 3 precedes row 4 because pids inside a nested namespace are not comparable with the multiplexer's host pids. A pane-process command failure and a nested-namespace read error propagate as errors, not refusals.
+
+###### `--pane` ID form
+
+| `--pane` form | Backend |
+|---|---|
+| `%` followed by one or more ASCII digits (e.g. `%12`) | tmux |
+| Exactly one `:` with non-empty text on both sides and no leading `%` (e.g. `w4:p3N`) | herdr |
+| Anything else | The `--pane` form error (§ `fleet create`) |
+
+The server comes from the first matching row. An ambiguous environment (both `HERDR_ENV` and `TMUX` set) is not an error under `--pane`, because the pane form already names the backend:
+
+| Environment's backend detection (§6.5 Backend selection) | Pane's backend | Server |
+|---|---|---|
+| Any result | Either | `--mux-server` when given |
+| Yields the pane's backend | Either | The environment sources of § `fleet create` |
+| Fails as ambiguous or absent, or yields the other backend | tmux | The output of `env -u TMUX tmux display-message -p '#{socket_path}'` (the default server); a failure or empty output exits 1 with `Error: no tmux server found; pass --mux-server <socket path>` |
+| Fails as ambiguous or absent, or yields the other backend | herdr | `default`, with no command |
+
+###### User-run pane identification
+
+Each refusal body names a command the user runs in the Director pane. It reports both the pane ID and the server, because the caller environment's server is as untrusted as its pane:
+
+| Multiplexer | Guidance text | Reply |
+|---|---|---|
+| tmux | `the tmux command prompt (the user presses the tmux prefix key in the Director pane, then types :display-message -d 0 "#{pane_id} #{socket_path}" and Enter; the status line shows the pane ID, then the server socket)` | Pane ID (e.g. `%12`) and socket path (e.g. `/tmp/tmux-1000/default`) |
+| herdr | `! env -u HERDR_PANE_ID herdr --session <session> pane current --current (typed by the user into the Director's composer while the Director pane is focused; <session> is the herdr session the user attached, default unless herdr was started with --session <name>, and herdr session list shows the running sessions; the pane ID is result.pane.pane_id and the server is <session>)` | Pane ID (e.g. `w4:p3N`) and session name |
+
+The tmux command prompt evaluates both formats in the attached client's current pane without a shell. The herdr command asks the named session's server for its focused pane, which is the pane the user is typing in: it unsets `HERDR_PANE_ID` because a set value overrides `--current`, and its explicit `--session` overrides `HERDR_SESSION` and `HERDR_SOCKET_PATH`. CAFleet never fills `<session>` from the caller environment.
+
+###### Refusal messages
+
+`fleet create` prefixes each body with `cafleet fleet create `, and `doctor` prints the body alone. Every body ends with `then run cafleet fleet create with --pane <pane-id> --mux-server <server>`:
+
+| Body | Text |
+|---|---|
+| Shared-server | `cannot verify this session's pane: a shared <label> server (pid <pid>) runs this command, so its multiplexer environment can belong to another pane; ask the user to read the Director pane ID and server with <tmux guidance> in tmux, or with <herdr guidance> in herdr, then run cafleet fleet create with --pane <pane-id> --mux-server <server>` |
+| Unverified | `cannot verify that <VAR>=<pane> is this session's pane: <cause>; ask the user to read the Director pane ID and server with <guidance>, then run cafleet fleet create with --pane <pane-id> --mux-server <server>` |
+| Unset | `cannot identify its <backend> pane because <VAR> is not set; ask the user to read the Director pane ID and server with <guidance>, then run cafleet fleet create with --pane <pane-id> --mux-server <server>` |
+
+The shared-server body names both multiplexers because a shared server's environment can name the wrong one. The other bodies follow a shared-server-free ancestry, so `<VAR>` and `<guidance>` belong to the detected backend.
+
+| Row | `<cause>` in the unverified body |
+|---|---|
+| 2 | `the pane does not exist on the <backend> server <server>` |
+| 3 | `this command runs in a nested PID namespace` |
+| 5 | `the process ancestry could not be read: <read error>` (e.g. `… could not be read: cannot read /proc/412/stat: Permission denied (os error 13)`) |
+| 6 | `the process ancestry stopped at pid <pid> before reaching pid 1` |
+| 7 | `the pane's process <pane_pid> is not an ancestor of this command` |
+
+Example (a Codex Director whose tool commands run under the shared daemon):
+
+```
+Error: cafleet fleet create cannot verify this session's pane: a shared codex app-server server (pid 407596) runs this command, so its multiplexer environment can belong to another pane; ask the user to read the Director pane ID and server with the tmux command prompt (the user presses the tmux prefix key in the Director pane, then types :display-message -d 0 "#{pane_id} #{socket_path}" and Enter; the status line shows the pane ID, then the server socket) in tmux, or with ! env -u HERDR_PANE_ID herdr --session <session> pane current --current (typed by the user into the Director's composer while the Director pane is focused; <session> is the herdr session the user attached, default unless herdr was started with --session <name>, and herdr session list shows the running sessions; the pane ID is result.pane.pane_id and the server is <session>) in herdr, then run cafleet fleet create with --pane <pane-id> --mux-server <server>
+```
 
 ##### `fleet list`
 
@@ -419,7 +541,8 @@ Each check has a stable `name`, a `status` and a one-line `detail`. Checks run i
 
 | Check name | `ok` | `info` | `warn` | `error` |
 |---|---|---|---|---|
-| `multiplexer` | `<backend> session=<session> window=<window_id> pane=<pane_id>` | — | — | The multiplexer resolution, availability or context-discovery error |
+| `multiplexer` | `<backend> server=<server>` | `not checked: a shared <label> server (pid <pid>) supplies the caller environment` | — | The backend detection, server resolution or availability error |
+| `multiplexer.caller_pane` | `<VAR>=<pane_id> session=<session> window=<window_id>` | `unavailable: the multiplexer is unavailable` | A refusal body (§ Caller pane verification) | A propagated verification error, or the context read of a verified pane |
 | `database` | `cafleet <VERSION> at <path>` | — | — | The schema-version guard error for an empty or incompatible database, or the open/inspection cause |
 | `<agent>.configuration` | The resolved config path (§ Config-dir resolution) | — | — | The config-path validation error, or `HOME is not set` |
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
@@ -432,6 +555,17 @@ A recorded version is compared by string equality. Installation records are
 read only at the resolved path of a current database; a row recorded at
 another path is not the resolved installation.
 
+The multiplexer rows follow the `fleet create` steps without `--pane` (§ Caller pane verification), and `<VAR>` is the verified pane variable:
+
+| Situation | `multiplexer` | `multiplexer.caller_pane` |
+|---|---|---|
+| Row 1 refuses, before any multiplexer command | `info` | `warn` with the shared-server body |
+| Backend detection, server resolution or availability fails | `error` | `info` |
+| The env pane variable is unset | `ok` | `warn` with the unset body |
+| Rows 2, 3 or 5–7 refuse | `ok` | `warn` with the unverified body |
+| Row 4 verifies the pane | `ok` | `ok` |
+| A pane-process command failure, a nested-namespace read error, or a failed context read of the verified pane | `ok` | `error` with the error message |
+
 ##### Summary lines
 
 The default text output prints one `<status> <component>: <detail>` line per
@@ -441,9 +575,19 @@ registry order, then the `members` lines (§ Member runtime checks).
 
 | Component | `ok` detail | Problem line |
 |---|---|---|
-| `multiplexer` | `<backend> (session <session>, pane <pane_id>)` | `error` with the check's cause |
+| `multiplexer` | `<backend> (session <session>, pane <pane_id>)` | The multiplexer rules below |
 | `database` | `cafleet <VERSION>` | `error` with the check's cause, which names `run 'cafleet setup'` |
 | `<agent>` | `ready` | The backend rules below |
+
+The `multiplexer` line folds the `multiplexer` and `multiplexer.caller_pane` checks:
+
+| Statuses (`multiplexer`, `multiplexer.caller_pane`) | Summary line |
+|---|---|
+| `ok`, `ok` | `ok multiplexer: <backend> (session <session>, pane <pane_id>)` |
+| `info`, `warn` | `warn multiplexer: <caller_pane detail>` |
+| `ok`, `warn` | `warn multiplexer: <backend> (server <server>); <caller_pane detail>` |
+| `ok`, `error` | `error multiplexer: <caller_pane detail>` |
+| `error`, `info` | `error multiplexer: <multiplexer detail>` |
 
 A backend line folds that backend's `configuration`, `executable`, OpenCode `preset`, extension and `installation` checks under the first matching rule:
 
@@ -491,7 +635,8 @@ runtime checks.
   {"component":"members","status":"warn","detail":"20 lost runtime: 1-6, 9-22 — run 'cafleet member recover ID --from-member-id 2' or 'cafleet member delete ID'","state":"lost_runtime","member_ids":[1,2,3,4,5,6,9,10,11,12,13,14,15,16,17,18,19,20,21,22]}
  ],
  "checks":[
-  {"name":"multiplexer","status":"ok","detail":"herdr session=w2 window=w2:tP pane=w2:p2N"},
+  {"name":"multiplexer","status":"ok","detail":"herdr server=default"},
+  {"name":"multiplexer.caller_pane","status":"ok","detail":"HERDR_PANE_ID=w2:p2N session=w2 window=w2:tP"},
   {"name":"member_runtime.9","status":"warn","detail":"member 9 lost runtime: …","member_id":9,"state":"lost_runtime"}
  ]}
 ```
@@ -729,7 +874,7 @@ Database contention retries stay inside the snapshot budget; exhaustion or anoth
 
 **Closed notice.** Before every non-zero exit after `ready`, the listener makes one best-effort attempt, bounded by 10 s, to forward `[cafleet listen closed] exit 1: <stderr diagnostic>` with `codex queue`; the attempt can itself meet the full queue and is not retried. When that attempt also fails, stderr keeps the original diagnostic and adds `failed to forward the closed notice to codex thread <THREAD>: <cause>`, and the exit status stays 1.
 
-**Session pinning.** At startup the listener walks its ancestors, starting from its parent, reading `/proc/<pid>/stat` (ppid) and `/proc/<pid>/cmdline` on Linux and `ps -o ppid= -o args= -p <pid>` elsewhere. It pins the nearest ancestor whose argv[0] basename is exactly `codex`; shells, `bwrap`, node launchers and the sandbox helper (the same binary, run with argv[0] `codex-linux-sandbox`) are skipped. The executable path is not compared, because the helper shares it. A sandbox that unshares the PID namespace hides the ancestor, and startup fails with the missing-ancestor error.
+**Session pinning.** At startup the listener walks its ancestors, starting from its parent, through the process-entry reader of §6.3 Caller pane verification (`/proc/<pid>/stat` and `/proc/<pid>/cmdline` on Linux, `ps -o ppid= -o args= -p <pid>` elsewhere), propagating its read errors. It pins the nearest ancestor whose argv[0] basename is exactly `codex`; shells, `bwrap`, node launchers and the sandbox helper (the same binary, run with argv[0] `codex-linux-sandbox`) are skipped. The executable path is not compared, because the helper shares it. A sandbox that unshares the PID namespace hides the ancestor, and startup fails with the missing-ancestor error.
 
 **Liveness.** Each idle tick (at most 1 s) checks the pinned pid with `kill(pid, 0)`. On Linux it also compares the pinned process's start time from `/proc/<pid>/stat`, so a reused pid counts as exited. The pinned process's exit ends the listener with `session_exited`. The listener sets no `PR_SET_PDEATHSIG`, which fires when the forking thread exits rather than the multi-threaded Codex process.
 
@@ -1062,7 +1207,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | (any command with output) | Writing stdout fails with a broken pipe, e.g. `cafleet member list 1` piped into `head -1`; the command stops writing and nothing goes to stderr | — | The command's own result |
 | (any command with output) | Writing stdout fails with any other error | `Error: failed to write output: <cause>` | 1 |
 | `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
-| `fleet create` | No tmux server, the pane is not on the chosen server, a herdr caller without `HERDR_PANE_ID` or `--pane`, or a Hermes session without `--pane`; before any write | §6.3 `fleet create` | 1 |
+| `fleet create` | No tmux server, the pane is not on the chosen server, a malformed `--pane`, or without `--pane` a shared-server caller or an unset or unverifiable env pane; before any write | §6.3 `fleet create` | 1 |
 | `member create` | `--coding-agent hermes` with an unreadable `hermes config path`, before registration or multiplexer effects | §6.7 Hermes availability preflight | 1 |
 | `member create` | A non-default database and a spawn prompt without `{database_url}`, before registration (§6.3 Spawn-prompt substitution) | `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url` | 1 |
 | `member delete` | A `hermes` run whose work settlement cannot be verified; the member row and runner cleanup records are kept | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 |
@@ -1173,7 +1318,7 @@ CAFleet hosts coding-agent sessions in tmux or herdr panes. Both backends are dr
 
 #### Backend selection
 
-`fleet create` and the `cafleet doctor` `multiplexer` row are the only readers of the caller's multiplexer environment. Both use one resolver, where truthy `HERDR_ENV` signals herdr and a set `TMUX` signals tmux:
+`fleet create` and the `cafleet doctor` `multiplexer` and `multiplexer.caller_pane` rows are the only readers of the caller's multiplexer environment. Both run the shared-server check before reading it and verify the env pane afterwards (§6.3 Caller pane verification). Both use one resolver, where truthy `HERDR_ENV` signals herdr and a set `TMUX` signals tmux:
 
 | `HERDR_ENV` | `TMUX` | Result |
 |---|---|---|
@@ -1182,7 +1327,7 @@ CAFleet hosts coding-agent sessions in tmux or herdr panes. Both backends are dr
 | not truthy | set | tmux |
 | not truthy | unset | Error `no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; run cafleet inside a tmux or herdr session` |
 
-`fleet create` records the backend, its server and the Director's pane context (§6.3 `fleet create`); `cafleet doctor` reports the detected backend and its identifiers (§6.3 `cafleet doctor` — Environment Diagnosis). Every other multiplexer-driving command — `member create`, `member delete`, `fleet delete`, `member prompt`, `member exec`, `member press`, `member capture`, runner recovery and Hermes work settlement — builds it from the fleet Director's placement row (backend, `mux_server`, session, window, pane) and targets the recorded server explicitly (§ Multiplexer context).
+An explicit `fleet create --pane` selects the backend by its ID form instead of this resolver (§6.3 Caller pane verification). `fleet create` records the backend, its server and the Director's pane context (§6.3 `fleet create`); `cafleet doctor` reports the detected backend, its server and the caller pane verification (§6.3 `cafleet doctor` — Environment Diagnosis). Every other multiplexer-driving command — `member create`, `member delete`, `fleet delete`, `member prompt`, `member exec`, `member press`, `member capture`, runner recovery and Hermes work settlement — builds it from the fleet Director's placement row (backend, `mux_server`, session, window, pane) and targets the recorded server explicitly (§ Multiplexer context).
 
 #### Error taxonomy
 
@@ -1387,7 +1532,8 @@ argv in § Prompt dispatch and § Explicit key dispatch.
 | Operation | tmux argv | herdr argv | Failure handling |
 |---|---|---|---|
 | Availability | `tmux` on `PATH` | `herdr` on `PATH` | `<backend> binary not found on PATH` |
-| Pane context (`fleet create` only) | <code>tmux display-message -p -t &lt;pane&gt; "#{session_name}&#124;#{window_id}&#124;#{pane_id}"</code>, split on the first two <code>&#124;</code> | `herdr pane current --pane <pane>`; `result.pane` supplies `workspace_id`, `tab_id`, `pane_id` | tmux: `unexpected tmux display-message output: <quoted>`; herdr: `herdr <context> missing '<key>' field`; an unknown pane fails per §6.3 `fleet create` |
+| Pane context (`fleet create` and `doctor`) | <code>tmux display-message -p -t &lt;pane&gt; "#{session_name}&#124;#{window_id}&#124;#{pane_id}"</code>, split on the first two <code>&#124;</code> | `herdr pane current --pane <pane>`; `result.pane` supplies `workspace_id`, `tab_id`, `pane_id` | tmux: `unexpected tmux display-message output: <quoted>`; herdr: `herdr <context> missing '<key>' field`; an unknown pane fails per §6.3 `fleet create` |
+| Pane process (`fleet create` and `doctor`, §6.3 Caller pane verification) | <code>tmux display-message -p -t &lt;pane&gt; "#{pane_id}&#124;#{pane_pid}"</code>, split on the first <code>&#124;</code> | `herdr pane process-info --pane <pane>`; `result.process_info.shell_pid` supplies the pid | tmux: an empty `pane_id` or one that differs from `<pane>` is a missing pane, and with a matching `pane_id` a pid that is not a positive integer fails with `unexpected tmux display-message output: <quoted>`; herdr: error code `pane_not_found` is a missing pane, and a missing or non-integer field fails with `herdr pane process-info missing 'shell_pid' field` |
 | Split | `tmux split-window -t <window_id> -P -F "#{pane_id}" -d <command>...`, then `tmux select-layout -t <window_id> main-vertical` | <code>herdr pane split &lt;pane&gt; --direction right&#124;down --no-focus --cwd &lt;cwd&gt;</code>, then `herdr pane run <new pane> "<shell-quoted command>"` | An empty or failed split is an unknown pane-cleanup outcome (§ Pane ownership during creation); tmux ignores a layout error |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
 | Close | `tmux kill-pane -t <pane>` | `herdr pane get <pane>`, `herdr pane close <pane>`, then the delete-time rebalance | An explicit ignore-missing teardown tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`) |
@@ -1532,10 +1678,11 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 
 #### Interface
 
-A coding-agent backend is a stateless value selected per member at spawn time, with two read-only properties and five operations:
+A coding-agent backend is a stateless value selected per member at spawn time, with three read-only properties and five operations:
 
 - **`name`** — the registry key: a stable lowercase string that MUST equal its `--coding-agent` token, the persisted `placement.coding_agent` lookup value and its registration key.
 - **`binary_name`** — the executable resolved against `PATH`; equal to `name` for every backend.
+- **`shared_server_signatures`** — the backend's shared-server signatures (§ Shared-server signatures), empty for a backend without one.
 - **`ensure_available()`** — fails on the first unmet spawn precondition, in order: the config directory resolves per §6.3 CLI *Config-dir resolution* (an invalid config-location variable fails first); the binary resolves on `PATH`; the backend's own check (opencode: the selected preset file is readable; hermes: the effective approvals configuration passes § Hermes availability preflight; pi: the CAFleet pi extension `<pi base>/extensions/cafleet.ts` is readable). A shared helper resolves `binary_name` to an absolute path per §6.9 Member PTY runtime *Native executable resolution*, failing with `binary {binary_name} not found on PATH`. Preconditions read the host through a **spawn probe** (binary lookup, home directory, `env_var(name) -> optional string`); the system probe reads the process environment.
 - **`validate_model(model)`**, **`validate_effort(effort)`** — raise a value-error for a value malformed or unacceptable for this backend; `None` (flag omitted) is always valid. A backend without a reasoning-effort control rejects every non-`None` effort.
 - **`validate_prompt(prompt)`** — raises a value-error for a spawn-prompt body this backend cannot carry as its prompt argument; only pi rejects a body (§ Per-backend `build_spawn_argv`), and every other backend accepts every prompt. `member create` checks the raw body, before placeholder substitution.
@@ -1548,6 +1695,18 @@ A coding-agent backend is a stateless value selected per member at spawn time, w
 #### Registry resolution
 
 The backend registry is the fixed set of supported backends in registry order, each keyed by its `name`. Resolution exactly matches the persisted `placement.coding_agent` token, with no fuzzy matching or default; a token with no entry fails with `invalid stored value for member_placements.coding_agent: VALUE`, exit 1.
+
+#### Shared-server signatures
+
+A shared-server signature identifies a long-lived backend server whose tool commands carry the environment of the pane that started it, not of the session they serve. It has `programs`, the final path components that name the server's program token, and `subcommand`, the tokens that follow that program token:
+
+| Backend | `programs` | `subcommand` | Label |
+|---|---|---|---|
+| `codex` | `codex` | `app-server` | `codex app-server` |
+| `hermes` | `hermes`, `hermes_cli.main` | `gateway`, `run` | `hermes gateway run` |
+| `claude`, `opencode`, `pi` | — | — | — |
+
+An argv matches when some token `argv[i]`, whose final `/`-separated component equals one of `programs`, is followed somewhere after `i` by the `subcommand` tokens as a contiguous run; options may sit between the program token and the run. The label is the backend name followed by the `subcommand` tokens joined by spaces. §6.3 Caller pane verification row 1 tests every ancestor against the signatures of every backend in registry order, whatever `--coding-agent` declares. OpenCode has no signature; the ancestry check refuses a second client of `opencode serve --service`.
 
 #### Per-backend `build_spawn_argv` (exact, token-by-token)
 
@@ -1897,13 +2056,15 @@ CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root D
 
 **codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. Director reception is `cafleet message listen <director-id> --codex-thread "$CODEX_THREAD_ID"`, started once through native `exec_command` (§6.3 Codex forwarding); Codex injects `CODEX_THREAD_ID` into every exec shell. Each forwarded record arrives as a queued user turn: it starts a turn on an idle session, waits for the end of a running turn otherwise, and interleaves with native goal continuation turns at turn boundaries. Where the sandbox cannot start the forwarder, for example when bwrap cannot create namespaces, it runs on the escalated path under the host's approval rules. The installed CAFleet skill's [Codex native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#codex-native-director-reception) owns the tool call, consumption and recovery.
 
+Codex 0.167.0 and later start or reuse the shared `codex app-server` daemon (openai/codex#58940 retired `daemon_auto_start`), and Director reception through `codex queue` needs that daemon, so a Codex Director cannot launch with `--no-daemon`. Its tool commands then run under the daemon, and its `fleet create` without `--pane` usually refuses at the shared-server check (§6.3 Caller pane verification).
+
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Native input is a Director-authorized action, with no second member-tool permission check assumed.
 
 **opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication; the Director coordinates next steps and routed native shell commands and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`; its effective permission boundary and any second member-tool permission check remain unestablished, so the preset's member-tool permissions and the Director's command authorization stay in force. An OpenCode Director runs OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory with the default agent, so plugins load in its private server with the launcher's environment; the shared background service passes no client environment to plugins and is not a supported Director launch. The `cafleet` plugin supplies reception and the goal extension (§ Director extensions). OpenCode 2.2.0 gives every agent a base policy whose first rule allows every action, so the plugin's `cafleet` action resolves to allow on a default Director; a configuration whose broad `ask` or `deny` rule overrides that base allow restores it with `{ "action": "cafleet", "resource": "*", "effect": "allow" }`.
 
-**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected through the gateway run without rendering in the classic CLI; members keep `--cli`. The Director receives inbox records through the `cafleet` plugin's `cafleet_listen` tool, which runs the listener inside the per-home gateway (§ Director extensions): each record becomes its own turn, and a record injected during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
+**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected through the gateway run without rendering in the classic CLI; members keep `--cli`. The Director receives inbox records through the `cafleet` plugin's `cafleet_listen` tool, which runs the listener inside the per-home gateway (§ Director extensions): each record becomes its own turn, and a record injected during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. A Hermes Director's terminal tools run in the per-home gateway (`hermes gateway run`), so its `fleet create` without `--pane` always refuses at the shared-server check (§6.3 Caller pane verification). CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
 
-**pi**: pi 1.5.0 has no native goal, no native facility that pushes external text into a session and no per-tool approval; the CAFleet pi extension supplies reception, the goal extension and the `cafleet_ask` decision surface (§ Director extensions), and the member gate (§ pi member gate). A pi Director runs plain `pi` (the fullscreen TUI) from the project directory, so the extension auto-loads; pi's bash tool inherits the pane environment, so `fleet create` registers the pane without `--pane`. A pi Director runs its own tool calls without approval, and the member gate is inert in its session. The installed CAFleet skill's [pi native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#pi-native-director-reception) owns the tool calls, consumption and recovery. Leading-`!` input runs a shell command as `user_bash` outside the member gate, stores its output for the next prompt and starts no turn, so after `member exec` the Director sends an explicit continuation; the Director authorizes each routed command under its host rules. Enter while a member works queues the text as a steering message.
+**pi**: pi 1.5.0 has no native goal, no native facility that pushes external text into a session and no per-tool approval; the CAFleet pi extension supplies reception, the goal extension and the `cafleet_ask` decision surface (§ Director extensions), and the member gate (§ pi member gate). A pi Director runs plain `pi` (the fullscreen TUI) from the project directory, so the extension auto-loads; pi's bash tool runs under the pane's `pi` process, so `fleet create` verifies and registers the pane without `--pane`. A pi Director runs its own tool calls without approval, and the member gate is inert in its session. The installed CAFleet skill's [pi native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#pi-native-director-reception) owns the tool calls, consumption and recovery. Leading-`!` input runs a shell command as `user_bash` outside the member gate, stores its output for the next prompt and starts no turn, so after `member exec` the Director sends an explicit continuation; the Director authorizes each routed command under its host rules. Enter while a member works queues the text as a steering message.
 
 #### Director extensions
 
@@ -2003,7 +2164,7 @@ For a `session_shutdown` reason of `reload`, `new`, `resume` or `fork`, the pi p
 
 ### 6.8 Configuration
 
-Settings retain only the selected SQLite URL, built from `--database-url` (§6.3 Database selection). CAFleet reads no `CAFLEET_*` environment variable; it reads the backend config-location variables and `HOME` (§6.3 Config-dir resolution), and only `fleet create` and doctor's `multiplexer` row read the caller's multiplexer environment (§6.5 Backend selection). Spawned members receive, when the creator sets it, the selected backend's config-location variable (§6.3 *Member environment*); identity and the database are rendered into prompt literals (§6.3 Spawn-prompt substitution).
+Settings retain only the selected SQLite URL, built from `--database-url` (§6.3 Database selection). CAFleet reads no `CAFLEET_*` environment variable; it reads the backend config-location variables and `HOME` (§6.3 Config-dir resolution), and only `fleet create` and doctor's `multiplexer` and `multiplexer.caller_pane` rows read the caller's multiplexer environment, verified against the caller's process ancestry (§6.5 Backend selection, §6.3 Caller pane verification). Spawned members receive, when the creator sets it, the selected backend's config-location variable (§6.3 *Member environment*); identity and the database are rendered into prompt literals (§6.3 Spawn-prompt substitution).
 
 ### 6.9 Member PTY runtime
 
@@ -3708,4 +3869,4 @@ The DDL above owns every runtime table column, type, enum, nullability constrain
 
 ## 9. Testing strategy
 
-The test suite covers current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, uncertain-cause recording at every runner uncertain transition, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds; and general timed pipe draining and owned-child cleanup.
+The test suite covers current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, uncertain-cause recording at every runner uncertain transition, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; caller-pane verification through injected process tables and fake multiplexers, with the process-entry parsers tested on every platform; backend/multiplexer smoke coverage; links, embedding and release builds; and general timed pipe draining and owned-child cleanup.
