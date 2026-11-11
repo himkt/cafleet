@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 31/70 tasks complete
+**Progress**: 39/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -553,18 +553,16 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 - [x] herdr unit tests: the exact argv with `--session <server>`, the `shell_pid` read, `pane_not_found` (`None`) and a missing field (error) <!-- completed: 2026-11-11T11:53 -->
 - [x] Delete `context_discovery` with its implementations and tests, `resolve_mux`, `resolve_multiplexer`, `BackendCore.env`, `BackendCore::env_var` and the `new(runner, env)` constructors. Make `BackendCore.server` a `String`, and move every test to `for_server` with the selector in its expected argv <!-- completed: 2026-11-11T11:53 -->
 
-COMMENT(programmer): Steps 6–8 status. (1) `mise //:lint` fails only on dead code: `SharedServerSignature` and its consts/methods, `Multiplexer::pane_process`, `ProcessTable::own_pid` / `nested_pid_namespace`, `parse_nspid_nested`, plus the Tester's unused `FixtureProcessTable` re-export at `src/runtime/mod.rs:187`; Step 9's `caller.rs` is their first consumer. Because clippy stops the task, `cargo fmt --check` was not reached. (2) Deleting `context_discovery` / `resolve_mux` left doctor without a reader, so `src/cli/setup.rs` `detect_mux` is an interim reader (caller_env → detect → caller_server → for_server → env pane → pane_context) that Step 11 replaces. (3) `mise //:test`: 1613 pass, 1 fails in two full runs: `runtime::process::tests::mechanisms_tests::runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_native_zero_exit` (`cleanup_state: Incomplete`, "owned descendants remain unconfirmed"). It passes alone and within `runtime::process`, so it looks load-dependent; whether it also fails on `main` is unverified. (4) I ran one `cargo build --bin cafleet` directly instead of through a mise task; every later check went through mise.
-
 ### Step 9: Caller verification module
 
-- [ ] Add `src/multiplexer/caller.rs` with the types and functions in § Caller resolution and verification <!-- completed: -->
-- [ ] Drop `HERMES_SESSION_ID` from `caller_env` <!-- completed: -->
-- [ ] Unit-test `walk` termination: PID 1 reached, a `None` entry, `parent == 0`, a read error carrying the whole message, and the 4096-entry cap <!-- completed: -->
-- [ ] Unit-test each decision-table row with `FixtureProcessTable` and a fake `Multiplexer`, including a propagated `pane_process` error and a propagated `nested_pid_namespace` error <!-- completed: -->
-- [ ] Unit-test every tmux and herdr case in § Evidence fixtures, after re-capturing each *re-capture* token <!-- completed: -->
-- [ ] Unit-test the `--pane` form rule: `%12` (tmux), `w4:p3N` (herdr), and `12`, `%`, `%1a`, `a:b:c`, `:p1`, `w4:` and `%1:2` (form error) <!-- completed: -->
-- [ ] Unit-test `resolve_pane_mux` server selection for every row of its table: `--mux-server` given; env backend equal to the derived backend; an ambiguous environment (`HERDR_ENV` and `TMUX` set) with `%5`, asserting the runner receives exactly `env -u TMUX tmux display-message -p #{socket_path}`; the ambiguous environment with `w4:p1` (`default`, zero runner calls); a herdr environment with `%5` and an empty environment with `%5` (the same `env -u TMUX` argv); and an empty or failed reply (`no tmux server found; pass --mux-server <socket path>`) <!-- completed: -->
-- [ ] Unit-test the exact `shared_server_message`, the `unverified_message` for every cause on both multiplexers, and `unset_message` on both <!-- completed: -->
+- [x] Add `src/multiplexer/caller.rs` with the types and functions in § Caller resolution and verification <!-- completed: 2026-11-11T11:59 -->
+- [x] Drop `HERMES_SESSION_ID` from `caller_env` <!-- completed: 2026-11-11T11:59 -->
+- [x] Unit-test `walk` termination: PID 1 reached, a `None` entry, `parent == 0`, a read error carrying the whole message, and the 4096-entry cap <!-- completed: 2026-11-11T11:59 -->
+- [x] Unit-test each decision-table row with `FixtureProcessTable` and a fake `Multiplexer`, including a propagated `pane_process` error and a propagated `nested_pid_namespace` error <!-- completed: 2026-11-11T11:59 -->
+- [x] Unit-test every tmux and herdr case in § Evidence fixtures, after re-capturing each *re-capture* token <!-- completed: 2026-11-11T11:59 -->
+- [x] Unit-test the `--pane` form rule: `%12` (tmux), `w4:p3N` (herdr), and `12`, `%`, `%1a`, `a:b:c`, `:p1`, `w4:` and `%1:2` (form error) <!-- completed: 2026-11-11T11:59 -->
+- [x] Unit-test `resolve_pane_mux` server selection for every row of its table: `--mux-server` given; env backend equal to the derived backend; an ambiguous environment (`HERDR_ENV` and `TMUX` set) with `%5`, asserting the runner receives exactly `env -u TMUX tmux display-message -p #{socket_path}`; the ambiguous environment with `w4:p1` (`default`, zero runner calls); a herdr environment with `%5` and an empty environment with `%5` (the same `env -u TMUX` argv); and an empty or failed reply (`no tmux server found; pass --mux-server <socket path>`) <!-- completed: 2026-11-11T11:59 -->
+- [x] Unit-test the exact `shared_server_message`, the `unverified_message` for every cause on both multiplexers, and `unset_message` on both <!-- completed: 2026-11-11T11:59 -->
 
 ### Step 10: `fleet create`
 

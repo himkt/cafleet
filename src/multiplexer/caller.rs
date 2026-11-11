@@ -1,3 +1,292 @@
+use crate::coding_agent::CodingAgent;
+use crate::error::CafleetError;
+use crate::multiplexer::CommandRunner;
+use crate::multiplexer::DEFAULT_HERDR_SESSION;
+use crate::multiplexer::Multiplexer;
+use crate::multiplexer::MuxBackend;
+use crate::multiplexer::argv;
+use crate::multiplexer::caller_server;
+use crate::multiplexer::tmux_socket_reply;
+use crate::runtime::ProcessTable;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+const MAX_ANCESTRY: usize = 4096;
+
+/// `CommandRunner` passes the process environment to every child, so a stale `TMUX` would
+/// select its server instead of the default one.
+const DEFAULT_TMUX_SOCKET: &[&str] = &[
+    "env",
+    "-u",
+    "TMUX",
+    "tmux",
+    "display-message",
+    "-p",
+    "#{socket_path}",
+];
+
+const TMUX_GUIDANCE: &str = "the tmux command prompt (the user presses the tmux prefix key in the Director pane, then types :display-message -d 0 \"#{pane_id} #{socket_path}\" and Enter; the status line shows the pane ID, then the server socket)";
+
+const HERDR_GUIDANCE: &str = "! env -u HERDR_PANE_ID herdr --session <session> pane current --current (typed by the user into the Director's composer while the Director pane is focused; <session> is the herdr session the user attached, default unless herdr was started with --session <name>, and herdr session list shows the running sessions; the pane ID is result.pane.pane_id and the server is <session>)";
+
+const RERUN: &str = "then run cafleet fleet create with --pane <pane-id> --mux-server <server>";
+
+pub(crate) struct CallerMux {
+    pub(crate) backend: MuxBackend,
+    pub(crate) server: String,
+    pub(crate) mux: Box<dyn Multiplexer>,
+}
+
+pub(crate) struct CallerPane {
+    pub(crate) variable: &'static str,
+    pub(crate) pane: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WalkEnd {
+    Complete,
+    Stopped { pid: i64 },
+    Unreadable { pid: i64, cause: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Ancestry {
+    /// Caller first.
+    pub(crate) entries: Vec<(i64, Vec<String>)>,
+    pub(crate) end: WalkEnd,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    SharedServer { label: String, pid: i64 },
+    PaneNotFound,
+    PaneNotAncestor { pane_pid: i64 },
+    WalkStopped { pid: i64 },
+    NestedPidNamespace,
+    ProcessUnreadable { pid: i64, cause: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Verification {
+    Verified { pane_pid: i64 },
+    Refused(Refusal),
+}
+
+pub(crate) fn walk(table: &dyn ProcessTable) -> Ancestry {
+    let mut entries: Vec<(i64, Vec<String>)> = Vec::new();
+    let mut pid = table.own_pid();
+    let end = loop {
+        if pid == 1 {
+            break WalkEnd::Complete;
+        }
+        if entries.len() == MAX_ANCESTRY {
+            let (last, _) = entries.last().expect("a capped walk has recorded entries");
+            break WalkEnd::Stopped { pid: *last };
+        }
+        match table.entry(pid) {
+            Err(error) => {
+                break WalkEnd::Unreadable {
+                    pid,
+                    cause: error.to_string(),
+                };
+            }
+            Ok(None) => break WalkEnd::Stopped { pid },
+            Ok(Some(entry)) => {
+                entries.push((pid, entry.argv));
+                if entry.parent == 0 {
+                    break WalkEnd::Stopped { pid };
+                }
+                pid = entry.parent;
+            }
+        }
+    };
+    Ancestry { entries, end }
+}
+
+/// Row 1: the nearest ancestor that matches a shared-server signature.
+pub(crate) fn shared_server(ancestry: &Ancestry) -> Option<Refusal> {
+    ancestry.entries.iter().find_map(|(pid, argv)| {
+        CodingAgent::all().iter().find_map(|agent| {
+            agent
+                .shared_server_signatures()
+                .iter()
+                .find(|signature| signature.matches(argv))
+                .map(|signature| Refusal::SharedServer {
+                    label: signature.label(*agent),
+                    pid: *pid,
+                })
+        })
+    })
+}
+
+fn lookup(env: &HashMap<String, String>) -> impl Fn(&str) -> Option<String> + '_ {
+    |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned()
+}
+
+fn available(
+    backend: MuxBackend,
+    server: String,
+    runner: Rc<dyn CommandRunner>,
+) -> Result<CallerMux, CafleetError> {
+    let mux = backend.for_server(&server, runner);
+    mux.ensure_available()?;
+    Ok(CallerMux {
+        backend,
+        server,
+        mux,
+    })
+}
+
+/// Backend detection, server resolution and availability, without `--pane`.
+pub(crate) fn resolve_env_mux(
+    env: &HashMap<String, String>,
+    runner: Rc<dyn CommandRunner>,
+) -> Result<CallerMux, CafleetError> {
+    let backend = MuxBackend::detect(lookup(env))?;
+    let server = caller_server(backend, lookup(env), runner.as_ref())?;
+    available(backend, server, runner)
+}
+
+fn pane_backend(pane: &str) -> Result<MuxBackend, CafleetError> {
+    if let Some(digits) = pane.strip_prefix('%')
+        && !digits.is_empty()
+        && digits.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Ok(MuxBackend::Tmux);
+    }
+    if let Some((workspace, rest)) = pane.split_once(':')
+        && !pane.starts_with('%')
+        && !workspace.is_empty()
+        && !rest.is_empty()
+        && !rest.contains(':')
+    {
+        return Ok(MuxBackend::Herdr);
+    }
+    Err(CafleetError::App(format!(
+        "--pane {pane} is neither a tmux pane ID (%N) nor a herdr pane ID (<workspace>:<pane>)"
+    )))
+}
+
+/// The backend selected by an explicit `--pane` ID form, its server and availability.
+pub(crate) fn resolve_pane_mux(
+    pane: &str,
+    mux_server: Option<String>,
+    env: &HashMap<String, String>,
+    runner: Rc<dyn CommandRunner>,
+) -> Result<CallerMux, CafleetError> {
+    let backend = pane_backend(pane)?;
+    let server = match mux_server {
+        Some(server) => server,
+        None if MuxBackend::detect(lookup(env)).is_ok_and(|detected| detected == backend) => {
+            caller_server(backend, lookup(env), runner.as_ref())?
+        }
+        None => match backend {
+            MuxBackend::Tmux => tmux_socket_reply(runner.as_ref(), &argv(DEFAULT_TMUX_SOCKET))?,
+            MuxBackend::Herdr => DEFAULT_HERDR_SESSION.to_owned(),
+        },
+    };
+    available(backend, server, runner)
+}
+
+fn pane_variable(backend: MuxBackend) -> &'static str {
+    match backend {
+        MuxBackend::Tmux => "TMUX_PANE",
+        MuxBackend::Herdr => "HERDR_PANE_ID",
+    }
+}
+
+/// The non-empty `TMUX_PANE` / `HERDR_PANE_ID` for `backend`, or `None`.
+pub(crate) fn env_pane(backend: MuxBackend, env: &HashMap<String, String>) -> Option<CallerPane> {
+    let variable = pane_variable(backend);
+    lookup(env)(variable).map(|pane| CallerPane { variable, pane })
+}
+
+/// Rows 2–7 for an env pane after `shared_server` returned `None`.
+pub(crate) fn verify_pane(
+    mux: &dyn Multiplexer,
+    table: &dyn ProcessTable,
+    ancestry: &Ancestry,
+    pane: &str,
+) -> Result<Verification, CafleetError> {
+    let Some(pane_pid) = mux.pane_process(pane)? else {
+        return Ok(Verification::Refused(Refusal::PaneNotFound));
+    };
+    if table.nested_pid_namespace()? {
+        return Ok(Verification::Refused(Refusal::NestedPidNamespace));
+    }
+    if ancestry.entries.iter().any(|(pid, _)| *pid == pane_pid) {
+        return Ok(Verification::Verified { pane_pid });
+    }
+    Ok(Verification::Refused(match &ancestry.end {
+        WalkEnd::Unreadable { pid, cause } => Refusal::ProcessUnreadable {
+            pid: *pid,
+            cause: cause.clone(),
+        },
+        WalkEnd::Stopped { pid } => Refusal::WalkStopped { pid: *pid },
+        WalkEnd::Complete => Refusal::PaneNotAncestor { pane_pid },
+    }))
+}
+
+/// The user-run command for one multiplexer.
+pub(crate) fn identification_guidance(backend: MuxBackend) -> &'static str {
+    match backend {
+        MuxBackend::Tmux => TMUX_GUIDANCE,
+        MuxBackend::Herdr => HERDR_GUIDANCE,
+    }
+}
+
+/// The refusal bodies, without the `cafleet fleet create ` prefix.
+pub(crate) fn shared_server_message(refusal: &Refusal) -> String {
+    let Refusal::SharedServer { label, pid } = refusal else {
+        panic!("shared_server_message takes a shared-server refusal, got {refusal:?}");
+    };
+    format!(
+        "cannot verify this session's pane: a shared {label} server (pid {pid}) runs this command, so its multiplexer environment can belong to another pane; ask the user to read the Director pane ID and server with {TMUX_GUIDANCE} in tmux, or with {HERDR_GUIDANCE} in herdr, {RERUN}"
+    )
+}
+
+pub(crate) fn unverified_message(
+    caller: &CallerPane,
+    refusal: &Refusal,
+    mux: &CallerMux,
+) -> String {
+    let cause = match refusal {
+        Refusal::PaneNotFound => format!(
+            "the pane does not exist on the {} server {}",
+            mux.backend.name(),
+            mux.server
+        ),
+        Refusal::PaneNotAncestor { pane_pid } => {
+            format!("the pane's process {pane_pid} is not an ancestor of this command")
+        }
+        Refusal::WalkStopped { pid } => {
+            format!("the process ancestry stopped at pid {pid} before reaching pid 1")
+        }
+        Refusal::NestedPidNamespace => "this command runs in a nested PID namespace".to_owned(),
+        Refusal::ProcessUnreadable { cause, .. } => {
+            format!("the process ancestry could not be read: {cause}")
+        }
+        Refusal::SharedServer { .. } => {
+            panic!("a shared-server refusal renders through shared_server_message")
+        }
+    };
+    format!(
+        "cannot verify that {}={} is this session's pane: {cause}; ask the user to read the Director pane ID and server with {}, {RERUN}",
+        caller.variable,
+        caller.pane,
+        identification_guidance(mux.backend)
+    )
+}
+
+pub(crate) fn unset_message(backend: MuxBackend) -> String {
+    format!(
+        "cannot identify its {} pane because {} is not set; ask the user to read the Director pane ID and server with {}, {RERUN}",
+        backend.name(),
+        pane_variable(backend),
+        identification_guidance(backend)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
+pub(crate) mod caller;
 pub(crate) mod herdr;
 pub(crate) mod tmux;
 
@@ -564,8 +565,7 @@ impl MuxBackend {
 /// non-UTF-8 one fails with its name.
 pub(crate) fn caller_env()
 -> Result<std::collections::HashMap<String, String>, crate::error::CafleetError> {
-    let names =
-        "TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH HERDR_PANE_ID HERMES_SESSION_ID";
+    let names = "TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH HERDR_PANE_ID";
     let set = |name: &str| Ok(crate::config::process_env(name)?.map(|value| (name.into(), value)));
     names
         .split(' ')
@@ -610,16 +610,26 @@ pub(crate) fn caller_server(
     }
 }
 
-const DEFAULT_HERDR_SESSION: &str = "default";
+pub(crate) const DEFAULT_HERDR_SESSION: &str = "default";
 
 fn default_tmux_socket(runner: &dyn CommandRunner) -> Result<String, MultiplexerError> {
+    tmux_socket_reply(
+        runner,
+        &argv(&["tmux", "display-message", "-p", "#{socket_path}"]),
+    )
+}
+
+/// The default tmux server's socket path as `argv` prints it.
+pub(crate) fn tmux_socket_reply(
+    runner: &dyn CommandRunner,
+    argv: &[String],
+) -> Result<String, MultiplexerError> {
     let no_server =
         || MultiplexerError::new("no tmux server found; pass --mux-server <socket path>");
-    let argv = argv(&["tmux", "display-message", "-p", "#{socket_path}"]);
-    let socket = match runner.run(&argv, None) {
+    let socket = match runner.run(argv, None) {
         Ok(out) => out.trim().to_owned(),
         Err(RunError::Failed { .. }) => return Err(no_server()),
-        Err(error) => return Err(map_run_error("tmux", &argv, None, error)),
+        Err(error) => return Err(map_run_error("tmux", argv, None, error)),
     };
     if socket.is_empty() {
         return Err(no_server());

@@ -757,20 +757,17 @@ pub(crate) fn parse_nspid_nested(status: &str) -> Result<bool> {
     let Some(line) = status.lines().find(|line| line.starts_with("NSpid:")) else {
         return Ok(false);
     };
-    let fields = line["NSpid:".len()..]
+    let fields: Option<Vec<i64>> = line["NSpid:".len()..]
         .split_whitespace()
-        .map(str::parse::<i64>)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|_| {
-            CafleetError::App(format!("malformed /proc/self/status NSpid line: {line}"))
-        })?;
+        .map(|field| field.parse().ok())
+        .collect();
+    let fields = fields.ok_or_else(|| {
+        CafleetError::App(format!("malformed /proc/self/status NSpid line: {line}"))
+    })?;
     Ok(fields.len() > 1)
 }
 
-#[cfg_attr(
-    target_os = "linux",
-    allow(dead_code, reason = "the ps reader runs only outside Linux")
-)]
+#[cfg_attr(target_os = "linux", allow(dead_code, reason = "the ps reader runs only outside Linux"))]
 pub(crate) fn parse_ps_output(
     pid: i64,
     output: &str,
@@ -785,9 +782,7 @@ pub(crate) fn parse_ps_output(
         .ok_or_else(|| CafleetError::App(format!("ps printed no parent for {pid}: {line}")))?;
     let argv: Vec<String> = fields.map(str::to_owned).collect();
     if argv.is_empty() {
-        return Err(CafleetError::App(format!(
-            "ps printed no command for {pid}: {line}"
-        )));
+        return Err(CafleetError::App(format!("ps printed no command for {pid}: {line}")));
     }
     Ok(Some(ProcessEntry { parent, argv }))
 }
