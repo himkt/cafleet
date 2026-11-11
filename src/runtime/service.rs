@@ -2614,7 +2614,11 @@ pub(crate) mod test_support {
             let script = fixture._dir.path().join("owned-observation-process");
             private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
-            spec.argv = vec![script.to_str().unwrap().into(), "--approve-for-me".into()];
+            spec.argv = vec![
+                script.to_str().unwrap().into(),
+                "--no-daemon".into(),
+                "--approve-for-me".into(),
+            ];
             let definitions = crate::coding_agent::catalog::test_support::synthetic_definitions();
             private_write(
                 &fixture._dir.path().join("observation-services.json"),

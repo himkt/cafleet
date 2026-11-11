@@ -47,6 +47,8 @@ New members run through the CAFleet PTY runner with a declared detection-coverag
 
 Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and your Hermes configuration's `approvals.mode` ([Hermes configuration](#hermes-configuration)) governs the session. pi has no native per-tool approval, so both pi modes run the CAFleet member gate, which runs only the member's broker message commands: `cafleet-ask` opens the gate's approval form for every other command, and `cafleet` blocks it without a prompt ([pi configuration](#pi-configuration)).
 
+Every Codex member runs with `--no-daemon`, as its own Codex session outside the shared background server, so its commands always see the member's own pane.
+
 The Director handles an approval prompt the member's bundled runner profile recognizes as a [runtime event](members.md#consume-a-runtime-event); an unrecognized one, such as in a pane narrower than the profile's captured layouts, is answered manually on the member's native surface. A Member-eligible backend's profile recognizes every approval prompt its default mode can show outside its recorded layout limits ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements)). Each backend's launch configuration supplies broker access, subject to native and managed rules. [Choose a native policy](members.md#choose-a-native-policy) covers mode selection and profile coverage; the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 
 ## cafleet usage from a member pane

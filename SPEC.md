@@ -1574,13 +1574,15 @@ The `--allowedTools` values are the claude member's **spawn-time allow rules**, 
 **codex** — `ensure_available` resolves the codex home and checks `codex` on `PATH`. `display_name` is ignored.
 
 ```
-["codex", "--approve-for-me"]
+["codex", "--no-daemon", "--approve-for-me"]
   (+ ["--model", <model>]  if model is not None)
   (+ ["--config=model_reasoning_effort=<effort>"]  if effort is not None)  # ONE token
   (+ <prompt>)                                       # bare trailing positional
 ```
 
 An explicit `on-request` or `never` replaces `"--approve-for-me"` with `"--ask-for-approval", <mode>, "--sandbox", "workspace-write"`; `"--approve-for-me"` selects the workspace-write sandbox itself, and Codex 0.163.0 rejects it together with `--sandbox`.
+
+Every launch policy keeps `"--no-daemon"`, so the member runs its own Codex session instead of starting or reusing the shared background app-server. The member's tool commands are then children of the pane's own `codex` process and inherit that pane's multiplexer variables; a shared app-server keeps the environment of the pane that started it. Codex 0.163.0 accepts `--no-daemon`.
 
 **opencode** — `validate_model` examples: `"openai/gpt-4"` accepted; `"a/b/c"` accepted as provider `a` / model `b/c`; `"a/"`, `"/b"`, `"abc"` rejected. `validate_effort` rejects every non-`None` value, so `build_spawn_argv` never emits effort tokens. `member create` resolves the launch policy before `ensure_available`, whose opencode check (§ Interface order) reads only the selected preset `<preset base>/agents/<mode>.md` for the resolved mode (§ opencode preset); only opencode has a required preset. `display_name` is ignored; the prompt is a two-token `--prompt <prompt>` pair, unlike claude/codex's bare positional.
 

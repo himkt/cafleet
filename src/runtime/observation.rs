@@ -2286,6 +2286,7 @@ pub(crate) mod native_capture {
                 spec.evidence_policy = policy;
                 spec.argv = vec![
                     executable.to_str().unwrap().into(),
+                    "--no-daemon".into(),
                     "--approve-for-me".into(),
                     "private assignment canary".into(),
                 ];
@@ -3366,15 +3367,15 @@ pub(crate) mod native_capture {
                     let (mut port, receiver) =
                         fixture.channel_with(NativeCaptureLimits::default(), &[], &catalog());
                     match mutation {
-                        "approval" => fixture.spec.argv[1] = "--full-auto".into(),
+                        "approval" => fixture.spec.argv[2] = "--full-auto".into(),
                         "missing_approval" => {
-                            fixture.spec.argv.remove(1);
+                            fixture.spec.argv.remove(2);
                         }
                         "repeat_approval" => fixture.spec.argv.push("--approve-for-me".into()),
                         "added_sandbox" => fixture
                             .spec
                             .argv
-                            .splice(2..2, ["--sandbox".into(), "workspace-write".into()])
+                            .splice(3..3, ["--sandbox".into(), "workspace-write".into()])
                             .for_each(drop),
                         "trailing_sandbox" => fixture
                             .spec
