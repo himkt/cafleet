@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 50/70 tasks complete
+**Progress**: 54/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -583,10 +583,10 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 
 ### Step 12: Validation
 
-- [ ] Run `mise //:test`; all tests pass <!-- completed: -->
-- [ ] Run `mise //:lint`; no findings <!-- completed: -->
-- [ ] Run `mise //docs:build`; the build and link check pass <!-- completed: -->
-- [ ] Build the branch binary with `mise //:build` and use `<repo>/target/release/cafleet` by absolute path for live acceptance; run no install task, so the operator's installed binary and assets and the active execute fleet's runtime stay unchanged <!-- completed: -->
+- [x] Run `mise //:test`; all tests pass <!-- completed: 2026-11-11T12:08 -->
+- [x] Run `mise //:lint`; no findings <!-- completed: 2026-11-11T12:08 -->
+- [x] Run `mise //docs:build`; the build and link check pass <!-- completed: 2026-11-11T12:08 -->
+- [x] Build the branch binary with `mise //:build` and use `<repo>/target/release/cafleet` by absolute path for live acceptance; run no install task, so the operator's installed binary and assets and the active execute fleet's runtime stay unchanged <!-- completed: 2026-11-11T12:08 -->
 - [ ] Run the scratch setup from § Live acceptance protocol and confirm that `<BASE>/.acceptance/home` holds the installed assets and that the operator's installed `cafleet` executable (`command -v cafleet`) and every CAFleet asset under the operator's config directories (the `cafleet` skill directories, the OpenCode and Hermes plugin files and the pi extension) have identical `sha256sum` listings before and after <!-- completed: -->
 
 ### Step 13: Live acceptance — tmux
