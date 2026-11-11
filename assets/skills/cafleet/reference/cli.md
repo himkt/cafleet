@@ -72,13 +72,14 @@ Send/create require exactly one positional body or `--file PATH`; `--file -` rea
 
 ## Fleet commands
 
-`cafleet fleet create --name NAME --coding-agent AGENT [--pane PANE_ID [--mux-server SERVER]] [--json]` registers the Director's pane and its multiplexer server as the root Director's placement without spawning. It and doctor's `multiplexer` row are the only readers of the caller's multiplexer environment; every later command targets the recorded server (`tmux -S <socket>` or `herdr --session <name>`) and placement. A failed `TMUX`/`HERDR_ENV` detection gives `cafleet fleet create must be run inside a tmux or herdr session`. Director messages use broker reception.
+`cafleet fleet create --name NAME --coding-agent AGENT [--pane PANE_ID [--mux-server SERVER]] [--json]` registers the Director's pane and its multiplexer server as the root Director's placement without spawning. It and doctor's `multiplexer` and `multiplexer.caller_pane` rows are the only readers of the caller's multiplexer environment; every later command targets the recorded server (`tmux -S <socket>` or `herdr --session <name>`) and placement. Without `--pane`, it first refuses a caller whose process ancestry includes a shared server (`codex app-server`, `hermes gateway run`), before any multiplexer command, and then registers `TMUX_PANE` / `HERDR_PANE_ID` only when that pane's process is an ancestor of the `cafleet` process. A failed `TMUX`/`HERDR_ENV` detection gives `cafleet fleet create must be run inside a tmux or herdr session`. Director messages use broker reception.
 
 | Input | Source, first match wins |
 |---|---|
-| tmux server | `--mux-server`; everything before the last two commas of `TMUX`; `tmux display-message -p '#{socket_path}'` |
-| herdr session | `--mux-server`; `HERDR_SESSION`; the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; `default` |
-| Director pane | `--pane`; `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr) |
+| Backend | The `--pane` ID form: `%` and digits (e.g. `%12`) is tmux, and exactly one `:` with text on both sides (e.g. `w4:p3N`) is herdr; else `TMUX`/`HERDR_ENV` detection |
+| tmux server | `--mux-server`; everything before the last two commas of `TMUX`; `tmux display-message -p '#{socket_path}'`. With `--pane`, the `TMUX` sources apply only when the environment detects tmux |
+| herdr session | `--mux-server`; `HERDR_SESSION`; the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; `default`. With `--pane`, these environment sources apply only when the environment detects herdr |
+| Director pane | `--pane`, checked only for existence on the server; else `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr), verified against the caller's process ancestry |
 
 Each failure exits 1 before any write:
 
@@ -86,10 +87,19 @@ Each failure exits 1 before any write:
 |---|---|
 | tmux finds no server | `Error: no tmux server found; pass --mux-server <socket path>` |
 | The pane is not on the chosen server (a tmux reply with an empty field or another `pane_id`) | `Error: pane <pane-id> was not found on the <backend> server <server>; pass --pane and --mux-server for the Director's pane` |
-| herdr without `--pane` and with `HERDR_PANE_ID` unset | `Error: cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>` |
-| `HERMES_SESSION_ID` is set and `--pane` is absent | `Error: cafleet fleet create cannot identify its pane inside a Hermes session; pass --pane <pane-id>` |
+| `--pane` is neither ID form | `Error: --pane <pane> is neither a tmux pane ID (%N) nor a herdr pane ID (<workspace>:<pane>)` |
+| A shared-server ancestor, without `--pane` | `Error: cafleet fleet create cannot verify this session's pane: a shared <label> server (pid <pid>) runs this command, …` naming both the tmux and the herdr guidance |
+| The env pane fails verification, without `--pane` | `Error: cafleet fleet create cannot verify that <VAR>=<pane> is this session's pane: <cause>; …` naming the detected multiplexer's guidance |
+| `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr) is unset, without `--pane` | `Error: cafleet fleet create cannot identify its <backend> pane because <VAR> is not set; …` naming the detected multiplexer's guidance |
 
-A Hermes Director's terminal tools run in the shared gateway and may carry another pane's `TMUX_PANE`, so it reads its pane with Hermes's leading-`!` local shell (`! echo $TMUX_PANE` or `! echo $HERDR_PANE_ID`) and passes `--pane <pane-id>`.
+Each refusal ends `then run cafleet fleet create with --pane <pane-id> --mux-server <server>`. `<cause>` is one of `the pane does not exist on the <backend> server <server>`, `this command runs in a nested PID namespace`, `the process ancestry could not be read: <read error>`, `the process ancestry stopped at pid <pid> before reaching pid 1` or `the pane's process <pane_pid> is not an ancestor of this command`. The guidance names what the user, not the agent, runs in the Director pane:
+
+| Multiplexer | Guidance text in the refusal | The user replies with |
+|---|---|---|
+| tmux | `the tmux command prompt (the user presses the tmux prefix key in the Director pane, then types :display-message -d 0 "#{pane_id} #{socket_path}" and Enter; the status line shows the pane ID, then the server socket)` | The pane ID (e.g. `%12`) and the socket path, passed as `--pane` and `--mux-server` |
+| herdr | `! env -u HERDR_PANE_ID herdr --session <session> pane current --current (typed by the user into the Director's composer while the Director pane is focused; <session> is the herdr session the user attached, default unless herdr was started with --session <name>, and herdr session list shows the running sessions; the pane ID is result.pane.pane_id and the server is <session>)` | The pane ID (e.g. `w4:p3N`) and the session name, passed as `--pane` and `--mux-server` |
+
+With `--pane`, `fleet create` reads no process ancestry, and an environment naming the other multiplexer or both is not an error; without `--mux-server` there, the server is the default tmux server or the herdr session `default`.
 
 `cafleet fleet list [--json]` reads the registry. `cafleet fleet show FLEET_ID [--json]` includes deleted fleets; unknown IDs give `fleet 'X' not found.`, exit 1.
 
@@ -448,6 +458,18 @@ pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 | `cafleet doctor --verbose` | One `<status> <name>: <detail>` row per check, no summary |
 | `cafleet doctor --json` | `{"summary":[…],"checks":[…]}`; summary entries `component,status,detail` (`members` adds `state,member_ids`), check entries `name,status,detail` (`member_runtime` entries add `member_id,state`) |
 
+The `multiplexer` check reports the backend and server (`ok` `<backend> server=<server>`), and the `multiplexer.caller_pane` check that follows it reports the `fleet create` pane verification without `--pane` (§ Fleet commands). Their `multiplexer` summary line folds both:
+
+| Situation | Checks (`multiplexer`, `multiplexer.caller_pane`) | Summary line |
+|---|---|---|
+| Pane verified | `ok`, `ok` `<VAR>=<pane_id> session=<session> window=<window_id>` | `ok multiplexer: <backend> (session <session>, pane <pane_id>)` |
+| Shared-server ancestor | `info` `not checked: a shared <label> server (pid <pid>) supplies the caller environment`, `warn` with the refusal body | `warn multiplexer: <refusal body>` |
+| Env pane unset or unverified | `ok`, `warn` with the refusal body | `warn multiplexer: <backend> (server <server>); <refusal body>` |
+| Verification or verified-pane context read errored | `ok`, `error` with the error | `error multiplexer: <error>` |
+| Detection, server or availability failed | `error` with the cause, `info` `unavailable: the multiplexer is unavailable` | `error multiplexer: <cause>` |
+
+The refusal body is the `fleet create` refusal without its `cafleet fleet create ` prefix, and a `warn` keeps the exit code at 0.
+
 A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, an identical phrase listed once (`info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets from cafleet 0.30.0 (this is 0.31.1) — run 'cafleet setup --coding-agent codex'`. A recorded version other than the CLI's, or no installation recorded, is `warn`.
 
 Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
@@ -486,7 +508,7 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | (any command except `setup` and `doctor`) | Incompatible database file, including one from another cafleet version | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` |
 | (any command with output) | Writing stdout fails with an error other than a broken pipe; a broken pipe stops output and keeps the command's own result | `Error: failed to write output: <cause>` |
 | Director-only commands | `--from-member-id` is not the live subject fleet's root Director | § Director-only command guard |
-| `fleet create` | No server, the pane is not on it, or no identifiable pane | The errors under § Fleet commands |
+| `fleet create` | No server, the pane is not on it, a malformed `--pane`, or without `--pane` a shared-server caller or an unset or unverifiable caller pane | The errors under § Fleet commands |
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` |
 | `message listen --codex-thread` | `codex` is missing, or no Codex ancestor process exists | The startup errors under § `message listen` |
 | `member create` | The selected opencode preset is missing or unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` |

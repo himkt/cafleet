@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 12/70 tasks complete
+**Progress**: 17/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -524,11 +524,11 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 
 ### Step 5: Skills
 
-- [ ] `reference/cli.md` § Fleet commands: update the opening sentence, the Director pane input row (form rule), the error table (new rows, removed Hermes row) and the guidance table that replaces the Hermes paragraph <!-- completed: -->
-- [ ] `reference/cli.md` § `setup` and `doctor` and the exit-code table: add the `multiplexer.caller_pane` row and summary folding, and widen the `fleet create` exit row <!-- completed: -->
-- [ ] `roles/director.md`: update Spawn Protocol steps 2–3 and add `### Director pane identification` <!-- completed: -->
-- [ ] `reference/coding-agents.md`: update the Hermes Note row and reception step 2, and add the Codex Note row <!-- completed: -->
-- [ ] Grep `SPEC.md`, `docs/` and `assets/skills/` for `HERMES_SESSION_ID`, `inside a Hermes session` and `echo $TMUX_PANE`; none remain <!-- completed: -->
+- [x] `reference/cli.md` § Fleet commands: update the opening sentence, the Director pane input row (form rule), the error table (new rows, removed Hermes row) and the guidance table that replaces the Hermes paragraph <!-- completed: 2026-11-11T11:44 -->
+- [x] `reference/cli.md` § `setup` and `doctor` and the exit-code table: add the `multiplexer.caller_pane` row and summary folding, and widen the `fleet create` exit row <!-- completed: 2026-11-11T11:44 -->
+- [x] `roles/director.md`: update Spawn Protocol steps 2–3 and add `### Director pane identification` <!-- completed: 2026-11-11T11:44 -->
+- [x] `reference/coding-agents.md`: update the Hermes Note row and reception step 2, and add the Codex Note row <!-- completed: 2026-11-11T11:44 -->
+- [x] Grep `SPEC.md`, `docs/` and `assets/skills/` for `HERMES_SESSION_ID`, `inside a Hermes session` and `echo $TMUX_PANE`; none remain <!-- completed: 2026-11-11T11:44 -->
 
 ### Step 6: Process table
 

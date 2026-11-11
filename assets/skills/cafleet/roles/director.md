@@ -268,12 +268,23 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 ### Spawn Protocol
 
 1. Complete [Required reading](#required-reading) and the supplied host rules, then resolve each member's backend/model/effort before writing its prompt.
-2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues. Preserve the user's host continuation controls as supplied.
-3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs; every later command targets the recorded placement. A Hermes Director passes `--pane <pane-id>` read through its leading-`!` local shell, and `--mux-server <server>` selects a non-default server ([fleet commands](../reference/cli.md#fleet-commands)). With a custom database, pass `--database-url <url>` on every command, this one included.
+2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn multiplexer` caller-pane line is resolved at step 3 by [Director pane identification](#director-pane-identification). Preserve the user's host continuation controls as supplied.
+3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs; every later command targets the recorded placement. When it refuses the Director pane, follow [Director pane identification](#director-pane-identification). With a custom database, pass `--database-url <url>` on every command, this one included.
 4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin or extension tool. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 6. Receive each member's ready and ACK it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
 7. Keep native reception active and follow [Director wake](#director-wake) for the fleet's lifetime; [Shutdown](#shutdown) ends it through fleet deletion.
+
+### Director pane identification
+
+`fleet create` without `--pane` trusts the caller's pane variables only after verifying them, because a shared server running your tool commands can carry another pane's environment. A Hermes Director is always refused (gateway), and a Codex Director on Codex 0.167.0 or later usually is (daemon); every backend follows the same steps:
+
+1. Run `cafleet fleet create --name <name> --coding-agent <backend> --json` as usual.
+2. When it fails with `cannot verify this session's pane`, `cannot verify that … is this session's pane` or `cannot identify its … pane`, ask the user through {decision_surface} to run the command the error names in the Director pane themselves: the tmux command when the Director runs in tmux, the herdr command in herdr. Ask them to reply with the pane ID and the server the command shows. Relay the command text verbatim from the error and run nothing in the Director pane yourself.
+3. Rerun `cafleet fleet create --name <name> --coding-agent <backend> --pane <pane-id> --mux-server <server> --json` with both reported values: the tmux socket path, or the herdr session name.
+4. When the rerun fails with `pane <pane-id> was not found on the <backend> server <server>` or the `--pane` form error, ask the user once more with the same command, reporting the error. When the second rerun also fails, stop and report its error to the user; make no third attempt.
+
+[Fleet commands](../reference/cli.md#fleet-commands) carries the exact refusals and guidance text.
 
 ### Director wake
 
