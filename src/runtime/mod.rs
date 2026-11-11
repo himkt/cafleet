@@ -20,7 +20,6 @@ use crate::error::CafleetError;
 pub(crate) use crate::error::Result;
 use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MultiplexerError;
-use crate::multiplexer::resolve_multiplexer;
 pub(crate) use crate::runtime::artifacts::*;
 pub(crate) use crate::runtime::control::CONTROL_PROTOCOL_VERSION;
 pub(crate) use crate::runtime::control::ControlDecoder;
@@ -64,11 +63,6 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::rc::Rc;
-
-pub(crate) fn resolve_mux() -> Result<Box<dyn Multiplexer>> {
-    let env = crate::multiplexer::caller_env()?;
-    Ok(resolve_multiplexer(env, Rc::new(SystemRunner))?)
-}
 
 /// The multiplexer that targets `placement`'s recorded backend and server.
 pub(crate) fn mux_for_placement(
@@ -190,6 +184,7 @@ impl SpawnSpec {
 pub(crate) mod test_support {
     pub(crate) use crate::runtime::artifacts::test_support::short_tempdir;
     pub(crate) use crate::runtime::lifecycle::test_support::SLOW_SUM;
+    pub(crate) use crate::runtime::process::test_support::FixtureProcessTable;
     use rusqlite::Connection;
     use serde_json::json;
     use tempfile::TempDir;

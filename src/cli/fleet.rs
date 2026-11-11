@@ -1,4 +1,5 @@
 use crate::broker;
+use crate::broker::CreatedFleet;
 use crate::broker::DeletedFleet;
 use crate::broker::DeletedMember;
 use crate::broker::MemberRecord;
@@ -15,6 +16,9 @@ use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MuxBackend;
+use crate::multiplexer::caller;
+use crate::multiplexer::caller::CallerMux;
+use crate::multiplexer::caller::Verification;
 use crate::output::format_fleet_create;
 use crate::output::format_fleet_delete;
 use crate::output::format_fleet_list;
@@ -22,11 +26,14 @@ use crate::output::format_fleet_show;
 use crate::pane_lock::PaneLock;
 use crate::pane_lock::lock_deletion;
 use crate::pane_lock::lock_path;
+use crate::runtime::ProcessTable;
+use crate::runtime::SystemProcessTable;
 use crate::runtime::system::SystemRunner;
 use crate::time::Deadline;
 use clap::Subcommand;
 use rusqlite::Connection;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -40,10 +47,10 @@ pub(crate) enum FleetCommand {
         /// Director's coding agent.
         #[arg(long = "coding-agent", value_enum)]
         coding_agent: CodingAgent,
-        /// The Director's pane [default: the caller's pane from TMUX_PANE or HERDR_PANE_ID].
+        /// The Director's pane; its tmux %N or herdr <workspace>:<pane> form selects the multiplexer [default: the caller's TMUX_PANE or HERDR_PANE_ID, verified against the caller's process ancestry]
         #[arg(long, value_name = "PANE_ID")]
         pane: Option<String>,
-        /// The Director's tmux socket path or herdr session [default: the caller's server].
+        /// The Director's tmux socket path or herdr session [default: the caller's server on the pane's multiplexer]
         #[arg(long = "mux-server", value_name = "SERVER", requires = "pane")]
         mux_server: Option<String>,
         /// Output in JSON format.
@@ -84,7 +91,16 @@ pub(crate) fn run(
             pane,
             mux_server,
             json,
-        } => create(conn, &name, coding_agent, pane, mux_server, json),
+        } => create(
+            conn,
+            CreateRequest {
+                name: &name,
+                agent: coding_agent,
+                pane,
+                mux_server,
+            },
+            json,
+        ),
         FleetCommand::List { json } => {
             let fleets = broker::list_fleets(conn)?;
             let payload = Value::Array(
@@ -110,75 +126,94 @@ pub(crate) fn run(
     }
 }
 
+pub(crate) struct CreateRequest<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) agent: CodingAgent,
+    pub(crate) pane: Option<String>,
+    pub(crate) mux_server: Option<String>,
+}
+
 fn create(
     conn: &mut Connection,
-    name: &str,
-    agent: CodingAgent,
-    pane: Option<String>,
-    mux_server: Option<String>,
+    request: CreateRequest<'_>,
     json: bool,
 ) -> Result<(), CafleetError> {
     let env = crate::multiplexer::caller_env()?;
-    let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
-    let backend = MuxBackend::detect(lookup).map_err(|_| {
-        CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
-    })?;
-    let pane = match pane {
-        Some(pane) => pane,
-        None => caller_pane(backend, lookup)?,
-    };
-    let runner: Rc<dyn CommandRunner> = Rc::new(SystemRunner);
-    let server = match mux_server {
-        Some(server) => server,
-        None => crate::multiplexer::caller_server(backend, lookup, runner.as_ref())?,
-    };
-    let mux = backend.for_server(&server, runner);
-    mux.ensure_available()?;
-    let context = mux.pane_context(&pane)?.ok_or_else(|| {
-        CafleetError::App(format!(
-            "pane {pane} was not found on the {} server {server}; pass --pane and --mux-server for the Director's pane",
-            backend.name()
-        ))
-    })?;
-    let fleet = broker::create_fleet(
+    let fleet = create_with(
         conn,
-        Some(name),
-        &NewPlacement {
-            backend: backend.name().into(),
-            mux_session: context.session,
-            mux_window_id: context.window_id,
-            mux_pane_id: Some(context.pane_id),
-            coding_agent: agent.name().into(),
-            mux_server: server,
-        },
+        request,
+        &env,
+        Rc::new(SystemRunner),
+        &SystemProcessTable,
     )?;
     emit(json, &crate::output::json::created_fleet(&fleet), || {
         format_fleet_create(&fleet)
     })
 }
 
-/// The caller's own pane; a Hermes terminal tool runs in the shared gateway, so its pane
-/// variables may name another session's pane.
-fn caller_pane(
-    backend: MuxBackend,
-    lookup: impl Fn(&str) -> Option<String>,
-) -> Result<String, CafleetError> {
-    if lookup("HERMES_SESSION_ID").is_some() {
-        return Err(CafleetError::App(
-            "cafleet fleet create cannot identify its pane inside a Hermes session; pass --pane <pane-id>".into(),
-        ));
-    }
-    let (variable, missing) = match backend {
-        MuxBackend::Tmux => (
-            "TMUX_PANE",
-            "cafleet fleet create must be run inside a tmux or herdr session",
+fn refusal(body: String) -> CafleetError {
+    CafleetError::App(format!("cafleet fleet create {body}"))
+}
+
+/// Every external read is injected; tests call this directly.
+pub(crate) fn create_with(
+    conn: &mut Connection,
+    request: CreateRequest<'_>,
+    env: &HashMap<String, String>,
+    runner: Rc<dyn CommandRunner>,
+    table: &dyn ProcessTable,
+) -> Result<CreatedFleet, CafleetError> {
+    let (target, pane) = match request.pane {
+        Some(pane) => (
+            caller::resolve_pane_mux(&pane, request.mux_server, env, runner)?,
+            pane,
         ),
-        MuxBackend::Herdr => (
-            "HERDR_PANE_ID",
-            "cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>",
-        ),
+        None => verified_env_pane(env, runner, table)?,
     };
-    lookup(variable).ok_or_else(|| CafleetError::App(missing.into()))
+    let context = target.mux.pane_context(&pane)?.ok_or_else(|| {
+        CafleetError::App(format!(
+            "pane {pane} was not found on the {} server {}; pass --pane and --mux-server for the Director's pane",
+            target.backend.name(),
+            target.server
+        ))
+    })?;
+    broker::create_fleet(
+        conn,
+        Some(request.name),
+        &NewPlacement {
+            backend: target.backend.name().into(),
+            mux_session: context.session,
+            mux_window_id: context.window_id,
+            mux_pane_id: Some(context.pane_id),
+            coding_agent: request.agent.name().into(),
+            mux_server: target.server,
+        },
+    )
+}
+
+/// Steps 2–6 of `fleet create` without `--pane`: the caller's multiplexer and its verified pane.
+fn verified_env_pane(
+    env: &HashMap<String, String>,
+    runner: Rc<dyn CommandRunner>,
+    table: &dyn ProcessTable,
+) -> Result<(CallerMux, String), CafleetError> {
+    let ancestry = caller::walk(table);
+    if let Some(shared) = caller::shared_server(&ancestry) {
+        return Err(refusal(caller::shared_server_message(&shared)));
+    }
+    let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
+    let backend = MuxBackend::detect(lookup).map_err(|_| {
+        CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
+    })?;
+    let pane =
+        caller::env_pane(backend, env).ok_or_else(|| refusal(caller::unset_message(backend)))?;
+    let mux = caller::resolve_env_mux(env, runner)?;
+    match caller::verify_pane(mux.mux.as_ref(), table, &ancestry, &pane.pane)? {
+        Verification::Verified { .. } => Ok((mux, pane.pane)),
+        Verification::Refused(refused) => {
+            Err(refusal(caller::unverified_message(&pane, &refused, &mux)))
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -2231,8 +2266,10 @@ mod tests {
         use crate::multiplexer::test_support::FakeRunner;
         let runner = FakeRunner::with_binary("tmux");
         runner.succeed(1);
-        let mux =
-            crate::multiplexer::tmux::TmuxMultiplexer::new(runner.clone(), Default::default());
+        let mux = crate::multiplexer::tmux::TmuxMultiplexer::for_server(
+            runner.clone(),
+            "/tmp/tmux-1000/default",
+        );
         let mut host = crate::cli::fleet::MultiplexerDeletionHost::new(&mux);
         let placement = crate::broker::Placement {
             backend: "tmux".into(),
@@ -2307,5 +2344,603 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    mod create {
+        use std::collections::HashMap;
+        use std::rc::Rc;
+
+        use rusqlite::Connection;
+        use tempfile::TempDir;
+
+        use crate::broker::CreatedFleet;
+        use crate::broker::Placement;
+        use crate::cli::fleet::CreateRequest;
+        use crate::cli::fleet::create_with;
+        use crate::coding_agent::CodingAgent;
+        use crate::db::test_support::migrated_conn;
+        use crate::error::CafleetError;
+        use crate::multiplexer::MuxBackend;
+        use crate::multiplexer::caller::CallerMux;
+        use crate::multiplexer::caller::CallerPane;
+        use crate::multiplexer::caller::Refusal;
+        use crate::multiplexer::caller::shared_server_message;
+        use crate::multiplexer::caller::unset_message;
+        use crate::multiplexer::caller::unverified_message;
+        use crate::multiplexer::test_support::FakeRunner;
+        use crate::multiplexer::test_support::argv;
+        use crate::multiplexer::test_support::env;
+        use crate::multiplexer::test_support::herdr_envelope;
+        use crate::runtime::ProcessEntry;
+        use crate::runtime::ProcessTable;
+        use crate::runtime::test_support::FixtureProcessTable;
+
+        const TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
+        const RERUN_SOCKET: &str = "/tmp/tmux-0/default";
+        const TMUX_ENV: &[(&str, &str)] = &[
+            ("TMUX", "/tmp/tmux-1000/default,123,0"),
+            ("TMUX_PANE", "%3"),
+        ];
+        const CONTEXT_FORMAT: &str = "#{session_name}|#{window_id}|#{pane_id}";
+        const PROCESS_FORMAT: &str = "#{pane_id}|#{pane_pid}";
+
+        /// A process table that fails the test on any read, for paths that must not walk.
+        struct UnreadTable;
+
+        impl ProcessTable for UnreadTable {
+            fn own_pid(&self) -> i64 {
+                panic!("this path reads no process table")
+            }
+
+            fn entry(&self, _: i64) -> Result<Option<ProcessEntry>, CafleetError> {
+                panic!("this path reads no process table")
+            }
+
+            fn nested_pid_namespace(&self) -> Result<bool, CafleetError> {
+                panic!("this path reads no process table")
+            }
+        }
+
+        fn database() -> (TempDir, Connection) {
+            let dir = tempfile::tempdir().unwrap();
+            let conn = migrated_conn(&dir);
+            (dir, conn)
+        }
+
+        fn request(pane: Option<&str>, mux_server: Option<&str>) -> CreateRequest<'static> {
+            CreateRequest {
+                name: "alpha",
+                agent: CodingAgent::Codex,
+                pane: pane.map(str::to_owned),
+                mux_server: mux_server.map(str::to_owned),
+            }
+        }
+
+        fn fleet_rows(conn: &Connection) -> (i64, i64) {
+            let count = |table: &str| {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+            };
+            (count("fleets"), count("members"))
+        }
+
+        fn director_placement(fleet: &CreatedFleet) -> &Placement {
+            fleet
+                .director
+                .placement
+                .as_ref()
+                .expect("the created Director records its placement")
+        }
+
+        /// `30 → 20 → 10 → 1`; pid 20 is the Director pane's process.
+        fn plain_chain() -> FixtureProcessTable {
+            FixtureProcessTable::new(30)
+                .process(30, 20, &["cafleet", "fleet", "create"])
+                .process(20, 10, &["/bin/sh"])
+                .process(10, 1, &["tmux", "new-session"])
+        }
+
+        /// Herdr pane A's shared Codex daemon chain from the evidence fixtures.
+        fn herdr_daemon_chain() -> FixtureProcessTable {
+            FixtureProcessTable::new(408076)
+                .process(408076, 407596, &["cafleet", "fleet", "create"])
+                .process(
+                    407596,
+                    407442,
+                    &[
+                        "/root/.codex/packages/app-server-daemon/releases/0.167.1-x86_64-unknown-linux-musl/bin/codex",
+                        "app-server",
+                        "--list",
+                    ],
+                )
+                .process(
+                    407442,
+                    407363,
+                    &[
+                        "codex",
+                        "--enable",
+                        "daemon_auto_start",
+                        "--dangerously-bypass-approvals-and-sandbox",
+                        "<prompt>",
+                    ],
+                )
+                .process(407363, 3340413, &["/bin/sh"])
+                .process(
+                    3340413,
+                    1,
+                    &[
+                        "/root/.local/share/mise/installs/aqua-ogulcancelik-herdr/v0.9.5/herdr",
+                        "server",
+                    ],
+                )
+        }
+
+        fn refused(
+            conn: &mut Connection,
+            request: CreateRequest<'_>,
+            pairs: &[(&str, &str)],
+            runner: &Rc<FakeRunner>,
+            table: &dyn ProcessTable,
+        ) -> CafleetError {
+            let error = match create_with(conn, request, &env(pairs), runner.clone(), table) {
+                Ok(fleet) => panic!("fleet create registered {fleet:?}"),
+                Err(error) => error,
+            };
+            assert_eq!(error.exit_code(), 1, "{error}");
+            assert_eq!(fleet_rows(conn), (0, 0), "{error}");
+            error
+        }
+
+        fn tmux(parts: &[&str], server: &str) -> Vec<String> {
+            let mut command = argv(&["tmux", "-S", server]);
+            command.extend(argv(parts));
+            command
+        }
+
+        fn caller_mux(backend: MuxBackend, server: &str) -> CallerMux {
+            CallerMux {
+                backend,
+                server: server.to_string(),
+                mux: backend.for_server(server, FakeRunner::without_binaries()),
+            }
+        }
+
+        #[test]
+        fn an_explicit_tmux_pane_reads_no_process_table_and_ignores_a_herdr_environment() {
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok("main|@1|%5\n".to_string()));
+            let fleet = create_with(
+                &mut conn,
+                request(Some("%5"), Some(RERUN_SOCKET)),
+                &env(&[
+                    ("HERDR_ENV", "1"),
+                    ("HERDR_SESSION", "default"),
+                    ("HERDR_PANE_ID", "w5:p1"),
+                ]),
+                runner.clone(),
+                &UnreadTable,
+            )
+            .unwrap();
+            let placement = director_placement(&fleet);
+            assert_eq!(
+                (
+                    placement.backend.as_str(),
+                    placement.mux_server.as_str(),
+                    placement.mux_session.as_str(),
+                    placement.mux_window_id.as_str(),
+                    placement.mux_pane_id.as_deref(),
+                    placement.coding_agent.as_str(),
+                ),
+                ("tmux", RERUN_SOCKET, "main", "@1", Some("%5"), "codex")
+            );
+            assert_eq!(
+                runner.run_argvs(),
+                vec![tmux(
+                    &["display-message", "-p", "-t", "%5", CONTEXT_FORMAT],
+                    RERUN_SOCKET
+                )]
+            );
+            assert_eq!(fleet_rows(&conn), (1, 1));
+        }
+
+        #[test]
+        fn an_explicit_herdr_pane_reads_no_process_table_and_ignores_a_tmux_environment() {
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(herdr_envelope(serde_json::json!({
+                "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
+            }))));
+            let fleet = create_with(
+                &mut conn,
+                request(Some("w4:p3N"), Some("default")),
+                &env(TMUX_ENV),
+                runner.clone(),
+                &UnreadTable,
+            )
+            .unwrap();
+            let placement = director_placement(&fleet);
+            assert_eq!(
+                (
+                    placement.backend.as_str(),
+                    placement.mux_server.as_str(),
+                    placement.mux_session.as_str(),
+                    placement.mux_window_id.as_str(),
+                    placement.mux_pane_id.as_deref(),
+                ),
+                ("herdr", "default", "w4", "w4:t1", Some("w4:p3N"))
+            );
+            assert_eq!(
+                runner.run_argvs(),
+                vec![argv(&[
+                    "herdr",
+                    "--session",
+                    "default",
+                    "pane",
+                    "current",
+                    "--pane",
+                    "w4:p3N",
+                ])]
+            );
+        }
+
+        #[test]
+        fn an_explicit_pane_missing_from_its_server_reports_pane_not_found() {
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok("||\n".to_string()));
+            let error = refused(
+                &mut conn,
+                request(Some("%5"), Some(RERUN_SOCKET)),
+                &[],
+                &runner,
+                &UnreadTable,
+            );
+            assert_eq!(
+                error.to_string(),
+                "pane %5 was not found on the tmux server /tmp/tmux-0/default; pass --pane and --mux-server for the Director's pane"
+            );
+        }
+
+        #[test]
+        fn a_malformed_pane_fails_before_any_command_or_process_read() {
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::with_binary("tmux");
+            let error = refused(
+                &mut conn,
+                request(Some("12"), Some(RERUN_SOCKET)),
+                TMUX_ENV,
+                &runner,
+                &UnreadTable,
+            );
+            assert_eq!(
+                error.to_string(),
+                "--pane 12 is neither a tmux pane ID (%N) nor a herdr pane ID (<workspace>:<pane>)"
+            );
+            assert!(runner.events().is_empty());
+        }
+
+        #[test]
+        fn a_cross_multiplexer_caller_is_refused_without_commands_then_the_rerun_registers_tmux() {
+            let (_dir, mut conn) = database();
+            let herdr_pane_a = [
+                ("HERDR_ENV", "1"),
+                ("HERDR_SESSION", "default"),
+                ("HERDR_PANE_ID", "w5:p1"),
+            ];
+            let runner = FakeRunner::without_binaries();
+            let error = refused(
+                &mut conn,
+                request(None, None),
+                &herdr_pane_a,
+                &runner,
+                &herdr_daemon_chain(),
+            );
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "cafleet fleet create {}",
+                    shared_server_message(&Refusal::SharedServer {
+                        label: "codex app-server".to_string(),
+                        pid: 407596,
+                    })
+                )
+            );
+            assert!(runner.events().is_empty());
+
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok("main|@2|%5\n".to_string()));
+            let fleet = create_with(
+                &mut conn,
+                request(Some("%5"), Some(RERUN_SOCKET)),
+                &env(&herdr_pane_a),
+                runner.clone(),
+                &herdr_daemon_chain(),
+            )
+            .unwrap();
+            let placement = director_placement(&fleet);
+            assert_eq!(
+                (
+                    placement.backend.as_str(),
+                    placement.mux_server.as_str(),
+                    placement.mux_pane_id.as_deref(),
+                ),
+                ("tmux", RERUN_SOCKET, Some("%5"))
+            );
+            let calls = runner.run_argvs();
+            assert!(!calls.is_empty());
+            for call in calls {
+                assert_eq!(call[..3], argv(&["tmux", "-S", RERUN_SOCKET]), "{call:?}");
+            }
+        }
+
+        #[test]
+        fn a_shared_server_refuses_before_multiplexer_detection() {
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::without_binaries();
+            let error = refused(
+                &mut conn,
+                request(None, None),
+                &[],
+                &runner,
+                &herdr_daemon_chain(),
+            );
+            assert!(
+                error
+                    .to_string()
+                    .starts_with("cafleet fleet create cannot verify this session's pane: a shared codex app-server server (pid 407596)"),
+                "{error}"
+            );
+            assert!(runner.events().is_empty());
+        }
+
+        #[test]
+        fn a_caller_outside_any_multiplexer_keeps_the_detection_message() {
+            let empty: &[(&str, &str)] = &[];
+            for pairs in [
+                empty,
+                &[("HERDR_ENV", "1"), ("TMUX", "/tmp/tmux-1000/default,123,0")],
+            ] {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::without_binaries();
+                let error = refused(
+                    &mut conn,
+                    request(None, None),
+                    pairs,
+                    &runner,
+                    &plain_chain(),
+                );
+                assert_eq!(
+                    error.to_string(),
+                    "cafleet fleet create must be run inside a tmux or herdr session",
+                    "{pairs:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn an_unset_env_pane_names_the_user_run_command_for_its_backend() {
+            for (backend, pairs) in [
+                (
+                    MuxBackend::Tmux,
+                    &[("TMUX", "/tmp/tmux-1000/default,123,0"), ("TMUX_PANE", "")][..],
+                ),
+                (MuxBackend::Herdr, &[("HERDR_ENV", "1")][..]),
+            ] {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::with_binary(backend.name());
+                let error = refused(
+                    &mut conn,
+                    request(None, None),
+                    pairs,
+                    &runner,
+                    &plain_chain(),
+                );
+                assert_eq!(
+                    error.to_string(),
+                    format!("cafleet fleet create {}", unset_message(backend))
+                );
+                assert!(runner.events().is_empty(), "{backend:?}");
+            }
+        }
+
+        #[test]
+        fn each_unverified_env_pane_refuses_with_its_cause() {
+            let unreadable = "cannot read /proc/412/stat: Permission denied (os error 13)";
+            for (table, pane_pid, refusal) in [
+                (plain_chain(), None, Refusal::PaneNotFound),
+                (
+                    plain_chain().nested(),
+                    Some(20),
+                    Refusal::NestedPidNamespace,
+                ),
+                (
+                    FixtureProcessTable::new(30)
+                        .process(30, 412, &["cafleet"])
+                        .unreadable(412, unreadable),
+                    Some(99),
+                    Refusal::ProcessUnreadable {
+                        pid: 412,
+                        cause: unreadable.to_string(),
+                    },
+                ),
+                (
+                    FixtureProcessTable::new(30).process(30, 20, &["cafleet"]),
+                    Some(99),
+                    Refusal::WalkStopped { pid: 20 },
+                ),
+                (
+                    plain_chain(),
+                    Some(99),
+                    Refusal::PaneNotAncestor { pane_pid: 99 },
+                ),
+            ] {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::with_binary("tmux");
+                runner.respond(Ok(match pane_pid {
+                    Some(pid) => format!("%3|{pid}\n"),
+                    None => "|\n".to_string(),
+                }));
+                let error = refused(&mut conn, request(None, None), TMUX_ENV, &runner, &table);
+                let caller = CallerPane {
+                    variable: "TMUX_PANE",
+                    pane: "%3".to_string(),
+                };
+                assert_eq!(
+                    error.to_string(),
+                    format!(
+                        "cafleet fleet create {}",
+                        unverified_message(
+                            &caller,
+                            &refusal,
+                            &caller_mux(MuxBackend::Tmux, TMUX_SOCKET)
+                        )
+                    )
+                );
+                assert_eq!(
+                    runner.run_argvs(),
+                    vec![tmux(
+                        &["display-message", "-p", "-t", "%3", PROCESS_FORMAT],
+                        TMUX_SOCKET
+                    )]
+                );
+            }
+        }
+
+        #[test]
+        fn a_verified_tmux_env_pane_registers_its_context() {
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok("%3|20\n".to_string()));
+            runner.respond(Ok("main|@1|%3\n".to_string()));
+            let fleet = create_with(
+                &mut conn,
+                request(None, None),
+                &env(TMUX_ENV),
+                runner.clone(),
+                &plain_chain(),
+            )
+            .unwrap();
+            let placement = director_placement(&fleet);
+            assert_eq!(
+                (
+                    placement.backend.as_str(),
+                    placement.mux_server.as_str(),
+                    placement.mux_session.as_str(),
+                    placement.mux_window_id.as_str(),
+                    placement.mux_pane_id.as_deref(),
+                    placement.coding_agent.as_str(),
+                ),
+                ("tmux", TMUX_SOCKET, "main", "@1", Some("%3"), "codex")
+            );
+            assert_eq!(
+                runner.run_argvs(),
+                vec![
+                    tmux(
+                        &["display-message", "-p", "-t", "%3", PROCESS_FORMAT],
+                        TMUX_SOCKET
+                    ),
+                    tmux(
+                        &["display-message", "-p", "-t", "%3", CONTEXT_FORMAT],
+                        TMUX_SOCKET
+                    ),
+                ]
+            );
+            assert_eq!(fleet_rows(&conn), (1, 1));
+        }
+
+        #[test]
+        fn a_verified_herdr_env_pane_registers_its_context() {
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(herdr_envelope(
+                serde_json::json!({"process_info": {"shell_pid": 20}}),
+            )));
+            runner.respond(Ok(herdr_envelope(serde_json::json!({
+                "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
+            }))));
+            let fleet = create_with(
+                &mut conn,
+                request(None, None),
+                &env(&[
+                    ("HERDR_ENV", "1"),
+                    ("HERDR_SESSION", "work"),
+                    ("HERDR_PANE_ID", "w4:p3N"),
+                ]),
+                runner.clone(),
+                &plain_chain(),
+            )
+            .unwrap();
+            let placement = director_placement(&fleet);
+            assert_eq!(
+                (
+                    placement.backend.as_str(),
+                    placement.mux_server.as_str(),
+                    placement.mux_session.as_str(),
+                    placement.mux_window_id.as_str(),
+                    placement.mux_pane_id.as_deref(),
+                ),
+                ("herdr", "work", "w4", "w4:t1", Some("w4:p3N"))
+            );
+            let selector = argv(&["herdr", "--session", "work", "pane"]);
+            let calls = runner.run_argvs();
+            assert_eq!(calls.len(), 2);
+            assert_eq!(calls[0][..4], selector);
+            assert_eq!(calls[0][4], "process-info");
+            assert_eq!(calls[1][..4], selector);
+            assert_eq!(calls[1][4], "current");
+        }
+
+        #[test]
+        fn pane_and_mux_server_help_state_the_form_rule_and_verified_default() {
+            use clap::CommandFactory;
+            let command = crate::cli::CliArgs::command();
+            let create = command
+                .find_subcommand("fleet")
+                .and_then(|fleet| fleet.find_subcommand("create"))
+                .expect("fleet create is registered");
+            let help = |id: &str| {
+                create
+                    .get_arguments()
+                    .find(|argument| argument.get_id() == id)
+                    .unwrap_or_else(|| panic!("fleet create declares {id}"))
+                    .get_help()
+                    .expect("the option carries help")
+                    .to_string()
+            };
+            assert_eq!(
+                help("pane"),
+                "The Director's pane; its tmux %N or herdr <workspace>:<pane> form selects the multiplexer [default: the caller's TMUX_PANE or HERDR_PANE_ID, verified against the caller's process ancestry]"
+            );
+            assert_eq!(
+                help("mux_server"),
+                "The Director's tmux socket path or herdr session [default: the caller's server on the pane's multiplexer]"
+            );
+        }
+
+        #[test]
+        fn registration_records_the_requested_name_and_coding_agent() {
+            let request = CreateRequest {
+                name: "alpha",
+                agent: CodingAgent::Hermes,
+                pane: Some("%5".to_string()),
+                mux_server: Some(RERUN_SOCKET.to_string()),
+            };
+            let (_dir, mut conn) = database();
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok("main|@1|%5\n".to_string()));
+            let fleet = create_with(
+                &mut conn,
+                request,
+                &HashMap::new(),
+                runner.clone(),
+                &UnreadTable,
+            )
+            .unwrap();
+            assert_eq!(fleet.name.as_deref(), Some("alpha"));
+            assert_eq!(director_placement(&fleet).coding_agent, "hermes");
+        }
     }
 }

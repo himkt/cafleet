@@ -4,9 +4,22 @@ Register the calling session as Director, then create independent member panes a
 
 ## Registration and readiness
 
-`fleet create` atomically registers the current Director with its pane and multiplexer server, and every later command drives the multiplexer through that recorded placement. A Hermes Director passes its pane with `--pane` ([Hermes setup](../quickstart.md#hermes)). `member create` inherits that Director's backend unless overridden, validates model/effort, native policy, evidence policy and prompt identity before registration, then starts the member's owned PTY runner. A failed creation rolls back or deregisters its pending member and reports the original cause with any cleanup error ([creation failure compensation](https://github.com/himkt/cafleet/blob/main/SPEC.md#creation-failure-compensation)).
+`fleet create` atomically registers the current Director with its pane and multiplexer server, and every later command drives the multiplexer through that recorded placement. When CAFleet cannot confirm the Director's pane, registration needs one step from you ([Director pane verification](#director-pane-verification)). `member create` inherits that Director's backend unless overridden, validates model/effort, native policy, evidence policy and prompt identity before registration, then starts the member's owned PTY runner. A failed creation rolls back or deregisters its pending member and reports the original cause with any cleanup error ([creation failure compensation](https://github.com/himkt/cafleet/blob/main/SPEC.md#creation-failure-compensation)).
 
 Members send ready, then poll their inbox; the Director can assign a member once its ready arrives.
+
+### Director pane verification
+
+Some coding agents run their tool commands in a long-lived shared server: a Codex Director on Codex 0.167.0 or later through its shared daemon, and a Hermes Director through its gateway. Such a server can hand `cafleet` the multiplexer variables of another pane, even one in another multiplexer. Without `--pane`, `fleet create` therefore registers the pane only after confirming that the `cafleet` command descends from that pane's own process. Otherwise it registers nothing and names a command for you to run in the Director pane.
+
+The Director then asks you to run that command and reply with the pane ID and server it shows, and reruns `fleet create` with `--pane <pane-id> --mux-server <server>`. Run the command yourself in the Director pane; the agent's own shell cannot report that pane reliably.
+
+| Multiplexer | What you do in the Director pane | Reply with |
+|---|---|---|
+| tmux | Press the tmux prefix key, type `:display-message -d 0 "#{pane_id} #{socket_path}"` and press Enter; the status line shows the pane ID, then the server socket | The pane ID (e.g. `%12`) and the socket path (e.g. `/tmp/tmux-1000/default`) |
+| herdr | With the Director pane focused, type `! env -u HERDR_PANE_ID herdr --session <session> pane current --current` into the Director's composer. `<session>` is the herdr session you attached, `default` unless herdr was started with `--session <name>`, and `herdr session list` shows the running sessions | `result.pane.pane_id` (e.g. `w4:p3N`) and the session name |
+
+The pane ID's form names its multiplexer (`%N` for tmux, `<workspace>:<pane>` for herdr), so the rerun works even when the Director's environment names the other multiplexer. If the rerun reports that the pane was not found, the Director asks you once more. `cafleet doctor` reports the same check on its `multiplexer` line as `warn`, which leaves its exit status unchanged. The [caller pane verification contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#caller-pane-verification) lists every refusal and its exact message.
 
 ## Assignment and receiving
 

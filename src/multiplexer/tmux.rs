@@ -4,7 +4,6 @@ use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MultiplexerContext;
 use crate::multiplexer::MultiplexerError;
 use crate::multiplexer::PLACEMENT_MISMATCH;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
@@ -21,58 +20,31 @@ pub(crate) struct TmuxMultiplexer {
 }
 
 impl TmuxMultiplexer {
-    pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
-        Self::with_server(runner, env, None)
-    }
-
     pub(crate) fn for_server(runner: Rc<dyn CommandRunner>, socket: &str) -> Self {
-        Self::with_server(runner, HashMap::new(), Some(socket.to_owned()))
-    }
-
-    fn with_server(
-        runner: Rc<dyn CommandRunner>,
-        env: HashMap<String, String>,
-        server: Option<String>,
-    ) -> Self {
         TmuxMultiplexer {
             core: BackendCore {
                 runner,
-                env,
                 name: "tmux",
                 pane_gone: is_pane_gone,
                 server_flag: "-S",
-                server,
+                server: socket.to_owned(),
             },
         }
     }
 
-    /// `pane`'s session, window and pane as `display-message` prints them.
-    fn read_context(
-        &self,
-        pane: &str,
-    ) -> Result<(String, Option<MultiplexerContext>), MultiplexerError> {
-        let out = self.core.run(
-            &self.core.argv(&[
-                "tmux",
-                "display-message",
-                "-p",
-                "-t",
-                pane,
-                "#{session_name}|#{window_id}|#{pane_id}",
-            ]),
+    /// `format` for `pane` as `display-message` prints it.
+    fn display(&self, pane: &str, format: &str) -> Result<String, MultiplexerError> {
+        self.core.run(
+            &self
+                .core
+                .argv(&["tmux", "display-message", "-p", "-t", pane, format]),
             None,
-        )?;
-        let parts: Vec<&str> = out.trim().splitn(3, '|').collect();
-        let context = match parts.as_slice() {
-            [session, window_id, pane_id] => Some(MultiplexerContext {
-                session: session.to_string(),
-                window_id: window_id.to_string(),
-                pane_id: pane_id.to_string(),
-            }),
-            _ => None,
-        };
-        Ok((out, context))
+        )
     }
+}
+
+fn unexpected_output(out: &str) -> MultiplexerError {
+    MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
 }
 
 impl Multiplexer for TmuxMultiplexer {
@@ -89,13 +61,37 @@ impl Multiplexer for TmuxMultiplexer {
     /// tmux prints `||` and exits 0 for a missing pane, so an empty field or another pane id
     /// means the server has no such pane.
     fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
-        let (out, context) = self.read_context(pane)?;
-        let context = context.ok_or_else(|| {
-            MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
-        })?;
-        let found =
-            !context.session.is_empty() && !context.window_id.is_empty() && context.pane_id == pane;
-        Ok(found.then_some(context))
+        let out = self.display(pane, "#{session_name}|#{window_id}|#{pane_id}")?;
+        let [session, window_id, pane_id] = out
+            .trim()
+            .splitn(3, '|')
+            .collect::<Vec<_>>()
+            .try_into()
+            .map_err(|_| unexpected_output(&out))?;
+        let found = !session.is_empty() && !window_id.is_empty() && pane_id == pane;
+        Ok(found.then(|| MultiplexerContext {
+            session: session.to_owned(),
+            window_id: window_id.to_owned(),
+            pane_id: pane_id.to_owned(),
+        }))
+    }
+
+    /// A reply naming another or no pane means the server has no such pane.
+    fn pane_process(&self, pane: &str) -> Result<Option<i64>, MultiplexerError> {
+        let out = self.display(pane, "#{pane_id}|#{pane_pid}")?;
+        let (pane_id, pid) = out
+            .trim()
+            .split_once('|')
+            .ok_or_else(|| unexpected_output(&out))?;
+        if pane_id != pane {
+            return Ok(None);
+        }
+        let pid = pid
+            .parse::<i64>()
+            .ok()
+            .filter(|pid| *pid > 0)
+            .ok_or_else(|| unexpected_output(&out))?;
+        Ok(Some(pid))
     }
 
     fn check_key_target(
@@ -138,17 +134,6 @@ impl Multiplexer for TmuxMultiplexer {
         let mut argv = self.core.argv(&["tmux", "send-keys", "-t", pane_id]);
         argv.extend(keys.tmux_arguments());
         self.core.send_keys(&argv, deadline)
-    }
-
-    /// The caller pane's context, read through `TMUX_PANE`.
-    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        let caller = self.core.env_var("TMUX_PANE").ok_or_else(|| {
-            MultiplexerError::new("TMUX_PANE is not set; not running inside a tmux pane")
-        })?;
-        let (out, context) = self.read_context(caller)?;
-        context.ok_or_else(|| {
-            MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
-        })
     }
 
     /// Split `reference.window_id` detached (`-d`) and return the new pane
@@ -236,14 +221,20 @@ mod tests {
     use crate::multiplexer::TmuxMultiplexer;
     use crate::multiplexer::test_support::FakeRunner;
     use crate::multiplexer::test_support::argv;
-    use crate::multiplexer::test_support::env;
     use crate::multiplexer::test_support::run_event;
+    use std::rc::Rc;
 
-    fn tmux_env() -> std::collections::HashMap<String, String> {
-        env(&[
-            ("TMUX", "/tmp/tmux-1000/default,123,0"),
-            ("TMUX_PANE", "%1"),
-        ])
+    const SOCKET: &str = "/tmp/tmux-1000/default";
+
+    fn on_server(runner: Rc<FakeRunner>) -> TmuxMultiplexer {
+        TmuxMultiplexer::for_server(runner, SOCKET)
+    }
+
+    /// `tmux -S <SOCKET> <parts…>`.
+    fn tmux(parts: &[&str]) -> Vec<String> {
+        let mut command = argv(&["tmux", "-S", SOCKET]);
+        command.extend(argv(parts));
+        command
     }
 
     fn reference() -> MultiplexerContext {
@@ -255,62 +246,63 @@ mod tests {
     }
 
     #[test]
-    fn context_discovery_requires_tmux_pane() {
+    fn pane_process_reads_the_pane_pid_on_the_recorded_server() {
         let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner, env(&[("TMUX", "/tmp/tmux")]));
+        runner.respond(Ok("%3|400625\n".to_string()));
         assert_eq!(
-            mux.context_discovery().unwrap_err().to_string(),
-            "TMUX_PANE is not set; not running inside a tmux pane"
+            on_server(runner.clone()).pane_process("%3").unwrap(),
+            Some(400625)
+        );
+        assert_eq!(
+            runner.run_argvs(),
+            vec![tmux(&[
+                "display-message",
+                "-p",
+                "-t",
+                "%3",
+                "#{pane_id}|#{pane_pid}",
+            ])]
         );
     }
 
     #[test]
-    fn context_discovery_resolves_the_calling_pane() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Ok("main|@1|%1\n".to_string()));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let context = mux.context_discovery().unwrap();
-        assert_eq!(context.session, "main");
-        assert_eq!(context.window_id, "@1");
-        assert_eq!(context.pane_id, "%1");
-        assert_eq!(
-            runner.events(),
-            vec![run_event(
-                &[
-                    "tmux",
-                    "display-message",
-                    "-p",
-                    "-t",
-                    "%1",
-                    "#{session_name}|#{window_id}|#{pane_id}",
-                ],
+    fn pane_process_of_an_empty_or_other_pane_id_is_none() {
+        for reply in ["|\n", "|400625\n", "%4|400625\n", "%30|400625\n"] {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok(reply.to_string()));
+            assert_eq!(
+                on_server(runner.clone()).pane_process("%3").unwrap(),
                 None,
-            )]
-        );
+                "{reply:?}"
+            );
+            assert_eq!(runner.run_argvs().len(), 1);
+        }
     }
 
     #[test]
-    fn context_discovery_splits_on_the_first_two_pipes_only() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Ok("se|ss|@1|%1\n".to_string()));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
-        let context = mux.context_discovery().unwrap();
-        assert_eq!(context.session, "se");
-        assert_eq!(context.window_id, "ss");
-        assert_eq!(context.pane_id, "@1|%1");
+    fn pane_process_with_a_matching_pane_and_a_non_positive_integer_pid_fails() {
+        for reply in ["%3|abc\n", "%3|\n", "%3|0\n", "%3|-5\n", "%3|12x\n"] {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok(reply.to_string()));
+            let error = on_server(runner)
+                .pane_process("%3")
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.starts_with("unexpected tmux display-message output: ")
+                    && error.contains(reply.trim_end()),
+                "{reply:?}: {error}"
+            );
+        }
     }
 
     #[test]
-    fn context_discovery_rejects_a_malformed_reply() {
+    fn pane_process_propagates_a_command_failure() {
         let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Ok("only|two\n".to_string()));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
-        let err = mux.context_discovery().unwrap_err();
-        assert!(
-            err.to_string()
-                .starts_with("unexpected tmux display-message output:"),
-            "got: {err}"
-        );
+        runner.respond(Err(RunError::Failed {
+            stderr: "no server running on /tmp/tmux-1000/default".to_string(),
+        }));
+        assert!(on_server(runner).pane_process("%3").is_err());
     }
 
     #[test]
@@ -320,7 +312,7 @@ mod tests {
         runner.respond(Err(RunError::Failed {
             stderr: "layout boom".to_string(),
         }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        let mux = on_server(runner.clone());
         let pane = mux
             .split_window(&reference(), &argv(&["claude", "--name", "worker"]))
             .unwrap();
@@ -328,8 +320,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&[
-                    "tmux",
+                tmux(&[
                     "split-window",
                     "-t",
                     "@1",
@@ -341,7 +332,7 @@ mod tests {
                     "--name",
                     "worker",
                 ]),
-                argv(&["tmux", "select-layout", "-t", "@1", "main-vertical"]),
+                tmux(&["select-layout", "-t", "@1", "main-vertical"]),
             ]
         );
     }
@@ -349,7 +340,7 @@ mod tests {
     #[test]
     fn capture_pane_rejects_non_positive_lines() {
         let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
+        let mux = on_server(runner);
         assert_eq!(
             mux.capture_pane("%5", 0).unwrap_err().to_string(),
             "capture_pane: lines must be positive, got 0"
@@ -360,7 +351,7 @@ mod tests {
     fn capture_pane_keeps_the_last_lines_after_dropping_the_blank_tail() {
         let runner = FakeRunner::with_binary("tmux");
         runner.respond(Ok("l1\nl2\nl3\nx\rY\n".to_string()));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        let mux = on_server(runner.clone());
         let captured = mux.capture_pane("%5", 2).unwrap();
         assert_eq!(
             captured, "l3\nx\rY",
@@ -372,6 +363,8 @@ mod tests {
             vec![run_event(
                 &[
                     "tmux",
+                    "-S",
+                    SOCKET,
                     "capture-pane",
                     "-p",
                     "-e",
@@ -392,11 +385,11 @@ mod tests {
         runner.respond(Err(RunError::Failed {
             stderr: "No Such Pane: %5".to_string(),
         }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        let mux = on_server(runner.clone());
         mux.kill_pane("%5", true).unwrap();
         assert_eq!(
             runner.run_argvs(),
-            vec![argv(&["tmux", "kill-pane", "-t", "%5"])],
+            vec![tmux(&["kill-pane", "-t", "%5"])],
             "the marker match is case-insensitive"
         );
 
@@ -404,7 +397,7 @@ mod tests {
         runner.respond(Err(RunError::Failed {
             stderr: "server exited unexpectedly".to_string(),
         }));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
+        let mux = on_server(runner);
         assert!(
             mux.kill_pane("%5", true).is_err(),
             "ignore_missing never swallows a non-pane-gone failure"
@@ -421,7 +414,7 @@ mod tests {
         ] {
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(response);
-            let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+            let mux = on_server(runner.clone());
             let error = mux
                 .split_window(&reference(), &argv(&["claude"]))
                 .unwrap_err();
@@ -437,7 +430,7 @@ mod tests {
             drop(mux);
             let calls = runner.run_argvs();
             assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0][1], "split-window");
+            assert_eq!(calls[0][..4], tmux(&["split-window"]));
         }
     }
 }

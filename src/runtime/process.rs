@@ -659,6 +659,216 @@ impl Drop for PtySession {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProcessEntry {
+    pub(crate) parent: i64,
+    pub(crate) argv: Vec<String>,
+}
+
+pub(crate) trait ProcessTable {
+    fn own_pid(&self) -> i64;
+    /// `None` when the process no longer exists.
+    fn entry(&self, pid: i64) -> Result<Option<ProcessEntry>>;
+    /// Whether this process runs in a PID namespace nested below the initial one.
+    fn nested_pid_namespace(&self) -> Result<bool>;
+}
+
+pub(crate) struct SystemProcessTable;
+
+impl ProcessTable for SystemProcessTable {
+    fn own_pid(&self) -> i64 {
+        i64::from(std::process::id())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn entry(&self, pid: i64) -> Result<Option<ProcessEntry>> {
+        let read = |file: &str| match std::fs::read(format!("/proc/{pid}/{file}")) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(CafleetError::App(format!(
+                "cannot read /proc/{pid}/{file}: {error}"
+            ))),
+        };
+        let (Some(stat), Some(cmdline)) = (read("stat")?, read("cmdline")?) else {
+            return Ok(None);
+        };
+        Ok(Some(ProcessEntry {
+            parent: parse_stat_parent(pid, &stat)?,
+            argv: parse_cmdline(&cmdline),
+        }))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn entry(&self, pid: i64) -> Result<Option<ProcessEntry>> {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "ppid=", "-o", "args=", "-p", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|error| CafleetError::App(format!("cannot run ps: {error}")))?;
+        parse_ps_output(pid, &String::from_utf8_lossy(&output.stdout))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn nested_pid_namespace(&self) -> Result<bool> {
+        let status = std::fs::read_to_string("/proc/self/status").map_err(|error| {
+            CafleetError::App(format!("cannot read /proc/self/status: {error}"))
+        })?;
+        parse_nspid_nested(&status)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn nested_pid_namespace(&self) -> Result<bool> {
+        Ok(false)
+    }
+}
+
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the /proc reader runs only on Linux")
+)]
+pub(crate) fn parse_stat_parent(pid: i64, stat: &[u8]) -> Result<i64> {
+    String::from_utf8_lossy(stat)
+        .rsplit_once(')')
+        .and_then(|(_, tail)| tail.split_whitespace().nth(1))
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(|| CafleetError::App(format!("malformed /proc/{pid}/stat")))
+}
+
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the /proc reader runs only on Linux")
+)]
+pub(crate) fn parse_cmdline(cmdline: &[u8]) -> Vec<String> {
+    let mut argv: Vec<String> = cmdline
+        .split(|byte| *byte == 0)
+        .map(|argument| String::from_utf8_lossy(argument).into_owned())
+        .collect();
+    if argv.last().is_some_and(String::is_empty) {
+        argv.pop();
+    }
+    argv
+}
+
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the /proc reader runs only on Linux")
+)]
+pub(crate) fn parse_nspid_nested(status: &str) -> Result<bool> {
+    let Some(line) = status.lines().find(|line| line.starts_with("NSpid:")) else {
+        return Ok(false);
+    };
+    let fields: Option<Vec<i64>> = line["NSpid:".len()..]
+        .split_whitespace()
+        .map(|field| field.parse().ok())
+        .collect();
+    let fields = fields.ok_or_else(|| {
+        CafleetError::App(format!("malformed /proc/self/status NSpid line: {line}"))
+    })?;
+    Ok(fields.len() > 1)
+}
+
+#[cfg_attr(
+    target_os = "linux",
+    allow(dead_code, reason = "the ps reader runs only outside Linux")
+)]
+pub(crate) fn parse_ps_output(pid: i64, output: &str) -> Result<Option<ProcessEntry>> {
+    let Some(line) = output.lines().find(|line| !line.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let mut fields = line.split_whitespace();
+    let parent = fields
+        .next()
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(|| CafleetError::App(format!("ps printed no parent for {pid}: {line}")))?;
+    let argv: Vec<String> = fields.map(str::to_owned).collect();
+    if argv.is_empty() {
+        return Err(CafleetError::App(format!(
+            "ps printed no command for {pid}: {line}"
+        )));
+    }
+    Ok(Some(ProcessEntry { parent, argv }))
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::collections::HashMap;
+
+    use crate::error::CafleetError;
+    use crate::runtime::process::ProcessEntry;
+    use crate::runtime::process::ProcessTable;
+
+    /// A literal process table: absent pids read as `None`, `unreadable` pids fail with their message.
+    pub(crate) struct FixtureProcessTable {
+        own_pid: i64,
+        entries: HashMap<i64, ProcessEntry>,
+        errors: HashMap<i64, String>,
+        nested: bool,
+        namespace_error: Option<String>,
+    }
+
+    impl FixtureProcessTable {
+        pub(crate) fn new(own_pid: i64) -> Self {
+            Self {
+                own_pid,
+                entries: HashMap::new(),
+                errors: HashMap::new(),
+                nested: false,
+                namespace_error: None,
+            }
+        }
+
+        pub(crate) fn process(mut self, pid: i64, parent: i64, argv: &[&str]) -> Self {
+            let entry = ProcessEntry {
+                parent,
+                argv: argv.iter().map(|token| (*token).to_owned()).collect(),
+            };
+            assert!(
+                self.entries.insert(pid, entry).is_none(),
+                "fixture pid {pid} is declared twice"
+            );
+            self
+        }
+
+        pub(crate) fn unreadable(mut self, pid: i64, message: &str) -> Self {
+            assert!(
+                self.errors.insert(pid, message.to_owned()).is_none(),
+                "fixture pid {pid} is declared unreadable twice"
+            );
+            self
+        }
+
+        pub(crate) fn nested(mut self) -> Self {
+            self.nested = true;
+            self
+        }
+
+        pub(crate) fn namespace_error(mut self, message: &str) -> Self {
+            self.namespace_error = Some(message.to_owned());
+            self
+        }
+    }
+
+    impl ProcessTable for FixtureProcessTable {
+        fn own_pid(&self) -> i64 {
+            self.own_pid
+        }
+
+        fn entry(&self, pid: i64) -> Result<Option<ProcessEntry>, CafleetError> {
+            if let Some(message) = self.errors.get(&pid) {
+                return Err(CafleetError::App(message.clone()));
+            }
+            Ok(self.entries.get(&pid).cloned())
+        }
+
+        fn nested_pid_namespace(&self) -> Result<bool, CafleetError> {
+            match &self.namespace_error {
+                Some(message) => Err(CafleetError::App(message.clone())),
+                None => Ok(self.nested),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::runtime::process::*;
@@ -1657,6 +1867,204 @@ mod tests {
                 assert!(!session.group_closed);
                 assert!(session.shutdown_clock.is_some());
                 assert_reaped(&native);
+            }
+        }
+    }
+
+    mod process_table_tests {
+        use crate::runtime::process::*;
+
+        fn argv(tokens: &[&str]) -> Vec<String> {
+            tokens.iter().map(|token| (*token).to_owned()).collect()
+        }
+
+        mod stat_parser {
+            use crate::runtime::process::tests::process_table_tests::*;
+
+            #[test]
+            fn reads_the_second_field_after_the_last_closing_parenthesis() {
+                assert_eq!(
+                    parse_stat_parent(412, b"412 (we) ird (x)) S 77 412 412 0 -1 4194304\n")
+                        .unwrap(),
+                    77
+                );
+            }
+
+            #[test]
+            fn missing_parent_field_is_malformed() {
+                assert_eq!(
+                    parse_stat_parent(412, b"412 (bash) S")
+                        .unwrap_err()
+                        .to_string(),
+                    "malformed /proc/412/stat"
+                );
+            }
+
+            #[test]
+            fn non_integer_parent_field_is_malformed() {
+                assert_eq!(
+                    parse_stat_parent(412, b"412 (bash) S parent 412 412")
+                        .unwrap_err()
+                        .to_string(),
+                    "malformed /proc/412/stat"
+                );
+            }
+
+            #[test]
+            fn stat_without_a_closing_parenthesis_is_malformed() {
+                assert_eq!(
+                    parse_stat_parent(412, b"412 bash S 77")
+                        .unwrap_err()
+                        .to_string(),
+                    "malformed /proc/412/stat"
+                );
+            }
+        }
+
+        mod cmdline_parser {
+            use crate::runtime::process::tests::process_table_tests::*;
+
+            #[test]
+            fn splits_on_nul_and_drops_the_trailing_empty_segment() {
+                assert_eq!(
+                    parse_cmdline(b"codex\0app-server\0--list\0"),
+                    argv(&["codex", "app-server", "--list"])
+                );
+            }
+
+            #[test]
+            fn keeps_the_last_argument_without_a_trailing_nul() {
+                assert_eq!(parse_cmdline(b"zsh\0-l"), argv(&["zsh", "-l"]));
+            }
+
+            #[test]
+            fn keeps_an_empty_argument_before_the_end() {
+                assert_eq!(parse_cmdline(b"sh\0\0-c\0"), argv(&["sh", "", "-c"]));
+            }
+
+            #[test]
+            fn empty_cmdline_is_an_empty_argv() {
+                assert_eq!(parse_cmdline(b""), Vec::<String>::new());
+            }
+        }
+
+        mod nspid_parser {
+            use crate::runtime::process::tests::process_table_tests::*;
+
+            #[test]
+            fn a_single_pid_is_not_nested() {
+                assert!(
+                    !parse_nspid_nested("Name:\tcafleet\nPid:\t4242\nNSpid:\t4242\nPPid:\t1\n")
+                        .unwrap()
+                );
+            }
+
+            #[test]
+            fn several_pids_are_nested() {
+                assert!(
+                    parse_nspid_nested("Name:\tcafleet\nNSpid:\t4242\t17\nPPid:\t1\n").unwrap()
+                );
+            }
+
+            #[test]
+            fn an_absent_nspid_line_is_not_nested() {
+                assert!(!parse_nspid_nested("Name:\tcafleet\nPid:\t4242\nPPid:\t1\n").unwrap());
+            }
+
+            #[test]
+            fn a_non_integer_field_is_malformed_with_the_line() {
+                assert_eq!(
+                    parse_nspid_nested("Name:\tcafleet\nNSpid:\t4242\tx\nPPid:\t1\n")
+                        .unwrap_err()
+                        .to_string(),
+                    "malformed /proc/self/status NSpid line: NSpid:\t4242\tx"
+                );
+            }
+        }
+
+        mod ps_parser {
+            use crate::runtime::process::tests::process_table_tests::*;
+
+            #[test]
+            fn reads_the_parent_and_the_whitespace_split_argv() {
+                assert_eq!(
+                    parse_ps_output(42, "  1234 /bin/zsh -l  --login\n").unwrap(),
+                    Some(ProcessEntry {
+                        parent: 1234,
+                        argv: argv(&["/bin/zsh", "-l", "--login"]),
+                    })
+                );
+            }
+
+            #[test]
+            fn reads_the_first_non_blank_line() {
+                assert_eq!(
+                    parse_ps_output(42, "\n   \n 77 sh -c true\n").unwrap(),
+                    Some(ProcessEntry {
+                        parent: 77,
+                        argv: argv(&["sh", "-c", "true"]),
+                    })
+                );
+            }
+
+            #[test]
+            fn blank_output_is_none() {
+                assert_eq!(parse_ps_output(42, "").unwrap(), None);
+                assert_eq!(parse_ps_output(42, "  \n\t\n").unwrap(), None);
+            }
+
+            #[test]
+            fn a_non_integer_parent_is_no_parent() {
+                assert_eq!(
+                    parse_ps_output(42, "abc /bin/sh\n")
+                        .unwrap_err()
+                        .to_string(),
+                    "ps printed no parent for 42: abc /bin/sh"
+                );
+            }
+
+            #[test]
+            fn a_parent_without_a_command_is_no_command() {
+                assert_eq!(
+                    parse_ps_output(42, "1234\n").unwrap_err().to_string(),
+                    "ps printed no command for 42: 1234"
+                );
+            }
+        }
+
+        mod system_table {
+            use crate::runtime::process::tests::process_table_tests::*;
+
+            #[test]
+            fn own_pid_is_this_process() {
+                assert_eq!(SystemProcessTable.own_pid(), i64::from(std::process::id()));
+            }
+
+            #[test]
+            fn entry_for_its_own_pid_reads_the_parent_and_a_non_empty_argv() {
+                let table = SystemProcessTable;
+                let entry = table
+                    .entry(table.own_pid())
+                    .unwrap()
+                    .expect("the running test process has an entry");
+                assert_eq!(entry.parent, i64::from(nix::unistd::getppid().as_raw()));
+                assert!(!entry.argv.is_empty());
+            }
+
+            #[test]
+            fn entry_for_a_reaped_child_is_none() {
+                let mut child = std::process::Command::new("true")
+                    .stdin(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let pid = i64::from(child.id());
+                assert!(child.wait().unwrap().success());
+                assert_eq!(SystemProcessTable.entry(pid).unwrap(), None);
+            }
+
+            #[test]
+            fn nested_pid_namespace_reads_without_error() {
+                SystemProcessTable.nested_pid_namespace().unwrap();
             }
         }
     }

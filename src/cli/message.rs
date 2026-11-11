@@ -17,6 +17,8 @@ use crate::output::format_message_acknowledged;
 use crate::output::format_message_sent;
 use crate::output::format_message_wait;
 use crate::output::format_messages;
+use crate::runtime::ProcessTable;
+use crate::runtime::SystemProcessTable;
 use crate::time::Clock;
 use crate::time::Deadline;
 use crate::time::SystemClock;
@@ -701,64 +703,19 @@ fn pinned_session_exited(session: &crate::runtime::ProcessIdentity) -> Result<bo
 /// Pins the nearest ancestor whose argv[0] basename is exactly `codex`, skipping shells,
 /// sandbox wrappers and the `codex-linux-sandbox` helper, which shares the Codex executable.
 fn pin_codex_session() -> Result<Option<crate::runtime::ProcessIdentity>, CafleetError> {
+    let table = SystemProcessTable;
     let mut pid = i64::from(nix::unistd::getppid().as_raw());
     while pid > 1 {
-        let Some((parent, argv0)) = process_parent_and_argv0(pid)? else {
+        let Some(entry) = table.entry(pid)? else {
             return Ok(None);
         };
-        if argv0.rsplit('/').next() == Some("codex") {
+        let argv0 = entry.argv.first().map(String::as_str);
+        if argv0.and_then(|argv0| argv0.rsplit('/').next()) == Some("codex") {
             return crate::runtime::ProcessIdentity::read(pid);
         }
-        pid = parent;
+        pid = entry.parent;
     }
     Ok(None)
-}
-
-#[cfg(target_os = "linux")]
-fn process_parent_and_argv0(pid: i64) -> Result<Option<(i64, String)>, CafleetError> {
-    let read = |file: &str| match std::fs::read(format!("/proc/{pid}/{file}")) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(CafleetError::App(format!(
-            "cannot read /proc/{pid}/{file}: {error}"
-        ))),
-    };
-    let (Some(stat), Some(cmdline)) = (read("stat")?, read("cmdline")?) else {
-        return Ok(None);
-    };
-    let stat = String::from_utf8_lossy(&stat);
-    let parent = stat
-        .rsplit_once(')')
-        .and_then(|(_, tail)| tail.split_whitespace().nth(1))
-        .and_then(|field| field.parse().ok())
-        .ok_or_else(|| CafleetError::App(format!("malformed /proc/{pid}/stat")))?;
-    let argv0 = cmdline
-        .split(|byte| *byte == 0)
-        .next()
-        .expect("split yields a first segment");
-    Ok(Some((parent, String::from_utf8_lossy(argv0).into_owned())))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn process_parent_and_argv0(pid: i64) -> Result<Option<(i64, String)>, CafleetError> {
-    let output = std::process::Command::new("ps")
-        .args(["-o", "ppid=", "-o", "args=", "-p", &pid.to_string()])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|error| CafleetError::App(format!("cannot run ps: {error}")))?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let Some(line) = text.lines().find(|line| !line.trim().is_empty()) else {
-        return Ok(None);
-    };
-    let mut fields = line.split_whitespace();
-    let parent = fields
-        .next()
-        .and_then(|field| field.parse().ok())
-        .ok_or_else(|| CafleetError::App(format!("ps printed no parent for {pid}: {line}")))?;
-    let argv0 = fields
-        .next()
-        .ok_or_else(|| CafleetError::App(format!("ps printed no command for {pid}: {line}")))?;
-    Ok(Some((parent, argv0.to_owned())))
 }
 
 struct CodexForwarding<'a> {

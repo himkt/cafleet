@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
+pub(crate) mod caller;
 pub(crate) mod herdr;
 pub(crate) mod tmux;
 
@@ -230,24 +231,20 @@ pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|part| part.to_string()).collect()
 }
 
-/// The runner, environment and error mapping shared by every backend; a
+/// The runner, server selector and error mapping shared by every backend; a
 /// backend adds only its own argv construction and output parsing.
 pub(crate) struct BackendCore {
     runner: Rc<dyn CommandRunner>,
-    env: std::collections::HashMap<String, String>,
     name: &'static str,
     pane_gone: fn(&str) -> bool,
     server_flag: &'static str,
-    /// The recorded server every argv targets; `None` only for the caller-environment
-    /// multiplexer that `fleet create` and doctor detect.
-    server: Option<String>,
+    server: String,
 }
 
 impl BackendCore {
     fn bounded(&self, deadline: crate::time::Deadline) -> Self {
         Self {
             runner: DeadlineRunner::wrap(self.runner.clone(), deadline),
-            env: self.env.clone(),
             name: self.name,
             pane_gone: self.pane_gone,
             server_flag: self.server_flag,
@@ -255,23 +252,16 @@ impl BackendCore {
         }
     }
 
-    /// `parts` with the recorded server selector inserted after the binary.
+    /// `parts` with the server selector inserted after the binary.
     fn argv(&self, parts: &[&str]) -> Vec<String> {
         let (binary, rest) = parts.split_first().expect("an argv names its binary");
-        let mut command = vec![binary.to_string()];
-        if let Some(server) = &self.server {
-            command.push(self.server_flag.to_owned());
-            command.push(server.clone());
-        }
+        let mut command = vec![
+            binary.to_string(),
+            self.server_flag.to_owned(),
+            self.server.clone(),
+        ];
         command.extend(argv(rest));
         command
-    }
-
-    fn env_var(&self, name: &str) -> Option<&str> {
-        self.env
-            .get(name)
-            .map(String::as_str)
-            .filter(|value| !value.is_empty())
     }
 
     fn map_error(
@@ -460,11 +450,13 @@ pub(crate) trait Multiplexer {
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError>;
 
-    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError>;
-
     /// The session, window and pane of `pane` on the targeted server, or `None` when the server
     /// has no such pane.
     fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError>;
+
+    /// The pid of `pane`'s process on the targeted server, or `None` when the server has no such
+    /// pane.
+    fn pane_process(&self, pane: &str) -> Result<Option<i64>, MultiplexerError>;
 
     fn split_window(
         &self,
@@ -573,24 +565,12 @@ impl MuxBackend {
 /// non-UTF-8 one fails with its name.
 pub(crate) fn caller_env()
 -> Result<std::collections::HashMap<String, String>, crate::error::CafleetError> {
-    let names =
-        "TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH HERDR_PANE_ID HERMES_SESSION_ID";
+    let names = "TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH HERDR_PANE_ID";
     let set = |name: &str| Ok(crate::config::process_env(name)?.map(|value| (name.into(), value)));
     names
         .split(' ')
         .filter_map(|name| set(name).transpose())
         .collect()
-}
-
-/// The caller-environment multiplexer that `fleet create` and doctor detect.
-pub(crate) fn resolve_multiplexer(
-    env: std::collections::HashMap<String, String>,
-    runner: Rc<dyn CommandRunner>,
-) -> Result<Box<dyn Multiplexer>, MultiplexerError> {
-    Ok(match MuxBackend::detect(|key| env.get(key).cloned())? {
-        MuxBackend::Herdr => Box::new(HerdrMultiplexer::new(runner, env)),
-        MuxBackend::Tmux => Box::new(TmuxMultiplexer::new(runner, env)),
-    })
 }
 
 /// The multiplexer that targets `server` on the recorded `backend` explicitly.
@@ -630,16 +610,26 @@ pub(crate) fn caller_server(
     }
 }
 
-const DEFAULT_HERDR_SESSION: &str = "default";
+pub(crate) const DEFAULT_HERDR_SESSION: &str = "default";
 
 fn default_tmux_socket(runner: &dyn CommandRunner) -> Result<String, MultiplexerError> {
+    tmux_socket_reply(
+        runner,
+        &argv(&["tmux", "display-message", "-p", "#{socket_path}"]),
+    )
+}
+
+/// The default tmux server's socket path as `argv` prints it.
+pub(crate) fn tmux_socket_reply(
+    runner: &dyn CommandRunner,
+    argv: &[String],
+) -> Result<String, MultiplexerError> {
     let no_server =
         || MultiplexerError::new("no tmux server found; pass --mux-server <socket path>");
-    let argv = argv(&["tmux", "display-message", "-p", "#{socket_path}"]);
-    let socket = match runner.run(&argv, None) {
+    let socket = match runner.run(argv, None) {
         Ok(out) => out.trim().to_owned(),
         Err(RunError::Failed { .. }) => return Err(no_server()),
-        Err(error) => return Err(map_run_error("tmux", &argv, None, error)),
+        Err(error) => return Err(map_run_error("tmux", argv, None, error)),
     };
     if socket.is_empty() {
         return Err(no_server());
@@ -1366,7 +1356,7 @@ mod tests {
     #[test]
     fn expired_deadlines_start_no_native_command_or_optional_layout_restore() {
         let runner = test_support::FakeRunner::without_binaries();
-        let mux = HerdrMultiplexer::new(runner.clone(), test_support::env(&[]))
+        let mux = HerdrMultiplexer::for_server(runner.clone(), HERDR_SESSION)
             .bounded(crate::time::Deadline::until(std::time::Instant::now()));
         assert!(mux.close_pane("w1:p2", true).is_err());
         mux.restore_after_close().unwrap();

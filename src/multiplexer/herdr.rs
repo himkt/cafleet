@@ -8,7 +8,6 @@ use crate::multiplexer::PaneCleanup;
 use crate::multiplexer::PaneOwnership;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -96,27 +95,14 @@ pub(crate) struct HerdrMultiplexer {
 }
 
 impl HerdrMultiplexer {
-    pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
-        Self::with_server(runner, env, None)
-    }
-
     pub(crate) fn for_server(runner: Rc<dyn CommandRunner>, session: &str) -> Self {
-        Self::with_server(runner, HashMap::new(), Some(session.to_owned()))
-    }
-
-    fn with_server(
-        runner: Rc<dyn CommandRunner>,
-        env: HashMap<String, String>,
-        server: Option<String>,
-    ) -> Self {
         HerdrMultiplexer {
             core: BackendCore {
                 runner,
-                env,
                 name: "herdr",
                 pane_gone: is_pane_not_found,
                 server_flag: "--session",
-                server,
+                server: session.to_owned(),
             },
             closed_tab: RefCell::new(None),
         }
@@ -124,6 +110,20 @@ impl HerdrMultiplexer {
 
     fn run_json(&self, argv: &[String]) -> Result<Value, MultiplexerError> {
         parse_envelope(&self.core.run(argv, None)?)
+    }
+
+    /// The `result` of a pane read, or `None` when herdr reports `pane_not_found`.
+    fn pane_read(&self, parts: &[&str]) -> Result<Option<Value>, MultiplexerError> {
+        let argv = self.core.argv(parts);
+        match self.core.runner.run(&argv, None) {
+            Ok(out) => parse_envelope(&out).map(Some),
+            Err(crate::multiplexer::RunError::Failed { ref stderr })
+                if is_pane_not_found(stderr) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(self.core.map_error(&argv, None, error)),
+        }
     }
 
     fn list_panes(&self) -> Result<Vec<Value>, MultiplexerError> {
@@ -184,25 +184,20 @@ impl Multiplexer for HerdrMultiplexer {
         self.core.send_keys(&argv, deadline)
     }
 
-    /// The caller pane's context, which `herdr pane current` resolves through `HERDR_PANE_ID`.
-    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        let result = self.run_json(&self.core.argv(&["herdr", "pane", "current"]))?;
-        current_context(&result)
+    fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
+        self.pane_read(&["herdr", "pane", "current", "--pane", pane])?
+            .map(|result| current_context(&result))
+            .transpose()
     }
 
-    fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
-        let argv = self
-            .core
-            .argv(&["herdr", "pane", "current", "--pane", pane]);
-        match self.core.runner.run(&argv, None) {
-            Ok(out) => current_context(&parse_envelope(&out)?).map(Some),
-            Err(crate::multiplexer::RunError::Failed { ref stderr })
-                if is_pane_not_found(stderr) =>
-            {
-                Ok(None)
-            }
-            Err(error) => Err(self.core.map_error(&argv, None, error)),
-        }
+    fn pane_process(&self, pane: &str) -> Result<Option<i64>, MultiplexerError> {
+        self.pane_read(&["herdr", "pane", "process-info", "--pane", pane])?
+            .map(|result| {
+                result["process_info"]["shell_pid"].as_i64().ok_or_else(|| {
+                    MultiplexerError::new("herdr pane process-info missing 'shell_pid' field")
+                })
+            })
+            .transpose()
     }
 
     /// Emulate tmux main-vertical: the first member splits the Director pane
@@ -547,20 +542,28 @@ mod tests {
     use crate::multiplexer::RunError;
     use crate::multiplexer::test_support::FakeRunner;
     use crate::multiplexer::test_support::argv;
-    use crate::multiplexer::test_support::env;
     use crate::multiplexer::test_support::herdr_envelope;
     use crate::multiplexer::test_support::herdr_error_stderr;
-    use crate::multiplexer::test_support::run_event;
+    use std::rc::Rc;
 
-    fn herdr_env() -> std::collections::HashMap<String, String> {
-        env(&[("HERDR_ENV", "1")])
+    const SESSION: &str = "work";
+
+    fn on_server(runner: Rc<FakeRunner>) -> HerdrMultiplexer {
+        HerdrMultiplexer::for_server(runner, SESSION)
+    }
+
+    /// `herdr --session <SESSION> <parts…>`.
+    fn herdr(parts: &[&str]) -> Vec<String> {
+        let mut command = argv(&["herdr", "--session", SESSION]);
+        command.extend(argv(parts));
+        command
     }
 
     fn assert_styled_read(runner: &FakeRunner, pane: &str, depth: &str) {
         let calls = runner.run_argvs();
         assert_eq!(calls.len(), 1);
-        assert_eq!(&calls[0][..4], ["herdr", "pane", "read", pane]);
-        let options = &calls[0][4..];
+        assert_eq!(calls[0][..6], herdr(&["pane", "read", pane]));
+        let options = &calls[0][6..];
         assert_eq!(options.len(), 6);
         let options: std::collections::BTreeMap<_, _> = options
             .as_chunks::<2>()
@@ -595,28 +598,10 @@ mod tests {
     }
 
     #[test]
-    fn context_discovery_reads_the_single_pane_current_envelope() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok(herdr_envelope(json!({
-            "pane": {"pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1"}
-        }))));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let context = mux.context_discovery().unwrap();
-        assert_eq!(context.session, "w1");
-        assert_eq!(context.window_id, "w1:t1");
-        assert_eq!(context.pane_id, "w1:p1");
-        assert_eq!(
-            runner.events(),
-            vec![run_event(&["herdr", "pane", "current"], None)]
-        );
-    }
-
-    #[test]
     fn structured_reads_reject_non_json_and_missing_result() {
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Ok("not json".to_string()));
-        let mux = HerdrMultiplexer::new(runner, herdr_env());
-        let err = mux.context_discovery().unwrap_err();
+        let err = on_server(runner).pane_context("w1:p1").unwrap_err();
         assert!(
             err.to_string()
                 .starts_with("herdr returned non-JSON output:"),
@@ -625,13 +610,76 @@ mod tests {
 
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Ok(r#"{"id":1}"#.to_string()));
-        let mux = HerdrMultiplexer::new(runner, herdr_env());
-        let err = mux.context_discovery().unwrap_err();
+        let err = on_server(runner).pane_context("w1:p1").unwrap_err();
         assert!(
             err.to_string()
                 .starts_with("herdr output missing 'result' object:"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn pane_process_reads_the_shell_pid_on_the_recorded_session() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok(herdr_envelope(json!({
+            "process_info": {"shell_pid": 407363}
+        }))));
+        assert_eq!(
+            on_server(runner.clone()).pane_process("w5:p1").unwrap(),
+            Some(407363)
+        );
+        assert_eq!(
+            runner.run_argvs(),
+            vec![herdr(&["pane", "process-info", "--pane", "w5:p1"])]
+        );
+    }
+
+    #[test]
+    fn pane_process_of_a_pane_not_found_is_none() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Err(RunError::Failed {
+            stderr: herdr_error_stderr("pane_not_found"),
+        }));
+        assert_eq!(
+            on_server(runner.clone()).pane_process("w5:p9").unwrap(),
+            None
+        );
+        assert_eq!(runner.run_argvs().len(), 1);
+    }
+
+    #[test]
+    fn pane_process_without_an_integer_shell_pid_fails() {
+        for result in [
+            json!({"process_info": {}}),
+            json!({"process_info": {"shell_pid": "407363"}}),
+            json!({"process_info": {"shell_pid": null}}),
+            json!({}),
+        ] {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(herdr_envelope(result.clone())));
+            assert_eq!(
+                on_server(runner)
+                    .pane_process("w5:p1")
+                    .unwrap_err()
+                    .to_string(),
+                "herdr pane process-info missing 'shell_pid' field",
+                "{result}"
+            );
+        }
+    }
+
+    #[test]
+    fn pane_process_propagates_other_command_failures() {
+        for failure in [
+            RunError::Failed {
+                stderr: herdr_error_stderr("server_unavailable"),
+            },
+            RunError::Timeout,
+        ] {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Err(failure));
+            assert!(on_server(runner).pane_process("w5:p1").is_err());
+        }
     }
 
     #[test]
@@ -642,7 +690,7 @@ mod tests {
         }))));
         runner.respond(Ok(herdr_envelope(json!({"pane": {"pane_id": "w1:p2"}}))));
         runner.succeed(1);
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let mux = on_server(runner.clone());
         let pane = mux
             .split_window(&reference(), &argv(&["claude", "--name", "w 1"]))
             .unwrap();
@@ -650,9 +698,8 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "list"]),
-                argv(&[
-                    "herdr",
+                herdr(&["pane", "list"]),
+                herdr(&[
                     "pane",
                     "split",
                     "w1:p1",
@@ -662,7 +709,7 @@ mod tests {
                     "--cwd",
                     &cwd(),
                 ]),
-                argv(&["herdr", "pane", "run", "w1:p2", "claude --name 'w 1'"]),
+                herdr(&["pane", "run", "w1:p2", "claude --name 'w 1'"]),
             ],
             "pane run submits ONE shell line — the argv is shlex-quoted"
         );
@@ -693,15 +740,14 @@ mod tests {
             }
         }))));
         runner.succeed(2);
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let mux = on_server(runner.clone());
         let pane = mux.split_window(&reference(), &argv(&["claude"])).unwrap();
         assert_eq!(pane, "w1:p3");
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "list"]),
-                argv(&[
-                    "herdr",
+                herdr(&["pane", "list"]),
+                herdr(&[
                     "pane",
                     "split",
                     "w1:p2",
@@ -711,9 +757,8 @@ mod tests {
                     "--cwd",
                     &cwd(),
                 ]),
-                argv(&["herdr", "pane", "layout", "--pane", "w1:p1"]),
-                argv(&[
-                    "herdr",
+                herdr(&["pane", "layout", "--pane", "w1:p1"]),
+                herdr(&[
                     "pane",
                     "resize",
                     "--pane",
@@ -723,7 +768,7 @@ mod tests {
                     "--amount",
                     "0.2",
                 ]),
-                argv(&["herdr", "pane", "run", "w1:p3", "claude"]),
+                herdr(&["pane", "run", "w1:p3", "claude"]),
             ],
             "split targets the column's max pane; one signed resize drives the \
              down split to ratio 1/2; the read anchors on the Director's pane"
@@ -744,7 +789,7 @@ mod tests {
             stderr: "layout read boom".to_string(),
         }));
         runner.succeed(1);
-        let mux = HerdrMultiplexer::new(runner, herdr_env());
+        let mux = on_server(runner);
         let pane = mux.split_window(&reference(), &argv(&["claude"])).unwrap();
         assert_eq!(pane, "w1:p3", "a rebalance failure never fails the spawn");
     }
@@ -755,7 +800,7 @@ mod tests {
         runner.respond(Ok(
             "scrollback\r\nprompt> ls\r\nstatus bar\r\n\r\n \r\n".to_string()
         ));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let mux = on_server(runner.clone());
         assert_eq!(
             mux.capture_pane("w1:p2", 2).unwrap(),
             "prompt> ls\r\nstatus bar\r"
@@ -780,17 +825,16 @@ mod tests {
             }
         }))));
         runner.succeed(1);
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let mux = on_server(runner.clone());
         mux.kill_pane("w1:p2", false).unwrap();
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "get", "w1:p2"]),
-                argv(&["herdr", "pane", "close", "w1:p2"]),
-                argv(&["herdr", "pane", "list"]),
-                argv(&["herdr", "pane", "layout", "--pane", "w1:p1"]),
-                argv(&[
-                    "herdr",
+                herdr(&["pane", "get", "w1:p2"]),
+                herdr(&["pane", "close", "w1:p2"]),
+                herdr(&["pane", "list"]),
+                herdr(&["pane", "layout", "--pane", "w1:p1"]),
+                herdr(&[
                     "pane",
                     "resize",
                     "--pane",
@@ -822,15 +866,14 @@ mod tests {
             "splits": [{"direction":"down", "rect":{"x":60,"y":15}, "ratio":0.2}]
         }}))));
         runner.succeed(1);
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let mux = on_server(runner.clone());
         mux.close_pane("w1:p2", false).unwrap();
         assert_eq!(runner.run_argvs().len(), 2);
         mux.restore_after_close().unwrap();
         let calls = runner.run_argvs();
         assert_eq!(
             calls[4],
-            argv(&[
-                "herdr",
+            herdr(&[
                 "pane",
                 "resize",
                 "--pane",
@@ -850,13 +893,13 @@ mod tests {
             stderr: herdr_error_stderr("pane_not_found"),
         }));
         runner.respond(Ok(String::new()));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let mux = on_server(runner.clone());
         mux.kill_pane("w1:p2", false).unwrap();
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "get", "w1:p2"]),
-                argv(&["herdr", "pane", "close", "w1:p2"]),
+                herdr(&["pane", "get", "w1:p2"]),
+                herdr(&["pane", "close", "w1:p2"]),
             ],
             "a failed tab read never blocks the close; the rebalance is skipped"
         );
@@ -871,7 +914,7 @@ mod tests {
         runner.respond(Err(RunError::Failed {
             stderr: herdr_error_stderr("pane_not_found"),
         }));
-        let mux = HerdrMultiplexer::new(runner, herdr_env());
+        let mux = on_server(runner);
         mux.kill_pane("w1:p2", true).unwrap();
 
         let runner = FakeRunner::with_binary("herdr");
@@ -881,7 +924,7 @@ mod tests {
         runner.respond(Err(RunError::Failed {
             stderr: herdr_error_stderr("pane_not_found"),
         }));
-        let mux = HerdrMultiplexer::new(runner, herdr_env());
+        let mux = on_server(runner);
         assert!(
             mux.kill_pane("w1:p2", false).is_err(),
             "without ignore_missing the close failure propagates"
@@ -909,7 +952,7 @@ mod tests {
             } else {
                 Ok(String::new())
             });
-            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let mux = on_server(runner.clone());
             let error = mux
                 .split_window(&reference(), &argv(&["agent", "a'b", "$(literal)"]))
                 .unwrap_err();
@@ -919,16 +962,10 @@ mod tests {
             );
             drop(mux);
             let calls = runner.run_argvs();
-            assert_eq!(calls.iter().filter(|call| call[2] == "close").count(), 1);
+            assert_eq!(calls.iter().filter(|call| call[4] == "close").count(), 1);
             assert_eq!(
                 calls[2],
-                argv(&[
-                    "herdr",
-                    "pane",
-                    "run",
-                    "w1:p9",
-                    "agent 'a'\"'\"'b' '$(literal)'"
-                ])
+                herdr(&["pane", "run", "w1:p9", "agent 'a'\"'\"'b' '$(literal)'"])
             );
         }
     }
@@ -945,7 +982,7 @@ mod tests {
                 json!({"panes": [{"pane_id":"w1:p1", "tab_id":"w1:t1"}]}),
             )));
             runner.respond(split);
-            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let mux = on_server(runner.clone());
             let error = mux
                 .split_window(&reference(), &argv(&["agent"]))
                 .unwrap_err();

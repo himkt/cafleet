@@ -1263,7 +1263,7 @@ mod tests {
                     }
                 }),
             });
-            let mux = TmuxMultiplexer::new(runner.clone(), Default::default()).bounded(deadline);
+            let mux = TmuxMultiplexer::for_server(runner.clone(), CLOSE_SOCKET).bounded(deadline);
             let result = close_member(&mut conn, &settings, worker, &mut locked, &*mux, deadline);
             assert_eq!(runner.calls.get(), 1);
             if scenario == "terminal" {
@@ -2055,6 +2055,8 @@ mod tests {
         (dir, conn, settings, fleet, director, worker)
     }
 
+    const CLOSE_SOCKET: &str = "/tmp/tmux-1000/default";
+
     struct CloseRunner {
         check: Box<dyn Fn()>,
         calls: Cell<usize>,
@@ -2068,7 +2070,7 @@ mod tests {
         }
 
         fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
-            assert_eq!(argv, &["tmux", "kill-pane", "-t", "%9"]);
+            assert_eq!(argv, &["tmux", "-S", CLOSE_SOCKET, "kill-pane", "-t", "%9"]);
             self.calls.set(self.calls.get() + 1);
             (self.check)();
             match self.failure {
@@ -2130,7 +2132,7 @@ mod tests {
                     }
                 }),
             });
-            let mux = TmuxMultiplexer::new(runner.clone(), Default::default()).bounded(deadline);
+            let mux = TmuxMultiplexer::for_server(runner.clone(), CLOSE_SOCKET).bounded(deadline);
             assert_eq!(
                 close_member(&mut conn, &settings, worker, &mut locked, &*mux, deadline).unwrap(),
                 "%9 (killed)"
@@ -2174,7 +2176,7 @@ mod tests {
             failure: None,
             check: Box::new(|| {}),
         });
-        let mux = TmuxMultiplexer::new(runner.clone(), Default::default()).bounded(deadline);
+        let mux = TmuxMultiplexer::for_server(runner.clone(), CLOSE_SOCKET).bounded(deadline);
         let error = close_member(&mut conn, &settings, worker, &mut locked, &*mux, deadline)
             .unwrap_err()
             .to_string();

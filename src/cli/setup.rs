@@ -12,16 +12,26 @@ use crate::db;
 use crate::db::SchemaState;
 use crate::error::CafleetError;
 use crate::multiplexer::MultiplexerContext;
+use crate::multiplexer::caller;
+use crate::multiplexer::caller::Ancestry;
+use crate::multiplexer::caller::CallerMux;
+use crate::multiplexer::caller::Refusal;
+use crate::multiplexer::caller::Verification;
+use crate::runtime::ProcessTable;
+use crate::runtime::SystemProcessTable;
 use crate::runtime::control::CheckStatus;
 use crate::runtime::control::MemberState;
 use crate::runtime::system::SystemProbe;
+use crate::runtime::system::SystemRunner;
 use clap::Args;
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -246,12 +256,29 @@ impl Summary {
     }
 }
 
-/// The detected multiplexer's name and the caller pane's context.
-pub(crate) type MuxReading = Result<(&'static str, MultiplexerContext), CafleetError>;
+pub(crate) enum CallerReading {
+    /// Row 1 refused before any multiplexer command.
+    SharedServer { refusal: Refusal },
+    Resolved {
+        /// The backend name and its server.
+        mux: Result<(&'static str, String), CafleetError>,
+        /// `None` when `mux` failed.
+        pane: Option<Result<PaneReading, CafleetError>>,
+    },
+}
+
+pub(crate) enum PaneReading {
+    Verified {
+        variable: &'static str,
+        context: MultiplexerContext,
+    },
+    /// The `unverified_message` or `unset_message` body.
+    Unverified { detail: String },
+}
 
 /// Everything doctor reads from outside the process.
 pub(crate) struct DoctorInputs<'a> {
-    pub(crate) mux: &'a dyn Fn() -> MuxReading,
+    pub(crate) caller: &'a dyn Fn() -> CallerReading,
     pub(crate) settings: &'a Settings,
     pub(crate) probe: &'a dyn SpawnProbe,
     pub(crate) home: &'a Result<PathBuf, CafleetError>,
@@ -282,10 +309,18 @@ pub(crate) enum Mode {
 }
 
 pub(crate) fn doctor(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
+    doctor_with(settings, args, &SystemProcessTable)
+}
+
+pub(crate) fn doctor_with(
+    settings: &Settings,
+    args: DoctorArgs,
+    table: &dyn ProcessTable,
+) -> Result<(), CafleetError> {
     let home = crate::config::home_dir();
     let hermes = hermes_reader(&SystemProbe, &home);
     let report = gather(&DoctorInputs {
-        mux: &detect_mux,
+        caller: &|| detect_caller(table),
         settings,
         probe: &SystemProbe,
         home: &home,
@@ -319,11 +354,60 @@ fn hermes_reader(
     Some(HermesCli::new(executable, base))
 }
 
-fn detect_mux() -> MuxReading {
-    let mux = crate::runtime::resolve_mux()?;
-    mux.ensure_available()?;
-    let context = mux.context_discovery()?;
-    Ok((mux.name(), context))
+/// The `fleet create` verification without `--pane`, as doctor reports it.
+fn detect_caller(table: &dyn ProcessTable) -> CallerReading {
+    let unavailable = |cause: CafleetError| CallerReading::Resolved {
+        mux: Err(cause),
+        pane: None,
+    };
+    let env = match crate::multiplexer::caller_env() {
+        Ok(env) => env,
+        Err(cause) => return unavailable(cause),
+    };
+    let ancestry = caller::walk(table);
+    if let Some(refusal) = caller::shared_server(&ancestry) {
+        return CallerReading::SharedServer { refusal };
+    }
+    let mux = match caller::resolve_env_mux(&env, Rc::new(SystemRunner)) {
+        Ok(mux) => mux,
+        Err(cause) => return unavailable(cause),
+    };
+    CallerReading::Resolved {
+        mux: Ok((mux.backend.name(), mux.server.clone())),
+        pane: Some(read_caller_pane(&mux, &env, table, &ancestry)),
+    }
+}
+
+fn read_caller_pane(
+    mux: &CallerMux,
+    env: &HashMap<String, String>,
+    table: &dyn ProcessTable,
+    ancestry: &Ancestry,
+) -> Result<PaneReading, CafleetError> {
+    let Some(pane) = caller::env_pane(mux.backend, env) else {
+        return Ok(PaneReading::Unverified {
+            detail: caller::unset_message(mux.backend),
+        });
+    };
+    match caller::verify_pane(mux.mux.as_ref(), table, ancestry, &pane.pane)? {
+        Verification::Verified { .. } => {
+            let context = mux.mux.pane_context(&pane.pane)?.ok_or_else(|| {
+                CafleetError::App(format!(
+                    "pane {} was not found on the {} server {}",
+                    pane.pane,
+                    mux.backend.name(),
+                    mux.server
+                ))
+            })?;
+            Ok(PaneReading::Verified {
+                variable: pane.variable,
+                context,
+            })
+        }
+        Verification::Refused(refusal) => Ok(PaneReading::Unverified {
+            detail: caller::unverified_message(&pane, &refusal, mux),
+        }),
+    }
 }
 
 /// Runs every check: the Hermes batch starts first and overlaps the multiplexer, database,
@@ -343,7 +427,7 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
             let deadline = Instant::now() + HERMES_DOCTOR_BUDGET;
             scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline))
         });
-        let (mut checks, mut summary) = multiplexer_rows((inputs.mux)());
+        let (mut checks, mut summary) = multiplexer_rows((inputs.caller)());
         let (conn, schema) = database(inputs.settings);
         let (database_check, database_summary) = database_rows(inputs.settings, &schema);
         checks.push(database_check);
@@ -398,23 +482,85 @@ pub(crate) fn render(report: &Report, mode: Mode) -> String {
         .join("\n")
 }
 
-fn multiplexer_rows(reading: MuxReading) -> (Vec<Check>, Vec<Summary>) {
-    let (status, detail, short) = match reading {
-        Ok((name, context)) => (
-            CheckStatus::Ok,
-            format!(
-                "{name} session={} window={} pane={}",
-                context.session, context.window_id, context.pane_id
+/// The `multiplexer` and `multiplexer.caller_pane` checks and their folded summary line.
+fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
+    let ((mux_status, mux_detail), (pane_status, pane_detail), (status, short)) = match reading {
+        CallerReading::SharedServer { refusal } => {
+            let Refusal::SharedServer { label, pid } = &refusal else {
+                panic!("a shared-server reading carries a shared-server refusal");
+            };
+            let detail = caller::shared_server_message(&refusal);
+            (
+                (
+                    CheckStatus::Info,
+                    format!(
+                        "not checked: a shared {label} server (pid {pid}) supplies the caller environment"
+                    ),
+                ),
+                (CheckStatus::Warn, detail.clone()),
+                (CheckStatus::Warn, detail),
+            )
+        }
+        CallerReading::Resolved {
+            mux: Err(cause),
+            pane: None,
+        } => (
+            (CheckStatus::Error, cause.to_string()),
+            (
+                CheckStatus::Info,
+                "unavailable: the multiplexer is unavailable".to_owned(),
             ),
-            format!(
-                "{name} (session {}, pane {})",
-                context.session, context.pane_id
-            ),
+            (CheckStatus::Error, cause.to_string()),
         ),
-        Err(cause) => (CheckStatus::Error, cause.to_string(), cause.to_string()),
+        CallerReading::Resolved {
+            mux: Ok((name, server)),
+            pane: Some(pane),
+        } => {
+            let mux = (CheckStatus::Ok, format!("{name} server={server}"));
+            match pane {
+                Ok(PaneReading::Verified { variable, context }) => (
+                    mux,
+                    (
+                        CheckStatus::Ok,
+                        format!(
+                            "{variable}={} session={} window={}",
+                            context.pane_id, context.session, context.window_id
+                        ),
+                    ),
+                    (
+                        CheckStatus::Ok,
+                        format!(
+                            "{name} (session {}, pane {})",
+                            context.session, context.pane_id
+                        ),
+                    ),
+                ),
+                Ok(PaneReading::Unverified { detail }) => (
+                    mux,
+                    (CheckStatus::Warn, detail.clone()),
+                    (
+                        CheckStatus::Warn,
+                        format!("{name} (server {server}); {detail}"),
+                    ),
+                ),
+                Err(cause) => (
+                    mux,
+                    (CheckStatus::Error, cause.to_string()),
+                    (CheckStatus::Error, cause.to_string()),
+                ),
+            }
+        }
+        CallerReading::Resolved { mux, pane } => panic!(
+            "a resolved caller reading has a pane exactly when its multiplexer resolved (mux ok: {}, pane: {})",
+            mux.is_ok(),
+            pane.is_some()
+        ),
     };
     (
-        vec![Check::new("multiplexer", status, detail)],
+        vec![
+            Check::new("multiplexer", mux_status, mux_detail),
+            Check::new("multiplexer.caller_pane", pane_status, pane_detail),
+        ],
         vec![Summary::new("multiplexer", status, short)],
     )
 }
@@ -2014,8 +2160,64 @@ mod tests {
         use crate::broker::runtime::test_support::assert_key_order;
         use crate::broker::runtime::test_support::register_member_run;
         use crate::cli::setup::tests::*;
+        use crate::multiplexer::MuxBackend;
+        use crate::multiplexer::caller::CallerMux;
+        use crate::multiplexer::caller::CallerPane;
+        use crate::multiplexer::caller::Refusal;
+        use crate::multiplexer::caller::shared_server_message;
+        use crate::multiplexer::caller::unset_message;
+        use crate::multiplexer::caller::unverified_message;
+        use crate::runtime::test_support::FixtureProcessTable;
         use serde_json::Value;
         use serde_json::json;
+
+        const TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
+
+        fn main_pane() -> MultiplexerContext {
+            MultiplexerContext {
+                session: "main".into(),
+                window_id: "@1".into(),
+                pane_id: "%1".into(),
+            }
+        }
+
+        fn verified_caller() -> CallerReading {
+            CallerReading::Resolved {
+                mux: Ok(("tmux", TMUX_SOCKET.to_string())),
+                pane: Some(Ok(PaneReading::Verified {
+                    variable: "TMUX_PANE",
+                    context: main_pane(),
+                })),
+            }
+        }
+
+        fn codex_daemon() -> Refusal {
+            Refusal::SharedServer {
+                label: "codex app-server".to_string(),
+                pid: 407596,
+            }
+        }
+
+        fn unverified_detail() -> String {
+            unverified_message(
+                &CallerPane {
+                    variable: "TMUX_PANE",
+                    pane: "%3".to_string(),
+                },
+                &Refusal::PaneNotAncestor { pane_pid: 405228 },
+                &CallerMux {
+                    backend: MuxBackend::Tmux,
+                    server: TMUX_SOCKET.to_string(),
+                    mux: MuxBackend::Tmux.for_server(
+                        TMUX_SOCKET,
+                        crate::multiplexer::test_support::FakeRunner::without_binaries(),
+                    ),
+                },
+            )
+        }
+
+        const NO_MULTIPLEXER: &str = "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; run cafleet inside a tmux or herdr session";
+        const PANE_READ_FAILURE: &str = "tmux command failed: server exited unexpectedly";
 
         #[test]
         fn a_run_reached_after_the_time_budget_is_not_checked() {
@@ -2129,6 +2331,7 @@ mod tests {
 
         const CHILD_CONFIG: &str = "CAFLEET_TEST_DOCTOR";
         const CHILD_STDOUT_MARKER: &str = "cafleet-doctor-child-stdout-begins";
+        const CHILD_ANCESTOR: i64 = 4242;
         const REGISTRY_FAILURE: &str = "registry fixture failure";
         const PHANTOM_RUN: i64 = 999;
         const PHANTOM_MEMBER: i64 = 42;
@@ -2163,6 +2366,7 @@ mod tests {
             home: tempfile::TempDir,
             database: PathBuf,
             registry: Registry,
+            caller: fn() -> CallerReading,
             executables: Vec<&'static str>,
             environment: Vec<(&'static str, String)>,
             hermes: FakeHermes,
@@ -2176,6 +2380,7 @@ mod tests {
                     home,
                     database,
                     registry,
+                    caller: verified_caller,
                     executables: Vec::new(),
                     environment: Vec::new(),
                     hermes: FakeHermes::new(),
@@ -2251,18 +2456,8 @@ mod tests {
                 let settings = Settings::for_database(&self.database);
                 let probe = self.probe();
                 let home = Ok(self.home.path().to_path_buf());
-                let mux = || -> MuxReading {
-                    Ok((
-                        "tmux",
-                        MultiplexerContext {
-                            session: "main".into(),
-                            window_id: "@1".into(),
-                            pane_id: "%1".into(),
-                        },
-                    ))
-                };
                 gather(&DoctorInputs {
-                    mux: &mux,
+                    caller: &self.caller,
                     settings: &settings,
                     probe: &probe,
                     home: &home,
@@ -2415,8 +2610,19 @@ mod tests {
             let Command::Doctor(args) = CliArgs::try_parse_from(argv).unwrap().command else {
                 panic!("doctor command");
             };
+            let own = i64::from(std::process::id());
+            let table = match config["ancestor"].as_array() {
+                Some(ancestor) => {
+                    let ancestor: Vec<&str> =
+                        ancestor.iter().map(|arg| arg.as_str().unwrap()).collect();
+                    FixtureProcessTable::new(own)
+                        .process(own, CHILD_ANCESTOR, &["cafleet", "doctor"])
+                        .process(CHILD_ANCESTOR, 1, &ancestor)
+                }
+                None => FixtureProcessTable::new(own).process(own, 1, &["cafleet", "doctor"]),
+            };
             println!("{CHILD_STDOUT_MARKER}");
-            match doctor(&settings, args) {
+            match doctor_with(&settings, args, &table) {
                 Ok(()) => std::process::exit(0),
                 Err(error) => {
                     eprintln!("Error: {error}");
@@ -2425,28 +2631,46 @@ mod tests {
             }
         }
 
+        /// The child's `TMUX_PANE` and the pid the tmux stub reports for pane `%1`.
+        #[derive(Clone, Copy)]
+        enum ChildPane {
+            Own,
+            Unset,
+            Pid(i64),
+        }
+
         struct Outcome {
             code: Option<i32>,
             stdout: String,
             stderr: String,
         }
 
-        /// Runs the real `cafleet doctor` in a child whose `PATH` holds only `tmux` and the
-        /// given stubs, with every backend's configuration under `home`.
+        /// Runs `doctor_with` in a child whose `PATH` holds only `tmux` and the given stubs,
+        /// with every backend's configuration under `home`. The child's process table records
+        /// the child itself with parent 1, or with `ancestor`'s argv between the child and pid 1.
         fn doctor_process(
             home: &Path,
             database: &Path,
             stubs: &[(&str, String)],
             args: &[&str],
+            ancestor: Option<&[&str]>,
+            pane: ChildPane,
         ) -> Outcome {
             use crate::runtime::system::test_support::TestChild;
             use std::process::Stdio;
 
             let bin = tempfile::tempdir().unwrap();
+            // `$PPID` is the doctor child that runs the stub, so the child's own pid is the pane pid.
+            let pane_pid = match pane {
+                ChildPane::Pid(pid) => pid.to_string(),
+                ChildPane::Own | ChildPane::Unset => "\"$PPID\"".to_owned(),
+            };
             crate::coding_agent::test_support::executable_stub(
                 bin.path(),
                 "tmux",
-                "case \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac",
+                &format!(
+                    "case \" $* \" in *'#{{pane_pid}}'*) printf '%%1|%s\\n' {pane_pid} ;; *' display-message '*) printf 'main|@1|%%1\\n' ;; esac"
+                ),
             );
             for (name, body) in stubs {
                 crate::coding_agent::test_support::executable_stub(bin.path(), name, body);
@@ -2466,14 +2690,18 @@ mod tests {
                 ])
                 .env(
                     CHILD_CONFIG,
-                    serde_json::json!({"database": database, "args": args}).to_string(),
+                    serde_json::json!({"database": database, "args": args, "ancestor": ancestor})
+                        .to_string(),
                 )
                 .env("PATH", bin.path())
                 .env("HOME", home)
                 .env("TMUX", "cafleet-test,1,0")
-                .env("TMUX_PANE", "%1")
+                .env_remove("TMUX_PANE")
                 .env_remove("HERDR_ENV")
                 .env("RUST_BACKTRACE", "0");
+            if !matches!(pane, ChildPane::Unset) {
+                command.env("TMUX_PANE", "%1");
+            }
             for agent in CodingAgent::all() {
                 command.env(agent.config_variable(), home.join(agent.name()));
             }
@@ -2509,8 +2737,8 @@ mod tests {
             status_lines(payload["summary"].as_array().unwrap(), "component")
         }
 
-        #[test]
-        fn doctor_process_reads_a_real_hermes_and_prints_json_for_a_healthy_home() {
+        /// A home where every backend is ready, with its database and the backend stubs.
+        fn healthy_home() -> (tempfile::TempDir, PathBuf, Vec<(&'static str, String)>) {
             let home = crate::runtime::test_support::short_tempdir();
             let mut conn = crate::db::test_support::migrated_conn(&home);
             let database = PathBuf::from(conn.path().unwrap());
@@ -2547,22 +2775,145 @@ mod tests {
                 .map(|name| (name, "exit 0".to_owned()))
                 .to_vec();
             stubs.push(("hermes", hermes));
-            let outcome = doctor_process(home.path(), &database, &stubs, &["doctor", "--json"]);
+            (home, database, stubs)
+        }
+
+        fn ready_backend_lines() -> Vec<String> {
+            vec![
+                format!("ok database: cafleet {}", crate::cli::VERSION),
+                "ok claude: ready".into(),
+                "ok codex: ready".into(),
+                "ok opencode: ready".into(),
+                "ok hermes: ready".into(),
+                "ok pi: ready".into(),
+                "ok members: none running".into(),
+            ]
+        }
+
+        fn check_lines(stdout: &str) -> Vec<String> {
+            let payload: Value = serde_json::from_str(stdout.trim_end()).unwrap();
+            status_lines(payload["checks"].as_array().unwrap(), "name")
+        }
+
+        #[test]
+        fn doctor_process_reads_a_real_hermes_and_prints_json_for_a_healthy_home() {
+            let (home, database, stubs) = healthy_home();
+            let outcome = doctor_process(
+                home.path(),
+                &database,
+                &stubs,
+                &["doctor", "--json"],
+                None,
+                ChildPane::Own,
+            );
             assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
             assert_eq!(outcome.stderr, "");
+            let mut expected = vec!["ok multiplexer: tmux (session main, pane %1)".to_owned()];
+            expected.extend(ready_backend_lines());
+            assert_eq!(summary_lines(&outcome.stdout), expected);
             assert_eq!(
-                summary_lines(&outcome.stdout),
+                check_lines(&outcome.stdout)[..2],
                 [
-                    "ok multiplexer: tmux (session main, pane %1)".to_owned(),
-                    format!("ok database: cafleet {}", crate::cli::VERSION),
-                    "ok claude: ready".into(),
-                    "ok codex: ready".into(),
-                    "ok opencode: ready".into(),
-                    "ok hermes: ready".into(),
-                    "ok pi: ready".into(),
-                    "ok members: none running".into(),
+                    "ok multiplexer: tmux server=cafleet-test".to_owned(),
+                    "ok multiplexer.caller_pane: TMUX_PANE=%1 session=main window=@1".to_owned(),
                 ]
             );
+        }
+
+        #[test]
+        fn doctor_process_under_a_codex_app_server_warns_on_the_caller_pane_and_exits_zero() {
+            let (home, database, stubs) = healthy_home();
+            let outcome = doctor_process(
+                home.path(),
+                &database,
+                &stubs,
+                &["doctor", "--json"],
+                Some(&[
+                    "/root/.codex/packages/app-server-daemon/releases/0.167.1-x86_64-unknown-linux-musl/bin/codex",
+                    "app-server",
+                    "--list",
+                ]),
+                ChildPane::Own,
+            );
+            assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
+            assert_eq!(outcome.stderr, "");
+            let detail = shared_server_message(&Refusal::SharedServer {
+                label: "codex app-server".to_string(),
+                pid: CHILD_ANCESTOR,
+            });
+            let mut expected = vec![format!("warn multiplexer: {detail}")];
+            expected.extend(ready_backend_lines());
+            assert_eq!(summary_lines(&outcome.stdout), expected);
+            assert_eq!(
+                check_lines(&outcome.stdout)[..2],
+                [
+                    format!(
+                        "info multiplexer: not checked: a shared codex app-server server (pid {CHILD_ANCESTOR}) supplies the caller environment"
+                    ),
+                    format!("warn multiplexer.caller_pane: {detail}"),
+                ]
+            );
+        }
+
+        fn assert_caller_pane_warning(outcome: &Outcome, detail: &str) {
+            assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
+            assert_eq!(outcome.stderr, "");
+            let mut expected = vec![format!(
+                "warn multiplexer: tmux (server cafleet-test); {detail}"
+            )];
+            expected.extend(ready_backend_lines());
+            assert_eq!(summary_lines(&outcome.stdout), expected);
+            assert_eq!(
+                check_lines(&outcome.stdout)[..2],
+                [
+                    "ok multiplexer: tmux server=cafleet-test".to_owned(),
+                    format!("warn multiplexer.caller_pane: {detail}"),
+                ]
+            );
+        }
+
+        #[test]
+        fn doctor_process_with_tmux_pane_unset_warns_on_the_caller_pane_and_exits_zero() {
+            let (home, database, stubs) = healthy_home();
+            let outcome = doctor_process(
+                home.path(),
+                &database,
+                &stubs,
+                &["doctor", "--json"],
+                None,
+                ChildPane::Unset,
+            );
+            assert_caller_pane_warning(&outcome, &unset_message(MuxBackend::Tmux));
+        }
+
+        #[test]
+        fn doctor_process_with_a_non_ancestor_pane_warns_unverified_and_exits_zero() {
+            const STRANGER: i64 = 405228;
+            let (home, database, stubs) = healthy_home();
+            let outcome = doctor_process(
+                home.path(),
+                &database,
+                &stubs,
+                &["doctor", "--json"],
+                None,
+                ChildPane::Pid(STRANGER),
+            );
+            let detail = unverified_message(
+                &CallerPane {
+                    variable: "TMUX_PANE",
+                    pane: "%1".to_string(),
+                },
+                &Refusal::PaneNotAncestor { pane_pid: STRANGER },
+                &CallerMux {
+                    backend: MuxBackend::Tmux,
+                    server: "cafleet-test".to_string(),
+                    mux: MuxBackend::Tmux.for_server(
+                        "cafleet-test",
+                        crate::multiplexer::test_support::FakeRunner::without_binaries(),
+                    ),
+                },
+            );
+            assert_caller_pane_warning(&outcome, &detail);
         }
 
         #[test]
@@ -2574,6 +2925,8 @@ mod tests {
                 &database,
                 &[],
                 &["doctor", "--json", "--verbose"],
+                None,
+                ChildPane::Own,
             );
             assert_eq!(outcome.code, Some(1));
             assert_eq!(outcome.stderr, "Error: doctor found errors\n");
@@ -2652,6 +3005,165 @@ mod tests {
                 "ok hermes: ready".into(),
                 "ok pi: ready".into(),
             ]
+        }
+
+        mod caller_pane_rows {
+            use crate::cli::setup::tests::doctor_summary::*;
+
+            /// The healthy scenario's views with `caller` as the caller reading.
+            fn views_with(caller: fn() -> CallerReading) -> Views {
+                let mut scenario = Scenario::new(member_run_registry);
+                let mut conn = scenario.connect();
+                healthy_backends(&mut scenario, &mut conn);
+                scenario.caller = caller;
+                scenario.views()
+            }
+
+            fn assert_multiplexer(views: &Views, summary: &str, rows: [&str; 2], code: i32) {
+                let summaries: Vec<&String> = views
+                    .text
+                    .iter()
+                    .filter(|line| row_name(line) == "multiplexer")
+                    .collect();
+                assert_eq!(summaries, [summary], "one folded multiplexer summary line");
+                assert_eq!(views.text[0], summary);
+                assert_eq!(views.verbose[..2], rows);
+                let checks = views.json["checks"].as_array().unwrap();
+                assert_eq!(checks[0]["name"], "multiplexer");
+                assert_eq!(checks[1]["name"], "multiplexer.caller_pane");
+                assert_eq!(
+                    views.json["summary"][0],
+                    json!({
+                        "component": "multiplexer",
+                        "status": summary.split_once(' ').unwrap().0,
+                        "detail": summary.split_once(": ").unwrap().1,
+                    })
+                );
+                views.assert_exit(code);
+            }
+
+            #[test]
+            fn a_shared_server_reports_info_multiplexer_and_warn_caller_pane() {
+                let detail = shared_server_message(&codex_daemon());
+                assert_multiplexer(
+                    &views_with(|| CallerReading::SharedServer {
+                        refusal: codex_daemon(),
+                    }),
+                    &format!("warn multiplexer: {detail}"),
+                    [
+                        "info multiplexer: not checked: a shared codex app-server server (pid 407596) supplies the caller environment",
+                        &format!("warn multiplexer.caller_pane: {detail}"),
+                    ],
+                    0,
+                );
+            }
+
+            #[test]
+            fn an_unavailable_multiplexer_reports_error_and_an_unavailable_caller_pane() {
+                assert_multiplexer(
+                    &views_with(|| CallerReading::Resolved {
+                        mux: Err(CafleetError::App(NO_MULTIPLEXER.into())),
+                        pane: None,
+                    }),
+                    &format!("error multiplexer: {NO_MULTIPLEXER}"),
+                    [
+                        &format!("error multiplexer: {NO_MULTIPLEXER}"),
+                        "info multiplexer.caller_pane: unavailable: the multiplexer is unavailable",
+                    ],
+                    1,
+                );
+            }
+
+            #[test]
+            fn an_unset_env_pane_warns_with_the_unset_message() {
+                let detail = unset_message(MuxBackend::Tmux);
+                assert_multiplexer(
+                    &views_with(|| CallerReading::Resolved {
+                        mux: Ok(("tmux", TMUX_SOCKET.to_string())),
+                        pane: Some(Ok(PaneReading::Unverified {
+                            detail: unset_message(MuxBackend::Tmux),
+                        })),
+                    }),
+                    &format!("warn multiplexer: tmux (server {TMUX_SOCKET}); {detail}"),
+                    [
+                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
+                        &format!("warn multiplexer.caller_pane: {detail}"),
+                    ],
+                    0,
+                );
+            }
+
+            #[test]
+            fn a_refused_env_pane_warns_with_the_unverified_message() {
+                let detail = unverified_detail();
+                assert_multiplexer(
+                    &views_with(|| CallerReading::Resolved {
+                        mux: Ok(("tmux", TMUX_SOCKET.to_string())),
+                        pane: Some(Ok(PaneReading::Unverified {
+                            detail: unverified_detail(),
+                        })),
+                    }),
+                    &format!("warn multiplexer: tmux (server {TMUX_SOCKET}); {detail}"),
+                    [
+                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
+                        &format!("warn multiplexer.caller_pane: {detail}"),
+                    ],
+                    0,
+                );
+            }
+
+            #[test]
+            fn a_verified_pane_reports_its_context() {
+                assert_multiplexer(
+                    &views_with(verified_caller),
+                    "ok multiplexer: tmux (session main, pane %1)",
+                    [
+                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
+                        "ok multiplexer.caller_pane: TMUX_PANE=%1 session=main window=@1",
+                    ],
+                    0,
+                );
+            }
+
+            #[test]
+            fn a_propagated_pane_error_reports_error_caller_pane_and_fails() {
+                assert_multiplexer(
+                    &views_with(|| CallerReading::Resolved {
+                        mux: Ok(("tmux", TMUX_SOCKET.to_string())),
+                        pane: Some(Err(CafleetError::App(PANE_READ_FAILURE.into()))),
+                    }),
+                    &format!("error multiplexer: {PANE_READ_FAILURE}"),
+                    [
+                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
+                        &format!("error multiplexer.caller_pane: {PANE_READ_FAILURE}"),
+                    ],
+                    1,
+                );
+            }
+
+            #[test]
+            fn a_herdr_verified_pane_names_herdr_pane_id() {
+                let views = views_with(|| CallerReading::Resolved {
+                    mux: Ok(("herdr", "default".to_string())),
+                    pane: Some(Ok(PaneReading::Verified {
+                        variable: "HERDR_PANE_ID",
+                        context: MultiplexerContext {
+                            session: "w4".into(),
+                            window_id: "w4:t1".into(),
+                            pane_id: "w4:p3N".into(),
+                        },
+                    })),
+                });
+                assert_multiplexer(
+                    &views,
+                    "ok multiplexer: herdr (session w4, pane w4:p3N)",
+                    [
+                        "ok multiplexer: herdr server=default",
+                        "ok multiplexer.caller_pane: HERDR_PANE_ID=w4:p3N session=w4 window=w4:t1",
+                    ],
+                    0,
+                );
+            }
         }
 
         #[test]

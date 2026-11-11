@@ -96,6 +96,8 @@ writable_roots = ["/home/<you>/.local/share/cafleet"]
 
 `network_access` lets cafleet reach the tmux or herdr socket, and `writable_roots` names the database directory. Setup overwrites the installed `~/.codex/rules/cafleet.rules`, so keep your own Codex rules in a separate file beside it.
 
+Codex 0.167.0 and later run a Codex Director's tool commands through the shared Codex daemon, so registering a Codex Director usually asks you for its pane ID and server ([Director pane verification](concepts/members.md#director-pane-verification)).
+
 ### OpenCode
 
 1. Launch the Director on OpenCode 2.2.0 or later with
@@ -122,13 +124,11 @@ Run the Director in the TUI client: `hermes chat --tui`, or set
 
 1. Run `cafleet setup --coding-agent hermes` with `hermes` on `PATH`.
 2. Start the Director with `hermes chat --tui`.
-3. Read the Director's pane ID with Hermes's leading-`!` local shell:
-   `! echo $TMUX_PANE` in tmux, or `! echo $HERDR_PANE_ID` in herdr.
-4. Register the fleet with that ID:
-   `cafleet fleet create --name <name> --coding-agent hermes --pane <pane-id>`.
-   Add `--mux-server <server>` when the pane is not on the server CAFleet
-   finds by default.
-5. Start reception with the plugin's `cafleet_listen` tool, passing the
+3. Register the fleet with
+   `cafleet fleet create --name <name> --coding-agent hermes`. When CAFleet
+   asks for the pane ID and server, run the command it names
+   ([Director pane verification](concepts/members.md#director-pane-verification)).
+4. Start reception with the plugin's `cafleet_listen` tool, passing the
    Director ID.
 
 ### pi
