@@ -4,7 +4,6 @@ use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MultiplexerContext;
 use crate::multiplexer::MultiplexerError;
 use crate::multiplexer::PLACEMENT_MISMATCH;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
@@ -21,58 +20,31 @@ pub(crate) struct TmuxMultiplexer {
 }
 
 impl TmuxMultiplexer {
-    pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
-        Self::with_server(runner, env, None)
-    }
-
     pub(crate) fn for_server(runner: Rc<dyn CommandRunner>, socket: &str) -> Self {
-        Self::with_server(runner, HashMap::new(), Some(socket.to_owned()))
-    }
-
-    fn with_server(
-        runner: Rc<dyn CommandRunner>,
-        env: HashMap<String, String>,
-        server: Option<String>,
-    ) -> Self {
         TmuxMultiplexer {
             core: BackendCore {
                 runner,
-                env,
                 name: "tmux",
                 pane_gone: is_pane_gone,
                 server_flag: "-S",
-                server,
+                server: socket.to_owned(),
             },
         }
     }
 
-    /// `pane`'s session, window and pane as `display-message` prints them.
-    fn read_context(
-        &self,
-        pane: &str,
-    ) -> Result<(String, Option<MultiplexerContext>), MultiplexerError> {
-        let out = self.core.run(
-            &self.core.argv(&[
-                "tmux",
-                "display-message",
-                "-p",
-                "-t",
-                pane,
-                "#{session_name}|#{window_id}|#{pane_id}",
-            ]),
+    /// `format` for `pane` as `display-message` prints it.
+    fn display(&self, pane: &str, format: &str) -> Result<String, MultiplexerError> {
+        self.core.run(
+            &self
+                .core
+                .argv(&["tmux", "display-message", "-p", "-t", pane, format]),
             None,
-        )?;
-        let parts: Vec<&str> = out.trim().splitn(3, '|').collect();
-        let context = match parts.as_slice() {
-            [session, window_id, pane_id] => Some(MultiplexerContext {
-                session: session.to_string(),
-                window_id: window_id.to_string(),
-                pane_id: pane_id.to_string(),
-            }),
-            _ => None,
-        };
-        Ok((out, context))
+        )
     }
+}
+
+fn unexpected_output(out: &str) -> MultiplexerError {
+    MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
 }
 
 impl Multiplexer for TmuxMultiplexer {
@@ -89,13 +61,37 @@ impl Multiplexer for TmuxMultiplexer {
     /// tmux prints `||` and exits 0 for a missing pane, so an empty field or another pane id
     /// means the server has no such pane.
     fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
-        let (out, context) = self.read_context(pane)?;
-        let context = context.ok_or_else(|| {
-            MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
-        })?;
-        let found =
-            !context.session.is_empty() && !context.window_id.is_empty() && context.pane_id == pane;
-        Ok(found.then_some(context))
+        let out = self.display(pane, "#{session_name}|#{window_id}|#{pane_id}")?;
+        let [session, window_id, pane_id] = out
+            .trim()
+            .splitn(3, '|')
+            .collect::<Vec<_>>()
+            .try_into()
+            .map_err(|_| unexpected_output(&out))?;
+        let found = !session.is_empty() && !window_id.is_empty() && pane_id == pane;
+        Ok(found.then(|| MultiplexerContext {
+            session: session.to_owned(),
+            window_id: window_id.to_owned(),
+            pane_id: pane_id.to_owned(),
+        }))
+    }
+
+    /// A reply naming another or no pane means the server has no such pane.
+    fn pane_process(&self, pane: &str) -> Result<Option<i64>, MultiplexerError> {
+        let out = self.display(pane, "#{pane_id}|#{pane_pid}")?;
+        let (pane_id, pid) = out
+            .trim()
+            .split_once('|')
+            .ok_or_else(|| unexpected_output(&out))?;
+        if pane_id != pane {
+            return Ok(None);
+        }
+        let pid = pid
+            .parse::<i64>()
+            .ok()
+            .filter(|pid| *pid > 0)
+            .ok_or_else(|| unexpected_output(&out))?;
+        Ok(Some(pid))
     }
 
     fn check_key_target(
@@ -138,17 +134,6 @@ impl Multiplexer for TmuxMultiplexer {
         let mut argv = self.core.argv(&["tmux", "send-keys", "-t", pane_id]);
         argv.extend(keys.tmux_arguments());
         self.core.send_keys(&argv, deadline)
-    }
-
-    /// The caller pane's context, read through `TMUX_PANE`.
-    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        let caller = self.core.env_var("TMUX_PANE").ok_or_else(|| {
-            MultiplexerError::new("TMUX_PANE is not set; not running inside a tmux pane")
-        })?;
-        let (out, context) = self.read_context(caller)?;
-        context.ok_or_else(|| {
-            MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
-        })
     }
 
     /// Split `reference.window_id` detached (`-d`) and return the new pane

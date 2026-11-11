@@ -1,7 +1,7 @@
 # Caller pane verification for `fleet create` and `doctor`
 
 **Status**: Approved
-**Progress**: 17/70 tasks complete
+**Progress**: 31/70 tasks complete
 **Last Updated**: 2026-11-11
 
 ## Overview
@@ -532,26 +532,28 @@ The order follows `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs
 
 ### Step 6: Process table
 
-- [ ] Add `ProcessEntry`, `ProcessTable` and `SystemProcessTable` (Linux `/proc`, non-Linux `ps`) to `src/runtime/process.rs`, with the `stat`, `cmdline`, `NSpid:` and `ps`-line parsers as pure functions compiled on every platform <!-- completed: -->
-- [ ] Unit-test the `stat` and `cmdline` parsers: a parent after a `)` inside the command name, a missing or non-integer parent (`malformed /proc/<pid>/stat`), a NUL-split argv with a trailing NUL, and an empty `cmdline` <!-- completed: -->
-- [ ] Unit-test the `NSpid:` parser: single, nested, absent and non-integer (`malformed /proc/self/status NSpid line: <line>`) lines <!-- completed: -->
-- [ ] Unit-test the `ps` line parser: parent and whitespace argv, blank output (`None`), no parent (`ps printed no parent for <pid>: <line>`) and no command (`ps printed no command for <pid>: <line>`) <!-- completed: -->
-- [ ] Unit-test `SystemProcessTable::entry` for its own pid (parent equals `getppid`, argv non-empty) and for a reaped child's pid (`None`) <!-- completed: -->
-- [ ] Add a `#[cfg(test)] pub(crate) mod test_support` `FixtureProcessTable` (own pid, entries, per-pid errors, nested flag, namespace error) beside `ProcessTable` <!-- completed: -->
-- [ ] Replace `process_parent_and_argv0` in `src/cli/message.rs` with `SystemProcessTable`; the existing Codex-pin tests pass unchanged <!-- completed: -->
+- [x] Add `ProcessEntry`, `ProcessTable` and `SystemProcessTable` (Linux `/proc`, non-Linux `ps`) to `src/runtime/process.rs`, with the `stat`, `cmdline`, `NSpid:` and `ps`-line parsers as pure functions compiled on every platform <!-- completed: 2026-11-11T11:53 -->
+- [x] Unit-test the `stat` and `cmdline` parsers: a parent after a `)` inside the command name, a missing or non-integer parent (`malformed /proc/<pid>/stat`), a NUL-split argv with a trailing NUL, and an empty `cmdline` <!-- completed: 2026-11-11T11:53 -->
+- [x] Unit-test the `NSpid:` parser: single, nested, absent and non-integer (`malformed /proc/self/status NSpid line: <line>`) lines <!-- completed: 2026-11-11T11:53 -->
+- [x] Unit-test the `ps` line parser: parent and whitespace argv, blank output (`None`), no parent (`ps printed no parent for <pid>: <line>`) and no command (`ps printed no command for <pid>: <line>`) <!-- completed: 2026-11-11T11:53 -->
+- [x] Unit-test `SystemProcessTable::entry` for its own pid (parent equals `getppid`, argv non-empty) and for a reaped child's pid (`None`) <!-- completed: 2026-11-11T11:53 -->
+- [x] Add a `#[cfg(test)] pub(crate) mod test_support` `FixtureProcessTable` (own pid, entries, per-pid errors, nested flag, namespace error) beside `ProcessTable` <!-- completed: 2026-11-11T11:53 -->
+- [x] Replace `process_parent_and_argv0` in `src/cli/message.rs` with `SystemProcessTable`; the existing Codex-pin tests pass unchanged <!-- completed: 2026-11-11T11:53 -->
 
 ### Step 7: Shared-server signatures
 
-- [ ] Add `SharedServerSignature` and `CodingAgent::shared_server_signatures` in `src/coding_agent/mod.rs` <!-- completed: -->
-- [ ] Unit-test `matches`: the Codex daemon and Hermes gateway argv from § Evidence fixtures match. `codex --no-daemon …`, `codex --enable daemon_auto_start …`, `hermes chat --tui`, `hermes gateway status`, `opencode serve --service`, `claude` and an empty argv do not <!-- completed: -->
-- [ ] Unit-test `label` for both signatures <!-- completed: -->
+- [x] Add `SharedServerSignature` and `CodingAgent::shared_server_signatures` in `src/coding_agent/mod.rs` <!-- completed: 2026-11-11T11:53 -->
+- [x] Unit-test `matches`: the Codex daemon and Hermes gateway argv from § Evidence fixtures match. `codex --no-daemon …`, `codex --enable daemon_auto_start …`, `hermes chat --tui`, `hermes gateway status`, `opencode serve --service`, `claude` and an empty argv do not <!-- completed: 2026-11-11T11:53 -->
+- [x] Unit-test `label` for both signatures <!-- completed: 2026-11-11T11:53 -->
 
 ### Step 8: Pane process read and multiplexer cleanup
 
-- [ ] Add `pane_process` to the `Multiplexer` trait with tmux and herdr implementations <!-- completed: -->
-- [ ] tmux unit tests (FakeRunner): the exact argv with `-S <server>`, a found pid, a `|` reply (`None`), another pane ID (`None`) and a non-numeric pid (error) <!-- completed: -->
-- [ ] herdr unit tests: the exact argv with `--session <server>`, the `shell_pid` read, `pane_not_found` (`None`) and a missing field (error) <!-- completed: -->
-- [ ] Delete `context_discovery` with its implementations and tests, `resolve_mux`, `resolve_multiplexer`, `BackendCore.env`, `BackendCore::env_var` and the `new(runner, env)` constructors. Make `BackendCore.server` a `String`, and move every test to `for_server` with the selector in its expected argv <!-- completed: -->
+- [x] Add `pane_process` to the `Multiplexer` trait with tmux and herdr implementations <!-- completed: 2026-11-11T11:53 -->
+- [x] tmux unit tests (FakeRunner): the exact argv with `-S <server>`, a found pid, a `|` reply (`None`), another pane ID (`None`) and a non-numeric pid (error) <!-- completed: 2026-11-11T11:53 -->
+- [x] herdr unit tests: the exact argv with `--session <server>`, the `shell_pid` read, `pane_not_found` (`None`) and a missing field (error) <!-- completed: 2026-11-11T11:53 -->
+- [x] Delete `context_discovery` with its implementations and tests, `resolve_mux`, `resolve_multiplexer`, `BackendCore.env`, `BackendCore::env_var` and the `new(runner, env)` constructors. Make `BackendCore.server` a `String`, and move every test to `for_server` with the selector in its expected argv <!-- completed: 2026-11-11T11:53 -->
+
+COMMENT(programmer): Steps 6–8 status. (1) `mise //:lint` fails only on dead code: `SharedServerSignature` and its consts/methods, `Multiplexer::pane_process`, `ProcessTable::own_pid` / `nested_pid_namespace`, `parse_nspid_nested`, plus the Tester's unused `FixtureProcessTable` re-export at `src/runtime/mod.rs:187`; Step 9's `caller.rs` is their first consumer. Because clippy stops the task, `cargo fmt --check` was not reached. (2) Deleting `context_discovery` / `resolve_mux` left doctor without a reader, so `src/cli/setup.rs` `detect_mux` is an interim reader (caller_env → detect → caller_server → for_server → env pane → pane_context) that Step 11 replaces. (3) `mise //:test`: 1613 pass, 1 fails in two full runs: `runtime::process::tests::mechanisms_tests::runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_native_zero_exit` (`cleanup_state: Incomplete`, "owned descendants remain unconfirmed"). It passes alone and within `runtime::process`, so it looks load-dependent; whether it also fails on `main` is unverified. (4) I ran one `cargo build --bin cafleet` directly instead of through a mise task; every later check went through mise.
 
 ### Step 9: Caller verification module
 

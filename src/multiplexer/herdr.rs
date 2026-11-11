@@ -8,7 +8,6 @@ use crate::multiplexer::PaneCleanup;
 use crate::multiplexer::PaneOwnership;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -96,27 +95,14 @@ pub(crate) struct HerdrMultiplexer {
 }
 
 impl HerdrMultiplexer {
-    pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
-        Self::with_server(runner, env, None)
-    }
-
     pub(crate) fn for_server(runner: Rc<dyn CommandRunner>, session: &str) -> Self {
-        Self::with_server(runner, HashMap::new(), Some(session.to_owned()))
-    }
-
-    fn with_server(
-        runner: Rc<dyn CommandRunner>,
-        env: HashMap<String, String>,
-        server: Option<String>,
-    ) -> Self {
         HerdrMultiplexer {
             core: BackendCore {
                 runner,
-                env,
                 name: "herdr",
                 pane_gone: is_pane_not_found,
                 server_flag: "--session",
-                server,
+                server: session.to_owned(),
             },
             closed_tab: RefCell::new(None),
         }
@@ -124,6 +110,20 @@ impl HerdrMultiplexer {
 
     fn run_json(&self, argv: &[String]) -> Result<Value, MultiplexerError> {
         parse_envelope(&self.core.run(argv, None)?)
+    }
+
+    /// The `result` of a pane read, or `None` when herdr reports `pane_not_found`.
+    fn pane_read(&self, parts: &[&str]) -> Result<Option<Value>, MultiplexerError> {
+        let argv = self.core.argv(parts);
+        match self.core.runner.run(&argv, None) {
+            Ok(out) => parse_envelope(&out).map(Some),
+            Err(crate::multiplexer::RunError::Failed { ref stderr })
+                if is_pane_not_found(stderr) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(self.core.map_error(&argv, None, error)),
+        }
     }
 
     fn list_panes(&self) -> Result<Vec<Value>, MultiplexerError> {
@@ -184,25 +184,20 @@ impl Multiplexer for HerdrMultiplexer {
         self.core.send_keys(&argv, deadline)
     }
 
-    /// The caller pane's context, which `herdr pane current` resolves through `HERDR_PANE_ID`.
-    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        let result = self.run_json(&self.core.argv(&["herdr", "pane", "current"]))?;
-        current_context(&result)
+    fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
+        self.pane_read(&["herdr", "pane", "current", "--pane", pane])?
+            .map(|result| current_context(&result))
+            .transpose()
     }
 
-    fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
-        let argv = self
-            .core
-            .argv(&["herdr", "pane", "current", "--pane", pane]);
-        match self.core.runner.run(&argv, None) {
-            Ok(out) => current_context(&parse_envelope(&out)?).map(Some),
-            Err(crate::multiplexer::RunError::Failed { ref stderr })
-                if is_pane_not_found(stderr) =>
-            {
-                Ok(None)
-            }
-            Err(error) => Err(self.core.map_error(&argv, None, error)),
-        }
+    fn pane_process(&self, pane: &str) -> Result<Option<i64>, MultiplexerError> {
+        self.pane_read(&["herdr", "pane", "process-info", "--pane", pane])?
+            .map(|result| {
+                result["process_info"]["shell_pid"].as_i64().ok_or_else(|| {
+                    MultiplexerError::new("herdr pane process-info missing 'shell_pid' field")
+                })
+            })
+            .transpose()
     }
 
     /// Emulate tmux main-vertical: the first member splits the Director pane

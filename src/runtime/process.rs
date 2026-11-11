@@ -659,6 +659,139 @@ impl Drop for PtySession {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProcessEntry {
+    pub(crate) parent: i64,
+    pub(crate) argv: Vec<String>,
+}
+
+pub(crate) trait ProcessTable {
+    fn own_pid(&self) -> i64;
+    /// `None` when the process no longer exists.
+    fn entry(&self, pid: i64) -> Result<Option<ProcessEntry>>;
+    /// Whether this process runs in a PID namespace nested below the initial one.
+    fn nested_pid_namespace(&self) -> Result<bool>;
+}
+
+pub(crate) struct SystemProcessTable;
+
+impl ProcessTable for SystemProcessTable {
+    fn own_pid(&self) -> i64 {
+        i64::from(std::process::id())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn entry(&self, pid: i64) -> Result<Option<ProcessEntry>> {
+        let read = |file: &str| match std::fs::read(format!("/proc/{pid}/{file}")) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(CafleetError::App(format!(
+                "cannot read /proc/{pid}/{file}: {error}"
+            ))),
+        };
+        let (Some(stat), Some(cmdline)) = (read("stat")?, read("cmdline")?) else {
+            return Ok(None);
+        };
+        Ok(Some(ProcessEntry {
+            parent: parse_stat_parent(pid, &stat)?,
+            argv: parse_cmdline(&cmdline),
+        }))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn entry(&self, pid: i64) -> Result<Option<ProcessEntry>> {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "ppid=", "-o", "args=", "-p", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|error| CafleetError::App(format!("cannot run ps: {error}")))?;
+        parse_ps_output(pid, &String::from_utf8_lossy(&output.stdout))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn nested_pid_namespace(&self) -> Result<bool> {
+        let status = std::fs::read_to_string("/proc/self/status").map_err(|error| {
+            CafleetError::App(format!("cannot read /proc/self/status: {error}"))
+        })?;
+        parse_nspid_nested(&status)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn nested_pid_namespace(&self) -> Result<bool> {
+        Ok(false)
+    }
+}
+
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the /proc reader runs only on Linux")
+)]
+pub(crate) fn parse_stat_parent(pid: i64, stat: &[u8]) -> Result<i64> {
+    String::from_utf8_lossy(stat)
+        .rsplit_once(')')
+        .and_then(|(_, tail)| tail.split_whitespace().nth(1))
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(|| CafleetError::App(format!("malformed /proc/{pid}/stat")))
+}
+
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the /proc reader runs only on Linux")
+)]
+pub(crate) fn parse_cmdline(cmdline: &[u8]) -> Vec<String> {
+    let mut argv: Vec<String> = cmdline
+        .split(|byte| *byte == 0)
+        .map(|argument| String::from_utf8_lossy(argument).into_owned())
+        .collect();
+    if argv.last().is_some_and(String::is_empty) {
+        argv.pop();
+    }
+    argv
+}
+
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(dead_code, reason = "the /proc reader runs only on Linux")
+)]
+pub(crate) fn parse_nspid_nested(status: &str) -> Result<bool> {
+    let Some(line) = status.lines().find(|line| line.starts_with("NSpid:")) else {
+        return Ok(false);
+    };
+    let fields = line["NSpid:".len()..]
+        .split_whitespace()
+        .map(str::parse::<i64>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| {
+            CafleetError::App(format!("malformed /proc/self/status NSpid line: {line}"))
+        })?;
+    Ok(fields.len() > 1)
+}
+
+#[cfg_attr(
+    target_os = "linux",
+    allow(dead_code, reason = "the ps reader runs only outside Linux")
+)]
+pub(crate) fn parse_ps_output(
+    pid: i64,
+    output: &str,
+) -> Result<Option<ProcessEntry>> {
+    let Some(line) = output.lines().find(|line| !line.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let mut fields = line.split_whitespace();
+    let parent = fields
+        .next()
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(|| CafleetError::App(format!("ps printed no parent for {pid}: {line}")))?;
+    let argv: Vec<String> = fields.map(str::to_owned).collect();
+    if argv.is_empty() {
+        return Err(CafleetError::App(format!(
+            "ps printed no command for {pid}: {line}"
+        )));
+    }
+    Ok(Some(ProcessEntry { parent, argv }))
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::collections::HashMap;

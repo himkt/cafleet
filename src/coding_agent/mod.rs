@@ -214,6 +214,54 @@ pub(crate) fn pi_extension(base: &Path) -> PathBuf {
     base.join("extensions/cafleet.ts")
 }
 
+/// A long-lived backend server whose tool commands carry the environment of the pane that
+/// started it, not of the session they serve.
+pub(crate) struct SharedServerSignature {
+    /// Final path components that name the server's program token.
+    pub(crate) programs: &'static [&'static str],
+    /// Tokens that appear, contiguously and in order, after the program token.
+    pub(crate) subcommand: &'static [&'static str],
+}
+
+impl SharedServerSignature {
+    pub(crate) fn label(&self, agent: CodingAgent) -> String {
+        std::iter::once(agent.name())
+            .chain(self.subcommand.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub(crate) fn matches(&self, argv: &[String]) -> bool {
+        argv.iter().enumerate().any(|(index, token)| {
+            let program = token.rsplit('/').next().expect("rsplit yields a last segment");
+            self.programs.contains(&program)
+                && argv[index + 1..]
+                    .windows(self.subcommand.len())
+                    .any(|run| run.iter().eq(self.subcommand.iter()))
+        })
+    }
+}
+
+const CODEX_SHARED_SERVERS: &[SharedServerSignature] = &[SharedServerSignature {
+    programs: &["codex"],
+    subcommand: &["app-server"],
+}];
+
+const HERMES_SHARED_SERVERS: &[SharedServerSignature] = &[SharedServerSignature {
+    programs: &["hermes", "hermes_cli.main"],
+    subcommand: &["gateway", "run"],
+}];
+
+impl CodingAgent {
+    pub(crate) fn shared_server_signatures(self) -> &'static [SharedServerSignature] {
+        match self {
+            Self::Codex => CODEX_SHARED_SERVERS,
+            Self::Hermes => HERMES_SHARED_SERVERS,
+            Self::Claude | Self::Opencode | Self::Pi => &[],
+        }
+    }
+}
+
 pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
     CodingAgent::all()
         .iter()

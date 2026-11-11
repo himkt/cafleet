@@ -320,9 +320,27 @@ fn hermes_reader(
 }
 
 fn detect_mux() -> MuxReading {
-    let mux = crate::runtime::resolve_mux()?;
+    use crate::multiplexer::MuxBackend;
+    let env = crate::multiplexer::caller_env()?;
+    let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
+    let backend = MuxBackend::detect(lookup)?;
+    let runner: std::rc::Rc<dyn crate::multiplexer::CommandRunner> =
+        std::rc::Rc::new(crate::runtime::system::SystemRunner);
+    let server = crate::multiplexer::caller_server(backend, lookup, runner.as_ref())?;
+    let mux = backend.for_server(&server, runner);
     mux.ensure_available()?;
-    let context = mux.context_discovery()?;
+    let variable = match backend {
+        MuxBackend::Tmux => "TMUX_PANE",
+        MuxBackend::Herdr => "HERDR_PANE_ID",
+    };
+    let pane = lookup(variable)
+        .ok_or_else(|| CafleetError::App(format!("{variable} is not set")))?;
+    let context = mux.pane_context(&pane)?.ok_or_else(|| {
+        CafleetError::App(format!(
+            "pane {pane} was not found on the {} server {server}",
+            backend.name()
+        ))
+    })?;
     Ok((mux.name(), context))
 }
 
