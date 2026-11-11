@@ -348,6 +348,7 @@ impl CodingAgent {
         let mut argv = vec![self.name().into()];
         match self {
             Self::Opencode => argv.extend(["mini".into(), "--standalone".into()]),
+            Self::Codex => argv.push("--no-daemon".into()),
             Self::Hermes => {
                 let cwd = cwd.to_str().ok_or_else(|| {
                     CafleetError::App(format!(
@@ -357,7 +358,7 @@ impl CodingAgent {
                 })?;
                 argv.extend(["chat", "--cli", "--source", "tool", "--in", cwd].map(String::from));
             }
-            Self::Claude | Self::Codex | Self::Pi => {}
+            Self::Claude | Self::Pi => {}
         }
         argv.extend(policy.permission_argv.clone());
         if self == Self::Claude {
@@ -779,7 +780,10 @@ mod tests {
                     "display name",
                 ],
             ),
-            (CodingAgent::Codex, vec!["codex", "--approve-for-me"]),
+            (
+                CodingAgent::Codex,
+                vec!["codex", "--no-daemon", "--approve-for-me"],
+            ),
             (
                 CodingAgent::Opencode,
                 vec!["opencode", "mini", "--standalone", "--agent", "cafleet-ask"],
@@ -1527,7 +1531,7 @@ mod tests {
                         "fixture name".into(),
                     ],
                     CodingAgent::Codex => {
-                        let mut argv = vec!["codex".into()];
+                        let mut argv = vec!["codex".into(), "--no-daemon".into()];
                         argv.extend(permission_argv(backend, mode));
                         argv
                     }
