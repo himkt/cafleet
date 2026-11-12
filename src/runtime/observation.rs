@@ -9927,7 +9927,7 @@ mod tests {
 
         #[test]
         fn permission_inspection_observed_authority_has_no_debug_or_serialized_representation() {
-            assert_no_debug_or_serialize!(ObservedRequest);
+            assert_not_impl!(ObservedRequest: std::fmt::Debug, serde::Serialize);
         }
     }
     mod controller_tests {

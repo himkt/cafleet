@@ -52,7 +52,7 @@ pub(crate) trait RecoveryHost {
     }
 }
 
-pub(crate) fn unlink_descriptor_file(path: &std::path::Path, deadline: Instant) -> Result<()> {
+fn unlink_descriptor_file(path: &std::path::Path, deadline: Instant) -> Result<()> {
     check_deadline(Instant::now(), deadline)?;
     std::fs::remove_file(path).map_err(|cause| error(format!("descriptor unlink failed: {cause}")))
 }
@@ -644,7 +644,7 @@ fn refresh(conn: &mut Connection, result: &mut RecoveryCompletion, until: Instan
     result.report.status = result.run.status;
     Ok(())
 }
-pub(super) fn count_commit(
+fn count_commit(
     report: &mut RecoveryReport,
     event: &RuntimeEventRecord,
     original: bool,
@@ -703,7 +703,7 @@ fn persist(
     host.checkpoint(RecoveryBoundary::AfterCommit, &result.run, until)?;
     Ok(())
 }
-pub(super) fn loss_transitions(
+fn loss_transitions(
     conn: &Connection,
     run: &RunRecord,
     first: i64,
@@ -781,7 +781,7 @@ fn publish_delivery_results<S: OutboxIo>(
     }
     Ok(())
 }
-pub(super) fn terminal_outcome(conn: &Connection, run: &RunRecord) -> Result<Option<RunStatus>> {
+fn terminal_outcome(conn: &Connection, run: &RunRecord) -> Result<Option<RunStatus>> {
     let terminal: Option<String> = conn.query_row(
         "SELECT kind FROM member_runtime_events WHERE run_id=?1 AND kind IN ('runner_exited','runner_lost') ORDER BY event_seq DESC LIMIT 1",
         [run.run_id], |row| row.get(0)).optional()?;
@@ -4467,7 +4467,7 @@ pub(crate) mod test_support {
             deadline: Instant,
         ) -> TestResult<()> {
             let Some(probe) = &mut self.unlink else {
-                return unlink_descriptor_file(path, deadline);
+                return crate::runtime::recovery::unlink_descriptor_file(path, deadline);
             };
             probe.calls += 1;
             assert_eq!(path, probe.path);

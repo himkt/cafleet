@@ -2495,14 +2495,14 @@ mod tests {
 
     #[test]
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
-        assert_no_debug_or_serialize!(AnswerMatch);
+        assert_not_impl!(AnswerMatch: std::fmt::Debug, serde::Serialize);
     }
 
     #[test]
     fn runtime_profile_private_fingerprint_supports_comparison_without_debug_or_serialization() {
         fn comparable<T: Clone + Eq>() {}
         comparable::<SemanticFingerprint>();
-        assert_no_debug_or_serialize!(SemanticFingerprint);
+        assert_not_impl!(SemanticFingerprint: std::fmt::Debug, serde::Serialize);
     }
     mod claude_2_1_312_guards {
         use crate::coding_agent::detector::tests::*;

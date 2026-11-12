@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 43/49 tasks complete
+**Progress**: 49/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -225,8 +225,8 @@ Record every test's keep/delete classification with its entry point in `.verific
 
 | ID | Change | Sources |
 |---|---|---|
-| VIS1 | Make private: `count_commit`, `loss_transitions`, `terminal_outcome`, `unlink_descriptor_file` (`recovery.rs`), `validate_version`, `frame_control_body`, `OwnerLockProbe`, `HealthProbe`, `RuntimeProbes` (`control.rs`); expose `ControlClient.stream` only under `#[cfg_attr(test, ...)]` for its test access. | D.P8, D.P9 |
-| VIS2 | Make private: `PLUGINS_KEY`, `PLUGINS_ENABLED_KEY`, `GATEWAY_INJECTION_KEY`, `PluginState`, `read_plugin_state` (`hermes.rs`); `build_spawn_argv_with_policy`, `run_bounded`, `version_token`, `config_variable` (`coding_agent/mod.rs`); `ComposerPlan::encode`. | E Appendix B |
+| VIS1 | Make private: `count_commit`, `loss_transitions`, `terminal_outcome`, `unlink_descriptor_file` (`recovery.rs`), `validate_version`, `frame_control_body`, `OwnerLockProbe`, `HealthProbe`, `RuntimeProbes` (`control.rs`); make `ControlClient.stream` private with a `#[cfg(test)] pub(crate) fn stream_mut` accessor for its test access. | D.P8, D.P9 |
+| VIS2 | Make private: `read_plugin_state` (`hermes.rs`), `run_bounded` (`coding_agent/mod.rs`) and `ComposerPlan::encode`. | E Appendix B |
 | VIS3 | Delete `assert_no_debug_or_serialize!`; rewrite its six call sites (`catalog.rs:3113`, `:7048`, `detector.rs:2529`, `:2536`, `input.rs:8890`, `observation.rs:12753`) as `assert_not_impl!(T: std::fmt::Debug, serde::Serialize)`. | H.P8 |
 | VIS4 | Drop `CafleetError`'s `source()` override and `impl std::error::Error for MultiplexerError {}` when the build passes without them. | H.P12 |
 | VIS5 | Rename `assets::lookup` to `preset(path)` with `PRESETS` built in. | H.P11 |
@@ -356,6 +356,7 @@ The `schema_version` patterns target only the removed constant versions; the ope
 | `PtySession::shutdown` from `Drop` | B.P9 | Safety net for error returns between `PtySession::prepare` and `LiveShutdown` |
 | Mixed string and object entries in `cleanup_diagnostics` (`recovery::diagnostics` returns `Vec<Value>`; `format_runtime_recovery` renders non-strings as JSON) | F.P7 | Exceptional takeover records the `owner_termination_attestation` object beside string diagnostics |
 | `HealthSnapshot.output_seq` and its health-reply write | D.P4 | The retained `native_capture` drivers record it, and the runner tests use it as their only screen-progress synchronization signal |
+| `pub(crate)` on `PluginState`, `PLUGINS_KEY`, `PLUGINS_ENABLED_KEY`, `GATEWAY_INJECTION_KEY` (`hermes.rs`), `version_token`, `build_spawn_argv_with_policy` and `CodingAgent::config_variable` (`coding_agent/mod.rs`) | E Appendix B | Cross-module users: `PluginState` in production `assets.rs` and `cli/setup.rs`, the others in `assets.rs`, `cli/setup.rs`, `runtime/artifacts.rs` and `native_capture` test code |
 | `native_capture` drivers and their production seams (`ObservationClockKind`, capture fields, `attach_capture`, `begin_capture_shutdown`, `RunnerDependencies.capture`, `Running.capture`, the `service.rs:1664-1684` child-path dispatch) | A.B4 | User decision: the fixture-recording capability stays |
 
 ### Test policy
@@ -476,15 +477,15 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 14: Visibility and naming tidy
 
-- [ ] Apply VIS1–VIS5 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply VIS1–VIS5 <!-- completed: 2026-11-12T13:28:08Z -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T13:28:08Z -->
 
 ### Step 15: Verification
 
-- [ ] Run every § Verification greps pattern and confirm only allowed residuals remain <!-- completed: -->
-- [ ] Diff the baseline against the `SPEC.md` §8 DDL for every changed table <!-- completed: -->
-- [ ] Confirm every § Retained by decision item is still present <!-- completed: -->
-- [ ] Run `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
+- [x] Run every § Verification greps pattern and confirm only allowed residuals remain <!-- completed: 2026-11-12T13:55:22Z -->
+- [x] Diff the baseline against the `SPEC.md` §8 DDL for every changed table <!-- completed: 2026-11-12T13:55:22Z -->
+- [x] Confirm every § Retained by decision item is still present <!-- completed: 2026-11-12T13:55:22Z -->
+- [x] Run `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: 2026-11-12T13:55:22Z -->
 
 ---
 

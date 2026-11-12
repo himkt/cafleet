@@ -1205,7 +1205,7 @@ pub(crate) struct ComposerPlan {
 }
 
 impl ComposerPlan {
-    pub(crate) fn encode(&self, literal: &str) -> std::result::Result<Vec<u8>, CafleetError> {
+    fn encode(&self, literal: &str) -> std::result::Result<Vec<u8>, CafleetError> {
         let prefix = self.operation.prefix();
         let size = prefix
             .len()
@@ -3163,10 +3163,8 @@ mod tests {
 
     #[test]
     fn permission_inspection_executable_plans_have_no_debug_or_serialized_representation() {
-        assert_no_debug_or_serialize!(
-            crate::coding_agent::AnswerPlan,
-            crate::coding_agent::AnswerStage
-        );
+        assert_not_impl!(crate::coding_agent::AnswerPlan: std::fmt::Debug, serde::Serialize);
+        assert_not_impl!(crate::coding_agent::AnswerStage: std::fmt::Debug, serde::Serialize);
     }
     fn invalid(change: impl FnOnce(&mut Value)) {
         assert!(crate::coding_agent::catalog::test_support::load(&definitions()).is_ok());
@@ -7043,7 +7041,7 @@ mod tests {
 
     #[test]
     fn composer_plans_withhold_debug_serialization_and_private_bytes_from_errors() {
-        assert_no_debug_or_serialize!(ComposerPlan);
+        assert_not_impl!(ComposerPlan: std::fmt::Debug, serde::Serialize);
         const SUBMIT: &str = "E16_PRIVATE_SUBMIT";
         const LITERAL: &str = "E16_PRIVATE_LITERAL";
         let hex = crate::digest::hex(SUBMIT.as_bytes());

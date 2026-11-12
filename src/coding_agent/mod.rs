@@ -615,7 +615,7 @@ pub(crate) use crate::runtime::system::BoundedOutput;
 
 /// Runs a native command with null stdin and bounded output, returning its
 /// UTF-8 stdout or the failure detail that callers prefix with the command.
-pub(crate) fn run_bounded(
+fn run_bounded(
     executable: &Path,
     args: &[&str],
     environment: &[(&str, &Path)],

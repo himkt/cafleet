@@ -37,7 +37,7 @@ use std::time::Instant;
 pub(crate) const CONTROL_PROTOCOL_VERSION: u32 = 1;
 pub(crate) const MAX_CONTROL_FRAME: usize = 65536;
 
-pub(super) fn validate_version(frame: &Value) -> Result<()> {
+fn validate_version(frame: &Value) -> Result<()> {
     ensure(
         frame.is_object()
             && frame.get("protocol_version").and_then(Value::as_u64)
@@ -52,7 +52,7 @@ pub(crate) fn encode_control_frame(frame: &Value) -> Result<Vec<u8>> {
     frame_control_body(&body)
 }
 
-pub(super) fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
+fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
     ensure(
         body.len() <= MAX_CONTROL_FRAME,
         "control frame exceeds size limit",
@@ -1045,7 +1045,7 @@ pub(super) fn pause(deadline: Instant) -> Result<()> {
     Ok(())
 }
 pub(super) struct ControlClient {
-    pub(crate) stream: UnixStream,
+    stream: UnixStream,
     decoder: ControlDecoder,
 }
 
@@ -1056,6 +1056,10 @@ enum EndpointPhase {
 }
 
 impl ControlClient {
+    #[cfg(test)]
+    pub(crate) fn stream_mut(&mut self) -> &mut UnixStream {
+        &mut self.stream
+    }
     pub(super) fn connect(path: &Path, deadline: Instant) -> Result<Self> {
         Self::connect_in_phase(path, deadline, EndpointPhase::Ready)
     }
@@ -1369,20 +1373,20 @@ impl MemberState {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum OwnerLockProbe {
+enum OwnerLockProbe {
     Held,
     Free,
     Failed(String),
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum HealthProbe {
+enum HealthProbe {
     Answered,
     Skipped,
     Failed(String),
 }
 
-pub(crate) enum RuntimeProbes {
+enum RuntimeProbes {
     InvalidPaths(String),
     Observed {
         descriptor_leftover: bool,

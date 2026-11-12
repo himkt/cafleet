@@ -117,8 +117,6 @@ impl<F: Fn(&str) -> Result<(), MultiplexerError>> Drop for PaneOwnership<F> {
     }
 }
 
-impl std::error::Error for MultiplexerError {}
-
 impl From<MultiplexerError> for CafleetError {
     fn from(error: MultiplexerError) -> Self {
         CafleetError::App(error.to_string())

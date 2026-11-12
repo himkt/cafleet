@@ -2891,12 +2891,15 @@ mod tests {
             let mut client =
                 crate::runtime::control::ControlClient::connect(&paths.control_socket, deadline)?;
             if matches!(self.reply, ReplyMode::Disconnected) {
-                client.stream.shutdown(Shutdown::Read).map_err(io_error)?;
+                client
+                    .stream_mut()
+                    .shutdown(Shutdown::Read)
+                    .map_err(io_error)?;
                 let bytes = crate::runtime::control::encode_input_request(request)?;
                 let mut offset = 0;
                 while offset < bytes.len() {
                     check_deadline(Instant::now(), deadline)?;
-                    match client.stream.write(&bytes[offset..]) {
+                    match client.stream_mut().write(&bytes[offset..]) {
                         Ok(0) => panic!("owned external request disconnected during send"),
                         Ok(count) => offset += count,
                         Err(cause)

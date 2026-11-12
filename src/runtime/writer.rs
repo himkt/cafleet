@@ -2096,7 +2096,6 @@ mod tests {
                 }
                 if field == "conflict" {
                     let mut raw = invalid.evidence_json.clone();
-                    raw["sensitive"] = serde_json::json!(false);
                     raw["truncated"] = serde_json::json!(true);
                     invalid.evidence_json = storage::evidence::EvidencePolicy::metadata()
                         .apply(&raw)

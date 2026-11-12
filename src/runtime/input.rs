@@ -8779,7 +8779,7 @@ mod tests {
 
         #[test]
         fn permission_inspection_current_authority_has_no_debug_or_serialized_representation() {
-            assert_no_debug_or_serialize!(CurrentRequest);
+            assert_not_impl!(CurrentRequest: std::fmt::Debug, serde::Serialize);
         }
     }
     mod permission_response_contracts {

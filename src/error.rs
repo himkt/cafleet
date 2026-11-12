@@ -102,14 +102,7 @@ impl From<rusqlite::Error> for CafleetError {
     }
 }
 
-impl std::error::Error for CafleetError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::WithDiagnostics { cause, .. } => Some(cause.as_ref()),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for CafleetError {}
 
 #[cfg(test)]
 mod tests {

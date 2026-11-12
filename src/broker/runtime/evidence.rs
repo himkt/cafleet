@@ -307,7 +307,7 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
         "unknown policy",
     )?;
     require(
-        !object.contains_key("semantic_fingerprint") && !object.contains_key("sensitive"),
+        !object.contains_key("semantic_fingerprint"),
         "evidence_json",
         "in-memory evidence cannot be persisted",
     )?;

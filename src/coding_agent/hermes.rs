@@ -115,10 +115,7 @@ impl PluginState {
     }
 }
 
-pub(crate) fn read_plugin_state(
-    hermes: &dyn HermesConfig,
-    deadline: Instant,
-) -> Result<PluginState, String> {
+fn read_plugin_state(hermes: &dyn HermesConfig, deadline: Instant) -> Result<PluginState, String> {
     plugin_state(hermes.get(PLUGINS_KEY, deadline)?)
 }
 

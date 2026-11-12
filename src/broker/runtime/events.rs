@@ -2020,7 +2020,6 @@ mod tests {
                 .unwrap();
             let mut raw = raw_evidence(SECRET);
             raw["screen_seq"] = json!(121);
-            raw["sensitive"] = json!(false);
             fixture.update.evidence_json = redacted_policy(&[SECRET]).apply(&raw).unwrap();
             let original_event = fixture.event.clone();
             let update = fixture.refresh(1).unwrap();

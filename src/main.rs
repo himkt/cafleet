@@ -10,21 +10,6 @@ macro_rules! test_path {
     }};
 }
 #[cfg(test)]
-macro_rules! assert_no_debug_or_serialize {
-    ($($type:ty),+ $(,)?) => {{
-        trait AmbiguousIfImplemented<Marker> {
-            fn check() {}
-        }
-        struct DebugImplemented;
-        struct SerializeImplemented;
-        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
-        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
-        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
-        // A forbidden trait implementation makes the inferred marker ambiguous.
-        $(let _ = <$type as AmbiguousIfImplemented<_>>::check;)+
-    }};
-}
-#[cfg(test)]
 macro_rules! assert_not_impl {
     ($type:ty: $($bound:path),+ $(,)?) => {{
         $({

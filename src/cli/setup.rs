@@ -2386,11 +2386,11 @@ mod tests {
                 }
             }
 
-            fn opencode_extension(&self) -> (PathBuf, PathBuf) {
+            fn seed_opencode_extension(&self) -> (PathBuf, PathBuf) {
                 install_opencode_extension(&self.path("opencode"))
             }
 
-            fn pi_extension(&self) -> (PathBuf, PathBuf) {
+            fn seed_pi_extension(&self) -> (PathBuf, PathBuf) {
                 install_pi_extension(&self.path("pi"))
             }
 
@@ -2934,8 +2934,8 @@ mod tests {
             }
             scenario.hermes_ready();
             scenario.opencode_presets();
-            scenario.opencode_extension();
-            scenario.pi_extension();
+            scenario.seed_opencode_extension();
+            scenario.seed_pi_extension();
             for agent in [
                 CodingAgent::Claude,
                 CodingAgent::Opencode,
@@ -3473,7 +3473,7 @@ mod tests {
             scenario
                 .environment
                 .push(("CLAUDE_CONFIG_DIR", "relative".into()));
-            scenario.opencode_extension();
+            scenario.seed_opencode_extension();
             let (fleet, director) = create_fleet_fixture(&mut conn, "doctor-ended");
             let ended = register_member_run(&mut conn, fleet, director, "ended");
             conn.execute(
@@ -3872,7 +3872,7 @@ mod tests {
                 PLUGINS_KEY,
                 json!({"entries": {"cafleet": {"allow_gateway_injection": true}}}),
             );
-            let (plugin, _) = scenario.opencode_extension();
+            let (plugin, _) = scenario.seed_opencode_extension();
             std::fs::write(&plugin, "tampered").unwrap();
             let (summary, _) = scenario.summary_and_rows(1);
             assert_eq!(
@@ -3894,7 +3894,7 @@ mod tests {
         #[test]
         fn doctor_folds_a_tampered_pi_extension_into_the_pi_summary() {
             let (scenario, _conn) = healthy_scenario();
-            let (extension, _) = scenario.pi_extension();
+            let (extension, _) = scenario.seed_pi_extension();
             std::fs::write(&extension, "tampered").unwrap();
             let (summary, rows) = scenario.summary_and_rows(1);
             assert_eq!(
@@ -3918,7 +3918,7 @@ mod tests {
             let mut scenario = Scenario::new(member_run_registry);
             let _conn = scenario.connect();
             scenario.executable("pi");
-            let (_, record) = scenario.pi_extension();
+            let (_, record) = scenario.seed_pi_extension();
             std::fs::write(&record, "").unwrap();
             let (summary, _) = scenario.summary_and_rows(1);
             assert_eq!(

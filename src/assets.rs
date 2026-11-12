@@ -164,7 +164,7 @@ pub(crate) fn install_agent(
                 target.display()
             ))
         };
-        let bytes = lookup(PRESETS, source).expect("embedded preset exists");
+        let bytes = preset(source).expect("embedded preset exists");
         std::fs::create_dir_all(target.parent().expect("preset has a parent")).map_err(fail)?;
         remove_existing_target(target).map_err(fail)?;
         std::fs::write(target, bytes).map_err(fail)?;
@@ -333,11 +333,8 @@ fn remove_existing_target(target: &Path) -> std::io::Result<()> {
 
 include!(concat!(env!("OUT_DIR"), "/embedded_data.rs"));
 
-pub(crate) fn lookup(
-    table: &'static [(&'static str, &'static [u8])],
-    path: &str,
-) -> Option<&'static [u8]> {
-    table
+pub(crate) fn preset(path: &str) -> Option<&'static [u8]> {
+    PRESETS
         .iter()
         .find(|(entry, _)| *entry == path)
         .map(|(_, bytes)| *bytes)
@@ -734,7 +731,7 @@ mod tests {
                 for (source, target) in &presets {
                     assert_eq!(
                         std::fs::read(target).unwrap(),
-                        lookup(PRESETS, source).unwrap(),
+                        preset(source).unwrap(),
                         "{}",
                         target.display()
                     );
@@ -952,7 +949,7 @@ mod tests {
         for (source, target) in expected_presets(CodingAgent::Opencode, &base) {
             assert_eq!(
                 std::fs::read(&target).unwrap(),
-                lookup(PRESETS, source).unwrap(),
+                preset(source).unwrap(),
                 "{}",
                 target.display()
             );
@@ -1035,7 +1032,11 @@ mod tests {
             ));
             assert_eq!(
                 std::fs::read(extension_target(&base)).unwrap(),
-                lookup(EXTENSIONS, "pi/cafleet.ts").unwrap()
+                EXTENSIONS
+                    .iter()
+                    .find(|(path, _)| *path == "pi/cafleet.ts")
+                    .unwrap()
+                    .1
             );
             assert_executable_record(&base.join("extensions/cafleet.executable"));
             let recorded: Vec<String> = conn
