@@ -183,11 +183,9 @@ pub(crate) fn deregister_member_rows(
             "cannot deregister the root Director; use 'cafleet fleet delete' instead".to_string(),
         ));
     }
-    let now = now_stamp();
     let changed = conn.execute(
-        "UPDATE members SET status='deregistered', deregistered_at=?1 \
-             WHERE member_id=?2 AND status='active'",
-        params![now, member_id],
+        "UPDATE members SET status='deregistered' WHERE member_id=?1 AND status='active'",
+        [member_id],
     )?;
     if changed == 0 {
         return Ok(false);
@@ -451,14 +449,14 @@ mod tests {
             .unwrap(),
             0
         );
-        assert!(
+        assert_eq!(
             conn.query_row(
-                "SELECT deregistered_at FROM members WHERE member_id=?1",
+                "SELECT status FROM members WHERE member_id=?1",
                 [worker],
-                |row| row.get::<_, Option<String>>(0)
+                |row| row.get::<_, String>(0)
             )
-            .unwrap()
-            .is_some()
+            .unwrap(),
+            "deregistered"
         );
     }
 

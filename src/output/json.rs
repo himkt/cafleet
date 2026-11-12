@@ -30,7 +30,7 @@ pub(crate) fn member(row: &MemberRecord) -> Value {
 pub(crate) fn runtime_snapshot(row: &crate::broker::runtime::RuntimeSnapshot) -> Value {
     let run = &row.run;
     json!({"run_id":run.run_id,"resolved_mode":run.resolved_mode,"status":run.status.as_str(),
-        "reachability":run.reachability.as_str(),"owner_epoch":run.owner_epoch,"last_health_at":run.last_health_at,
+        "owner_epoch":run.owner_epoch,"last_health_at":run.last_health_at,
         "coverage":run.coverage.as_str(),
         "current_interaction_id":row.current_interaction_id,
         "unresolved_input_ids":row.unresolved_input_ids,"owner_kind":run.owner_kind.as_str(),"owner_pid":run.owner_pid,
@@ -403,11 +403,10 @@ mod tests {
         use rusqlite::params;
         use serde_json::Value;
 
-        const RUNTIME_KEYS: [&str; 17] = [
+        const RUNTIME_KEYS: [&str; 16] = [
             "run_id",
             "resolved_mode",
             "status",
-            "reachability",
             "owner_epoch",
             "last_health_at",
             "coverage",

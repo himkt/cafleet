@@ -529,8 +529,12 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(&tx, settings, expected_run, expected_placement)?;
             let changed = tx.execute(
-                "UPDATE member_runs SET reachability='reachable',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
-                rusqlite::params![crate::time::now_stamp(), expected_run.run_id, expected_run.owner_epoch],
+                "UPDATE member_runs SET last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
+                rusqlite::params![
+                    crate::time::now_stamp(),
+                    expected_run.run_id,
+                    expected_run.owner_epoch
+                ],
             )?;
             ensure(changed == 1, "submission health ownership changed")?;
             deadline.remaining()?;
@@ -3750,7 +3754,13 @@ mod tests {
     #[test]
     fn live_receipt_settled_history_is_immutable_before_live_calls_and_the_original_sql_deadline() {
         let mut case = History::new(InputState::Settled, Some(InputDisposition::Submitted));
-        case.fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at='2026-10-27T17:26:00Z' WHERE member_id=?1", [case.fixture.run.member_id]).unwrap();
+        case.fixture
+            .conn
+            .execute(
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                [case.fixture.run.member_id],
+            )
+            .unwrap();
         let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
             .unwrap()
             .unwrap();
@@ -4124,10 +4134,13 @@ mod tests {
             ),
         ] {
             let mut case = History::new(state, disposition);
-            case.fixture.conn.execute(
-                "UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",
-                rusqlite::params!["2026-10-27T14:01:00.000000+00:00", case.fixture.run.member_id],
-            ).unwrap();
+            case.fixture
+                .conn
+                .execute(
+                    "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                    [case.fixture.run.member_id],
+                )
+                .unwrap();
             let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
                 .unwrap()
                 .unwrap();
@@ -4677,7 +4690,14 @@ mod tests {
 
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
-            fixture.fixture.conn.execute("UPDATE member_runs SET reachability='suspect',last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1", [run.run_id]).unwrap();
+            fixture
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1",
+                    [run.run_id],
+                )
+                .unwrap();
             let before = storage::get_run(&fixture.fixture.conn, run.run_id).unwrap();
             let records = health_records(&fixture.fixture.conn);
             let update = Arc::new(AtomicBool::new(false));
@@ -4735,14 +4755,12 @@ mod tests {
                 "genuine successful health updates the supplied connection"
             );
             let refreshed = storage::get_run(&fixture.fixture.conn, run.run_id).unwrap();
-            assert_eq!(refreshed.reachability, Reachability::Reachable);
             assert!(refreshed.last_health_at.is_some());
             assert_ne!(
                 refreshed.last_health_at.as_deref(),
                 Some("2000-01-01T00:00:00Z")
             );
             let mut expected = before;
-            expected.reachability = refreshed.reachability;
             expected.last_health_at = refreshed.last_health_at.clone();
             assert_eq!(
                 refreshed, expected,
@@ -4836,7 +4854,6 @@ mod tests {
             );
             assert!(!failure.source.to_string().contains(&case.request.literal));
             let mut after = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
-            after.reachability = before.reachability;
             after.last_health_at = before.last_health_at.clone();
             assert_eq!(
                 after, before,

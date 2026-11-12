@@ -146,8 +146,8 @@ pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usiz
         params![now, fleet_id],
     )?;
     let deregistered_count = conn.execute(
-        "UPDATE members SET status='deregistered', deregistered_at=?1 WHERE fleet_id=?2 AND status='active'",
-        params![now, fleet_id],
+        "UPDATE members SET status='deregistered' WHERE fleet_id=?1 AND status='active'",
+        [fleet_id],
     )?;
     conn.execute("DELETE FROM member_placements WHERE member_id IN (SELECT member_id FROM members WHERE fleet_id=?1)", [fleet_id])?;
     Ok(deregistered_count)
@@ -196,27 +196,26 @@ pub(crate) fn recorded_asset_install(
     conn: &Connection,
     coding_agent: &str,
     path: &str,
-) -> rusqlite::Result<Option<(String, String)>> {
+) -> rusqlite::Result<Option<String>> {
     conn.query_row(
-        "SELECT cafleet_version, installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
+        "SELECT installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
         params![coding_agent, path],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ).optional()
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 pub(crate) fn record_asset_install(
     conn: &mut Connection,
     coding_agent: &str,
     path: &str,
-    cafleet_version: &str,
 ) -> Result<(), CafleetError> {
     let now = now_stamp();
     conn.execute(
-        "INSERT INTO asset_installs (coding_agent, path, cafleet_version, installed_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(coding_agent, path) DO UPDATE SET
-             cafleet_version=excluded.cafleet_version, installed_at=excluded.installed_at",
-        params![coding_agent, path, cafleet_version, now],
+        "INSERT INTO asset_installs (coding_agent, path, installed_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(coding_agent, path) DO UPDATE SET installed_at=excluded.installed_at",
+        params![coding_agent, path, now],
     )?;
     Ok(())
 }
@@ -315,33 +314,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&dir);
         for (agent, path) in [("codex", "/a"), ("codex", "/b"), ("claude", "/a")] {
-            record_asset_install(&mut conn, agent, path, "old").unwrap();
+            record_asset_install(&mut conn, agent, path).unwrap();
         }
         conn.execute("UPDATE asset_installs SET installed_at='old-time'", [])
             .unwrap();
-        record_asset_install(&mut conn, "codex", "/a", "new").unwrap();
-        let rows = conn.prepare("SELECT coding_agent, path, cafleet_version, installed_at FROM asset_installs ORDER BY coding_agent, path")
-            .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
+        record_asset_install(&mut conn, "codex", "/a").unwrap();
+        let rows = conn.prepare("SELECT coding_agent, path, installed_at FROM asset_installs ORDER BY coding_agent, path")
+            .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
             .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(rows.len(), 3);
-        assert_eq!(
-            rows[0],
-            (
-                "claude".into(),
-                "/a".into(),
-                "old".into(),
-                "old-time".into()
-            )
-        );
-        assert_eq!(
-            (&rows[1].0, &rows[1].1, &rows[1].2),
-            (&"codex".into(), &"/a".into(), &"new".into())
-        );
-        assert!(crate::time::parse_lenient(&rows[1].3).is_ok());
-        assert_eq!(
-            rows[2],
-            ("codex".into(), "/b".into(), "old".into(), "old-time".into())
-        );
+        assert_eq!(rows[0], ("claude".into(), "/a".into(), "old-time".into()));
+        assert_eq!((&rows[1].0, &rows[1].1), (&"codex".into(), &"/a".into()));
+        assert!(crate::time::parse_lenient(&rows[1].2).is_ok());
+        assert_eq!(rows[2], ("codex".into(), "/b".into(), "old-time".into()));
     }
 
     #[test]

@@ -2547,7 +2547,7 @@ mod tests {
         fn runner_policy_available_update_on_a_non_live_run_is_dropped_once_and_the_worker_continues()
          {
             let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "stopping");
+            set_status(&mut fixture, "prepared");
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks.clone());
             let _release = Release(hooks.clone());

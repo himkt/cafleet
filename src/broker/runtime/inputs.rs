@@ -2984,8 +2984,8 @@ mod tests {
             .base
             .conn
             .execute(
-                "UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",
-                params![NOW, fixture.base.director],
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                [fixture.base.director],
             )
             .unwrap();
         fixture

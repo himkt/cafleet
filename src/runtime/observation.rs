@@ -13286,7 +13286,6 @@ mod tests {
                     storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
                         .unwrap();
                 assert_eq!(run.status, RunStatus::Exited);
-                assert_eq!(run.exit_signal, Some(15));
                 for _ in 0..3 {
                     case.controller
                         .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
@@ -13340,10 +13339,6 @@ mod tests {
                 assert!(!case.controller.has_pending());
                 assert_eq!(case.controller.unsaved_gap_count(), 0);
                 assert_eq!(case.controller.status().gap_count, 0);
-                let run =
-                    storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
-                        .unwrap();
-                assert_eq!(run.observation_gap_count, 0);
                 assert_eq!(
                     events
                         .iter()
@@ -13657,7 +13652,6 @@ mod tests {
                 ["interaction_opened", "interaction_closed", "runner_exited"]
             );
             let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert_eq!(run.exit_signal, Some(15));
             assert_eq!(run.exit_code, None);
             writer.finish(deadline());
         }

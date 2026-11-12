@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 11/49 tasks complete
+**Progress**: 15/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -414,10 +414,10 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 4: Version and self-contained schema columns
 
-- [ ] Bump the version per § Version bump <!-- completed: -->
-- [ ] Apply BRK1, BRK2, BRK3 and BRK20 with their baseline and `db.rs` shape edits <!-- completed: -->
-- [ ] Apply BRK4 and BRK12 with their baseline and `db.rs` shape edits <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Bump the version per § Version bump <!-- completed: 2026-11-12T11:25 -->
+- [x] Apply BRK1, BRK2, BRK3 and BRK20 with their baseline and `db.rs` shape edits <!-- completed: 2026-11-12T11:25 -->
+- [x] Apply BRK4 and BRK12 with their baseline and `db.rs` shape edits <!-- completed: 2026-11-12T11:25 -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T11:25 -->
 
 ### Step 5: Placement, Director and run invariants
 

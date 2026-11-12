@@ -5825,7 +5825,7 @@ mod tests {
                     host.fixture
                         .conn
                         .execute(
-                            "UPDATE members SET status='deregistered',deregistered_at='2026-10-30T00:00:00Z' WHERE member_id=?1",
+                            "UPDATE members SET status='deregistered' WHERE member_id=?1",
                             [host.fixture.run.member_id],
                         )
                         .unwrap();

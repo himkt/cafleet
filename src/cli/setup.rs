@@ -108,14 +108,7 @@ fn install_selected(
                 None if selected.contains(&CodingAgent::Hermes) => HermesSetup::MissingRequired,
                 None => HermesSetup::Absent,
             };
-            install_agent(
-                conn,
-                *agent,
-                &paths,
-                crate::cli::VERSION,
-                hermes,
-                &mut std::io::stdout(),
-            )?;
+            install_agent(conn, *agent, &paths, hermes, &mut std::io::stdout())?;
         }
     }
     Ok(())
@@ -1203,20 +1196,7 @@ fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {
     let recorded =
         crate::broker::recorded_asset_install(conn, agent.name(), &path.display().to_string());
     match recorded {
-        Ok(Some((version, when))) if version == crate::cli::VERSION => Check::new(
-            name,
-            CheckStatus::Ok,
-            format!("recorded {version} at {when}"),
-        ),
-        Ok(Some((version, when))) => Check::fixable(
-            name,
-            CheckStatus::Warn,
-            format!("recorded {version} at {when}"),
-            format!(
-                "assets from cafleet {version} (this is {})",
-                crate::cli::VERSION
-            ),
-        ),
+        Ok(Some(when)) => Check::new(name, CheckStatus::Ok, format!("recorded at {when}")),
         Ok(None) => Check::fixable(
             name,
             CheckStatus::Warn,
@@ -1486,7 +1466,7 @@ mod tests {
     }
 
     #[test]
-    fn healthy_database_distinguishes_absent_stale_current_and_failed_install_queries() {
+    fn healthy_database_distinguishes_absent_recorded_and_failed_install_queries() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
         let probe = probe(home.path(), true, None);
@@ -1495,18 +1475,16 @@ mod tests {
             &mut conn,
             "claude",
             &home.path().join(".claude").display().to_string(),
-            crate::cli::VERSION,
-        )
-        .unwrap();
-        crate::broker::record_asset_install(
-            &mut conn,
-            "codex",
-            &home.path().join(".codex").display().to_string(),
-            "old",
         )
         .unwrap();
         let checks = checks_for(Some(&conn), &schema, &probe, home.path());
-        assert_eq!(find(&checks, "claude.installation").status, CheckStatus::Ok);
+        let claude = find(&checks, "claude.installation");
+        assert_eq!(claude.status, CheckStatus::Ok);
+        assert!(
+            claude.detail.starts_with("recorded at "),
+            "{}",
+            claude.detail
+        );
         assert_eq!(
             find(&checks, "codex.installation").status,
             CheckStatus::Warn
@@ -1525,7 +1503,7 @@ mod tests {
             )
         );
         conn.execute(
-            "UPDATE asset_installs SET cafleet_version=X'00' WHERE coding_agent='claude'",
+            "UPDATE asset_installs SET installed_at=X'00' WHERE coding_agent='claude'",
             [],
         )
         .unwrap();
@@ -2758,7 +2736,6 @@ mod tests {
                     &mut conn,
                     agent.name(),
                     &home.path().join(agent.name()).display().to_string(),
-                    crate::cli::VERSION,
                 )
                 .unwrap();
             }
@@ -2966,14 +2943,9 @@ mod tests {
             format!("ok database: cafleet {}", crate::cli::VERSION)
         }
 
-        fn record(conn: &mut Connection, scenario: &Scenario, agent: CodingAgent, version: &str) {
-            crate::broker::record_asset_install(
-                conn,
-                agent.name(),
-                &scenario.config(agent),
-                version,
-            )
-            .unwrap();
+        fn record(conn: &mut Connection, scenario: &Scenario, agent: CodingAgent) {
+            crate::broker::record_asset_install(conn, agent.name(), &scenario.config(agent))
+                .unwrap();
         }
 
         fn healthy_backends(scenario: &mut Scenario, conn: &mut Connection) {
@@ -2990,7 +2962,7 @@ mod tests {
                 CodingAgent::Hermes,
                 CodingAgent::Pi,
             ] {
-                record(conn, scenario, agent, crate::cli::VERSION);
+                record(conn, scenario, agent);
             }
         }
 
@@ -3311,13 +3283,7 @@ mod tests {
                 PLUGINS_KEY,
                 json!({"entries": {"cafleet": {"allow_gateway_injection": true}}}),
             );
-            record(
-                &mut conn,
-                &scenario,
-                CodingAgent::Claude,
-                crate::cli::VERSION,
-            );
-            record(&mut conn, &scenario, CodingAgent::Codex, "0.30.0");
+            record(&mut conn, &scenario, CodingAgent::Claude);
             let (runs, _artifacts) = member_runs(&mut conn);
             let director = runs.exited.director_member_id;
             let _held = crate::runtime::RunLock::acquire(&conn, &runs.unresponsive.owner())
@@ -3336,8 +3302,8 @@ mod tests {
                     database_line(),
                     "ok claude: ready".into(),
                     format!(
-                        "warn codex: assets from cafleet 0.30.0 (this is {}) — run 'cafleet setup --coding-agent codex'",
-                        crate::cli::VERSION
+                        "warn codex: assets not installed at {} — run 'cafleet setup --coding-agent codex'",
+                        scenario.config(CodingAgent::Codex)
                     ),
                     "info opencode: not installed (opencode is not on PATH)".into(),
                     format!(
@@ -3368,10 +3334,12 @@ mod tests {
                 ]
             );
             views.assert_exit(1);
-            assert!(
-                views
-                    .verbose_row("warn codex.installation: ")
-                    .starts_with("warn codex.installation: recorded 0.30.0 at "),
+            assert_eq!(
+                views.verbose_row("warn codex.installation: "),
+                format!(
+                    "warn codex.installation: no installation recorded at {}; run 'cafleet setup --coding-agent codex'",
+                    scenario.config(CodingAgent::Codex)
+                )
             );
             assert_eq!(
                 views.verbose_row("warn hermes.installation: "),

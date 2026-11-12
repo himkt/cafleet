@@ -952,7 +952,7 @@ pub(crate) mod test_support {
                 Mode::Fleet => {
                     self.owners.push((run.run_id, run.owner_epoch));
                     self.run_id = run.run_id;
-                    conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0,ended_at='2026-10-26T13:00:00Z',reachability='reachable',last_health_at='2026-10-26T13:00:00Z' WHERE run_id=?1", [run.run_id]).unwrap();
+                    conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0,ended_at='2026-10-26T13:00:00Z',last_health_at='2026-10-26T13:00:00Z' WHERE run_id=?1", [run.run_id]).unwrap();
                     Some(ChildExit::Code(0))
                 }
                 Mode::Recovery { .. } => {
@@ -1189,12 +1189,12 @@ mod tests {
                 assert_eq!(broker::get_member(&conn, id, fleet).unwrap(), member);
                 assert_eq!(
                     conn.query_row(
-                        "SELECT deregistered_at FROM members WHERE member_id=?1",
+                        "SELECT status FROM members WHERE member_id=?1",
                         [id],
-                        |row| row.get::<_, Option<String>>(0)
+                        |row| row.get::<_, String>(0)
                     )
                     .unwrap(),
-                    None
+                    "active"
                 );
             }
             conn.execute_batch("DROP TRIGGER fail_deletion").unwrap();
@@ -1724,17 +1724,16 @@ mod tests {
                     .deleted_at
                     .is_some()
             );
-            let (status, deregistered_at): (String, Option<String>) = case
+            let status: String = case
                 .fixture
                 .conn
                 .query_row(
-                    "SELECT status,deregistered_at FROM members WHERE member_id=?1 AND fleet_id=?2",
+                    "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
                     rusqlite::params![original.member_id, original.fleet_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .unwrap();
             assert_eq!(status, "deregistered");
-            assert!(deregistered_at.is_some());
             assert_eq!(
                 case.fixture
                     .conn

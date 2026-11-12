@@ -6,8 +6,7 @@ CREATE TABLE members (
     name TEXT NOT NULL,
     description TEXT NOT NULL,
     status TEXT NOT NULL,
-    registered_at TEXT NOT NULL,
-    deregistered_at TEXT
+    registered_at TEXT NOT NULL
 );
 CREATE INDEX idx_members_fleet_status ON members (fleet_id, status);
 
@@ -22,7 +21,6 @@ CREATE TABLE fleets (
 CREATE TABLE asset_installs (
     coding_agent TEXT NOT NULL,
     path TEXT NOT NULL,
-    cafleet_version TEXT NOT NULL,
     installed_at TEXT NOT NULL,
     PRIMARY KEY (coding_agent, path)
 );
@@ -32,7 +30,7 @@ CREATE TABLE member_placements (
     mux_session TEXT NOT NULL,
     mux_window_id TEXT NOT NULL,
     mux_pane_id TEXT,
-    backend TEXT NOT NULL DEFAULT 'tmux',
+    backend TEXT NOT NULL,
     mux_server TEXT NOT NULL,
     coding_agent TEXT NOT NULL,
     created_at TEXT NOT NULL
@@ -49,7 +47,7 @@ CREATE TABLE messages (
     notified_at TEXT
 );
 CREATE INDEX idx_messages_to_member_status_ts ON messages (to_member_id, status_timestamp);
-CREATE INDEX idx_messages_from_member_status_ts ON messages (from_member_id, status_timestamp);
+CREATE INDEX idx_messages_from_member_created_at ON messages (from_member_id, created_at);
 
 CREATE TABLE runtime_database_identity (
     singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
@@ -77,18 +75,15 @@ CREATE TABLE member_runs (
     permission_argv_json TEXT NOT NULL CHECK(json_valid(permission_argv_json) AND json_type(permission_argv_json) = 'array'),
     event_evidence TEXT NOT NULL CHECK(event_evidence IN ('metadata','redacted')),
     coverage TEXT NOT NULL CHECK(coverage IN ('tested','unknown')),
-    status TEXT NOT NULL CHECK(status IN ('starting','prepared','running','degraded','stopping','recovering','exited','failed','lost')),
-    created_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('starting','prepared','running','degraded','recovering','exited','failed','lost')),
     native_version TEXT,
     effective_policy_json TEXT CHECK(effective_policy_json IS NULL OR (json_valid(effective_policy_json) AND json_type(effective_policy_json) = 'object')),
     owner_epoch INTEGER NOT NULL CHECK(owner_epoch > 0),
     owner_kind TEXT NOT NULL CHECK(owner_kind IN ('creator','runner','reconciler')),
     owner_pid INTEGER NOT NULL CHECK(owner_pid > 0),
     owner_start_identity TEXT NOT NULL CHECK(length(trim(owner_start_identity)) > 0),
-    reachability TEXT NOT NULL CHECK(reachability IN ('reachable','suspect')),
     cleanup_state TEXT NOT NULL CHECK(cleanup_state IN ('complete','incomplete')),
     event_seq_reserved_through INTEGER NOT NULL CHECK(event_seq_reserved_through >= 0),
-    observation_gap_count INTEGER NOT NULL CHECK(observation_gap_count >= 0),
     runtime_dir_identity_json TEXT CHECK(runtime_dir_identity_json IS NULL OR (json_valid(runtime_dir_identity_json) AND json_type(runtime_dir_identity_json) = 'object')),
     run_lock_identity_json TEXT CHECK(run_lock_identity_json IS NULL OR (json_valid(run_lock_identity_json) AND json_type(run_lock_identity_json) = 'object')),
     runner_pid INTEGER CHECK(runner_pid IS NULL OR runner_pid > 0),
@@ -99,9 +94,8 @@ CREATE TABLE member_runs (
     last_health_at TEXT,
     ended_at TEXT,
     exit_code INTEGER,
-    exit_signal INTEGER,
     cleanup_diagnostics_json TEXT CHECK(cleanup_diagnostics_json IS NULL OR (json_valid(cleanup_diagnostics_json) AND json_type(cleanup_diagnostics_json) = 'array')),
-    recovery_origin_status TEXT CHECK(recovery_origin_status IS NULL OR recovery_origin_status IN ('starting','prepared','running','degraded','stopping','recovering','exited','failed','lost')),
+    recovery_origin_status TEXT CHECK(recovery_origin_status IS NULL OR recovery_origin_status IN ('starting','prepared','running','degraded','recovering','exited','failed','lost')),
     native_session_json TEXT CHECK(native_session_json IS NULL OR (json_valid(native_session_json) AND json_type(native_session_json) = 'object')),
     CHECK((mode_source = 'default' AND requested_mode IS NULL) OR (mode_source = 'explicit' AND requested_mode IS NOT NULL))
 );
@@ -129,7 +123,6 @@ CREATE TABLE member_runtime_events (
     interaction_id INTEGER REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
     kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','permission_denied_observed','automatic_refusal_observed','automatic_review_unavailable','input_delivery_result','runner_degraded','runner_lost','runner_exited')),
     observed_at TEXT NOT NULL,
-    committed_at TEXT NOT NULL,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
     notification_state TEXT NOT NULL CHECK(notification_state IN ('inbox','archived')),
     message_id INTEGER UNIQUE REFERENCES messages(message_id) ON DELETE RESTRICT,

@@ -556,8 +556,13 @@ fn reconcile_missing_runtime(
                 "owner_start_identity":current.owner_start_identity,"evidence_ref":claim.evidence_ref,
                 "recorded_at":crate::time::now_stamp(),"source":"operator_via_director"}));
         }
-        tx.execute("UPDATE member_runs SET observation_gap_count=observation_gap_count+1,cleanup_diagnostics_json=?1 WHERE run_id=?2",
-            params![serde_json::to_string(&report.cleanup_diagnostics).map_err(io_error)?,run.run_id])?;
+        tx.execute(
+            "UPDATE member_runs SET cleanup_diagnostics_json=?1 WHERE run_id=?2",
+            params![
+                serde_json::to_string(&report.cleanup_diagnostics).map_err(io_error)?,
+                run.run_id
+            ],
+        )?;
         let target = match established {
             Some(status) => status,
             None => {
@@ -1004,15 +1009,10 @@ mod tests {
             assert_eq!(current.owner_pid, process.pid);
             assert_eq!(current.owner_start_identity, process.start_identity);
             assert_eq!(
-                current.observation_gap_count,
-                before.observation_gap_count + 1
-            );
-            assert_eq!(
                 current.event_seq_reserved_through,
                 before.event_seq_reserved_through
             );
             assert_eq!(current.exit_code, before.exit_code);
-            assert_eq!(current.exit_signal, before.exit_signal);
             assert_eq!(current.cleanup_state, CleanupState::Complete);
             assert_eq!(
                 current.recovery_origin_status,
@@ -1614,7 +1614,12 @@ mod tests {
             let mut host = new_host();
             host.action = Some(Box::new(move |boundary, _, _| {
                 if boundary == "after_commit" && !changed {
-                    mutation.execute("UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",rusqlite::params![NOW,member]).unwrap();
+                    mutation
+                        .execute(
+                            "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                            [member],
+                        )
+                        .unwrap();
                     changed = true;
                 }
                 Ok(())
@@ -1994,7 +1999,6 @@ mod tests {
                 assert_eq!(counts(&report), (1, 1, 0));
                 case.refresh();
                 assert_eq!(case.fixture.run.exit_code, code);
-                assert_eq!(case.fixture.run.exit_signal, signal);
                 assert_eq!(
                     events(&case)
                         .iter()
@@ -2229,7 +2233,6 @@ mod tests {
                 assert_eq!(case.fixture.run.status, status);
                 assert_eq!(case.fixture.run.recovery_origin_status, Some(status));
                 assert_eq!(case.fixture.run.exit_code, original.exit_code);
-                assert_eq!(case.fixture.run.exit_signal, original.exit_signal);
                 assert_eq!(case.fixture.run.cleanup_state, CleanupState::Complete);
                 assert!(host.calls.iter().any(|name| name == "before_compact"));
                 assert!(
@@ -2271,7 +2274,6 @@ mod tests {
             );
             case.refresh();
             assert_eq!(case.fixture.run.exit_code, code);
-            assert_eq!(case.fixture.run.exit_signal, signal);
             assert_eq!(case.fixture.run.cleanup_state, CleanupState::Complete);
             assert!(host.calls.iter().any(|name| name == "before_compact"));
             assert!(
@@ -2963,7 +2965,6 @@ mod tests {
             persist_opening(&mut case);
             missing_lock(&mut case);
             let old_epoch = case.fixture.run.owner_epoch;
-            let old_gap = case.fixture.run.observation_gap_count;
             let marker = case
                 .fixture
                 ._dir
@@ -3011,7 +3012,6 @@ mod tests {
             assert_eq!(rejected["current_epoch"], old_epoch + 1);
             let current = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
             assert_eq!(current.owner_epoch, old_epoch + 1);
-            assert_eq!(current.observation_gap_count, old_gap + 1);
             assert_eq!(events(&case).len(), 3);
         }
 
@@ -3525,10 +3525,8 @@ mod tests {
             }
             let mut mutable = run.clone();
             mutable.last_health_at = Some("2000-01-01T00:00:00Z".into());
-            mutable.reachability = Reachability::Suspect;
             mutable.cleanup_diagnostics_json = Some(json!(["old bounded diagnostic"]));
             mutable.event_seq_reserved_through += 256;
-            mutable.observation_gap_count += 1;
             assert_eq!(stable_run_identity(&mutable), stable);
         }
 
@@ -3540,7 +3538,13 @@ mod tests {
             let expected = case.fixture.run.clone();
             let held = case.pane_lock();
             storage::reserve_event_sequences(&mut case.fixture.conn, &expected.owner()).unwrap();
-            case.fixture.conn.execute("UPDATE member_runs SET last_health_at=?1,reachability='suspect',observation_gap_count=observation_gap_count+1 WHERE run_id=?2",rusqlite::params![NOW,expected.run_id]).unwrap();
+            case.fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET last_health_at=?1 WHERE run_id=?2",
+                    rusqlite::params![NOW, expected.run_id],
+                )
+                .unwrap();
             let ceiling = storage::get_run(&case.fixture.conn, expected.run_id)
                 .unwrap()
                 .event_seq_reserved_through;
@@ -3677,7 +3681,7 @@ mod tests {
             foreign_owner: bool,
         ) -> Vec<TableSnapshot> {
             assert_eq!(conn.execute(
-        "UPDATE member_runs SET status=?1,cleanup_state='complete',exit_code=?2,exit_signal=NULL,ended_at=?3,cleanup_diagnostics_json=?4,owner_epoch=owner_epoch+?5 WHERE run_id=?6",
+        "UPDATE member_runs SET status=?1,cleanup_state='complete',exit_code=?2,ended_at=?3,cleanup_diagnostics_json=?4,owner_epoch=owner_epoch+?5 WHERE run_id=?6",
         rusqlite::params![status.as_str(), if status == RunStatus::Exited { Some(7) } else { None }, NOW, json!([{"kind":"same_owner_completion","status":status.as_str()}]).to_string(), i64::from(foreign_owner), run_id],
     ).unwrap(), 1);
             rows(conn)
@@ -3715,10 +3719,6 @@ mod tests {
             )));
             let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
             assert_eq!(run.owner(), case.fixture.run.owner());
-            assert_eq!(
-                run.observation_gap_count,
-                case.fixture.run.observation_gap_count
-            );
             assert_eq!(
                 run.exit_code,
                 if status == RunStatus::Exited {
@@ -4735,10 +4735,6 @@ pub(crate) mod test_support {
             let current = storage::get_run(&case.fixture.conn, original.run_id).unwrap();
             assert_eq!(current.owner_epoch, original.owner_epoch + 1);
             assert_eq!(current.owner_kind, OwnerKind::Reconciler);
-            assert_eq!(
-                current.observation_gap_count,
-                original.observation_gap_count + 1
-            );
             let events = events(case);
             assert_eq!(
                 events.iter().map(|row| row.event.kind).collect::<Vec<_>>(),
@@ -5007,23 +5003,20 @@ pub(crate) mod test_support {
         impl Lifecycle {
             pub(crate) fn apply(self, conn: &Connection, run: &RunRecord) {
                 let changed = match self {
-            Self::MemberInactive | Self::DirectorInactive => conn.execute(
-                "UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",
-                rusqlite::params![
-                    NOW,
-                    if matches!(self, Self::MemberInactive) {
-                        run.member_id
-                    } else {
-                        run.director_member_id
-                    }
-                ],
-            ),
-            Self::FleetDeleted => conn.execute(
-                "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
-                rusqlite::params![NOW, run.fleet_id],
-            ),
-        }
-        .unwrap();
+                    Self::MemberInactive | Self::DirectorInactive => conn.execute(
+                        "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                        [if matches!(self, Self::MemberInactive) {
+                            run.member_id
+                        } else {
+                            run.director_member_id
+                        }],
+                    ),
+                    Self::FleetDeleted => conn.execute(
+                        "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
+                        rusqlite::params![NOW, run.fleet_id],
+                    ),
+                }
+                .unwrap();
                 assert_eq!(changed, 1);
             }
             pub(crate) fn archive_reason(self) -> ArchiveReason {
@@ -5105,16 +5098,10 @@ pub(crate) mod test_support {
             assert_eq!(run.owner_kind, OwnerKind::Reconciler);
             assert_eq!(run.status, RunStatus::Exited);
             assert_eq!(run.exit_code, Some(7));
-            assert_eq!(run.exit_signal, None);
             assert_eq!(run.cleanup_state, CleanupState::Complete);
             assert_eq!(
                 run.event_seq_reserved_through,
                 original.event_seq_reserved_through
-            );
-            assert_eq!(
-                run.observation_gap_count,
-                original.observation_gap_count
-                    + i64::from(matches!(stage, Stage::ExceptionalTakeover))
             );
             assert_eq!(
                 &retained_history(&case.fixture.conn),

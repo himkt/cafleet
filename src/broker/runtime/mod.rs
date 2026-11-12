@@ -12,7 +12,6 @@ use crate::coding_agent::catalog::AnswerKey;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::time::Deadline;
-use crate::time::now_stamp;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use rusqlite::TransactionBehavior;
@@ -130,17 +129,14 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         event_evidence: row.get("event_evidence")?,
         coverage: row.get("coverage")?,
         status: row.get("status")?,
-        created_at: row.get("created_at")?,
         native_version: row.get("native_version")?,
         effective_policy_json: optional_json(row, "effective_policy_json", false)?,
         owner_epoch: row.get("owner_epoch")?,
         owner_kind: row.get("owner_kind")?,
         owner_pid: row.get("owner_pid")?,
         owner_start_identity: row.get("owner_start_identity")?,
-        reachability: row.get("reachability")?,
         cleanup_state: row.get("cleanup_state")?,
         event_seq_reserved_through: row.get("event_seq_reserved_through")?,
-        observation_gap_count: row.get("observation_gap_count")?,
         runtime_dir_identity_json: optional_json(row, "runtime_dir_identity_json", false)?,
         run_lock_identity_json: optional_json(row, "run_lock_identity_json", false)?,
         runner_pid: row.get("runner_pid")?,
@@ -151,7 +147,6 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         last_health_at: row.get("last_health_at")?,
         ended_at: row.get("ended_at")?,
         exit_code: row.get("exit_code")?,
-        exit_signal: row.get("exit_signal")?,
         cleanup_diagnostics_json: optional_json(row, "cleanup_diagnostics_json", true)?,
         recovery_origin_status: row.get("recovery_origin_status")?,
     })
@@ -182,7 +177,7 @@ pub(crate) fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, Cafle
         "positive owner identity required",
     )?;
     require(
-        run.event_seq_reserved_through >= 0 && run.observation_gap_count >= 0,
+        run.event_seq_reserved_through >= 0,
         "member_runs.event_seq_reserved_through",
         "nonnegative counters required",
     )?;
@@ -324,16 +319,15 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
         "member_runs.ownership",
         "member/fleet/Director mismatch",
     )?;
-    let now = now_stamp();
     conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
-             event_evidence,coverage,status,created_at,native_version,owner_epoch,
-             owner_kind,owner_pid,owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,observation_gap_count)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,?15,1,'creator',?16,?17,'reachable','incomplete',0,0)",
+             event_evidence,coverage,status,native_version,owner_epoch,
+             owner_kind,owner_pid,owner_start_identity,cleanup_state,event_seq_reserved_through)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,1,'creator',?15,?16,'incomplete',0)",
             params![new.member_id,new.fleet_id,new.director_member_id,new.backend,new.database_identity_json.to_string(),
                 new.launch_nonce,new.runtime_path,new.requested_mode,new.resolved_mode,new.mode_source.as_str(),
-                new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),now,
+                new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),
                 new.native_version,new.owner_pid,new.owner_start_identity],
         )?;
     let run = get_run(conn, conn.last_insert_rowid())?;
@@ -476,12 +470,11 @@ pub(crate) fn member_runtime(
 
 stored_enum!(RunStatus, "member_runs.status", {
     Starting => "starting", Prepared => "prepared", Running => "running",
-    Degraded => "degraded", Stopping => "stopping", Recovering => "recovering",
+    Degraded => "degraded", Recovering => "recovering",
     Exited => "exited", Failed => "failed", Lost => "lost"
 });
 stored_enum!(ModeSource, "member_runs.mode_source", { Default => "default", Explicit => "explicit" });
 stored_enum!(OwnerKind, "member_runs.owner_kind", { Creator => "creator", Runner => "runner", Reconciler => "reconciler" });
-stored_enum!(Reachability, "member_runs.reachability", { Reachable => "reachable", Suspect => "suspect" });
 stored_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete", Incomplete => "incomplete" });
 stored_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
 stored_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
@@ -580,17 +573,14 @@ pub(crate) struct RunRecord {
     pub(crate) event_evidence: EventEvidence,
     pub(crate) coverage: Coverage,
     pub(crate) status: RunStatus,
-    pub(crate) created_at: String,
     pub(crate) native_version: Option<String>,
     pub(crate) effective_policy_json: Option<Value>,
     pub(crate) owner_epoch: i64,
     pub(crate) owner_kind: OwnerKind,
     pub(crate) owner_pid: i64,
     pub(crate) owner_start_identity: String,
-    pub(crate) reachability: Reachability,
     pub(crate) cleanup_state: CleanupState,
     pub(crate) event_seq_reserved_through: i64,
-    pub(crate) observation_gap_count: i64,
     pub(crate) runtime_dir_identity_json: Option<Value>,
     pub(crate) run_lock_identity_json: Option<Value>,
     pub(crate) runner_pid: Option<i64>,
@@ -601,7 +591,6 @@ pub(crate) struct RunRecord {
     pub(crate) last_health_at: Option<String>,
     pub(crate) ended_at: Option<String>,
     pub(crate) exit_code: Option<i64>,
-    pub(crate) exit_signal: Option<i64>,
     pub(crate) cleanup_diagnostics_json: Option<Value>,
     pub(crate) recovery_origin_status: Option<RunStatus>,
 }
@@ -699,7 +688,6 @@ pub(crate) struct RuntimeEventRecord {
     pub(crate) interaction_id: Option<i64>,
     pub(crate) kind: RuntimeEventKind,
     pub(crate) observed_at: String,
-    pub(crate) committed_at: String,
     pub(crate) payload_json: Value,
     pub(crate) notification_state: NotificationState,
     pub(crate) message_id: Option<i64>,
@@ -1394,14 +1382,12 @@ mod tests {
         assert_eq!(run.owner_kind, OwnerKind::Creator);
         assert_eq!(run.cleanup_state, CleanupState::Incomplete);
         assert_eq!(run.event_seq_reserved_through, 0);
-        assert_eq!(run.observation_gap_count, 0);
         assert_eq!(run.mode_source, ModeSource::Default);
         assert_eq!(run.requested_mode, None);
         assert_eq!(run.resolved_mode, "never");
         assert_eq!(run.effective_policy_json, None);
         assert_eq!(run.child_pid, None);
         assert_eq!(run.exit_code, None);
-        assert_eq!(run.exit_signal, None);
         assert_eq!(run.coverage, Coverage::Unknown);
     }
 

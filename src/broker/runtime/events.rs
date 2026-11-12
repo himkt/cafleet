@@ -49,7 +49,6 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeEventRecord> {
         interaction_id: row.get("interaction_id")?,
         kind: row.get("kind")?,
         observed_at: row.get("observed_at")?,
-        committed_at: row.get("committed_at")?,
         payload_json: json_column(row, "payload_json", false)?,
         notification_state: row.get("notification_state")?,
         message_id: row.get("message_id")?,
@@ -707,10 +706,10 @@ pub(crate) fn persist_transition_in_transaction(
         ),
     };
     conn.execute(
-            "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason)
-             VALUES(?1,?2,?3,?4,?5,?6,'{}',?7,?8,?9)",
+            "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,payload_json,notification_state,message_id,archive_reason)
+             VALUES(?1,?2,?3,?4,?5,'{}',?6,?7,?8)",
             params![run.run_id,transition.event_seq,interaction_id,transition.kind.as_str(),transition.observed_at,
-                now_stamp(),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
+                notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
         )?;
     let event_id = conn.last_insert_rowid();
     let payload = payload(
@@ -742,9 +741,10 @@ pub(crate) fn persist_transition_in_transaction(
             .as_ref()
             .expect("validate_cause requires a native exit cause for RunnerExited");
         let exit_code = cause.get("exit_code").and_then(Value::as_i64);
-        let exit_signal = cause.get("exit_signal").and_then(Value::as_i64);
-        conn.execute("UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2,exit_signal=?3 WHERE run_id=?4",
-                params![transition.observed_at,exit_code,exit_signal,run.run_id])?;
+        conn.execute(
+            "UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2 WHERE run_id=?3",
+            params![transition.observed_at, exit_code, run.run_id],
+        )?;
     }
     get_event(conn, event_id).map(|view| (view.event, true))
 }
@@ -1524,7 +1524,7 @@ mod tests {
         fn available_update_commits_only_for_a_running_or_degraded_run() {
             for status in [
                 RunStatus::Starting,
-                RunStatus::Stopping,
+                RunStatus::Recovering,
                 RunStatus::Exited,
                 RunStatus::Running,
                 RunStatus::Degraded,
@@ -2948,7 +2948,13 @@ mod tests {
                     .unwrap();
                 }
                 "director" => {
-                    fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",params![NOW,fixture.director]).unwrap();
+                    fixture
+                        .conn
+                        .execute(
+                            "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                            [fixture.director],
+                        )
+                        .unwrap();
                 }
                 "fleet" => {
                     fixture
