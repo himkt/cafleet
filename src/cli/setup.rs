@@ -15,7 +15,6 @@ use crate::multiplexer::MultiplexerContext;
 use crate::multiplexer::caller;
 use crate::multiplexer::caller::Ancestry;
 use crate::multiplexer::caller::CallerMux;
-use crate::multiplexer::caller::Refusal;
 use crate::multiplexer::caller::Verification;
 use crate::runtime::ProcessTable;
 use crate::runtime::SystemProcessTable;
@@ -251,12 +250,16 @@ impl Summary {
 
 pub(crate) enum CallerReading {
     /// Row 1 refused before any multiplexer command.
-    SharedServer { refusal: Refusal },
+    SharedServer {
+        label: String,
+        pid: i64,
+        message: String,
+    },
+    Unavailable(CafleetError),
     Resolved {
-        /// The backend name and its server.
-        mux: Result<(&'static str, String), CafleetError>,
-        /// `None` when `mux` failed.
-        pane: Option<Result<PaneReading, CafleetError>>,
+        name: &'static str,
+        server: String,
+        pane: Result<PaneReading, CafleetError>,
     },
 }
 
@@ -349,25 +352,26 @@ fn hermes_reader(
 
 /// The `fleet create` verification without `--pane`, as doctor reports it.
 fn detect_caller(table: &dyn ProcessTable) -> CallerReading {
-    let unavailable = |cause: CafleetError| CallerReading::Resolved {
-        mux: Err(cause),
-        pane: None,
-    };
     let env = match crate::multiplexer::caller_env() {
         Ok(env) => env,
-        Err(cause) => return unavailable(cause),
+        Err(cause) => return CallerReading::Unavailable(cause),
     };
     let ancestry = caller::walk(table);
-    if let Some(refusal) = caller::shared_server(&ancestry) {
-        return CallerReading::SharedServer { refusal };
+    if let Some(shared) = caller::shared_server(&ancestry) {
+        return CallerReading::SharedServer {
+            message: caller::shared_server_message(&shared),
+            label: shared.label,
+            pid: shared.pid,
+        };
     }
     let mux = match caller::resolve_env_mux(&env, Rc::new(SystemRunner)) {
         Ok(mux) => mux,
-        Err(cause) => return unavailable(cause),
+        Err(cause) => return CallerReading::Unavailable(cause),
     };
     CallerReading::Resolved {
-        mux: Ok((mux.backend.name(), mux.server.clone())),
-        pane: Some(read_caller_pane(&mux, &env, table, &ancestry)),
+        name: mux.backend.name(),
+        server: mux.server.clone(),
+        pane: read_caller_pane(&mux, &env, table, &ancestry),
     }
 }
 
@@ -478,26 +482,21 @@ pub(crate) fn render(report: &Report, mode: Mode) -> String {
 /// The `multiplexer` and `multiplexer.caller_pane` checks and their folded summary line.
 fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
     let ((mux_status, mux_detail), (pane_status, pane_detail), (status, short)) = match reading {
-        CallerReading::SharedServer { refusal } => {
-            let Refusal::SharedServer { label, pid } = &refusal else {
-                panic!("a shared-server reading carries a shared-server refusal");
-            };
-            let detail = caller::shared_server_message(&refusal);
-            (
-                (
-                    CheckStatus::Info,
-                    format!(
-                        "not checked: a shared {label} server (pid {pid}) supplies the caller environment"
-                    ),
-                ),
-                (CheckStatus::Warn, detail.clone()),
-                (CheckStatus::Warn, detail),
-            )
-        }
-        CallerReading::Resolved {
-            mux: Err(cause),
-            pane: None,
+        CallerReading::SharedServer {
+            label,
+            pid,
+            message: detail,
         } => (
+            (
+                CheckStatus::Info,
+                format!(
+                    "not checked: a shared {label} server (pid {pid}) supplies the caller environment"
+                ),
+            ),
+            (CheckStatus::Warn, detail.clone()),
+            (CheckStatus::Warn, detail),
+        ),
+        CallerReading::Unavailable(cause) => (
             (CheckStatus::Error, cause.to_string()),
             (
                 CheckStatus::Info,
@@ -505,10 +504,7 @@ fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
             ),
             (CheckStatus::Error, cause.to_string()),
         ),
-        CallerReading::Resolved {
-            mux: Ok((name, server)),
-            pane: Some(pane),
-        } => {
+        CallerReading::Resolved { name, server, pane } => {
             let mux = (CheckStatus::Ok, format!("{name} server={server}"));
             match pane {
                 Ok(PaneReading::Verified { variable, context }) => (
@@ -543,11 +539,6 @@ fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
                 ),
             }
         }
-        CallerReading::Resolved { mux, pane } => panic!(
-            "a resolved caller reading has a pane exactly when its multiplexer resolved (mux ok: {}, pane: {})",
-            mux.is_ok(),
-            pane.is_some()
-        ),
     };
     (
         vec![
@@ -662,11 +653,7 @@ fn classify_registry(row: &MemberRunRegistry) -> Option<MemberRun<'_>> {
     })
 }
 
-fn probe_run<'a>(
-    source: Option<&str>,
-    row: &'a MemberRunRegistry,
-    deadline: Instant,
-) -> MemberRun<'a> {
+fn probe_run<'a>(source: &str, row: &'a MemberRunRegistry, deadline: Instant) -> MemberRun<'a> {
     let now = Instant::now();
     let (state, phrases) = if now >= deadline {
         (
@@ -675,12 +662,7 @@ fn probe_run<'a>(
         )
     } else {
         let until = deadline.min(now + Duration::from_millis(100));
-        let diagnosis = source
-            .ok_or_else(|| {
-                CafleetError::App("runtime diagnosis requires a file-backed registry".into())
-            })
-            .and_then(|source| crate::runtime::diagnose_runtime_at(source, row.run_id, until));
-        match diagnosis {
+        match crate::runtime::diagnose_runtime_at(source, row.run_id, until) {
             Ok(diagnosis) => (diagnosis.state, diagnosis.diagnostics),
             Err(cause) => (MemberState::CheckFailed, vec![cause.to_string()]),
         }
@@ -698,7 +680,7 @@ const PROBE_WORKERS: usize = 16;
 /// Probes `rows` on up to [`PROBE_WORKERS`] threads, each probing a contiguous share through its
 /// own read-only connections, and returns the runs in `rows` order.
 fn probe_runs<'a>(
-    source: Option<&str>,
+    source: &str,
     rows: &[&'a MemberRunRegistry],
     deadline: Instant,
 ) -> Vec<MemberRun<'a>> {
@@ -752,7 +734,7 @@ fn member_checks(
         .map(|(row, _)| row)
         .collect::<Vec<_>>();
     let mut probed = probe_runs(
-        conn.path(),
+        conn.path().expect("doctor reads a file-backed database"),
         &unclassified,
         Instant::now() + Duration::from_secs(5),
     )
@@ -2142,6 +2124,7 @@ mod tests {
         use crate::multiplexer::caller::CallerMux;
         use crate::multiplexer::caller::CallerPane;
         use crate::multiplexer::caller::Refusal;
+        use crate::multiplexer::caller::SharedServer;
         use crate::multiplexer::caller::shared_server_message;
         use crate::multiplexer::caller::unset_message;
         use crate::multiplexer::caller::unverified_message;
@@ -2161,16 +2144,17 @@ mod tests {
 
         fn verified_caller() -> CallerReading {
             CallerReading::Resolved {
-                mux: Ok(("tmux", TMUX_SOCKET.to_string())),
-                pane: Some(Ok(PaneReading::Verified {
+                name: "tmux",
+                server: TMUX_SOCKET.to_string(),
+                pane: Ok(PaneReading::Verified {
                     variable: "TMUX_PANE",
                     context: main_pane(),
-                })),
+                }),
             }
         }
 
-        fn codex_daemon() -> Refusal {
-            Refusal::SharedServer {
+        fn codex_daemon() -> SharedServer {
+            SharedServer {
                 label: "codex app-server".to_string(),
                 pid: 407596,
             }
@@ -2206,7 +2190,7 @@ mod tests {
             let rows = member_run_registry(&conn).unwrap();
             assert_eq!(rows.len(), 1);
             let deadline = Instant::now();
-            let probed = probe_run(conn.path(), &rows[0], deadline);
+            let probed = probe_run(conn.path().unwrap(), &rows[0], deadline);
             assert_eq!(probed.state, MemberState::NotChecked);
             let check = runtime_check(&probed);
             assert_eq!(
@@ -2810,7 +2794,7 @@ mod tests {
             );
             assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
             assert_eq!(outcome.stderr, "");
-            let detail = shared_server_message(&Refusal::SharedServer {
+            let detail = shared_server_message(&SharedServer {
                 label: "codex app-server".to_string(),
                 pid: CHILD_ANCESTOR,
             });
@@ -3015,7 +2999,9 @@ mod tests {
                 let detail = shared_server_message(&codex_daemon());
                 assert_multiplexer(
                     &views_with(|| CallerReading::SharedServer {
-                        refusal: codex_daemon(),
+                        label: codex_daemon().label,
+                        pid: codex_daemon().pid,
+                        message: shared_server_message(&codex_daemon()),
                     }),
                     &format!("warn multiplexer: {detail}"),
                     [
@@ -3029,9 +3015,8 @@ mod tests {
             #[test]
             fn an_unavailable_multiplexer_reports_error_and_an_unavailable_caller_pane() {
                 assert_multiplexer(
-                    &views_with(|| CallerReading::Resolved {
-                        mux: Err(CafleetError::App(NO_MULTIPLEXER.into())),
-                        pane: None,
+                    &views_with(|| {
+                        CallerReading::Unavailable(CafleetError::App(NO_MULTIPLEXER.into()))
                     }),
                     &format!("error multiplexer: {NO_MULTIPLEXER}"),
                     [
@@ -3047,10 +3032,11 @@ mod tests {
                 let detail = unset_message(MuxBackend::Tmux);
                 assert_multiplexer(
                     &views_with(|| CallerReading::Resolved {
-                        mux: Ok(("tmux", TMUX_SOCKET.to_string())),
-                        pane: Some(Ok(PaneReading::Unverified {
+                        name: "tmux",
+                        server: TMUX_SOCKET.to_string(),
+                        pane: Ok(PaneReading::Unverified {
                             detail: unset_message(MuxBackend::Tmux),
-                        })),
+                        }),
                     }),
                     &format!("warn multiplexer: tmux (server {TMUX_SOCKET}); {detail}"),
                     [
@@ -3066,10 +3052,11 @@ mod tests {
                 let detail = unverified_detail();
                 assert_multiplexer(
                     &views_with(|| CallerReading::Resolved {
-                        mux: Ok(("tmux", TMUX_SOCKET.to_string())),
-                        pane: Some(Ok(PaneReading::Unverified {
+                        name: "tmux",
+                        server: TMUX_SOCKET.to_string(),
+                        pane: Ok(PaneReading::Unverified {
                             detail: unverified_detail(),
-                        })),
+                        }),
                     }),
                     &format!("warn multiplexer: tmux (server {TMUX_SOCKET}); {detail}"),
                     [
@@ -3097,8 +3084,9 @@ mod tests {
             fn a_propagated_pane_error_reports_error_caller_pane_and_fails() {
                 assert_multiplexer(
                     &views_with(|| CallerReading::Resolved {
-                        mux: Ok(("tmux", TMUX_SOCKET.to_string())),
-                        pane: Some(Err(CafleetError::App(PANE_READ_FAILURE.into()))),
+                        name: "tmux",
+                        server: TMUX_SOCKET.to_string(),
+                        pane: Err(CafleetError::App(PANE_READ_FAILURE.into())),
                     }),
                     &format!("error multiplexer: {PANE_READ_FAILURE}"),
                     [
@@ -3112,15 +3100,16 @@ mod tests {
             #[test]
             fn a_herdr_verified_pane_names_herdr_pane_id() {
                 let views = views_with(|| CallerReading::Resolved {
-                    mux: Ok(("herdr", "default".to_string())),
-                    pane: Some(Ok(PaneReading::Verified {
+                    name: "herdr",
+                    server: "default".to_string(),
+                    pane: Ok(PaneReading::Verified {
                         variable: "HERDR_PANE_ID",
                         context: MultiplexerContext {
                             session: "w4".into(),
                             window_id: "w4:t1".into(),
                             pane_id: "w4:p3N".into(),
                         },
-                    })),
+                    }),
                 });
                 assert_multiplexer(
                     &views,
@@ -3854,7 +3843,11 @@ mod tests {
                 .collect::<Vec<_>>();
             let rows = member_run_registry(&conn).unwrap();
             let rows = rows.iter().collect::<Vec<_>>();
-            let probed = probe_runs(conn.path(), &rows, Instant::now() + Duration::from_secs(5));
+            let probed = probe_runs(
+                conn.path().unwrap(),
+                &rows,
+                Instant::now() + Duration::from_secs(5),
+            );
             assert_eq!(
                 probed.iter().map(|run| run.row.run_id).collect::<Vec<_>>(),
                 runs.iter().map(|run| run.run_id).collect::<Vec<_>>()
@@ -3864,12 +3857,6 @@ mod tests {
                     .iter()
                     .all(|run| run.state != MemberState::NotChecked),
                 "every run is probed within the pass budget"
-            );
-            let unbacked = probe_runs(None, &rows[..1], Instant::now() + Duration::from_secs(5));
-            assert_eq!(unbacked[0].state, MemberState::CheckFailed);
-            assert_eq!(
-                unbacked[0].phrases,
-                ["runtime diagnosis requires a file-backed registry"]
             );
         }
 

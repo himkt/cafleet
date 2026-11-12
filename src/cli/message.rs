@@ -134,7 +134,7 @@ pub(crate) fn run(
             body,
             json,
         } => {
-            let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
+            let text = resolve_body(body.text.as_deref(), body.file.as_deref())?;
             let deadline = crate::time::Deadline::new();
             let message = crate::db::with_database_budget(conn, deadline, |conn| {
                 broker::send_message(conn, from_member_id, to_member_id, &text)
@@ -369,14 +369,10 @@ pub(crate) fn listen(
     assert!(timeout.is_none_or(|timeout| !timeout.is_zero()));
     let expiry = timeout.map(|timeout| clock.now() + timeout);
     let mut snapshot = io.snapshot(work_deadline(clock.now(), expiry))?;
-    let fleet_id = match &snapshot {
-        InboxSnapshot::Open { fleet_id, .. } => *fleet_id,
-        InboxSnapshot::Closed { .. } => {
-            return Err(CafleetError::App(
-                "listener subject closed before startup validation".into(),
-            ));
-        }
+    let InboxSnapshot::Open { fleet_id, .. } = &snapshot else {
+        unreachable!("an unpinned listener snapshot is open or fails")
     };
+    let fleet_id = *fleet_id;
     let ready_deadline = work_deadline(clock.now(), expiry);
     ready_deadline.remaining_at(clock.now())?;
     output.emit(

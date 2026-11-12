@@ -22,11 +22,7 @@ pub(crate) fn format_message(message: &MessageRecord) -> String {
         message.message_id, message.from_member_id, message.status_timestamp
     );
     let body = truncate_text(&message.text, TEXT_BODY_LIMIT);
-    if body.is_empty() {
-        header
-    } else {
-        format!("{header}\n{body}")
-    }
+    format!("{header}\n{body}")
 }
 
 pub(crate) fn format_messages(messages: &[MessageRecord]) -> String {
@@ -533,12 +529,10 @@ mod tests {
             format_message(&message),
             format!("[5 | from:2 | acked]\n{}", message.text)
         );
-        message.text.clear();
-        assert_eq!(format_message(&message), "[5 | from:2 | acked]");
         assert_eq!(format_messages(&[]), "No messages found.");
         assert_eq!(
-            format_messages(&[message.clone(), message]),
-            "[5 | from:2 | acked]\n\n[5 | from:2 | acked]"
+            format_messages(&[message.clone(), message.clone()]),
+            format!("{0}\n\n{0}", format_message(&message))
         );
     }
 

@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 21/49 tasks complete
+**Progress**: 24/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -190,7 +190,6 @@ AGT7 and AGT8 also delete the `"native_request_id"` extract key and the `"sensit
 | CLI8 | `probe_run` reads `conn.path().expect("doctor reads a file-backed database")`; `source` becomes `&str`. | F.P2 | — |
 | CLI9 | Split `CallerReading` into `SharedServer { label, pid, message }`, `Unavailable(CafleetError)` and `Resolved { name, server, pane }`; delete both panicking arms. Applied with MUX8. | F.P3 | — |
 | CLI10 | `format_member_list` and the roster JSON print the non-optional placement. | F.P6 | `SPEC.md:190`; `cli.md:57` drop "placement may be null" |
-| CLI11 | `recovery::diagnostics` parses `Vec<String>` and fails loudly on a non-string; `format_runtime_recovery` prints strings directly. | F.P7 | — |
 | CLI12 | `format_message` always emits `format!("{header}\n{body}")`. | F.P8 | — |
 
 #### MUX — Multiplexer, delivery, pane lock, assets, config, time and errors
@@ -356,6 +355,7 @@ The `schema_version` patterns target only the removed constant versions; the ope
 | Per-variant `LifecycleRequest.protocol_version` | D.P7 | `deny_unknown_fields` does not combine with `#[serde(flatten)]` on an internally tagged enum |
 | `PaneCleanup::Attempted { error: None }` | H.P6 | Records the attempted pane for pane ownership during creation |
 | `PtySession::shutdown` from `Drop` | B.P9 | Safety net for error returns between `PtySession::prepare` and `LiveShutdown` |
+| Mixed string and object entries in `cleanup_diagnostics` (`recovery::diagnostics` returns `Vec<Value>`; `format_runtime_recovery` renders non-strings as JSON) | F.P7 | Exceptional takeover records the `owner_termination_attestation` object beside string diagnostics |
 | `native_capture` drivers and their production seams (`ObservationClockKind`, capture fields, `attach_capture`, `begin_capture_shutdown`, `RunnerDependencies.capture`, `Running.capture`, the `service.rs:1664-1684` child-path dispatch) | A.B4 | User decision: the fixture-recording capability stays |
 
 ### Test policy
@@ -433,9 +433,9 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 7: CLI and output
 
-- [ ] Apply CLI1–CLI3, CLI8, CLI11 and CLI12 <!-- completed: -->
-- [ ] Apply CLI9 together with MUX8 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply CLI1–CLI3, CLI8 and CLI12 <!-- completed: 2026-11-12T12:05 -->
+- [x] Apply CLI9 together with MUX8 <!-- completed: 2026-11-12T12:02 -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T12:05 -->
 
 ### Step 8: Multiplexer, delivery, assets, config, time
 

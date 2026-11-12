@@ -366,11 +366,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         catalog,
     )?;
 
-    let prompt_body = resolve_body(
-        args.body.prompt.as_deref(),
-        args.body.file.as_deref(),
-        "--file",
-    )?;
+    let prompt_body = resolve_body(args.body.prompt.as_deref(), args.body.file.as_deref())?;
     backend.validate_prompt(&prompt_body)?;
 
     let director = broker::director_placement(conn, fleet_id)?;

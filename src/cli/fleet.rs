@@ -292,16 +292,11 @@ pub(crate) trait DeletionHost {
     }
     fn settle_hermes(
         &mut self,
-        _conn: &Connection,
+        conn: &Connection,
         run: &crate::broker::runtime::RunRecord,
-        _pane_id: &str,
-        _deadline: Deadline,
-    ) -> Result<(), CafleetError> {
-        Err(CafleetError::App(format!(
-            "hermes settlement of run {} requires the member's multiplexer",
-            run.run_id
-        )))
-    }
+        pane_id: &str,
+        deadline: Deadline,
+    ) -> Result<(), CafleetError>;
     fn close_pane(&mut self, placement: &Placement, deadline: Deadline)
     -> Result<(), CafleetError>;
     /// Restores the layout after the preceding `close_pane`.
@@ -1078,6 +1073,16 @@ pub(crate) mod test_support {
             _: &RunRecord,
             _: crate::cli::fleet::Deadline,
         ) -> Result<ShutdownOutcome, CafleetError> {
+            unreachable!("broker fixtures register no member runs")
+        }
+
+        fn settle_hermes(
+            &mut self,
+            _: &Connection,
+            _: &RunRecord,
+            _: &str,
+            _: crate::cli::fleet::Deadline,
+        ) -> Result<(), CafleetError> {
             unreachable!("broker fixtures register no member runs")
         }
 
@@ -2604,7 +2609,7 @@ mod tests {
                 error.to_string(),
                 format!(
                     "cafleet fleet create {}",
-                    shared_server_message(&Refusal::SharedServer {
+                    shared_server_message(&crate::multiplexer::caller::SharedServer {
                         label: "codex app-server".to_string(),
                         pid: 407596,
                     })
