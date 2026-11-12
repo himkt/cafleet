@@ -1,6 +1,23 @@
 # CAFleet
 
-[![cafleet](https://github.com/user-attachments/assets/79ca69e7-cde4-4c85-9c1d-ea738685bdd6)](https://youtu.be/cHlp1rJcJp4)
+<p align="center">
+  <img src=".github/assets/cafleet.png" alt="cafleet" width="15%" />
+</p>
+
+<p align="center">
+  <a href="https://www.himkt.dev/cafleet">himkt.dev/cafleet</a> · <a href="https://www.himkt.dev/cafleet/quickstart#install">install</a> · <a href="https://www.himkt.dev/cafleet/quickstart">quick start</a> · <a href="https://herdr.dev/docs/">docs</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?labelColor=333333" alt="MIT license" /></a>
+  <a href="https://github.com/himkt/cafleet/stargazers"><img src="https://img.shields.io/github/stars/himkt/cafleet?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/himkt/cafleet/releases/latest"><img src="https://img.shields.io/github/v/release/himkt/cafleet?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
+  <a href="https://x.com/himako_h"><img src="https://img.shields.io/badge/follow-%40himako_h-000000?logo=x&logoColor=white" alt="follow @himako_h on X" /></a>
+</p>
+
+---
+
+https://github.com/user-attachments/assets/06e8251e-54a8-41bf-b7be-0d752f605b6e
 
 CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable messages: collaborative coding across multiple coding-agent backends, with full code transparency. Use its CLI and skills to delegate research, implementation and review, then collect durable replies while your session continues the task.
 
