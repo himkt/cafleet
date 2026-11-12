@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 30/49 tasks complete
+**Progress**: 33/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -451,9 +451,9 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 10: Runtime observation and transport
 
-- [ ] Apply OBS6–OBS8 and adapt every test observer <!-- completed: -->
-- [ ] Apply OBS1–OBS5 and OBS9–OBS16 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply OBS6–OBS8 and adapt every test observer <!-- completed: 2026-11-12T12:47:53Z -->
+- [x] Apply OBS1–OBS5 and OBS9–OBS16 <!-- completed: 2026-11-12T12:47:53Z -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T12:47:53Z -->
 
 ### Step 11: Runtime input and writer
 

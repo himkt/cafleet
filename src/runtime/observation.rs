@@ -39,6 +39,7 @@ pub(crate) trait ObservationClock: Send + Sync {
     #[cfg(test)]
     fn kind(&self) -> ObservationClockKind;
 }
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ObservationPhase {
     ChildOutput,
@@ -206,18 +207,21 @@ pub(crate) struct OrderedObservation<'a> {
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
     clock: &'a dyn ObservationClock,
+    #[cfg(test)]
     phase: ObservationPhase,
 }
 impl ScreenObserver for OrderedObservation<'_> {
-    fn input_health(&self) -> Option<ObservationHealth> {
-        Some(self.controller.health(self.writer))
+    fn input_health(&self) -> ObservationHealth {
+        self.controller.health(self.writer)
     }
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
-        self.controller
-            .observe_screen(screen, self.writer, self.clock, self.phase)
-    }
-    fn failures_are_fatal(&self) -> bool {
-        true
+        self.controller.observe_screen(
+            screen,
+            self.writer,
+            self.clock,
+            #[cfg(test)]
+            self.phase,
+        )
     }
     fn parser_failure(&mut self) -> Result<()> {
         self.controller
@@ -229,7 +233,6 @@ impl ObservationController {
         run: &RunRecord,
         catalog: &ProfileCatalog,
         policy: EvidencePolicy,
-        initial: RangeInclusive<i64>,
     ) -> Result<Self> {
         ensure(
             run.run_id > 0
@@ -241,8 +244,7 @@ impl ObservationController {
                 && run.started_at.is_none()
                 && run.ended_at.is_none()
                 && run.recovery_origin_status.is_none()
-                && run.event_seq_reserved_through == 256
-                && initial == (1..=256),
+                && run.event_seq_reserved_through == 256,
             "observation controller requires fresh committed initial grant",
         )?;
         let backend = crate::coding_agent::coding_agent(&run.backend)
@@ -252,11 +254,11 @@ impl ObservationController {
             "observer coverage mismatch",
         )?;
         let mut pool = EventSequencePool::default();
-        pool.supply(initial)?;
+        pool.supply(1..=256)?;
         Ok(Self {
             run: run.clone(),
             detector: Detector::new(catalog, backend, run.native_version.as_deref()),
-            tracker: EpisodeTracker::new(run.run_id, 1, policy)?,
+            tracker: EpisodeTracker::new(run.run_id, policy)?,
             pool,
             pending: None,
             gap: None,
@@ -557,7 +559,7 @@ impl ObservationController {
             .count
             .checked_add(1)
             .ok_or_else(|| error("gap interval count overflow"))?;
-        self.tracker.reset_observation(GateReason::Gap)?;
+        self.tracker.reset_observation()?;
         Ok(())
     }
     fn delivery_pressure(
@@ -681,8 +683,15 @@ impl ObservationController {
         writer: &'a EventWriter,
         clock: &'a dyn ObservationClock,
     ) -> OrderedObservation<'a> {
-        self.observer_for(writer, clock, ObservationPhase::ChildOutput)
+        OrderedObservation {
+            controller: self,
+            writer,
+            clock,
+            #[cfg(test)]
+            phase: ObservationPhase::ChildOutput,
+        }
     }
+    #[cfg(test)]
     pub(crate) fn observer_for<'a>(
         &'a mut self,
         writer: &'a EventWriter,
@@ -700,11 +709,9 @@ impl ObservationController {
         &mut self,
         screen: &ScreenSnapshot,
         now: &ObservationMoment,
-        phase: ObservationPhase,
+        #[cfg(test)] phase: ObservationPhase,
         #[cfg(test)] clock: &dyn ObservationClock,
     ) -> Result<Option<ScreenObservation>> {
-        #[cfg(not(test))]
-        let _ = phase;
         #[cfg(test)]
         {
             let failed = self
@@ -734,7 +741,7 @@ impl ObservationController {
         screen: &ScreenSnapshot,
         writer: &EventWriter,
         clock: &dyn ObservationClock,
-        phase: ObservationPhase,
+        #[cfg(test)] phase: ObservationPhase,
     ) -> Result<()> {
         let now = self.moment(clock)?;
         self.validate_output(screen)?;
@@ -754,6 +761,7 @@ impl ObservationController {
         let Some(observed) = self.observation(
             screen,
             &now,
+            #[cfg(test)]
             phase,
             #[cfg(test)]
             clock,
@@ -787,14 +795,30 @@ impl ObservationController {
         writer: &EventWriter,
         clock: &dyn ObservationClock,
     ) -> Result<ObservationStatus> {
-        self.poll_for(current, writer, clock, ObservationPhase::QuietTimer)
+        self.poll_at(
+            current,
+            writer,
+            clock,
+            #[cfg(test)]
+            ObservationPhase::QuietTimer,
+        )
     }
+    #[cfg(test)]
     pub(crate) fn poll_for(
         &mut self,
         current: &ScreenSnapshot,
         writer: &EventWriter,
         clock: &dyn ObservationClock,
         phase: ObservationPhase,
+    ) -> Result<ObservationStatus> {
+        self.poll_at(current, writer, clock, phase)
+    }
+    fn poll_at(
+        &mut self,
+        current: &ScreenSnapshot,
+        writer: &EventWriter,
+        clock: &dyn ObservationClock,
+        #[cfg(test)] phase: ObservationPhase,
     ) -> Result<ObservationStatus> {
         let now = self.moment(clock)?;
         self.validate_output(current)?;
@@ -867,9 +891,7 @@ impl ObservationController {
             && let Some(exit) = self.exit.take()
         {
             self.terminal_fenced = true;
-            let mut update = self
-                .tracker
-                .finish(InteractionCloseReason::ProcessExited, &exit.at)?;
+            let mut update = self.tracker.finish(&exit.at)?;
             let cause = match exit.exit {
                 ChildExit::Code(code) => {
                     serde_json::json!({"kind":RuntimeCauseKind::NativeExit.as_str(),"exit_code":code,"exit_signal":null})
@@ -895,6 +917,7 @@ impl ObservationController {
             let Some(value) = self.observation(
                 current,
                 &now,
+                #[cfg(test)]
                 phase,
                 #[cfg(test)]
                 clock,
@@ -956,8 +979,7 @@ impl ObservationController {
     }
     pub(crate) fn has_pending(&self) -> bool {
         let status = self.status();
-        status.retained_transition
-            || status.retained_draft
+        status.retained_draft
             || status.retained_evidence
             || self.exit.is_some()
             || self.gap.is_some()
@@ -4532,7 +4554,12 @@ pub(crate) mod native_capture {
         }
         pub(super) fn read_private(path: &Path, limit: usize) -> Result<Vec<u8>> {
             ensure(path.is_absolute(), "private file path must be absolute")?;
-            validate_private_file(path, nix::unistd::geteuid().as_raw(), 0o600)?;
+            crate::runtime::artifacts::private_metadata(
+                path,
+                nix::unistd::geteuid().as_raw(),
+                0o600,
+                false,
+            )?;
             let mut file = OpenOptions::new()
                 .read(true)
                 .custom_flags(nix::libc::O_NOFOLLOW)
@@ -4627,7 +4654,12 @@ pub(crate) mod native_capture {
                 &value.producer_manifest_path,
                 &value.capture_policy_path,
             ] {
-                validate_private_file(path, nix::unistd::geteuid().as_raw(), 0o600)?;
+                crate::runtime::artifacts::private_metadata(
+                    path,
+                    nix::unistd::geteuid().as_raw(),
+                    0o600,
+                    false,
+                )?;
                 ensure(
                     path.is_absolute(),
                     "absolute capture evidence path required",
@@ -4849,7 +4881,12 @@ pub(crate) mod native_capture {
                     Err(cause) => return Err(io_error(cause)),
                 };
                 self.used = true;
-                validate_private_file(&self.path, nix::unistd::geteuid().as_raw(), 0o600)?;
+                crate::runtime::artifacts::private_metadata(
+                    &self.path,
+                    nix::unistd::geteuid().as_raw(),
+                    0o600,
+                    false,
+                )?;
                 let claimed = self.path.with_extension("claimed");
                 std::fs::hard_link(&self.path, &claimed).map_err(io_error)?;
                 let owned = std::fs::symlink_metadata(&claimed).map_err(io_error)?;
@@ -8801,10 +8838,11 @@ pub(crate) mod native_capture {
                     "private owned case directory required",
                 )?;
             }
-            validate_private_file(
+            crate::runtime::artifacts::private_metadata(
                 Path::new(crate::db::database_path(&case.database_url)?),
                 nix::unistd::geteuid().as_raw(),
                 0o600,
+                false,
             )?;
             let sample = RealInputDeadlineClock.sample()?;
             let remaining = case
@@ -10341,14 +10379,11 @@ fn wall_time(value: &str) -> Result<()> {
     )
 }
 impl EpisodeTracker {
-    pub(crate) fn new(run_id: i64, next_episode_seq: i64, policy: EvidencePolicy) -> Result<Self> {
-        ensure(
-            run_id > 0 && next_episode_seq > 0,
-            "positive run/episode identities required",
-        )?;
+    pub(crate) fn new(run_id: i64, policy: EvidencePolicy) -> Result<Self> {
+        ensure(run_id > 0, "positive run identity required")?;
         Ok(Self {
             run_id,
-            next_episode: Some(next_episode_seq),
+            next_episode: Some(1),
             policy,
             active: None,
             candidate: None,
@@ -10666,12 +10701,8 @@ impl EpisodeTracker {
         };
         Ok(update)
     }
-    pub(crate) fn reset_observation(&mut self, reason: GateReason) -> Result<()> {
+    pub(crate) fn reset_observation(&mut self) -> Result<()> {
         self.current_evidence = None;
-        ensure(
-            matches!(reason, GateReason::Gap | GateReason::ObserverUnavailable),
-            "reset requires observation-gap cause",
-        )?;
         self.candidate = None;
         self.clear_boundaries();
         self.annotations.forget_candidates();
@@ -10682,17 +10713,12 @@ impl EpisodeTracker {
         self.obscurity = None;
         self.obscured = false;
     }
-    pub(crate) fn finish(
-        &mut self,
-        reason: InteractionCloseReason,
-        at: &str,
-    ) -> Result<EpisodeUpdate> {
-        ensure(
-            reason == InteractionCloseReason::ProcessExited,
-            "live finish requires process exit",
-        )?;
+    pub(crate) fn finish(&mut self, at: &str) -> Result<EpisodeUpdate> {
         wall_time(at)?;
-        let transitions = self.close(reason, None, at).into_iter().collect();
+        let transitions = self
+            .close(InteractionCloseReason::ProcessExited, None, at)
+            .into_iter()
+            .collect();
         self.finished = true;
         self.candidate = None;
         Ok(EpisodeUpdate {
@@ -10801,7 +10827,7 @@ pub(crate) mod test_support {
     use serde_json::json;
     pub(crate) const NOW: &str = "2026-10-26T15:35:00.000000+00:00";
     pub(crate) fn tracker() -> EpisodeTracker {
-        EpisodeTracker::new(1, 1, EvidencePolicy::metadata()).unwrap()
+        EpisodeTracker::new(1, EvidencePolicy::metadata()).unwrap()
     }
 
     pub(crate) fn open(
@@ -10854,7 +10880,7 @@ pub(crate) mod test_support {
     impl Run {
         pub(crate) fn new(policy: EvidencePolicy, observe: fn(&str) -> ScreenObservation) -> Self {
             Self {
-                tracker: EpisodeTracker::new(1, 1, policy).unwrap(),
+                tracker: EpisodeTracker::new(1, policy).unwrap(),
                 origin: Instant::now(),
                 sequence: 0,
                 observe,
@@ -11157,6 +11183,12 @@ mod tests {
             transitions: usize,
         }
         impl ScreenObserver for ParserAlgorithmBridge {
+            fn input_health(&self) -> ObservationHealth {
+                unreachable!("the parser bridge is never asked to quiesce input")
+            }
+            fn parser_failure(&mut self) -> std::result::Result<(), crate::error::CafleetError> {
+                Ok(())
+            }
             fn observe(
                 &mut self,
                 screen: &ScreenSnapshot,
@@ -11628,7 +11660,7 @@ mod tests {
             &[RULE],
         )
         .unwrap();
-        let mut tracker = EpisodeTracker::new(1, 1, policy).unwrap();
+        let mut tracker = EpisodeTracker::new(1, policy).unwrap();
         let origin = Instant::now();
         let first = detailed("first", 1);
         assert!(first.fingerprint == detailed("second", 1).fingerprint);
@@ -11728,7 +11760,7 @@ mod tests {
         let mut tracker = tracker();
         let value = permission("write disposable.txt");
         tracker.observe(&value, origin, NOW).unwrap();
-        tracker.reset_observation(GateReason::Gap).unwrap();
+        tracker.reset_observation().unwrap();
         assert!(
             tracker
                 .observe(&value, origin + Duration::from_secs(5), NOW)
@@ -11759,7 +11791,7 @@ mod tests {
         tracker
             .observe(&empty, origin + Duration::from_millis(200), NOW)
             .unwrap();
-        tracker.reset_observation(GateReason::Gap).unwrap();
+        tracker.reset_observation().unwrap();
         let fresh = tracker
             .observe(&empty, origin + Duration::from_secs(5), NOW)
             .unwrap();
@@ -11798,7 +11830,7 @@ mod tests {
         tracker
             .observe(&unknown(2), origin + Duration::from_millis(200), NOW)
             .unwrap();
-        tracker.reset_observation(GateReason::Gap).unwrap();
+        tracker.reset_observation().unwrap();
         let unseen = unknown(3);
         assert!(
             tracker
@@ -11825,42 +11857,17 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_reset_and_finish_validate_their_lifecycle_scope() {
-        for reason in [
-            GateReason::Candidate,
-            GateReason::Interaction,
-            GateReason::Unknown,
-        ] {
-            assert!(tracker().reset_observation(reason).is_err());
-        }
-        for reason in [GateReason::Gap, GateReason::ObserverUnavailable] {
-            tracker().reset_observation(reason).unwrap();
-        }
-        for reason in [
-            InteractionCloseReason::MonitorLost,
-            InteractionCloseReason::NotVisible,
-            InteractionCloseReason::Superseded,
-        ] {
-            assert!(tracker().finish(reason, NOW).is_err());
-        }
+    fn runtime_episode_finish_closes_the_active_episode_once_with_process_exit() {
         let origin = Instant::now();
         let mut tracker = tracker();
         open(&mut tracker, &permission("write disposable.txt"), origin);
-        let closed = tracker
-            .finish(InteractionCloseReason::ProcessExited, NOW)
-            .unwrap();
+        let closed = tracker.finish(NOW).unwrap();
         assert_eq!(closed.transitions.len(), 1);
         assert_eq!(
             closed.transitions[0].close_reason,
             Some(InteractionCloseReason::ProcessExited)
         );
-        assert!(
-            tracker
-                .finish(InteractionCloseReason::ProcessExited, NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
+        assert!(tracker.finish(NOW).unwrap().transitions.is_empty());
     }
 
     #[test]
@@ -11887,8 +11894,7 @@ mod tests {
 
     #[test]
     fn runtime_episode_rejects_regressing_output_sequences_and_invalid_identity() {
-        assert!(EpisodeTracker::new(0, 1, EvidencePolicy::metadata()).is_err());
-        assert!(EpisodeTracker::new(1, 0, EvidencePolicy::metadata()).is_err());
+        assert!(EpisodeTracker::new(0, EvidencePolicy::metadata()).is_err());
         let origin = Instant::now();
         let mut tracker = tracker();
         tracker
@@ -11919,7 +11925,7 @@ mod tests {
                     &[RULE],
                 )
                 .unwrap();
-            let mut tracker = EpisodeTracker::new(1, 1, policy).unwrap();
+            let mut tracker = EpisodeTracker::new(1, policy).unwrap();
             let origin = Instant::now();
             let result = open(&mut tracker, &value, origin);
             let evidence = &result.transitions[0].evidence_json;
@@ -12161,15 +12167,8 @@ mod tests {
             assert_private_cause_stays_local(&fixture);
         }
         #[test]
-        fn runner_child_output_parser_and_detector_failures_keep_transport_and_typed_metadata() {
+        fn runner_detector_failures_keep_transport_and_typed_metadata() {
             for (point, operation, form, fired, diagnostic) in [
-                (
-                    "child_output",
-                    "parser",
-                    "form-output-failure",
-                    "ChildOutput/Parser",
-                    "parser_unavailable",
-                ),
                 (
                     "child_output",
                     "detector",
@@ -12220,7 +12219,7 @@ mod tests {
             let catalog =
                 crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
                     .unwrap();
-            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata(), 1..=256)
+            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata())
                 .map(|_| ())
         }
 
@@ -12267,13 +12266,9 @@ mod tests {
             let catalog =
                 crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
                     .unwrap();
-            let mut controller = ObservationController::new(
-                &fixture.run,
-                &catalog,
-                EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
+            let mut controller =
+                ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata())
+                    .unwrap();
             let mut writer = writer_fixture
                 .start(writer_fixture.artifacts.paths.outbox.clone())
                 .unwrap();
@@ -12424,13 +12419,9 @@ mod tests {
             fixture.conn.execute("UPDATE member_runs SET backend='opencode',native_version='2.1.4',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog = ProfileCatalog::bundled();
-            let mut controller = ObservationController::new(
-                &fixture.run,
-                catalog,
-                EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
+            let mut controller =
+                ObservationController::new(&fixture.run, catalog, EvidencePolicy::metadata())
+                    .unwrap();
             let mut writer = writer_fixture
                 .start(writer_fixture.artifacts.paths.outbox.clone())
                 .unwrap();
@@ -12540,7 +12531,7 @@ mod tests {
             policy: storage::evidence::EvidencePolicy,
         ) -> (ObservationController, TestChild, TerminalState) {
             let mut controller =
-                ObservationController::new(&fixture.fixture.run, catalog, policy, 1..=256).unwrap();
+                ObservationController::new(&fixture.fixture.run, catalog, policy).unwrap();
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
             running(fixture, &child.identity());
             let terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
@@ -12578,7 +12569,6 @@ mod tests {
                     &fixture.fixture.run,
                     &catalog(),
                     storage::evidence::EvidencePolicy::metadata(),
-                    1..=256,
                 )
                 .unwrap()
             }
@@ -12869,13 +12859,9 @@ mod tests {
                     configure_run(&mut fixture);
                     let hooks = Arc::new(Hooks::default());
                     let writer = start(&fixture, hooks.clone());
-                    let mut controller = ObservationController::new(
-                        &fixture.fixture.run,
-                        &catalog(),
-                        policy,
-                        1..=256,
-                    )
-                    .unwrap();
+                    let mut controller =
+                        ObservationController::new(&fixture.fixture.run, &catalog(), policy)
+                            .unwrap();
                     if let Some(hooks) = observation_hooks {
                         controller.set_observation_hooks(hooks).unwrap();
                     }
@@ -13166,22 +13152,10 @@ mod tests {
                 ObservationController::new(
                     &fixture.fixture.run,
                     &catalog,
-                    storage::evidence::EvidencePolicy::metadata(),
-                    1..=256
+                    storage::evidence::EvidencePolicy::metadata()
                 )
                 .is_ok()
             );
-            for range in [0..=255, 1..=255, 2..=257, 257..=512] {
-                assert!(
-                    ObservationController::new(
-                        &fixture.fixture.run,
-                        &catalog,
-                        storage::evidence::EvidencePolicy::metadata(),
-                        range
-                    )
-                    .is_err()
-                );
-            }
             for field in [
                 "epoch",
                 "reservation",
@@ -13205,8 +13179,7 @@ mod tests {
                     ObservationController::new(
                         &run,
                         &catalog,
-                        storage::evidence::EvidencePolicy::metadata(),
-                        1..=256
+                        storage::evidence::EvidencePolicy::metadata()
                     )
                     .is_err(),
                     "{field}"
@@ -13308,7 +13281,6 @@ mod tests {
                     &fixture.fixture.run,
                     &catalog(),
                     storage::evidence::EvidencePolicy::metadata(),
-                    1..=256,
                 )
                 .unwrap();
                 controller.observer_failed(reason, &Clock::new()).unwrap();
@@ -13330,7 +13302,6 @@ mod tests {
                 &fixture.fixture.run,
                 &catalog(),
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
             )
             .unwrap();
             let screen = TerminalState::new(TerminalSize { rows: 24, cols: 80 })

@@ -14,10 +14,7 @@ use std::time::Instant;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputDrain {
     Pending,
-    Quiescent {
-        human_generation: u64,
-        output_seq: u64,
-    },
+    Quiescent,
 }
 
 pub(super) struct DrainedInput {
@@ -57,26 +54,15 @@ pub(crate) trait Display {
 }
 pub(crate) trait ScreenObserver {
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()>;
-    fn input_health(&self) -> Option<ObservationHealth> {
-        None
-    }
-    fn failures_are_fatal(&self) -> bool {
-        false
-    }
-    fn parser_failure(&mut self) -> Result<()> {
-        Ok(())
-    }
+    fn input_health(&self) -> ObservationHealth;
+    fn parser_failure(&mut self) -> Result<()>;
 }
 #[derive(Default)]
 pub(crate) struct TransportProgress {
     pub(crate) child_eof: bool,
     pub(crate) outer_eof: bool,
-    pub(crate) child_bytes: usize,
     pub(crate) human_bytes: usize,
     pub(crate) forwarded_bytes: usize,
-    pub(crate) display_bytes: usize,
-    pub(crate) observation_error: Option<String>,
-    pub(crate) observation_failure: Option<ObservationFailure>,
 }
 pub(crate) struct TransportLimits {
     pub(crate) input_bytes: usize,
@@ -209,7 +195,6 @@ impl Transport {
             write_pending(&mut self.input, usize::MAX, |bytes| pty.try_write(bytes))?;
         if let Some(bytes) = self.read_child(pty)? {
             self.child_eof = bytes.is_empty();
-            progress.child_bytes = bytes.len();
             self.display.extend(bytes.iter().copied());
             let observation_complete_before = self.observation_complete;
             if !bytes.is_empty() {
@@ -221,30 +206,20 @@ impl Transport {
                 && let Err(cause) =
                     hooks.before(self.observation_phase, ObservationOperation::Parser)
             {
-                progress.observation_error = Some(cause.message().into_owned());
-                progress.observation_failure = Some(ObservationFailure::Parser);
+                observer.parser_failure()?;
+                return Err(cause);
             }
-            if progress.observation_failure.is_none() {
-                match self.terminal.feed_observed_classified(&bytes, observer) {
-                    Ok(()) => {}
-                    Err(TerminalObservationError::Parser(cause)) => {
-                        observer.parser_failure()?;
-                        return Err(cause);
-                    }
-                    Err(TerminalObservationError::Observer(cause)) => {
-                        if observer.failures_are_fatal() {
-                            return Err(cause);
-                        }
-                        progress.observation_error = Some(cause.message().into_owned());
-                        progress.observation_failure = Some(ObservationFailure::Sink);
-                    }
+            match self.terminal.feed_observed_classified(&bytes, observer) {
+                Ok(()) => {}
+                Err(TerminalObservationError::Parser(cause)) => {
+                    observer.parser_failure()?;
+                    return Err(cause);
                 }
+                Err(TerminalObservationError::Observer(cause)) => return Err(cause),
             }
-            if progress.observation_failure.is_none() {
-                self.observation_complete = observation_complete_before;
-            }
+            self.observation_complete = observation_complete_before;
         }
-        progress.display_bytes = self.flush_display(display)?;
+        self.flush_display(display)?;
         progress.outer_eof = self.outer_eof;
         progress.child_eof = self.child_eof;
         Ok(progress)
@@ -351,6 +326,13 @@ impl Transport {
     }
     pub(super) fn take_input_drain(&mut self) -> Option<DrainedInput> {
         self.input_drain.take()
+    }
+    /// The human generation and output sequence of the retained drain proof.
+    #[cfg(test)]
+    pub(super) fn drained(&self) -> Option<(u64, u64)> {
+        self.input_drain
+            .as_ref()
+            .map(|drain| (drain.human_generation, drain.output_seq))
     }
     pub(super) fn drain_blocker(&self) -> Option<&str> {
         self.drain_blocker.as_deref()
@@ -518,8 +500,8 @@ impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
         check_deadline(Instant::now(), self.deadline)
     }
 
-    fn failures_are_fatal(&self) -> bool {
-        true
+    fn input_health(&self) -> ObservationHealth {
+        self.inner.input_health()
     }
 
     fn parser_failure(&mut self) -> Result<()> {
@@ -631,9 +613,6 @@ impl Transport {
                 }
                 let health = observer.input_health();
                 check_deadline(Instant::now(), deadline)?;
-                let Some(health) = health else {
-                    return Ok(self.pending("observation health unavailable".into()));
-                };
                 if let Some(reason) = unsettled_health(&health) {
                     return Ok(self.pending(reason));
                 }
@@ -646,10 +625,7 @@ impl Transport {
                     output_seq,
                     health,
                 });
-                return Ok(InputDrain::Quiescent {
-                    human_generation: self.human_generation,
-                    output_seq,
-                });
+                return Ok(InputDrain::Quiescent);
             }
         }
         Ok(self.pending("terminal output still arriving".into()))
@@ -1038,39 +1014,30 @@ impl TerminalState {
         bytes: &[u8],
         observer: &mut impl ScreenObserver,
     ) -> std::result::Result<(), TerminalObservationError> {
-        let mut failure = None;
         let mut start = 0;
         for (index, byte) in bytes.iter().enumerate() {
             if byte.is_ascii_control() {
                 if index > start {
-                    self.step(&bytes[start..index], observer, &mut failure)?;
+                    self.step(&bytes[start..index], observer)?;
                 }
-                self.step(&[*byte], observer, &mut failure)?;
+                self.step(&[*byte], observer)?;
                 start = index + 1;
             }
         }
         if start < bytes.len() {
-            self.step(&bytes[start..], observer, &mut failure)?;
+            self.step(&bytes[start..], observer)?;
         }
-        match failure {
-            Some(cause) => Err(TerminalObservationError::Observer(cause)),
-            None => Ok(()),
-        }
+        Ok(())
     }
     fn step(
         &mut self,
         bytes: &[u8],
         observer: &mut impl ScreenObserver,
-        failure: &mut Option<CafleetError>,
     ) -> std::result::Result<(), TerminalObservationError> {
         self.feed(bytes).map_err(TerminalObservationError::Parser)?;
-        if let Err(cause) = observer.observe(&self.snapshot()) {
-            if observer.failures_are_fatal() {
-                return Err(TerminalObservationError::Observer(cause));
-            }
-            failure.get_or_insert(cause);
-        }
-        Ok(())
+        observer
+            .observe(&self.snapshot())
+            .map_err(TerminalObservationError::Observer)
     }
     pub(crate) fn resize(&mut self, size: TerminalSize) -> Result<()> {
         size.validate()?;
@@ -1520,21 +1487,17 @@ mod tests {
             self.inner.observe(screen)
         }
 
-        fn failures_are_fatal(&self) -> bool {
-            self.inner.failures_are_fatal()
-        }
-
         fn parser_failure(&mut self) -> Result<()> {
             self.inner.parser_failure()
         }
 
-        fn input_health(&self) -> Option<ObservationHealth> {
+        fn input_health(&self) -> ObservationHealth {
             self.trace.borrow_mut().push(Site::Health);
             self.facts
                 .health_reads
                 .set(self.facts.health_reads.get() + 1);
             let health = self.inner.input_health();
-            self.facts.last_health.replace(health.clone());
+            self.facts.last_health.replace(Some(health.clone()));
             health
         }
     }
@@ -1559,7 +1522,6 @@ mod tests {
                 &fixture.fixture.run,
                 ProfileCatalog::bundled(),
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
             )
             .unwrap();
             let hooks = Arc::new(Hooks::default());
@@ -1633,12 +1595,13 @@ mod tests {
                 &mut output,
                 self.until,
             );
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
             assert_eq!(
-                result.unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: drain_transport.human_generation(),
-                    output_seq: drain_transport.snapshot().screen_seq,
-                }
+                drain_transport.drained(),
+                Some((
+                    drain_transport.human_generation(),
+                    drain_transport.snapshot().screen_seq
+                ))
             );
             assert_eq!(human.calls.len(), 1);
             assert_eq!(pty.reader.calls.len(), 1);
@@ -1786,12 +1749,13 @@ mod tests {
                 &mut output,
                 h.until,
             );
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
             assert_eq!(
-                result.unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: u64::try_from(human_bytes.len()).unwrap(),
-                    output_seq: u64::try_from(child_bytes.len()).unwrap(),
-                }
+                drain_transport.drained(),
+                Some((
+                    u64::try_from(human_bytes.len()).unwrap(),
+                    u64::try_from(child_bytes.len()).unwrap()
+                ))
             );
             assert_eq!(pty.bytes, human_bytes);
             assert_eq!(output.bytes, child_bytes);
@@ -1893,7 +1857,7 @@ mod tests {
                         h.until
                     )
                     .unwrap(),
-                    InputDrain::Quiescent { .. }
+                    InputDrain::Quiescent
                 ));
             });
         }
@@ -1912,13 +1876,8 @@ mod tests {
                     h.until,
                 )
                 .unwrap();
-            assert!(matches!(
-                result,
-                InputDrain::Quiescent {
-                    human_generation: 7,
-                    ..
-                }
-            ));
+            assert_eq!(result, InputDrain::Quiescent);
+            assert_eq!(drain_transport.drained().map(|(human, _)| human), Some(7));
             assert_eq!(human.calls.len(), 8);
             assert_eq!(h.observations.health_reads.get(), 1);
         });
@@ -1942,13 +1901,11 @@ mod tests {
             assert!(io.pty.bytes.is_empty());
             assert!(io.pty.offered.len() <= 8);
             io.pty.write_error = None;
-            assert!(matches!(
+            assert_eq!(
                 h.drain_with(&mut drain_transport, &mut io).unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: 8,
-                    ..
-                }
-            ));
+                InputDrain::Quiescent
+            );
+            assert_eq!(drain_transport.drained().map(|(human, _)| human), Some(8));
             assert_eq!(io.pty.bytes, b"abcdefgh");
             assert_eq!(drain_transport.pending_input_bytes(), 0);
         });
@@ -1985,7 +1942,7 @@ mod tests {
                     h.until
                 )
                 .unwrap(),
-                InputDrain::Quiescent { .. }
+                InputDrain::Quiescent
             ));
             assert_eq!(output.bytes, b"abcdefgh");
         });
@@ -2032,45 +1989,10 @@ mod tests {
                     h.until
                 )
                 .unwrap(),
-                InputDrain::Quiescent { .. }
+                InputDrain::Quiescent
             ));
             assert_eq!(output.bytes, b"firstrest");
             assert_eq!(drain_transport.snapshot().screen_seq, 9);
-        });
-    }
-
-    struct LegacyObserver(usize);
-    impl ScreenObserver for LegacyObserver {
-        fn observe(&mut self, _: &ScreenSnapshot) -> Result<()> {
-            self.0 += 1;
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn drain_absent_health_keeps_manual_observation_progress_without_a_proof() {
-        with_harness(|h| {
-            let mut drain_transport = drain_transport(32, 32, 32);
-            let mut human = Reader::data(Site::Human, &h.trace, b"human", 5);
-            let mut pty = DrainPty::new(&h.trace);
-            pty.reader = Reader::data(Site::Child, &h.trace, b"output", 6);
-            let mut output = DrainOutput::new(&h.trace);
-            let mut observer = LegacyObserver(0);
-            assert!(observer.input_health().is_none());
-            let result = drain_transport.quiesce_for_input(
-                &mut human,
-                &mut pty,
-                &mut output,
-                &mut observer,
-                h.until,
-            );
-            assert_pending(result, &mut drain_transport);
-            assert_eq!(pty.bytes, b"human");
-            assert_eq!(output.bytes, b"output");
-            assert_eq!(drain_transport.human_generation(), 5);
-            assert!(observer.0 > 0);
-            h.seal(&mut drain_transport);
-            assert!(drain_transport.take_input_drain().is_some());
         });
     }
 
@@ -2382,7 +2304,6 @@ mod tests {
         records: Rc<RefCell<Vec<CallbackRecord>>>,
         fault: CallbackFault,
         deadline: Instant,
-        fatal: bool,
     }
 
     impl<O: ScreenObserver> ScreenObserver for ControlledObservation<O> {
@@ -2420,15 +2341,11 @@ mod tests {
             }
         }
 
-        fn failures_are_fatal(&self) -> bool {
-            self.fatal
-        }
-
         fn parser_failure(&mut self) -> Result<()> {
             self.inner.parser_failure()
         }
 
-        fn input_health(&self) -> Option<ObservationHealth> {
+        fn input_health(&self) -> ObservationHealth {
             self.inner.input_health()
         }
     }
@@ -2477,8 +2394,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(progress.human_bytes, 7);
-        assert_eq!(progress.child_bytes, 6);
-        assert_eq!(progress.display_bytes, 6);
         assert_eq!(drain_transport.human_generation(), generation + 7);
         assert_eq!(pty.bytes, b"typedmanual\r");
         let mut displayed = child_bytes.to_vec();
@@ -2581,7 +2496,6 @@ mod tests {
                 records: records.clone(),
                 fault,
                 deadline: until,
-                fatal: true,
             },
             until,
         )
@@ -2608,13 +2522,8 @@ mod tests {
                 until,
                 &records,
             );
-            assert_eq!(
-                result.unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: 5,
-                    output_seq: 17
-                }
-            );
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
+            assert_eq!(drain_transport.drained(), Some((5, 17)));
             assert_eq!(io.output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(drain_transport.pending_display_bytes(), 0);
             assert_eq!(drain_transport.snapshot().screen.contents(), "TAIL\nsuffix");
@@ -2739,7 +2648,8 @@ mod tests {
         incomplete_callback_case(CallbackFault::ExpireAndFail);
     }
 
-    fn incomplete_tick_case(fatal: bool) {
+    #[test]
+    fn drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
         with_harness(|h| {
             h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
@@ -2761,7 +2671,6 @@ mod tests {
                     records: records.clone(),
                     fault: CallbackFault::Fail,
                     deadline: h.until,
-                    fatal,
                 },
             );
             assert_eq!(drain_transport.human_generation(), 5);
@@ -2770,45 +2679,24 @@ mod tests {
             assert_eq!(pty.reader.calls.len(), 1);
             assert_eq!(pty.reader.calls[0].count, Some(17));
             assert!(drain_transport.take_input_drain().is_none());
-            let prefix = if fatal {
-                let source = match result {
-                    Err(source) => source,
-                    Ok(_) => panic!("fatal ordered observation returns its actual error"),
-                };
-                assert_eq!(
-                    format!("{source:?}"),
-                    "App(\"fixture observation stopped\")"
-                );
-                assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
-                assert_eq!(records.borrow().len(), 2);
-                assert_eq!(drain_transport.snapshot().screen.contents(), "head");
-                assert!(output.bytes.is_empty() && output.offered.is_empty());
-                assert_eq!(
-                    drain_transport.pending_display_bytes(),
-                    17,
-                    "a completed child read remains queued after fatal observation"
-                );
-                5
-            } else {
-                let progress = result.unwrap();
-                assert_eq!(progress.human_bytes, 5);
-                assert_eq!(progress.child_bytes, 17);
-                assert_eq!(progress.display_bytes, 17);
-                assert_eq!(
-                    progress.observation_error.as_deref(),
-                    Some("fixture observation stopped")
-                );
-                assert!(matches!(
-                    progress.observation_failure,
-                    Some(ObservationFailure::Sink)
-                ));
-                assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
-                assert_eq!(records.borrow().len(), 6);
-                assert_eq!(drain_transport.snapshot().screen.contents(), "TAIL\nsuffix");
-                assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
-                assert_eq!(drain_transport.pending_display_bytes(), 0);
-                17
+            let source = match result {
+                Err(source) => source,
+                Ok(_) => panic!("ordered observation returns its actual error"),
             };
+            assert_eq!(
+                format!("{source:?}"),
+                "App(\"fixture observation stopped\")"
+            );
+            assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
+            assert_eq!(records.borrow().len(), 2);
+            assert_eq!(drain_transport.snapshot().screen.contents(), "head");
+            assert!(output.bytes.is_empty() && output.offered.is_empty());
+            assert_eq!(
+                drain_transport.pending_display_bytes(),
+                17,
+                "a completed child read remains queued after a failed observation"
+            );
+            let prefix = 5;
             assert_eq!(drain_transport.snapshot().screen_seq, prefix);
             assert_incomplete_observation_stays_fenced(
                 h,
@@ -2816,68 +2704,6 @@ mod tests {
                 (&mut human, &mut pty, &mut output),
                 CONTROL_SEPARATED_CHILD,
                 prefix,
-            );
-        });
-    }
-
-    #[test]
-    fn drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
-        incomplete_tick_case(true);
-    }
-
-    #[test]
-    fn drain_incomplete_ordinary_nonfatal_observer_error_retains_reporting_and_fence() {
-        incomplete_tick_case(false);
-    }
-
-    struct OneParserFailure(std::sync::atomic::AtomicBool);
-
-    impl ObservationHooks for OneParserFailure {
-        fn before(&self, _: ObservationPhase, operation: ObservationOperation) -> Result<()> {
-            if matches!(operation, ObservationOperation::Parser)
-                && self.0.swap(false, std::sync::atomic::Ordering::AcqRel)
-            {
-                Err(CafleetError::App("fixture parser boundary stopped".into()))
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    #[test]
-    fn drain_incomplete_ordinary_parser_fault_cannot_be_cleared_by_later_success() {
-        with_harness(|h| {
-            h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
-            drain_transport
-                .set_observation_hooks(Arc::new(OneParserFailure(
-                    std::sync::atomic::AtomicBool::new(true),
-                )))
-                .unwrap();
-            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
-            io.pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
-            let progress = h.tick_with(&mut drain_transport, &mut io).unwrap();
-            assert_eq!(progress.human_bytes, 5);
-            assert_eq!(progress.child_bytes, 17);
-            assert_eq!(progress.display_bytes, 17);
-            assert_eq!(
-                progress.observation_error.as_deref(),
-                Some("fixture parser boundary stopped")
-            );
-            assert!(matches!(
-                progress.observation_failure,
-                Some(ObservationFailure::Parser)
-            ));
-            assert_eq!(drain_transport.snapshot().screen_seq, 0);
-            assert_eq!(drain_transport.snapshot().screen.contents(), "");
-            assert_eq!(io.output.bytes, CONTROL_SEPARATED_CHILD);
-            assert_eq!(drain_transport.human_generation(), 5);
-            assert_incomplete_observation_stays_fenced(
-                h,
-                &mut drain_transport,
-                (&mut io.human, &mut io.pty, &mut io.output),
-                CONTROL_SEPARATED_CHILD,
-                0,
             );
         });
     }
@@ -2928,13 +2754,8 @@ mod tests {
                     }
                     assert_healthy(h);
                     let result = h.drain_with(&mut drain_transport, &mut io);
-                    assert_eq!(
-                        result.unwrap(),
-                        InputDrain::Quiescent {
-                            human_generation: 5,
-                            output_seq: 17
-                        }
-                    );
+                    assert_eq!(result.unwrap(), InputDrain::Quiescent);
+                    assert_eq!(drain_transport.drained(), Some((5, 17)));
                     assert_eq!(drain_transport.pending_display_bytes(), 0);
                     assert_eq!(
                         io.output.bytes,
@@ -2963,13 +2784,8 @@ mod tests {
             assert_eq!(drain_transport.snapshot().screen_seq, 0);
             assert!(h.observations.screens.borrow().is_empty());
             let result = h.drain_with(&mut drain_transport, &mut io);
-            assert_eq!(
-                result.unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: 5,
-                    output_seq: 17
-                }
-            );
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
+            assert_eq!(drain_transport.drained(), Some((5, 17)));
             assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
             assert_eq!(io.output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(drain_transport.pending_display_bytes(), 0);
@@ -2985,7 +2801,7 @@ mod tests {
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
             let progress = h.tick_with(&mut drain_transport, &mut io).unwrap();
             assert_eq!(progress.human_bytes, 5);
-            assert_eq!(progress.child_bytes, 0);
+            assert_eq!(drain_transport.pending_display_bytes(), 0);
             h.reset_observations();
             io.pty
                 .reader
@@ -3019,12 +2835,10 @@ mod tests {
             let mut drain_transport = drain_transport(64, 64, 64);
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, reply, 64));
             let result = h.drain_with(&mut drain_transport, &mut io);
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
             assert_eq!(
-                result.unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: 0,
-                    output_seq: drain_transport.snapshot().screen_seq,
-                }
+                drain_transport.drained(),
+                Some((0, drain_transport.snapshot().screen_seq))
             );
             assert_eq!(io.pty.bytes, reply, "the reply is forwarded unchanged");
             assert!(drain_transport.take_input_drain().is_some());
@@ -3053,12 +2867,10 @@ mod tests {
             assert_eq!(drain_transport.human_generation(), 0);
             io.human.steps.push_back(Read::Data(b"80R".to_vec()));
             let result = h.drain_with(&mut drain_transport, &mut io);
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
             assert_eq!(
-                result.unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: 0,
-                    output_seq: drain_transport.snapshot().screen_seq,
-                }
+                drain_transport.drained(),
+                Some((0, drain_transport.snapshot().screen_seq))
             );
             assert_eq!(drain_transport.drain_blocker(), None);
             assert_eq!(io.pty.bytes, b"\x1b[24;80R");
@@ -3119,12 +2931,10 @@ mod tests {
             assert_eq!(drain_transport.human_generation(), 0);
             drain_transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
             let result = h.drain_with(&mut drain_transport, &mut io);
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
             assert_eq!(
-                result.unwrap(),
-                InputDrain::Quiescent {
-                    human_generation: 1,
-                    output_seq: drain_transport.snapshot().screen_seq,
-                }
+                drain_transport.drained(),
+                Some((1, drain_transport.snapshot().screen_seq))
             );
             assert_eq!(io.pty.bytes, b"\x1b");
             let proof = drain_transport
@@ -4024,28 +3834,6 @@ mod tests {
     }
 
     #[test]
-    fn runner_transport_observation_queue_failure_reports_degradation_and_preserves_manual_io() {
-        let mut transport = transport();
-        let mut pty = FakePty::new(b"native output", 4);
-        let mut human = FakeInput::new(b"yes\r", 1);
-        let mut display = FakeDisplay::default();
-        let mut observer = Observer {
-            fail: true,
-            ..Default::default()
-        };
-        let mut reported = false;
-        for _ in 0..64 {
-            let progress = transport
-                .tick(&mut human, &mut pty, &mut display, &mut observer)
-                .unwrap();
-            reported |= progress.observation_error.is_some();
-        }
-        assert!(reported);
-        assert_eq!(pty.written, b"yes\r");
-        assert_eq!(display.bytes, b"native output");
-    }
-
-    #[test]
     fn runner_transport_forwards_one_outer_terminal_query_answer_without_parser_duplicates() {
         let mut transport = transport();
         let mut pty = FakePty::new(b"\x1b[6n", 1);
@@ -4245,6 +4033,12 @@ pub(crate) mod test_support {
     }
 
     impl ScreenObserver for Observer {
+        fn input_health(&self) -> crate::runtime::observation::ObservationHealth {
+            unreachable!("the transport fixture observer is never asked to quiesce input")
+        }
+        fn parser_failure(&mut self) -> std::result::Result<(), CafleetError> {
+            Ok(())
+        }
         fn observe(&mut self, screen: &ScreenSnapshot) -> std::result::Result<(), CafleetError> {
             if let Some(ordering) = &self.ordering {
                 ordering.borrow_mut().push("observe");

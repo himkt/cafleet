@@ -121,7 +121,7 @@ pub(super) fn private_metadata(
     )?;
     Ok(meta)
 }
-pub(crate) fn validate_private_file(path: &Path, expected_uid: u32, mode: u32) -> Result<()> {
+fn validate_private_file(path: &Path, expected_uid: u32, mode: u32) -> Result<()> {
     private_metadata(path, expected_uid, mode, false).map(|_| ())
 }
 fn present(path: &Path) -> Result<bool> {
@@ -335,7 +335,6 @@ impl Drop for RunArtifacts {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LaunchDescriptor {
-    pub(crate) schema_version: u32,
     pub(crate) identity: ControlIdentity,
     pub(crate) spawn: SpawnSpec,
 }
@@ -343,19 +342,12 @@ impl LaunchDescriptor {
     pub(crate) fn new(run: &RunRecord, spawn: SpawnSpec) -> Result<Self> {
         spawn.validate()?;
         Ok(Self {
-            schema_version: 1,
             identity: ControlIdentity::from_run(run),
             spawn,
         })
     }
     pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
-        let descriptor: Self =
-            serde_json::from_slice(bytes).map_err(|_| error("malformed launch descriptor"))?;
-        ensure(
-            descriptor.schema_version == 1,
-            "unsupported launch descriptor schema",
-        )?;
-        Ok(descriptor)
+        serde_json::from_slice(bytes).map_err(|_| error("malformed launch descriptor"))
     }
 }
 pub(crate) const DESCRIPTOR_LIMIT: u64 = 1024 * 1024;
@@ -1498,17 +1490,13 @@ mod tests {
 
         #[test]
         fn recovery_descriptor_pin_refuses_an_invalid_descriptor_privately() {
-            for damage in ["size", "json", "schema", "member", "permissions", "symlink"] {
+            for damage in ["size", "json", "member", "permissions", "symlink"] {
                 let mut case = described_creator();
                 let path = case.artifacts.paths.descriptor.clone();
                 let mut value: Value = serde_json::from_slice(&owned_bytes(&case)).unwrap();
                 match damage {
                     "size" => overwrite(&path, &vec![b' '; 1024 * 1024 + 1]),
                     "json" => overwrite(&path, b"{"),
-                    "schema" => {
-                        value["schema_version"] = json!(2);
-                        overwrite(&path, &serde_json::to_vec(&value).unwrap());
-                    }
                     "member" => {
                         value["member_id"] = json!(case.fixture.run.member_id + 1);
                         overwrite(&path, &serde_json::to_vec(&value).unwrap());

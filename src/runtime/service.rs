@@ -369,21 +369,20 @@ struct LiveShutdown<'a> {
     observation_clock: &'a dyn ObservationClock,
     coordinator: Option<&'a mut InputCoordinator>,
 }
-fn record_observation_failure(
-    controller: &mut ObservationController,
-    progress: &TransportProgress,
-    clock: &dyn ObservationClock,
-) -> Result<()> {
-    ensure(
-        progress.observation_error.is_some() == progress.observation_failure.is_some(),
-        "transport observation failure requires typed provenance",
-    )?;
-    if let Some(failure) = progress.observation_failure {
-        controller.observer_failed(failure, clock)?;
-    }
-    Ok(())
-}
 impl LiveShutdown<'_> {
+    fn poll_shutdown(&mut self) -> Result<ObservationStatus> {
+        let snapshot = self.transport.snapshot();
+        #[cfg(test)]
+        return self.controller.poll_for(
+            &snapshot,
+            self.writer,
+            self.observation_clock,
+            ObservationPhase::ShutdownDrain,
+        );
+        #[cfg(not(test))]
+        self.controller
+            .poll(&snapshot, self.writer, self.observation_clock)
+    }
     #[cfg(test)]
     fn await_native_exit_before_parsing(&mut self, deadline: Instant) -> Result<()> {
         if !self
@@ -440,28 +439,23 @@ impl ShutdownHost for LiveShutdown<'_> {
 
         while Instant::now() < deadline {
             let mut tick = |transport: &mut Transport| {
-                transport.tick(
-                    self.input,
-                    self.pty,
-                    self.output,
-                    &mut self.controller.observer_for(
-                        self.writer,
-                        self.observation_clock,
-                        ObservationPhase::ShutdownDrain,
-                    ),
-                )
+                #[cfg(test)]
+                let mut observer = self.controller.observer_for(
+                    self.writer,
+                    self.observation_clock,
+                    ObservationPhase::ShutdownDrain,
+                );
+                #[cfg(not(test))]
+                let mut observer = self
+                    .controller
+                    .observer(self.writer, self.observation_clock);
+                transport.tick(self.input, self.pty, self.output, &mut observer)
             };
             let progress = match self.coordinator.as_mut() {
                 Some(coordinator) => coordinator.progress_with_manual(self.transport, tick)?,
                 None => tick(self.transport)?,
             };
-            record_observation_failure(self.controller, &progress, self.observation_clock)?;
-            self.controller.poll_for(
-                &self.transport.snapshot(),
-                self.writer,
-                self.observation_clock,
-                ObservationPhase::ShutdownDrain,
-            )?;
+            self.poll_shutdown()?;
             self.send_exit()?;
             if !self.pty.survivors()? && progress.child_eof {
                 break;
@@ -510,12 +504,7 @@ impl ShutdownHost for LiveShutdown<'_> {
             return Err(crate::error::CafleetError::DeadlineExceeded);
         }
         while self.controller.has_pending() && Instant::now() < deadline {
-            self.controller.poll_for(
-                &self.transport.snapshot(),
-                self.writer,
-                self.observation_clock,
-                ObservationPhase::ShutdownDrain,
-            )?;
+            self.poll_shutdown()?;
             nap_until(deadline);
         }
         let (pending, gap) = self.writer.finish(deadline);
@@ -655,7 +644,7 @@ pub(crate) fn run_service(
     )
     .map_err(io_error)?;
     listener.set_nonblocking(true).map_err(io_error)?;
-    let range = with_database_deadline(&mut conn, handshake_deadline, |conn| {
+    with_database_deadline(&mut conn, handshake_deadline, |conn| {
         storage::reserve_event_sequences(conn, &owner)
     })?;
     run = storage::get_run(&conn, owner.run_id)?;
@@ -671,8 +660,7 @@ pub(crate) fn run_service(
         }
         _ => return Err(error("invalid launch evidence policy")),
     };
-    let mut controller =
-        ObservationController::new(&run, services.catalog, evidence_policy, range)?;
+    let mut controller = ObservationController::new(&run, services.catalog, evidence_policy)?;
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -1214,10 +1202,15 @@ impl RunnerLoop<'_> {
             native
                 .transport
                 .resize(native.pty, terminal_size(self.terminal)?)?;
-            native
-                .controller
-                .observer_for(native.writer, native.clock, ObservationPhase::Resize)
-                .observe(&native.transport.snapshot())?;
+            #[cfg(test)]
+            let mut observer = native.controller.observer_for(
+                native.writer,
+                native.clock,
+                ObservationPhase::Resize,
+            );
+            #[cfg(not(test))]
+            let mut observer = native.controller.observer(native.writer, native.clock);
+            observer.observe(&native.transport.snapshot())?;
         }
         let coordinator = self
             .coordinator
@@ -1231,7 +1224,6 @@ impl RunnerLoop<'_> {
                 &mut native.controller.observer(native.writer, native.clock),
             )
         })?;
-        record_observation_failure(native.controller, &progress, native.clock)?;
         native
             .controller
             .poll(&native.transport.snapshot(), native.writer, native.clock)?;
@@ -1285,7 +1277,7 @@ impl RunnerLoop<'_> {
         let result = match self.native.quiesce(coordinator, deadline) {
             Err(failure) => Err(CafleetError::from(failure)),
             Ok(InputDrain::Pending) => Ok(None),
-            Ok(InputDrain::Quiescent { .. }) => {
+            Ok(InputDrain::Quiescent) => {
                 if self.terminate.load(Ordering::Acquire) {
                     return Ok(Some(self.shutdown_clock()));
                 }
@@ -1333,7 +1325,7 @@ impl RunnerLoop<'_> {
             return Ok(());
         }
         let deadline = Instant::now() + Duration::from_secs(5);
-        if let Ok(InputDrain::Quiescent { .. }) = self.native.quiesce(coordinator, deadline)
+        if let Ok(InputDrain::Quiescent) = self.native.quiesce(coordinator, deadline)
             && !self.terminate.load(Ordering::Acquire)
             && !self.resize.load(Ordering::Acquire)
             && let Err(failure) = self.advance(deadline)
@@ -3992,145 +3984,6 @@ mod tests {
             assert_eq!(count(&fixture, "runner_exited"), 1);
             assert_private_cause_stays_local(&fixture);
         }
-
-        #[test]
-        fn shutdown_parser_loss_after_terminal_fence_remains_unsaved_without_live_append() {
-            let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
-                configure(fixture, spec, "shutdown_drain", "parser");
-                let config_path = fixture._dir.path().join("observation-services.json");
-                let mut config: Value =
-                    serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
-                config["buffered_tail"] = json!({"database_url":format!("sqlite:///{}",fixture.conn.path().unwrap()),"run_id":fixture.run.run_id});
-                std::fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
-                spec.environment.push((
-                    "CAFLEET_REVIEW_BUFFERED_TAIL_WRITTEN".into(),
-                    fixture
-                        ._dir
-                        .path()
-                        .join("buffered-tail-written")
-                        .to_str()
-                        .unwrap()
-                        .into(),
-                ));
-                install_trap(
-                    spec,
-                    "umask 077; if printf \"review-after-terminal-tail\\n\"; then /usr/bin/touch \"$CAFLEET_REVIEW_BUFFERED_TAIL_WRITTEN\" || exit 9; else exit 8; fi; exit 0",
-                );
-            });
-            fixture.start_running();
-            arm(&fixture);
-            let mut wire = fixture.connect("post-terminal observation loss");
-            wire.0
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let request = fixture.request("shutdown", fixture.prepared.as_ref().unwrap());
-            let begin = Instant::now();
-            let reply = wire.exchange(&request).unwrap_or_else(|cause| {
-                panic!(
-                    "bounded shutdown reply failed: {cause}; {}; buffered markers={:?}",
-                    fixture.connection_diagnostic("buffered tail shutdown"),
-                    std::fs::read_dir(fixture.fixture._dir.path())
-                        .unwrap()
-                        .map(|entry| entry.unwrap().file_name())
-                        .collect::<Vec<_>>()
-                )
-            });
-            assert!(begin.elapsed() < Duration::from_secs(5));
-            assert!(reply.get("error").is_none(), "{reply}");
-            let outcome: ShutdownOutcome = serde_json::from_value(reply["result"].clone()).unwrap();
-            let written = fixture
-                .fixture
-                ._dir
-                .path()
-                .join("buffered-tail-written")
-                .exists();
-            let fired = fixture
-                .fixture
-                ._dir
-                .path()
-                .join("observation-fault-fired")
-                .exists();
-            let stages: Vec<_> = [
-                "buffered-tail-order-selected.json",
-                "buffered-tail-native-terminated",
-                "buffered-tail-parser-entered",
-                "buffered-tail-post-fence-parser",
-            ]
-            .into_iter()
-            .map(|file| (file, fixture.fixture._dir.path().join(file).exists()))
-            .collect();
-            let gate_error = std::fs::read_to_string(
-                fixture.fixture._dir.path().join("buffered-tail-gate-error"),
-            );
-            let native_at_parser = std::fs::read_to_string(
-                fixture
-                    .fixture
-                    ._dir
-                    .path()
-                    .join("buffered-tail-parser-native.json"),
-            );
-            let final_kinds = crate::runtime::service::test_support::observation_services::kinds(
-                &fixture.fixture.conn,
-                fixture.fixture.run.run_id,
-            );
-            let final_run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert!(
-                written && fired,
-                "post-terminal tail: written={written}, fired={fired}, stages={stages:?}, gate_error={gate_error:?}, native_at_parser={native_at_parser:?}, final_kinds={final_kinds:?}, final_run_status={:?}, outcome={outcome:?}; {}",
-                final_run.status,
-                fixture.connection_diagnostic("post-terminal tail write and parser hook")
-            );
-            assert_fired(&fixture, "ShutdownDrain/Parser");
-            let selected: Value = serde_json::from_slice(
-                &std::fs::read(
-                    fixture
-                        .fixture
-                        ._dir
-                        .path()
-                        .join("buffered-tail-order-selected.json"),
-                )
-                .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(selected["run_id"], fixture.fixture.run.run_id);
-            let remaining_ns = selected["remaining_ns"].as_u64().unwrap();
-            assert!(
-                remaining_ns > 0 && remaining_ns <= 2_000_000_000,
-                "actual original child budget: {selected}"
-            );
-            assert!(
-                fixture
-                    .fixture
-                    ._dir
-                    .path()
-                    .join("buffered-tail-native-terminated")
-                    .exists()
-            );
-            assert!(
-                fixture
-                    .fixture
-                    ._dir
-                    .path()
-                    .join("buffered-tail-post-fence-parser")
-                    .exists()
-            );
-            assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
-            assert_eq!(outcome.pending_event_frames, 0);
-            assert!(outcome.unsaved_observation_gap > 0);
-            assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
-            let _exit = fixture.wait();
-            let kinds = crate::runtime::service::test_support::observation_services::kinds(
-                &fixture.fixture.conn,
-                fixture.fixture.run.run_id,
-            );
-            assert_eq!(kinds, ["runner_exited"]);
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert_eq!(run.status, RunStatus::Exited);
-            assert_eq!(run.exit_code, Some(0));
-            assert_eq!(run.cleanup_state, CleanupState::Incomplete);
-            assert_private_cause_stays_local(&fixture);
-        }
     }
     mod pacing_tests {
         use crate::runtime::service::*;
@@ -4165,25 +4018,21 @@ mod tests {
         #[test]
         fn pacing_keeps_the_idle_sleep_without_outer_input() {
             let now = Instant::now();
-            let mut child_only = progress(0, 0);
-            child_only.child_bytes = 512;
-            child_only.display_bytes = 512;
-            for idle in [progress(0, 0), child_only] {
-                assert_eq!(tick_sleep(&idle, None, now), Duration::from_millis(2));
-                assert_eq!(
-                    tick_sleep(&idle, Some(now + Duration::from_secs(1)), now),
-                    Duration::from_millis(2)
-                );
-                assert_eq!(
-                    tick_sleep(&idle, Some(now + Duration::from_micros(500)), now),
-                    Duration::from_micros(500),
-                    "an earlier observation deadline still shortens the idle sleep"
-                );
-                assert_eq!(
-                    tick_sleep(&idle, Some(now - Duration::from_millis(1)), now),
-                    Duration::ZERO
-                );
-            }
+            let idle = progress(0, 0);
+            assert_eq!(tick_sleep(&idle, None, now), Duration::from_millis(2));
+            assert_eq!(
+                tick_sleep(&idle, Some(now + Duration::from_secs(1)), now),
+                Duration::from_millis(2)
+            );
+            assert_eq!(
+                tick_sleep(&idle, Some(now + Duration::from_micros(500)), now),
+                Duration::from_micros(500),
+                "an earlier observation deadline still shortens the idle sleep"
+            );
+            assert_eq!(
+                tick_sleep(&idle, Some(now - Duration::from_millis(1)), now),
+                Duration::ZERO
+            );
         }
     }
     mod input_admission_tests {

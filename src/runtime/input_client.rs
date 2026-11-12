@@ -1959,10 +1959,20 @@ mod tests {
     use crate::runtime::service::test_support::input_service::wait_input_service_record;
     use crate::runtime::service::test_support::input_service::with_input_service;
     use crate::runtime::test_support::Fixture;
-    use crate::runtime::test_support::mark_exited;
     use std::io::Write;
     use std::net::Shutdown;
     use std::time::Duration;
+
+    fn mark_exited(conn: &rusqlite::Connection, run_id: i64) {
+        assert_eq!(
+            conn.execute(
+                "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z' WHERE run_id=?1",
+                [run_id],
+            )
+            .unwrap(),
+            1
+        );
+    }
 
     pub(crate) enum Termination {
         Terminated,

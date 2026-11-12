@@ -986,7 +986,7 @@ impl InputCoordinator {
             Some(reason.clone())
         } else if let Some(code) = &status.diagnostic {
             Some(format!("observation degraded: {code}"))
-        } else if status.retained_transition || status.retained_draft || status.retained_evidence {
+        } else if status.retained_draft || status.retained_evidence {
             Some("observation update pending".into())
         } else if status.visibility != Visibility::Visible {
             Some("permission request is not visible".into())
@@ -1888,7 +1888,6 @@ impl InputCoordinator {
         let status = observation.status();
         status.eligibility == InputEligibility::ComposerEmpty
             && status.visibility == Visibility::NotVisible
-            && !status.retained_transition
             && !status.retained_draft
             && !status.retained_evidence
             && status.diagnostic.is_none()
@@ -4061,10 +4060,7 @@ mod tests {
                             self.until,
                         )
                         .unwrap(),
-                    InputDrain::Quiescent {
-                        human_generation: 0,
-                        output_seq: 0,
-                    }
+                    InputDrain::Quiescent
                 );
             }
         }
@@ -7679,7 +7675,7 @@ mod tests {
                     }
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                     let mut controller =
-                        ObservationController::new(&fixture.run, catalog, policy, 1..=256).unwrap();
+                        ObservationController::new(&fixture.run, catalog, policy).unwrap();
                     let mut writer = writer_fixture
                         .start(writer_fixture.artifacts.paths.outbox.clone())
                         .unwrap();
@@ -7962,7 +7958,7 @@ mod tests {
                                 )
                             })
                             .unwrap();
-                        if matches!(result, InputDrain::Quiescent { .. }) {
+                        if matches!(result, InputDrain::Quiescent) {
                             return;
                         }
                         std::thread::sleep(Duration::from_millis(1));
@@ -9098,7 +9094,7 @@ mod tests {
                     "the redraw produced new output"
                 );
                 assert!(
-                    matches!(drained, InputDrain::Quiescent { .. }),
+                    matches!(drained, InputDrain::Quiescent),
                     "a screen_seq-only redraw needs no write, so it settles while the database is locked"
                 );
                 assert!(h.controller.current_request().is_some());
