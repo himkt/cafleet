@@ -54,7 +54,7 @@ Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/
 
 ### Member list output
 
-Roster records contain `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack`, `idle`. Fleet-reference matches have kind `director`; others `member`. Missing activity/placement may be null and pane placement pending.
+Roster records contain `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack`, `idle`. Fleet-reference matches have kind `director`; others `member`. Missing activity may be null and pane placement pending.
 
 ## JSON output
 
@@ -127,8 +127,6 @@ Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` 
 
 Receipt retirement failure reports `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining `notification_sent=true`. Pre-commit storage failure exits 1. Consume each committed ID once.
 
-For an ordinary recipient without a recorded run, `CAUSE` is `member MEMBER_ID has no recorded run`. The committed message stays pending, failed delivery has null method, stdout retains its successful record and exit 0, and later wait attempts report the same cause.
-
 ### `message poll`
 
 `cafleet message poll MEMBER_ID [--json]` returns incoming `input_required` records descending by status timestamp/message ID. Unknown/inactive member: `Member ID not found`, exit 1.
@@ -189,7 +187,7 @@ Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C
 
 Validate identity, ownership, reachability, storage and receipt history first; failure or uncertain prior input sends no fallback bytes. Unknown detection alone permits fallback.
 
-An open/candidate interaction (`permission_request`, `question`, `trust`, `update`, `unknown_interaction`, including obscured) or earlier queued input defers with zero bytes, including Escape. A verified empty composer with a measured plan receives literal input, 500 ms settle and the measured submit key without Escape. Terminal replies leave submission valid; human input stops it with `uncertain_cause=manual_input`.
+An open/candidate interaction (`permission_request`, `question`, `unknown_interaction`, including obscured) or earlier queued input defers with zero bytes, including Escape. A verified empty composer with a measured plan receives literal input, 500 ms settle and the measured submit key without Escape. Terminal replies leave submission valid; human input stops it with `uncertain_cause=manual_input`.
 
 A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`. Interaction/earlier-input time is excluded. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
 
@@ -213,7 +211,7 @@ Prompt/exec carry no clause, so inspect open prompts first. Repeated previews ar
 
 ## Member commands
 
-Pane operations require active placement; opaque pane IDs may be pending. Prompt/exec fail before pane I/O for an ordinary member without a recorded run (§ Error messages); individual deletion protects the Director.
+Pane operations require active placement; opaque pane IDs may be pending. Individual deletion protects the Director.
 
 ### `member create`
 
@@ -223,7 +221,7 @@ Registers and spawns, resolving the acting Director from the fleet. Omitted back
 
 Evidence defaults to `metadata`; `redacted` requires an absolute readable UTF-8 redaction file. Invalid policy/configuration combinations exit 2 before registration.
 
-Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet-ask); hermes: smart, manual (default smart); pi: cafleet, cafleet-ask (default cafleet-ask)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2. Mode classes (documentation only; argv and run records are unchanged): `auto` (native automatic review or a fixed allow/deny policy) is claude `auto`, `dontAsk`, `bypassPermissions`; codex `approve-for-me`, `never`; opencode `cafleet`; hermes `smart`; pi `cafleet`. `manual` (native interactive approval) is claude `default`, `manual`, `acceptEdits`, `plan`; codex `on-request`; opencode `cafleet-ask`; hermes `manual`; pi `cafleet-ask`. pi choices emit `--cafleet-gate MODE` and select the CAFleet member gate's mode. Hermes choices emit no permission argv (`permission_argv_json` `[]`) and are recorded only; the operator configuration's `approvals.mode` governs the session.
+Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet-ask); hermes: smart (default smart); pi: cafleet, cafleet-ask (default cafleet-ask)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2. Mode classes (documentation only; argv and run records are unchanged): `auto` (native automatic review or a fixed allow/deny policy) is claude `auto`, `dontAsk`, `bypassPermissions`; codex `approve-for-me`, `never`; opencode `cafleet`; hermes `smart`; pi `cafleet`. `manual` (native interactive approval) is claude `default`, `manual`, `acceptEdits`, `plan`; codex `on-request`; opencode `cafleet-ask`; pi `cafleet-ask`. pi choices emit `--cafleet-gate MODE` and select the CAFleet member gate's mode. The Hermes choice emits no permission argv (`permission_argv_json` `[]`) and is recorded only; the operator configuration's `approvals.mode` governs the session.
 
 Effort validation precedes side effects. An unlisted level exits 2 with `Error: --effort for the BACKEND backend must be one of LEVELS (got '<value>').`, LEVELS exactly as listed; any `--effort` for opencode exits 2 with `Error: opencode does not support reasoning effort.`
 
@@ -261,7 +259,7 @@ Failure compensation shuts down owned runner/child, closes pane, removes descrip
 
 ### `member delete`
 
-`cafleet member delete MEMBER_ID [--json]` shuts down a recorded runner (none when run-less), closes the locked pane and deregisters. Post-close database errors retain the cause and closed-pane evidence; layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages.
+`cafleet member delete MEMBER_ID [--json]` shuts down the member's runner, closes the locked pane and deregisters. Post-close database errors retain the cause and closed-pane evidence; layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages.
 
 Before runner shutdown, a `hermes` run's session work is stopped through native pane input (`Ctrl+C` when busy, then `/stop` and `/exit`) and its registered background processes are verified as stopped, within a 20-second settlement budget per Hermes member (also in `fleet delete`) that extends the 5-second deletion deadline.
 
@@ -273,7 +271,7 @@ Before runner shutdown, a `hermes` run's session work is stopped through native 
 
 ### `member list`
 
-`cafleet member list FLEET_ID [--json]` lists active Director, ordinary and placementless records (§ Member list output).
+`cafleet member list FLEET_ID [--json]` lists active Director and ordinary records (§ Member list output).
 
 ### `member show`
 
@@ -326,7 +324,6 @@ Operational failures exit 1 with empty stdout, including under `--json`. The pri
 | Root Director target, before I/O | `cannot press keys in the Director's own pane` |
 | Input lock remains busy | `member ID's pane input remained busy` |
 | Revalidated target changes | `member ID placement changed before key dispatch` |
-| Selected adapter differs from placement | `press backend does not match the recorded placement` |
 | Selected live context differs from placement | `press target context does not match the recorded placement` |
 
 Request-bound decisions use permission respond.
@@ -345,9 +342,9 @@ Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, 
 
 ### Runtime presentation
 
-Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director and for an ordinary row without a run, which CAFleet never writes but send, prompt, exec, recover and delete handle. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,reachability,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
+Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
 
-Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health. Effective policy contains `schema_version=1`, `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
+Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health. Effective policy contains `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
 
 Uncertain errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: manual_input (method=profile)` and `input_id=INPUT_ID`.
 
@@ -359,13 +356,13 @@ Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_
 
 ### Runtime events
 
-Notifications contain full versioned JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,permission_denied_observed,automatic_refusal_observed,automatic_review_unavailable,input_delivery_result,runner_degraded,runner_lost,runner_exited`.
+Notifications contain the full event JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,automatic_refusal_observed,automatic_review_unavailable,input_delivery_result,runner_degraded,runner_lost,runner_exited`.
 
-Runtime events use `schema_version=2`; readers require it. Identity fields: `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Required nullable `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question,review_automatic_refusal,review_automatic_review_unavailable`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv.
+Identity fields: `event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Required nullable `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question,review_automatic_refusal,review_automatic_review_unavailable`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv.
 
-Evidence contains `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. Positive `operation_rows` is null exactly with null operation; above one requires confirmation against excerpt. Metadata nulls screen-derived operation/choices/excerpt/native identifier. Excerpts/payloads are bounded at 8/16 KiB.
+Evidence contains `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,excerpt,evidence_digest`. Positive `operation_rows` is null exactly with null operation; above one requires confirmation against excerpt. Metadata nulls screen-derived operation/choices/excerpt. Excerpts/payloads are bounded at 8/16 KiB.
 
-Both automatic-review kinds carry `null` `interaction_id`, `classification` and `native_request_id`, `source` `runner_screen`, `decision_outcome` `"unknown"` and `director_action.inspect_argv` `["cafleet","event","show","<EVENT_ID>","--json"]`:
+Both automatic-review kinds carry `null` `interaction_id` and `classification`, `source` `runner_screen`, `decision_outcome` `"unknown"` and `director_action.inspect_argv` `["cafleet","event","show","<EVENT_ID>","--json"]`:
 
 | Field | `automatic_refusal_observed` | `automatic_review_unavailable` |
 |---|---|---|
@@ -401,7 +398,7 @@ Projection: deferred ready → queued with original reason; other ready → held
 | `write_failed` | The attempt failed after a possible child byte, including a failed deferred attempt or permission response |
 | `runner_stopped` | Runner shutdown ended an active deferred attempt that may have written a child byte |
 
-At settle checks the first matching cause among the first five wins. Director reconciliation requires nonempty evidence, synchronization with current owner and proof no active writer remains; unreachable owners require exclusive receipt-only ownership, otherwise uncertainty remains. Repeating a settled ordinary disposition returns original evidence; conflicting disposition fails unchanged. Settlement writes no input and establishes no native result.
+At settle checks the first matching cause among the first five wins. Director reconciliation requires nonempty evidence, synchronization with current owner and proof no active writer remains; an unreachable owner leaves uncertainty. A deregistered member or deleted fleet has no live runner: reconciliation fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`. Repeating a settled ordinary disposition returns original evidence; conflicting disposition fails unchanged. Settlement writes no input and establishes no native result.
 
 Nullable `permission_response` audit contains `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,choice_id,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at`; exactly one of `decision` and `choice_id` is null, and the text line `Permission decision: … decision=DECISION choice=CHOICE …` renders it as `-`. Settlement grants no answer and releases no possibly transmitted claim. IDs are positive; malformed input exits 2, absent/corrupt rows fail explicitly.
 
@@ -427,7 +424,7 @@ Retained accepted/submitted returns accepted/submitted; in-progress/uncertain re
 
 Accepted/prior submitted exits 0; structured held/rejected/uncertain prints selected response and exits 1: `Error: permission response STATUS for interaction INTERACTION_ID: REASON`, appending ` (input_id=INPUT_ID)` when known. Pre-reply failures retain ordinary categories/context; usage exits 2.
 
-Blocked current requests create no receipt/audit/claim/byte: `Error: runner control: permission request is blocked: REASON`, followed by known run/interaction/key context; capability reasons are `permission input is fenced`, `manual input accounting failed`, `observation degraded: CODE`, `observation transitions pending`, `observation evidence pending`, `observation update pending`, `observation incomplete`, `observation health unavailable`, `terminal input interrupted`, `outer terminal closed`, `native output closed`, `terminal output still arriving`, `terminal reply pending`, `permission request is not visible`, or `permission request is not the current interaction`, matching inspection.
+Blocked current requests create no receipt/audit/claim/byte: `Error: runner control: permission request is blocked: REASON`, followed by known run/interaction/key context; capability reasons are `permission input is fenced`, `manual input accounting failed`, `observation degraded: CODE`, `observation transitions pending`, `observation evidence pending`, `observation update pending`, `observation incomplete`, `terminal input interrupted`, `outer terminal closed`, `native output closed`, `terminal output still arriving`, `terminal reply pending`, `permission request is not visible`, or `permission request is not the current interaction`, matching inspection.
 
 A wrong-kind answer is a structured zero-byte `rejected` response (exit 1): `choice answers apply only to question interactions` (`--choice` on a non-question), `decision answers apply only to permission requests` (`--decision` on a question), or `choice CHOICE_ID has no tested answer for this question`.
 
@@ -470,7 +467,7 @@ The `multiplexer` check reports the backend and server (`ok` `<backend> server=<
 
 The refusal body is the `fleet create` refusal without its `cafleet fleet create ` prefix, and a `warn` keeps the exit code at 0.
 
-A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, an identical phrase listed once (`info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets from cafleet 0.30.0 (this is 0.31.1) — run 'cafleet setup --coding-agent codex'`. A recorded version other than the CLI's, or no installation recorded, is `warn`.
+A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, an identical phrase listed once (`info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets not installed at /home/user/.codex — run 'cafleet setup --coding-agent codex'`. No installation recorded is `warn`.
 
 Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
 
@@ -520,9 +517,6 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` |
 | `member create` | The fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` |
-| `member create` | The fleet's root Director has no concrete placement | `Error: fleet <fleet-id>'s root Director (member <id>) has no concrete placement.` |
-| `member create` | `--coding-agent` omitted and the spawning Director not found | `Error: Director (member <director-id>) not found.` |
-| `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: Director (member <director-id>) has no placement; supply --coding-agent.` |
 | `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` |
@@ -533,8 +527,6 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` |
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` |
-| `member prompt` / `exec` / `capture` | A target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` |
-| `member prompt` / `member exec` | Ordinary member without a recorded run | `Error: member <ID> has no recorded run` |
 | `permission inspect` | An unknown `INTERACTION_ID` | `Error: Interaction <interaction-id> not found` |
 
 Text-body errors of `message send` and `member create`:

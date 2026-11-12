@@ -7,7 +7,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 | Entry | Responsibility |
 |---|---|
 | `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs` together with the embedded `assets/` tree |
-| `assets/` | Data the binary embeds at build time: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate; `assets/migrations/` the SQL schema baseline; `assets/profiles/` the bundled runner-profile catalog and one native screen fixture file per backend with catalogued screens |
+| `assets/` | Data files: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate; `assets/migrations/` the SQL schema baseline; `assets/profiles/` the bundled runner-profile catalog and one native screen fixture file per backend with catalogued screens. The binary embeds every file except the native screen fixtures, which the test suite reads |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
 | `design-docs/` | Numbered design documents and local evidence |
 
