@@ -387,7 +387,7 @@ fn read_caller_pane(
         });
     };
     match caller::verify_pane(mux.mux.as_ref(), table, ancestry, &pane.pane)? {
-        Verification::Verified { .. } => {
+        Verification::Verified => {
             let context = mux.mux.pane_context(&pane.pane)?.ok_or_else(|| {
                 CafleetError::App(format!(
                     "pane {} was not found on the {} server {}",

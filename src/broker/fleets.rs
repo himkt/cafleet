@@ -324,7 +324,7 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0], ("claude".into(), "/a".into(), "old-time".into()));
         assert_eq!((&rows[1].0, &rows[1].1), (&"codex".into(), &"/a".into()));
-        assert!(crate::time::parse_lenient(&rows[1].2).is_ok());
+        assert!(crate::time::parse_lenient(&rows[1].2).is_some());
         assert_eq!(rows[2], ("codex".into(), "/b".into(), "old-time".into()));
     }
 

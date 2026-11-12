@@ -768,7 +768,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
     fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<()> {
         self.mux
             .bounded(crate::time::Deadline::until(deadline))
-            .kill_pane(pane, true)
+            .kill_pane(pane)
             .map_err(|cause| error(format!("runner pane cleanup failed: {cause}")))
     }
 }

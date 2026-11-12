@@ -20,12 +20,15 @@ impl Settings {
 }
 
 pub(crate) fn default_database_url() -> Result<String, CafleetError> {
-    let home = process_env("HOME")?.ok_or_else(|| {
-        CafleetError::App("HOME is not set; cannot derive the default database path".into())
+    let home = home_dir().map_err(|cause| {
+        CafleetError::App(format!(
+            "{}; cannot derive the default database path",
+            cause.message()
+        ))
     })?;
     Ok(format!(
         "sqlite:///{}/.local/share/cafleet/cafleet_{}.db",
-        home,
+        home.display(),
         crate::cli::VERSION
     ))
 }

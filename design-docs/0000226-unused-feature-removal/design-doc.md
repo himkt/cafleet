@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 24/49 tasks complete
+**Progress**: 26/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -439,8 +439,8 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 8: Multiplexer, delivery, assets, config, time
 
-- [ ] Apply MUX1–MUX7 and MUX9–MUX13 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply MUX1–MUX7 and MUX9–MUX13 <!-- completed: 2026-11-12T12:20 -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T12:20 -->
 
 ### Step 9: Coding agents and the fixture registry split
 

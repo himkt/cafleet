@@ -285,18 +285,19 @@ pub(crate) fn lock_deletion<S, T>(
     }
 }
 
+const PRESS_LOCK_RESERVE: Duration = Duration::from_secs(1);
+
 pub(crate) fn lock_member_with_reservation(
     conn: &mut Connection,
     settings: &Settings,
     member: &MemberRecord,
     deadline: Deadline,
-    reservation: Duration,
 ) -> Result<Option<LockedMember>, CafleetError> {
     let placement = &member.placement;
     let Some(guard) = PaneLock::acquire_within(
         &settings.database_url,
         placement,
-        deadline.reserving(reservation),
+        deadline.reserving(PRESS_LOCK_RESERVE),
     )
     .map_err(member_pane_input_error(member.member_id))?
     else {

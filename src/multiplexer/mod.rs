@@ -157,37 +157,14 @@ impl TimedRunError {
 
 pub(crate) trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
-    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
-    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-        self.run(
-            argv,
-            Some(timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)),
-        )
-    }
-    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .filter(|left| !left.is_zero())
-            .ok_or_else(TimedRunError::before_launch)?;
-        self.run_for(argv, remaining)
-            .map_err(|source| TimedRunError {
-                source,
-                cleanup_diagnostics: Vec::new(),
-            })
-    }
-    fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
-        Ok(None)
-    }
+    fn run(&self, argv: &[String]) -> Result<String, RunError>;
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError>;
+    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError>;
 }
 
 const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
 
-fn map_run_error(
-    name: &str,
-    argv: &[String],
-    timeout_secs: Option<u64>,
-    error: RunError,
-) -> MultiplexerError {
+fn map_run_error(name: &str, argv: &[String], error: RunError) -> MultiplexerError {
     let joined = argv.join(" ");
     match error {
         RunError::NotStarted(detail) => MultiplexerError::new(format!(
@@ -196,14 +173,9 @@ fn map_run_error(
         RunError::BinaryNotFound(detail) => {
             MultiplexerError::new(format!("{name} binary not found: {detail}"))
         }
-        RunError::Timeout => match timeout_secs {
-            Some(secs) => {
-                MultiplexerError::new(format!("{name} command timed out after {secs}s: {joined}"))
-            }
-            None => MultiplexerError::new(format!(
-                "{name} command timed out at the pane input deadline: {joined}"
-            )),
-        },
+        RunError::Timeout => MultiplexerError::new(format!(
+            "{name} command timed out at the pane input deadline: {joined}"
+        )),
         RunError::Failed { stderr } => MultiplexerError::new(format!(
             "{name} command failed: {joined}\nstderr: {}",
             stderr.trim()
@@ -264,33 +236,21 @@ impl BackendCore {
         command
     }
 
-    fn map_error(
-        &self,
-        argv: &[String],
-        timeout_secs: Option<u64>,
-        error: RunError,
-    ) -> MultiplexerError {
-        map_run_error(self.name, argv, timeout_secs, error)
+    fn map_error(&self, argv: &[String], error: RunError) -> MultiplexerError {
+        map_run_error(self.name, argv, error)
     }
 
-    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, MultiplexerError> {
+    fn run(&self, argv: &[String]) -> Result<String, MultiplexerError> {
         self.runner
-            .run(argv, timeout_secs)
-            .map_err(|error| self.map_error(argv, timeout_secs, error))
+            .run(argv)
+            .map_err(|error| self.map_error(argv, error))
     }
 
-    fn run_tolerating_missing(
-        &self,
-        argv: &[String],
-        ignore_missing: bool,
-        timeout_secs: Option<u64>,
-    ) -> Result<(), MultiplexerError> {
-        match self.runner.run(argv, timeout_secs) {
+    fn run_tolerating_missing(&self, argv: &[String]) -> Result<(), MultiplexerError> {
+        match self.runner.run(argv) {
             Ok(_) => Ok(()),
-            Err(RunError::Failed { ref stderr }) if ignore_missing && (self.pane_gone)(stderr) => {
-                Ok(())
-            }
-            Err(error) => Err(self.map_error(argv, timeout_secs, error)),
+            Err(RunError::Failed { ref stderr }) if (self.pane_gone)(stderr) => Ok(()),
+            Err(error) => Err(self.map_error(argv, error)),
         }
     }
 
@@ -316,7 +276,7 @@ impl BackendCore {
             .map_err(|error| {
                 let started =
                     writing && matches!(&error.source, RunError::Failed { .. } | RunError::Timeout);
-                let mut mapped = self.map_error(argv, None, error.source);
+                let mut mapped = self.map_error(argv, error.source);
                 for diagnostic in error.cleanup_diagnostics {
                     mapped.message.push('\n');
                     mapped.message.push_str(&diagnostic);
@@ -358,6 +318,12 @@ impl DeadlineRunner {
     ) -> Rc<dyn CommandRunner> {
         Rc::new(Self { runner, deadline })
     }
+
+    fn remaining(&self) -> Result<Duration, RunError> {
+        self.deadline
+            .remaining()
+            .map_err(|_| RunError::deadline_expired())
+    }
 }
 
 impl CommandRunner for DeadlineRunner {
@@ -365,22 +331,13 @@ impl CommandRunner for DeadlineRunner {
         self.runner.binary_exists(name)
     }
 
-    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
-        let remaining = self
-            .remaining_budget()?
-            .expect("deadline runner has a budget");
-        self.run_for(
-            argv,
-            timeout_secs
-                .map(Duration::from_secs)
-                .map_or(remaining, |timeout| timeout.min(remaining)),
-        )
+    fn run(&self, argv: &[String]) -> Result<String, RunError> {
+        let remaining = self.remaining()?;
+        self.run_for(argv, remaining)
     }
 
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-        let remaining = self
-            .remaining_budget()?
-            .expect("deadline runner has a budget");
+        let remaining = self.remaining()?;
         self.runner.run_for(argv, timeout.min(remaining))
     }
 
@@ -390,18 +347,6 @@ impl CommandRunner for DeadlineRunner {
             return Err(TimedRunError::before_launch());
         }
         self.runner.run_until(argv, deadline)
-    }
-
-    fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
-        let remaining = self
-            .deadline
-            .remaining()
-            .map_err(|_| RunError::deadline_expired())?;
-        Ok(Some(
-            self.runner
-                .remaining_budget()?
-                .map_or(remaining, |inner| inner.min(remaining)),
-        ))
     }
 }
 
@@ -466,8 +411,7 @@ pub(crate) trait Multiplexer {
 
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
 
-    fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
-    -> Result<(), MultiplexerError>;
+    fn kill_pane(&self, target_pane_id: &str) -> Result<(), MultiplexerError>;
 
     fn name(&self) -> &'static str {
         self.core().name
@@ -483,8 +427,6 @@ pub(crate) trait Multiplexer {
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
         check_deadline(deadline)?;
-        self.ensure_available()?;
-        check_deadline(deadline)?;
         let pane = placement
             .mux_pane_id
             .as_deref()
@@ -492,12 +434,8 @@ pub(crate) trait Multiplexer {
         self.check_key_target(pane, placement, deadline)
     }
 
-    fn close_pane(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        self.kill_pane(target_pane_id, ignore_missing)
+    fn close_pane(&self, target_pane_id: &str) -> Result<(), MultiplexerError> {
+        self.kill_pane(target_pane_id)
     }
 
     /// Restores the layout after the most recent `close_pane`.
@@ -596,7 +534,7 @@ pub(crate) fn caller_server(
                 .last()
                 .expect("rsplitn yields a first segment")
                 .to_owned()),
-            None => default_tmux_socket(runner),
+            None => tmux_socket_reply(runner, &argv(DEFAULT_TMUX_SOCKET)),
         },
         MuxBackend::Herdr => {
             if let Some(session) = present("HERDR_SESSION") {
@@ -612,12 +550,17 @@ pub(crate) fn caller_server(
 
 pub(crate) const DEFAULT_HERDR_SESSION: &str = "default";
 
-fn default_tmux_socket(runner: &dyn CommandRunner) -> Result<String, MultiplexerError> {
-    tmux_socket_reply(
-        runner,
-        &argv(&["tmux", "display-message", "-p", "#{socket_path}"]),
-    )
-}
+/// `CommandRunner` passes the process environment to every child, so a stale `TMUX` would
+/// select its server instead of the default one.
+pub(crate) const DEFAULT_TMUX_SOCKET: &[&str] = &[
+    "env",
+    "-u",
+    "TMUX",
+    "tmux",
+    "display-message",
+    "-p",
+    "#{socket_path}",
+];
 
 /// The default tmux server's socket path as `argv` prints it.
 pub(crate) fn tmux_socket_reply(
@@ -626,10 +569,10 @@ pub(crate) fn tmux_socket_reply(
 ) -> Result<String, MultiplexerError> {
     let no_server =
         || MultiplexerError::new("no tmux server found; pass --mux-server <socket path>");
-    let socket = match runner.run(argv, None) {
+    let socket = match runner.run(argv) {
         Ok(out) => out.trim().to_owned(),
         Err(RunError::Failed { .. }) => return Err(no_server()),
-        Err(error) => return Err(map_run_error("tmux", argv, None, error)),
+        Err(error) => return Err(map_run_error("tmux", argv, error)),
     };
     if socket.is_empty() {
         return Err(no_server());
@@ -643,8 +586,8 @@ fn herdr_session_for_socket(
 ) -> Result<String, MultiplexerError> {
     let argv = argv(&["herdr", "session", "list", "--json"]);
     let out = runner
-        .run(&argv, None)
-        .map_err(|error| map_run_error("herdr", &argv, None, error))?;
+        .run(&argv)
+        .map_err(|error| map_run_error("herdr", &argv, error))?;
     let listing: serde_json::Value = serde_json::from_str(&out).map_err(|_| {
         MultiplexerError::new(format!(
             "herdr session list returned non-JSON output: {out:?}"
@@ -787,10 +730,7 @@ pub(crate) mod test_support {
 
     #[derive(Debug, Clone, PartialEq)]
     pub(crate) enum Event {
-        Run {
-            argv: Vec<String>,
-            timeout_secs: Option<u64>,
-        },
+        Run { argv: Vec<String> },
     }
 
     pub(crate) struct FakeRunner {
@@ -844,25 +784,51 @@ pub(crate) mod test_support {
             self.binaries.iter().any(|b| b == name)
         }
 
-        fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
+        fn run(&self, argv: &[String]) -> Result<String, RunError> {
             self.events.borrow_mut().push(Event::Run {
                 argv: argv.to_vec(),
-                timeout_secs,
             });
             self.responses
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or_else(|| panic!("unexpected process call: {argv:?}"))
         }
+
+        fn run_for(&self, argv: &[String], _: std::time::Duration) -> Result<String, RunError> {
+            self.run(argv)
+        }
+
+        fn run_until(
+            &self,
+            argv: &[String],
+            deadline: std::time::Instant,
+        ) -> Result<String, crate::multiplexer::TimedRunError> {
+            run_until_through_run_for(self, argv, deadline)
+        }
+    }
+
+    /// The relative-budget form of `run_until` shared by the fakes that time out through `run_for`.
+    pub(crate) fn run_until_through_run_for(
+        runner: &dyn CommandRunner,
+        argv: &[String],
+        deadline: std::time::Instant,
+    ) -> Result<String, crate::multiplexer::TimedRunError> {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(crate::multiplexer::TimedRunError::before_launch)?;
+        runner
+            .run_for(argv, remaining)
+            .map_err(|source| crate::multiplexer::TimedRunError {
+                source,
+                cleanup_diagnostics: Vec::new(),
+            })
     }
 
     pub(crate) use crate::multiplexer::argv;
 
-    pub(crate) fn run_event(parts: &[&str], timeout_secs: Option<u64>) -> Event {
-        Event::Run {
-            argv: argv(parts),
-            timeout_secs,
-        }
+    pub(crate) fn run_event(parts: &[&str]) -> Event {
+        Event::Run { argv: argv(parts) }
     }
 
     pub(crate) fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -1171,7 +1137,10 @@ mod tests {
         fn binary_exists(&self, _: &str) -> bool {
             true
         }
-        fn run(&self, _: &[String], _: Option<u64>) -> Result<String, RunError> {
+        fn run(&self, _: &[String]) -> Result<String, RunError> {
+            panic!("absolute execution retains its Instant")
+        }
+        fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
             panic!("absolute execution retains its Instant")
         }
         fn run_until(&self, _: &[String], deadline: Instant) -> Result<String, TimedRunError> {
@@ -1247,7 +1216,7 @@ mod tests {
 
     #[test]
     fn tmux_caller_server_without_tmux_asks_the_default_server_for_its_socket() {
-        let default_socket = argv(&["tmux", "display-message", "-p", "#{socket_path}"]);
+        let default_socket = argv(DEFAULT_TMUX_SOCKET);
         let runner = FakeRunner::with_binary("tmux");
         runner.respond(Ok("/tmp/tmux-0/default\n".into()));
         assert_eq!(
@@ -1358,7 +1327,7 @@ mod tests {
         let runner = test_support::FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::for_server(runner.clone(), HERDR_SESSION)
             .bounded(crate::time::Deadline::until(std::time::Instant::now()));
-        assert!(mux.close_pane("w1:p2", true).is_err());
+        assert!(mux.close_pane("w1:p2").is_err());
         mux.restore_after_close().unwrap();
         assert!(runner.events().is_empty());
     }

@@ -2,6 +2,7 @@ use crate::coding_agent::CodingAgent;
 use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::DEFAULT_HERDR_SESSION;
+use crate::multiplexer::DEFAULT_TMUX_SOCKET;
 use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MuxBackend;
 use crate::multiplexer::argv;
@@ -12,18 +13,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 const MAX_ANCESTRY: usize = 4096;
-
-/// `CommandRunner` passes the process environment to every child, so a stale `TMUX` would
-/// select its server instead of the default one.
-const DEFAULT_TMUX_SOCKET: &[&str] = &[
-    "env",
-    "-u",
-    "TMUX",
-    "tmux",
-    "display-message",
-    "-p",
-    "#{socket_path}",
-];
 
 const TMUX_GUIDANCE: &str = "the tmux command prompt (the user presses the tmux prefix key in the Director pane, then types :display-message -d 0 \"#{pane_id} #{socket_path}\" and Enter; the status line shows the pane ID, then the server socket)";
 
@@ -46,7 +35,7 @@ pub(crate) struct CallerPane {
 pub(crate) enum WalkEnd {
     Complete,
     Stopped { pid: i64 },
-    Unreadable { pid: i64, cause: String },
+    Unreadable { cause: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,12 +57,12 @@ pub(crate) enum Refusal {
     PaneNotAncestor { pane_pid: i64 },
     WalkStopped { pid: i64 },
     NestedPidNamespace,
-    ProcessUnreadable { pid: i64, cause: String },
+    ProcessUnreadable { cause: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Verification {
-    Verified { pane_pid: i64 },
+    Verified,
     Refused(Refusal),
 }
 
@@ -91,7 +80,6 @@ pub(crate) fn walk(table: &dyn ProcessTable) -> Ancestry {
         match table.entry(pid) {
             Err(error) => {
                 break WalkEnd::Unreadable {
-                    pid,
                     cause: error.to_string(),
                 };
             }
@@ -220,11 +208,10 @@ pub(crate) fn verify_pane(
         return Ok(Verification::Refused(Refusal::NestedPidNamespace));
     }
     if ancestry.entries.iter().any(|(pid, _)| *pid == pane_pid) {
-        return Ok(Verification::Verified { pane_pid });
+        return Ok(Verification::Verified);
     }
     Ok(Verification::Refused(match &ancestry.end {
-        WalkEnd::Unreadable { pid, cause } => Refusal::ProcessUnreadable {
-            pid: *pid,
+        WalkEnd::Unreadable { cause } => Refusal::ProcessUnreadable {
             cause: cause.clone(),
         },
         WalkEnd::Stopped { pid } => Refusal::WalkStopped { pid: *pid },
@@ -266,7 +253,7 @@ pub(crate) fn unverified_message(
             format!("the process ancestry stopped at pid {pid} before reaching pid 1")
         }
         Refusal::NestedPidNamespace => "this command runs in a nested PID namespace".to_owned(),
-        Refusal::ProcessUnreadable { cause, .. } => {
+        Refusal::ProcessUnreadable { cause } => {
             format!("the process ancestry could not be read: {cause}")
         }
     };
@@ -441,7 +428,6 @@ mod tests {
                 Ancestry {
                     entries: vec![(30, strings(&["cafleet"]))],
                     end: WalkEnd::Unreadable {
-                        pid: 412,
                         cause: UNREADABLE.to_string(),
                     },
                 }
@@ -576,7 +562,7 @@ mod tests {
                 };
                 assert_eq!(
                     verify_pane(&*mux, &table, &walk(&table), pane).unwrap(),
-                    Verification::Verified { pane_pid: 20 },
+                    Verification::Verified,
                     "{backend}"
                 );
             }
@@ -593,20 +579,19 @@ mod tests {
                 answer_tmux(&runner, "%3", Some(20));
                 assert_eq!(
                     verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                    Verification::Verified { pane_pid: 20 }
+                    Verification::Verified
                 );
             }
         }
 
         #[test]
-        fn row_5_an_unreadable_walk_refuses_with_its_pid_and_cause() {
+        fn row_5_an_unreadable_walk_refuses_with_its_cause() {
             let table = table(30, &[(30, 412, &["cafleet"])]).unreadable(412, UNREADABLE);
             let runner = FakeRunner::with_binary("tmux");
             answer_tmux(&runner, "%3", Some(99));
             assert_eq!(
                 verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
                 Verification::Refused(Refusal::ProcessUnreadable {
-                    pid: 412,
                     cause: UNREADABLE.to_string(),
                 })
             );
@@ -727,9 +712,7 @@ mod tests {
             fn verification(&self, pane_pid: Option<i64>) -> Result<Verification, SharedServer> {
                 match self.expected {
                     Expected::SharedServer(label, pid) => shared(label, pid),
-                    Expected::Verified => Ok(Verification::Verified {
-                        pane_pid: pane_pid.expect("a verified case names its pane pid"),
-                    }),
+                    Expected::Verified => Ok(Verification::Verified),
                     Expected::NotAncestor => Ok(Verification::Refused(Refusal::PaneNotAncestor {
                         pane_pid: pane_pid.expect("a row-7 case names its pane pid"),
                     })),
@@ -994,7 +977,7 @@ mod tests {
             answer_tmux(&runner, case.pane, case.pane_pid);
             assert_eq!(
                 verify_pane(&tmux_mux(&runner), &table, &walk(&table), case.pane).unwrap(),
-                Verification::Verified { pane_pid: 400625 }
+                Verification::Verified
             );
         }
 
@@ -1064,7 +1047,7 @@ mod tests {
             answer_tmux(&runner, "%1", Some(428571));
             assert_eq!(
                 verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%1").unwrap(),
-                Verification::Verified { pane_pid: 428571 },
+                Verification::Verified,
                 "row 4 alone would accept the chat client pane"
             );
         }
@@ -1131,7 +1114,7 @@ mod tests {
             answer_herdr(&runner, Some(362679));
             assert_eq!(
                 decide(&table, &herdr_mux(&runner), "w4:p3N"),
-                Ok(Verification::Verified { pane_pid: 362679 })
+                Ok(Verification::Verified)
             );
         }
     }
@@ -1503,7 +1486,6 @@ mod tests {
                     ),
                     (
                         Refusal::ProcessUnreadable {
-                            pid: 412,
                             cause: UNREADABLE.to_string(),
                         },
                         format!("the process ancestry could not be read: {UNREADABLE}"),

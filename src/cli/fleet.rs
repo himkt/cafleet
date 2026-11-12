@@ -208,7 +208,7 @@ fn verified_env_pane(
         caller::env_pane(backend, env).ok_or_else(|| refusal(caller::unset_message(backend)))?;
     let mux = caller::resolve_env_mux(env, runner)?;
     match caller::verify_pane(mux.mux.as_ref(), table, &ancestry, &pane.pane)? {
-        Verification::Verified { .. } => Ok((mux, pane.pane)),
+        Verification::Verified => Ok((mux, pane.pane)),
         Verification::Refused(refused) => {
             Err(refusal(caller::unverified_message(&pane, &refused, &mux)))
         }
@@ -341,7 +341,7 @@ impl<M: std::ops::Deref<Target: Multiplexer>> DeletionHost for MultiplexerDeleti
         Ok(self
             .closing
             .insert(self.mux.bounded(deadline))
-            .close_pane(pane, true)?)
+            .close_pane(pane)?)
     }
 
     fn restore_layout(&mut self) -> Result<(), CafleetError> {
@@ -2003,8 +2003,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_deletion_actual_replay_sql_is_cancelled_within_the_supplied_remaining_budget()
-         {
+        fn runner_recovery_deletion_actual_replay_sql_is_cancelled_within_the_supplied_budget() {
             let mut case = Case::new();
             case.seed(&[opening(&case.fixture.run, 1, 1)]);
             case.fixture.conn.execute_batch(&format!("CREATE TABLE recovery_sql_probe (entered INTEGER NOT NULL); CREATE TRIGGER slow_replay BEFORE INSERT ON member_runtime_events BEGIN INSERT INTO recovery_sql_probe VALUES (1); SELECT ({SLOW_SUM}); END")).unwrap();
@@ -2729,7 +2728,6 @@ mod tests {
                         .unreadable(412, unreadable),
                     Some(99),
                     Refusal::ProcessUnreadable {
-                        pid: 412,
                         cause: unreadable.to_string(),
                     },
                 ),

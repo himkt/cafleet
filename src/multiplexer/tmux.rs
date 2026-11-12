@@ -38,7 +38,6 @@ impl TmuxMultiplexer {
             &self
                 .core
                 .argv(&["tmux", "display-message", "-p", "-t", pane, format]),
-            None,
         )
     }
 }
@@ -156,7 +155,7 @@ impl Multiplexer for TmuxMultiplexer {
         args.extend(command.iter().cloned());
         let pane_id = self
             .core
-            .run(&args, None)
+            .run(&args)
             .map_err(|error| error.with_pane_cleanup(crate::multiplexer::PaneCleanup::Unknown))?
             .trim()
             .to_string();
@@ -166,16 +165,13 @@ impl Multiplexer for TmuxMultiplexer {
                     .with_pane_cleanup(crate::multiplexer::PaneCleanup::Unknown),
             );
         }
-        let _ = self.core.run(
-            &self.core.argv(&[
-                "tmux",
-                "select-layout",
-                "-t",
-                &reference.window_id,
-                "main-vertical",
-            ]),
-            None,
-        );
+        let _ = self.core.run(&self.core.argv(&[
+            "tmux",
+            "select-layout",
+            "-t",
+            &reference.window_id,
+            "main-vertical",
+        ]));
         Ok(pane_id)
     }
 
@@ -184,32 +180,26 @@ impl Multiplexer for TmuxMultiplexer {
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
         crate::multiplexer::check_capture_lines(lines)?;
         let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
-        let raw = self.core.run(
-            &self.core.argv(&[
-                "tmux",
-                "capture-pane",
-                "-p",
-                "-e",
-                "-t",
-                target_pane_id,
-                "-S",
-                &format!("-{fetch_depth}"),
-            ]),
-            None,
-        )?;
+        let raw = self.core.run(&self.core.argv(&[
+            "tmux",
+            "capture-pane",
+            "-p",
+            "-e",
+            "-t",
+            target_pane_id,
+            "-S",
+            &format!("-{fetch_depth}"),
+        ]))?;
         Ok(crate::multiplexer::capture_window(&raw, lines))
     }
 
-    fn kill_pane(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        self.core.run_tolerating_missing(
-            &self.core.argv(&["tmux", "kill-pane", "-t", target_pane_id]),
-            ignore_missing,
-            None,
-        )
+    fn kill_pane(&self, target_pane_id: &str) -> Result<(), MultiplexerError> {
+        self.core.run_tolerating_missing(&self.core.argv(&[
+            "tmux",
+            "kill-pane",
+            "-t",
+            target_pane_id,
+        ]))
     }
 }
 
@@ -360,21 +350,18 @@ mod tests {
         );
         assert_eq!(
             runner.events(),
-            vec![run_event(
-                &[
-                    "tmux",
-                    "-S",
-                    SOCKET,
-                    "capture-pane",
-                    "-p",
-                    "-e",
-                    "-t",
-                    "%5",
-                    "-S",
-                    "-1002"
-                ],
-                None,
-            )],
+            vec![run_event(&[
+                "tmux",
+                "-S",
+                SOCKET,
+                "capture-pane",
+                "-p",
+                "-e",
+                "-t",
+                "%5",
+                "-S",
+                "-1002"
+            ],)],
             "Capture over-fetches by the fixed 1000-line margin"
         );
     }
@@ -386,7 +373,7 @@ mod tests {
             stderr: "No Such Pane: %5".to_string(),
         }));
         let mux = on_server(runner.clone());
-        mux.kill_pane("%5", true).unwrap();
+        mux.kill_pane("%5").unwrap();
         assert_eq!(
             runner.run_argvs(),
             vec![tmux(&["kill-pane", "-t", "%5"])],
@@ -399,8 +386,8 @@ mod tests {
         }));
         let mux = on_server(runner);
         assert!(
-            mux.kill_pane("%5", true).is_err(),
-            "ignore_missing never swallows a non-pane-gone failure"
+            mux.kill_pane("%5").is_err(),
+            "close never swallows a non-pane-gone failure"
         );
     }
 

@@ -197,7 +197,7 @@ fn idle_seconds(
     let Some((field, latest)) = latest else {
         return Ok(None);
     };
-    let parsed = parse_lenient(latest).map_err(|_| CafleetError::InvalidStoredValue {
+    let parsed = parse_lenient(latest).ok_or_else(|| CafleetError::InvalidStoredValue {
         field: field.into(),
         value: latest.clone(),
     })?;
@@ -356,7 +356,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(registered.name, "worker");
-        assert!(parse_lenient(&registered.registered_at).is_ok());
+        assert!(parse_lenient(&registered.registered_at).is_some());
         let member = get_member(&conn, registered.member_id, fleet)
             .unwrap()
             .unwrap();

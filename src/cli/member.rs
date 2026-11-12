@@ -1984,7 +1984,19 @@ mod tests {
             true
         }
 
-        fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
+        fn run_for(&self, argv: &[String], _: Duration) -> Result<String, RunError> {
+            self.run(argv)
+        }
+
+        fn run_until(
+            &self,
+            argv: &[String],
+            deadline: Instant,
+        ) -> Result<String, crate::multiplexer::TimedRunError> {
+            crate::multiplexer::test_support::run_until_through_run_for(self, argv, deadline)
+        }
+
+        fn run(&self, argv: &[String]) -> Result<String, RunError> {
             assert_eq!(argv, &["tmux", "-S", CLOSE_SOCKET, "kill-pane", "-t", "%9"]);
             self.calls.set(self.calls.get() + 1);
             (self.check)();

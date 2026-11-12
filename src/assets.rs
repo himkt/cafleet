@@ -9,7 +9,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) struct AgentPaths {
-    pub(crate) identity: String,
     base: PathBuf,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
@@ -85,7 +84,6 @@ pub(crate) fn agent_paths(
         CodingAgent::Claude | CodingAgent::Codex | CodingAgent::Hermes => None,
     };
     Ok(AgentPaths {
-        identity: base.display().to_string(),
         base,
         skills_dir,
         presets,
@@ -205,7 +203,7 @@ pub(crate) fn install_agent(
             HermesSetup::Absent => report("hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
         }
     }
-    crate::broker::record_asset_install(conn, agent.name(), &paths.identity)?;
+    crate::broker::record_asset_install(conn, agent.name(), &paths.base.display().to_string())?;
     Ok(())
 }
 
@@ -761,11 +759,11 @@ mod tests {
             let installed_at: String = conn
                 .query_row(
                     "SELECT installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
-                    rusqlite::params![agent.name(), paths.identity],
+                    rusqlite::params![agent.name(), paths.base.display().to_string()],
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert!(crate::time::parse_lenient(&installed_at).is_ok());
+            assert!(crate::time::parse_lenient(&installed_at).is_some());
         }
     }
 
@@ -942,7 +940,7 @@ mod tests {
         let mut conn = crate::db::test_support::migrated_conn(&home);
         let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Opencode).unwrap();
         let base = home.path().join(".config/opencode");
-        assert_eq!(paths.identity, base.display().to_string());
+        assert_eq!(paths.base, base);
         install_agent(
             &mut conn,
             CodingAgent::Opencode,

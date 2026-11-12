@@ -7,7 +7,6 @@ use crate::multiplexer::Multiplexer;
 use crate::multiplexer::PressKeys;
 use crate::time::Deadline;
 use rusqlite::Connection;
-use std::time::Duration;
 
 pub(crate) struct KeyAcknowledgment {
     pub(crate) member_id: i64,
@@ -74,16 +73,11 @@ pub(crate) fn press_member_with_mux(
             ));
         }
         let _span = crate::time::DeferTermination::begin()?;
-        let locked = crate::pane_lock::lock_member_with_reservation(
-            conn,
-            settings,
-            &member,
-            deadline,
-            Duration::from_secs(1),
-        )?
-        .ok_or_else(|| {
-            CafleetError::App(format!("member {member_id}'s pane input remained busy"))
-        })?;
+        let locked =
+            crate::pane_lock::lock_member_with_reservation(conn, settings, &member, deadline)?
+                .ok_or_else(|| {
+                    CafleetError::App(format!("member {member_id}'s pane input remained busy"))
+                })?;
         mux.validate_key_target(placement, deadline)
             .map_err(|cause| CafleetError::App(cause.to_string()))?;
         deadline.remaining()?;
@@ -169,7 +163,7 @@ mod tests {
             assert_eq!(name, "tmux");
             true
         }
-        fn run(&self, _: &[String], _: Option<u64>) -> Result<String, RunError> {
+        fn run(&self, _: &[String]) -> Result<String, RunError> {
             panic!("press probes and write retain absolute deadlines")
         }
         fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
