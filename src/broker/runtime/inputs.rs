@@ -1071,8 +1071,7 @@ fn validate_current_capability(
                 == event.event.payload_json["evidence"]["rule_id"]
                     .as_str()
                     .ok_or_else(|| invalid("rule_id", "event request rule required"))?
-            && cap.key() == &metadata.key
-            && !cap.fixture_ids().is_empty(),
+            && cap.key() == &metadata.key,
         "answer_capability",
         "answer capability does not match this request",
     )?;
@@ -2823,15 +2822,9 @@ mod tests {
                     PermissionDecision::Allow
                 },
             );
-            let capability = AnswerCapability::fixture(
-                backend,
-                version,
-                request_rule,
-                answer_rule,
-                decision,
-                &["synthetic-fixture".into()],
-            )
-            .unwrap();
+            let capability =
+                AnswerCapability::fixture(backend, version, request_rule, answer_rule, decision)
+                    .unwrap();
             let before = state(&fixture.base.conn);
             assert!(
                 storage::reserve_permission_response(

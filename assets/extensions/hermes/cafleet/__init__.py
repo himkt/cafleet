@@ -85,17 +85,13 @@ def _database_args(database_url: str | None) -> list[str]:
     return ["--database-url", database_url] if database_url else []
 
 
-def _cafleet_env() -> dict[str, str]:
-    return {name: value for name, value in os.environ.items() if not name.startswith("CAFLEET_")}
-
-
 def _director_refusal(executable: Path, director_id: int, database_url: str | None) -> str | None:
     """None when `director_id` is a root Director, otherwise the member refusal with the CLI's stderr."""
     try:
         shown = subprocess.run(
             [str(executable), *_database_args(database_url), "member", "show", str(director_id), "--json"],
             stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
-            env=_cafleet_env(), timeout=VERIFY_DEADLINE_S,
+            timeout=VERIFY_DEADLINE_S,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"{MEMBER_REFUSAL}: {exc}"
@@ -297,7 +293,7 @@ def _listen(args: dict, **kwargs) -> str:
         proc = subprocess.Popen(
             [str(executable), *_database_args(database_url), "message", "listen", str(director_id)],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            encoding="utf-8", errors="replace", bufsize=1, env=_cafleet_env(),
+            encoding="utf-8", errors="replace", bufsize=1,
         )
         receiver = Receiver(session_key, str(kwargs.get("session_id") or ""), proc)
         _receivers[session_key] = receiver

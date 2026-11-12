@@ -1693,7 +1693,6 @@ mod tests {
                 "recovery-fixture",
                 "single-request-choice",
                 PermissionDecision::Allow,
-                &["synthetic-storage-fixture".into()],
             )
             .unwrap();
             let request = NewPermissionResponse {

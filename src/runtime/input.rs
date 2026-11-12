@@ -1140,7 +1140,6 @@ impl InputCoordinator {
                         && observed.request_rule_id == bound.observed.request_rule_id
                         && observed.semantic == bound.observed.semantic
                         && observed.choices == bound.observed.choices
-                        && observed.native_correlation == bound.observed.native_correlation
                         && observed_match.map(AnswerMatch::focus_capture)
                             == bound_match.map(AnswerMatch::focus_capture)
                         && observed_match.and_then(AnswerMatch::focused_choice_id)
@@ -4896,10 +4895,15 @@ mod tests {
                 fixture["id"] = serde_json::json!("synthetic-exec-plan");
                 definition["fixtures"].as_array_mut().unwrap().push(fixture);
                 definition["profiles"][0]["capabilities"]["composer"]["submission"] = serde_json::json!({
-                    "prompt":null,
+                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-exec-plan"]},
                     "exec":{"prefix_hex":"2120","submit_hex":"6b6c","fixture_ids":["synthetic-exec-plan"]}
                 });
-                let exec_catalog = ProfileCatalog::from_definitions(&definition).unwrap();
+                let exec_catalog = crate::coding_agent::catalog::test_support::load(&definition)
+                    .unwrap()
+                    .without_submission(
+                        crate::coding_agent::CodingAgent::Codex,
+                        crate::coding_agent::ComposerOperation::Prompt,
+                    );
                 let mut expected = b"! ".to_vec();
                 expected.extend_from_slice(LITERAL.as_bytes());
                 expected.extend_from_slice(b"kl");
@@ -4984,7 +4988,7 @@ mod tests {
                     .push(composer["profiles"][0]["rules"][0].clone());
                 definition["profiles"][0]["capabilities"]["composer"] =
                     composer["profiles"][0]["capabilities"]["composer"].clone();
-                ProfileCatalog::from_definitions(&definition).unwrap()
+                prompt_plan_catalog(&definition)
             }
 
             /// Drives turns until the literal stage has been written, then returns.
@@ -6507,10 +6511,10 @@ mod tests {
             const UNCLASSIFIED: &[u8] = b"\x1b[2J\x1b[1;1Hworking on something";
 
             fn planless_catalog() -> ProfileCatalog {
-                let mut definition = catalog_definition();
-                definition["profiles"][0]["capabilities"]["composer"]["submission"] =
-                    serde_json::json!({"prompt":null,"exec":null});
-                ProfileCatalog::from_definitions(&definition).unwrap()
+                prompt_plan_catalog(&catalog_definition()).without_submission(
+                    crate::coding_agent::CodingAgent::Codex,
+                    crate::coding_agent::ComposerOperation::Prompt,
+                )
             }
 
             fn fallback_preview(canonical: &str) -> Vec<u8> {
@@ -6643,16 +6647,12 @@ mod tests {
 
             const DRAFT: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic draft\r\nDraft end";
 
-            /// The prompt-plan catalog with a classified draft composer, so a draft is a busy
-            /// composer rather than an unclassifiable screen.
+            /// The prompt-plan catalog, whose composer the draft screen leaves unverified.
             pub(super) fn busy_catalog() -> ProfileCatalog {
-                let mut definition = catalog_definition();
-                let empty = definition["profiles"][0]["rules"][0].clone();
-                with_draft_rule(&mut definition, empty);
-                ProfileCatalog::from_definitions(&definition).unwrap()
+                prompt_plan_catalog(&catalog_definition())
             }
 
-            /// The permission-form catalog whose composer also classifies a draft as busy.
+            /// The permission-form catalog with the prompt-plan composer.
             fn permission_busy_catalog() -> ProfileCatalog {
                 let mut definition =
                     crate::coding_agent::catalog::test_support::inspection_fixture_definition();
@@ -6665,34 +6665,18 @@ mod tests {
                 definition["profiles"][0]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(empty.clone());
+                    .push(empty);
                 definition["profiles"][0]["capabilities"]["composer"] =
                     composer["profiles"][0]["capabilities"]["composer"].clone();
-                with_draft_rule(&mut definition, empty);
-                ProfileCatalog::from_definitions(&definition).unwrap()
-            }
-
-            fn with_draft_rule(definition: &mut Value, empty: Value) {
-                let mut draft = empty;
-                draft["id"] = serde_json::json!("synthetic-composer-draft");
-                draft["observation"] = serde_json::json!("composer_draft");
-                draft["region"]["start_pattern"] = serde_json::json!("^Synthetic draft$");
-                draft["region"]["end_pattern"] = serde_json::json!("^Draft end$");
-                draft["matchers"] = serde_json::json!([{"id":"draft","scope":"line","pattern":"^Synthetic draft$"}]);
-                definition["profiles"][0]["rules"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(draft);
-                definition["profiles"][0]["capabilities"]["composer"]["rule_ids"] =
-                    serde_json::json!(["synthetic-composer-empty", "synthetic-composer-draft"]);
+                prompt_plan_catalog(&definition)
             }
 
             fn busy(host: &mut Host) {
                 host.show(DRAFT.to_vec());
-                assert_eq!(
+                assert!(matches!(
                     host.controller.health(&host.writer).eligibility,
-                    InputEligibility::Hold(GateReason::Draft)
-                );
+                    InputEligibility::Hold(_)
+                ));
             }
 
             fn fallback_program() -> Vec<u8> {
@@ -6739,7 +6723,7 @@ mod tests {
                     host.show(DRAFT.to_vec());
                     assert!(matches!(
                         host.controller.health(&host.writer).eligibility,
-                        InputEligibility::Hold(GateReason::Draft)
+                        InputEligibility::Hold(GateReason::Unknown)
                     ));
                     busy_then_profile(host);
                 });
@@ -6792,26 +6776,7 @@ mod tests {
 
             #[test]
             fn composer_busy_does_not_hold_a_working_member_whose_composer_row_is_empty() {
-                let mut definition = catalog_definition();
-                let mut working = definition["profiles"][0]["rules"][0].clone();
-                working["id"] = serde_json::json!("synthetic-working");
-                working["observation"] = serde_json::json!("working");
-                working["priority"] = serde_json::json!(50);
-                working["verified_noninteraction"] = serde_json::json!(false);
-                working["region"]["start_pattern"] = serde_json::json!("^Working$");
-                working["region"]["end_pattern"] = serde_json::json!("^Working$");
-                working["matchers"] =
-                    serde_json::json!([{"id":"working","scope":"line","pattern":"^Working$"}]);
-                definition["profiles"][0]["rules"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(working);
-                definition["profiles"][0]["capabilities"]["detection"] = serde_json::json!({
-                    "rule_ids":["synthetic-working"],
-                    "fixture_ids":[definition["fixtures"][0]["id"].clone()]
-                });
-                let catalog = ProfileCatalog::from_definitions(&definition).unwrap();
-                with_busy_host(catalog, encoded(), |host| {
+                with_busy_host(catalog(), encoded(), |host| {
                     host.show(
                         b"\x1b[2J\x1b[21;1HWorking\x1b[23;1HSynthetic state\r\nState end".to_vec(),
                     );
@@ -7383,20 +7348,32 @@ mod tests {
                 rule["region"]["start_pattern"] = serde_json::json!("^Synthetic state$");
                 rule["region"]["end_pattern"] = serde_json::json!("^State end$");
                 rule["matchers"] = serde_json::json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
-                rule["extract"] =
-                    serde_json::json!({"operation":null,"choices":[],"native_request_id":null});
+                rule["extract"] = serde_json::json!({"operation":null,"choices":[]});
                 rule["verified_noninteraction"] = serde_json::json!(true);
                 value["profiles"][0]["capabilities"] = serde_json::json!({
                     "detection":null,"annotations":null,"answers":[],"composer":{
                         "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
-                        "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":null}
+                        "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
                     }
                 });
                 value
             }
 
             pub(super) fn catalog() -> ProfileCatalog {
-                ProfileCatalog::from_definitions(&catalog_definition()).unwrap()
+                prompt_plan_catalog(&catalog_definition())
+            }
+
+            /// A catalog built on [`catalog_definition`]'s composer, whose exec submission is a
+            /// placeholder: only the prompt operation keeps an executable plan.
+            pub(in crate::runtime::input) fn prompt_plan_catalog(
+                definition: &serde_json::Value,
+            ) -> ProfileCatalog {
+                crate::coding_agent::catalog::test_support::load(definition)
+                    .unwrap()
+                    .without_submission(
+                        crate::coding_agent::CodingAgent::Codex,
+                        crate::coding_agent::ComposerOperation::Exec,
+                    )
             }
 
             pub(super) fn encoded() -> Vec<u8> {
@@ -8342,7 +8319,9 @@ mod tests {
             definition["profiles"][0]["capabilities"]["composer"] =
                 composer["profiles"][0]["capabilities"]["composer"].clone();
             with_profile_host(
-                ProfileCatalog::from_definitions(&definition).unwrap(),
+                crate::runtime::input::tests::ordinary_prompt::support::prompt_plan_catalog(
+                    &definition,
+                ),
                 expected_program,
                 profile,
                 |h| with_counted_tokens(h, body),
@@ -8449,7 +8428,7 @@ mod tests {
                 moved.observed.output_seq += 1;
                 assert!(current.same_request(&moved), "output_seq stays unbound");
                 type Mutation<'a> = (&'a str, Box<dyn Fn(&mut CurrentRequest) + 'a>);
-                let mutations: [Mutation; 15] = [
+                let mutations: [Mutation; 14] = [
                     (
                         "request_generation",
                         Box::new(|r| r.observed.request_generation += 1),
@@ -8480,13 +8459,6 @@ mod tests {
                     ),
                     ("choices", Box::new(|r| r.observed.choices.push("x".into()))),
                     ("focus", Box::new(|r| r.observed.focus.push('x'))),
-                    (
-                        "native_correlation",
-                        Box::new(|r| {
-                            r.observed.native_correlation =
-                                Some(format!("{:?}-changed", r.observed.native_correlation));
-                        }),
-                    ),
                     (
                         "answer_matches",
                         Box::new(|r| {
@@ -8822,7 +8794,8 @@ mod tests {
             use crate::runtime::TerminalSize;
             use crate::runtime::TerminalState;
             let catalog =
-                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
             let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             terminal
@@ -10741,7 +10714,10 @@ mod tests {
                     &h.fixture.run,
                     h.coordinator.lock.clone(),
                     crate::runtime::input::tests::ordinary_prompt::support::services(
-                        ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap(),
+                        crate::coding_agent::catalog::test_support::load(
+                            &inspection_fixture_definition(),
+                        )
+                        .unwrap(),
                         h.hooks.clone(),
                         h.stage_settle,
                         "receipt-only proof",
@@ -11393,7 +11369,7 @@ mod tests {
                         serde_json::to_value(&value.supported_choices).unwrap(),
                         serde_json::json!([
                             {"choice_id":"decline","label":"Keep current","scope":"persistent"},
-                            {"choice_id":"later","label":"Ask later","scope":"session"}
+                            {"choice_id":"later","label":"Ask later","scope":"persistent"}
                         ])
                     );
                     assert!(

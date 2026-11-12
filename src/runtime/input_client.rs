@@ -1757,8 +1757,7 @@ pub(crate) mod test_support {
             let evidence = storage::evidence::EvidencePolicy::metadata()
                 .apply(&json!({
                     "backend":"codex","native_version":fixture.run.native_version,
-                    "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,
-                    "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                    "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false
                 }))
                 .unwrap();
             let transition = ObservedTransition {
@@ -1790,7 +1789,6 @@ pub(crate) mod test_support {
                 "fixture-permission",
                 answer_rule,
                 decision,
-                &["synthetic-history-storage".into()],
             )
             .unwrap();
             let request = NewPermissionResponse {
@@ -4786,7 +4784,7 @@ mod tests {
             let mut case = History::new(InputState::Ready, None);
             let run = case.fixture.run.clone();
             storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
-            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
             storage::persist_transition(
                 &mut case.fixture.conn,
                 &run.owner(),
@@ -5168,8 +5166,7 @@ mod tests {
                     let evidence = storage::evidence::EvidencePolicy::metadata()
                     .apply(&json!({
                         "backend":"codex","native_version":case.fixture.run.native_version,
-                        "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,
-                        "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                        "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,"excerpt":null,"truncated":false
                     }))
                     .unwrap();
                     let annotation = storage::persist_transition(

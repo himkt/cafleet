@@ -457,8 +457,8 @@ stored_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => 
 stored_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
 stored_enum!(AutomaticReview, "effective_policy.automatic_review", { Available => "available", Unavailable => "unavailable" });
 stored_enum!(test_values InteractionClass, "member_interactions.classification", {
-    PermissionRequest => "permission_request", Question => "question", Trust => "trust",
-    Update => "update", UnknownInteraction => "unknown_interaction"
+    PermissionRequest => "permission_request", Question => "question",
+    UnknownInteraction => "unknown_interaction"
 });
 stored_enum!(test_values InteractionCloseReason, "member_interactions.close_reason", {
     NotVisible => "not_visible", Superseded => "superseded",
@@ -467,7 +467,6 @@ stored_enum!(test_values InteractionCloseReason, "member_interactions.close_reas
 stored_enum!(RuntimeEventKind,"member_runtime_events.kind", {
     CoverageUnknown => "coverage_unknown", InteractionOpened => "interaction_opened",
     InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
-    PermissionDeniedObserved => "permission_denied_observed",
     AutomaticRefusalObserved => "automatic_refusal_observed",
     AutomaticReviewUnavailable => "automatic_review_unavailable",
     InputDeliveryResult => "input_delivery_result", RunnerDegraded => "runner_degraded",
@@ -1054,10 +1053,9 @@ pub(crate) mod test_support {
             "backend":"codex","native_version":"0.163.0",
             "rule_id":"native-tool-permission","screen_seq":120,
             "operation":format!("run {text}"),"operation_rows":1,"choices":[format!("allow {text}"),"deny"],
-            "native_request_id":format!("native-{text}"),"excerpt":format!("request {text}"),
+            "excerpt":format!("request {text}"),
             "semantic_fingerprint":format!("fingerprint-{text}"),
-            "truncated":false,"sensitive":false,
-        })
+            "truncated":false,})
     }
 
     pub(crate) fn metadata() -> Value {
@@ -1210,7 +1208,6 @@ pub(crate) mod test_support {
             "native-tool-permission",
             "single-request-choice",
             key,
-            &["synthetic-storage-fixture".into()],
         )
         .unwrap()
     }

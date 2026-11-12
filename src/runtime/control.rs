@@ -2992,7 +2992,7 @@ mod tests {
             let run = &self.fixture.run;
             let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({
                 "backend":"codex","native_version":run.native_version,"rule_id":"fixture-wire-evidence","screen_seq":2,
-                "operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                "operation":null,"choices":null,"excerpt":null,"truncated":false
             })).unwrap();
             json!({"event_id":11,"message_id":14,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,
                 "run_id":run.run_id,"owner_epoch":run.owner_epoch,"interaction_id":12,"episode_seq":1,
@@ -3015,7 +3015,7 @@ mod tests {
                 value["answer_rule_id"] = json!("fixture-question-decline");
                 value["supported_choices"] = json!([
                     {"choice_id":"decline","label":"No, keep manual mode","scope":"persistent"},
-                    {"choice_id":"later","label":"Ask later","scope":"session"}
+                    {"choice_id":"later","label":"Ask later","scope":"persistent"}
                 ]);
             } else {
                 value["capability_reason"] = json!("question has no tested answer");
@@ -4050,7 +4050,7 @@ mod tests {
         }
         for (field, value) in [
             ("visibility", json!("missing")),
-            ("classification", json!("working")),
+            ("classification", json!("composer_empty")),
             ("answer_capability", json!("guessed")),
             ("supported_decisions", json!(["permit"])),
             ("missing_evidence", json!(["invented"])),

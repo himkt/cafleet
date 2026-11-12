@@ -2159,7 +2159,7 @@ pub(crate) mod test_support {
             rule["region"]["start_pattern"] = json!("^Synthetic state$");
             rule["region"]["end_pattern"] = json!("^State end$");
             rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
-            rule["extract"] = json!({"operation":null,"choices":[],"native_request_id":null});
+            rule["extract"] = json!({"operation":null,"choices":[]});
             rule["verified_noninteraction"] = json!(true);
             catalog["profiles"][0]["capabilities"] = json!({"detection":null,"annotations":null,"answers":[],"composer":{
                 "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
@@ -2583,7 +2583,6 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod observation_services {
-        use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
         use crate::runtime::service::test_support::*;
         use std::os::unix::fs::OpenOptionsExt;
@@ -2693,7 +2692,7 @@ pub(crate) mod test_support {
         ) -> Result<i32, CafleetError> {
             let value: Value = serde_json::from_slice(&std::fs::read(config).map_err(io_error)?)
                 .map_err(io_error)?;
-            let catalog = ProfileCatalog::from_definitions(&value["catalog"])?;
+            let catalog = crate::coding_agent::catalog::test_support::load(&value["catalog"])?;
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
             let services = crate::runtime::service::RunnerDependencies {
                 catalog: Box::leak(Box::new(catalog)),
@@ -3866,7 +3865,7 @@ mod tests {
                         seeded = Some(evidence.to_string());
                         fixture.conn.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,'2026-10-26T17:00:00Z',?3)",rusqlite::params![run.run_id,evidence["evidence_digest"].as_str().unwrap(),evidence.to_string()]).unwrap();
                     } else {
-                        let payload = json!({"event_id":1,"event_seq":1,"run_id":run.run_id,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"kind":"coverage_unknown","interaction_id":null,"classification":null,"observed_at":"2026-10-26T17:00:00Z","source":"runner_lifecycle","native_request_id":null,"decision_outcome":"unknown","director_action":null,"evidence":evidence,"cause":{"kind":"coverage_unknown"}});
+                        let payload = json!({"event_id":1,"event_seq":1,"run_id":run.run_id,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"kind":"coverage_unknown","interaction_id":null,"classification":null,"observed_at":"2026-10-26T17:00:00Z","source":"runner_lifecycle","decision_outcome":"unknown","director_action":null,"evidence":evidence,"cause":{"kind":"coverage_unknown"}});
                         seeded = Some(payload.to_string());
                         fixture.conn.execute("INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,payload_json,notification_state,archive_reason) VALUES(?1,1,'coverage_unknown','2026-10-26T17:00:00Z',?2,'archived','member_inactive')",rusqlite::params![run.run_id,payload.to_string()]).unwrap();
                     }

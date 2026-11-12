@@ -10,6 +10,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error as _;
+use serde::de::IgnoredAny;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -59,7 +60,6 @@ pub(crate) struct AnswerCapability {
     request_rule_id: String,
     answer_rule_id: String,
     key: AnswerKey,
-    fixture_ids: Vec<String>,
 }
 impl AnswerCapability {
     pub(crate) fn backend(&self) -> CodingAgent {
@@ -77,9 +77,6 @@ impl AnswerCapability {
     pub(crate) fn key(&self) -> &AnswerKey {
         &self.key
     }
-    pub(crate) fn fixture_ids(&self) -> &[String] {
-        &self.fixture_ids
-    }
 
     #[cfg(test)]
     pub(crate) fn fixture(
@@ -88,7 +85,6 @@ impl AnswerCapability {
         request_rule_id: &str,
         answer_rule_id: &str,
         decision: PermissionDecision,
-        fixture_ids: &[String],
     ) -> std::result::Result<Self, CafleetError> {
         Self::fixture_key(
             backend,
@@ -96,7 +92,6 @@ impl AnswerCapability {
             request_rule_id,
             answer_rule_id,
             AnswerKey::Decision(decision),
-            fixture_ids,
         )
     }
 
@@ -107,13 +102,10 @@ impl AnswerCapability {
         request_rule_id: &str,
         answer_rule_id: &str,
         key: AnswerKey,
-        fixture_ids: &[String],
     ) -> std::result::Result<Self, CafleetError> {
         if [native_version, request_rule_id, answer_rule_id]
             .iter()
             .any(|value| value.trim().is_empty())
-            || fixture_ids.is_empty()
-            || fixture_ids.iter().any(|value| value.trim().is_empty())
         {
             return Err(CafleetError::App(
                 "answer capability requires complete profile provenance".into(),
@@ -125,7 +117,6 @@ impl AnswerCapability {
             request_rule_id: request_rule_id.into(),
             answer_rule_id: answer_rule_id.into(),
             key,
-            fixture_ids: fixture_ids.to_vec(),
         })
     }
 }
@@ -221,35 +212,15 @@ impl TryFrom<Vec<NonBlank>> for Ids {
     }
 }
 
-#[derive(Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum FixtureKind {
-    Synthetic,
-    Native,
-}
-
+/// The fixture registry and every `fixture_ids` value are provenance that the bundled-catalog
+/// build guard checks; the production loader accepts their contents unread.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawCatalog {
     schema_version: u64,
-    fixtures: Vec<RawFixture>,
+    #[serde(rename = "fixtures")]
+    _fixtures: IgnoredAny,
     profiles: Vec<RawProfile>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawFixture {
-    id: NonBlank,
-    kind: FixtureKind,
-    backend: CodingAgent,
-    native_version: NativeVersion,
-    #[serde(rename = "rows", deserialize_with = "positive_bound")]
-    _rows: u16,
-    #[serde(rename = "cols", deserialize_with = "positive_bound")]
-    _cols: u16,
-    #[serde(rename = "source_ref")]
-    _source_ref: NonBlank,
-    sha256: NonBlank,
 }
 
 #[derive(Deserialize)]
@@ -271,7 +242,6 @@ struct RawRule {
     matchers: Vec<Matcher>,
     extract: RawExtract,
     verified_noninteraction: bool,
-    sensitive: bool,
     #[serde(default, deserialize_with = "present")]
     frame: Option<Frame>,
     #[serde(default, deserialize_with = "present")]
@@ -279,7 +249,7 @@ struct RawRule {
     #[serde(default, deserialize_with = "present")]
     continues_choice_id: Option<NonBlank>,
     #[serde(default, deserialize_with = "present")]
-    fixture_ids: Option<Ids>,
+    fixture_ids: Option<IgnoredAny>,
 }
 
 #[derive(Deserialize)]
@@ -288,8 +258,6 @@ struct RawExtract {
     #[serde(deserialize_with = "Option::deserialize")]
     operation: Option<RawOperation>,
     choices: Vec<Choice>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    native_request_id: Option<Capture>,
 }
 
 #[derive(Deserialize)]
@@ -322,7 +290,8 @@ struct RawCapabilities {
 #[serde(deny_unknown_fields)]
 struct RawCapability {
     rule_ids: Ids,
-    fixture_ids: Ids,
+    #[serde(rename = "fixture_ids")]
+    _fixture_ids: IgnoredAny,
     #[serde(default, deserialize_with = "present")]
     submission: Option<RawSubmissions>,
 }
@@ -330,10 +299,8 @@ struct RawCapability {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawSubmissions {
-    #[serde(deserialize_with = "Option::deserialize")]
-    prompt: Option<RawSubmission>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    exec: Option<RawSubmission>,
+    prompt: RawSubmission,
+    exec: RawSubmission,
 }
 
 #[derive(Deserialize)]
@@ -341,7 +308,8 @@ struct RawSubmissions {
 struct RawSubmission {
     prefix_hex: String,
     submit_hex: String,
-    fixture_ids: Ids,
+    #[serde(rename = "fixture_ids")]
+    _fixture_ids: IgnoredAny,
 }
 
 #[derive(Deserialize)]
@@ -354,7 +322,8 @@ struct RawAnswer {
     choice_id: NonBlank,
     focus_matcher_id: NonBlank,
     stages: Vec<RawStage>,
-    fixture_ids: Ids,
+    #[serde(rename = "fixture_ids")]
+    _fixture_ids: IgnoredAny,
 }
 
 #[derive(Deserialize)]
@@ -367,13 +336,6 @@ struct RawStage {
     required_focus_choice_id: Option<NonBlank>,
     #[serde(default, deserialize_with = "present")]
     required_screen_rule_id: Option<NonBlank>,
-}
-#[derive(Clone, PartialEq, Eq)]
-pub(super) struct Fixture {
-    pub(crate) id: String,
-    pub(crate) native: bool,
-    pub(crate) backend: CodingAgent,
-    pub(crate) version: NativeVersion,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -400,7 +362,6 @@ pub(super) enum MarginRows {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ChoiceScope {
     SingleRequest,
-    Session,
     Persistent,
 }
 #[derive(Clone, Deserialize)]
@@ -438,7 +399,6 @@ pub(super) enum FocusStyle {
 pub(super) struct Continuation {
     pub(crate) rule_id: String,
     pub(crate) choice_id: String,
-    pub(crate) fixtures: Vec<String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -452,7 +412,6 @@ pub(super) enum ScreenSelector {
 pub(super) enum CursorRule {
     AtEnd,
     Inside,
-    Outside,
     Any,
 }
 #[derive(Clone, Deserialize)]
@@ -486,9 +445,7 @@ pub(super) struct Rule {
     pub(crate) matchers: Vec<Matcher>,
     pub(crate) operation: Option<Capture>,
     pub(crate) choices: Vec<Choice>,
-    pub(crate) native: Option<Capture>,
     pub(crate) verified: bool,
-    pub(crate) sensitive: bool,
     pub(crate) continuation: Option<Continuation>,
     pub(crate) frame: Option<Frame>,
 }
@@ -501,7 +458,6 @@ pub(super) struct Answer {
     pub(crate) key: AnswerKey,
     pub(crate) request: String,
     pub(crate) id: String,
-    pub(crate) fixtures: Vec<String>,
     pub(crate) choice_id: String,
     pub(crate) focus_matcher_id: String,
     pub(crate) stages: Vec<AnswerStage>,
@@ -576,18 +532,6 @@ pub(super) struct Profile {
     pub(crate) submissions: [Option<ComposerSubmission>; 2],
     pub(crate) answers: Vec<Answer>,
 }
-struct Interval<'a> {
-    min: &'a NativeVersion,
-    next: Option<&'a NativeVersion>,
-}
-impl Interval<'_> {
-    fn contains(&self, version: &NativeVersion) -> bool {
-        version.precedence(self.min).is_ge()
-            && self
-                .next
-                .is_none_or(|next| version.precedence(next).is_lt())
-    }
-}
 impl Profile {
     pub(super) fn answer_plan(
         &self,
@@ -613,7 +557,6 @@ impl Profile {
                 request_rule_id: request.into(),
                 answer_rule_id: answer.id.clone(),
                 key: key.clone(),
-                fixture_ids: answer.fixtures.clone(),
             },
             choice_id: answer.choice_id.clone(),
             choice_scope,
@@ -694,10 +637,9 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         raw.continues_choice_id,
         raw.fixture_ids,
     ) {
-        (true, Some(rule), Some(choice), Some(fixtures)) => Some(Continuation {
+        (true, Some(rule), Some(choice), Some(_)) => Some(Continuation {
             rule_id: rule.0,
             choice_id: choice.0,
-            fixtures: fixtures.0,
         }),
         (false, None, None, None) => None,
         _ => {
@@ -738,14 +680,10 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         .operation
         .map(|operation| operation_capture(operation, &matchers))
         .transpose()?;
-    let native = raw.extract.native_request_id;
-    if let Some(native) = &native {
-        validate_capture(native, &matchers)?;
-    }
     if annotation {
         require(
-            choices.is_empty() && native.is_none() && !verified,
-            "annotation rules declare no choices, native request id or verified noninteraction",
+            choices.is_empty() && !verified,
+            "annotation rules declare no choices or verified noninteraction",
         )?;
         require(
             operation.is_some() == (kind == ObservationKind::AutomaticRefusal),
@@ -779,11 +717,9 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         kind,
         region: raw.region,
         operation,
-        native,
         choices,
         matchers,
         verified,
-        sensitive: raw.sensitive,
         continuation,
         frame: raw.frame,
     })
@@ -868,31 +804,7 @@ fn validate_gates(
     }
     Ok(())
 }
-/// Where a profile's provenance citations must point: native-captured or synthetic fixtures of
-/// the profile's backend whose capture version lies in the profile's interval.
-struct Scope<'a> {
-    backend: CodingAgent,
-    interval: Interval<'a>,
-    fixtures: &'a [Fixture],
-}
-impl Scope<'_> {
-    fn cite(&self, ids: &[String]) -> Result<()> {
-        require(!ids.is_empty(), "capability provenance required")?;
-        for id in ids {
-            let fixture = self
-                .fixtures
-                .iter()
-                .find(|f| &f.id == id)
-                .ok_or_else(|| invalid("unknown fixture"))?;
-            require(
-                fixture.backend == self.backend && self.interval.contains(&fixture.version),
-                "fixture backend or capture version outside the profile interval",
-            )?;
-        }
-        Ok(())
-    }
-}
-fn validate_continuation(rule: &Rule, rules: &[Rule], scope: &Scope) -> Result<()> {
+fn validate_continuation(rule: &Rule, rules: &[Rule]) -> Result<()> {
     let Some(continuation) = &rule.continuation else {
         return Ok(());
     };
@@ -910,16 +822,6 @@ fn validate_continuation(rule: &Rule, rules: &[Rule], scope: &Scope) -> Result<(
             .iter()
             .any(|choice| choice.id == continuation.choice_id),
         "continuation names an unknown continued choice",
-    )?;
-    scope.cite(&continuation.fixtures)?;
-    require(
-        continuation.fixtures.iter().all(|id| {
-            scope
-                .fixtures
-                .iter()
-                .any(|fixture| &fixture.id == id && fixture.native)
-        }),
-        "continuation cites native fixtures",
     )
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -932,25 +834,21 @@ impl Group {
     fn of(kind: ObservationKind) -> Self {
         if kind.is_annotation() {
             Self::Annotations
-        } else if matches!(
-            kind,
-            ObservationKind::ComposerEmpty | ObservationKind::ComposerDraft
-        ) {
+        } else if kind == ObservationKind::ComposerEmpty {
             Self::Composer
         } else {
             Self::Detection
         }
     }
 }
-fn capability(
-    raw: &RawCapability,
-    group: Group,
-    rules: &[Rule],
-    scope: &Scope,
-) -> Result<Capability> {
+fn capability(raw: &RawCapability, group: Group, rules: &[Rule]) -> Result<Capability> {
     require(
         group == Group::Composer || raw.submission.is_none(),
         "only the composer capability declares a submission",
+    )?;
+    require(
+        group != Group::Composer || raw.submission.is_some(),
+        "the composer capability declares a submission",
     )?;
     let ids = raw.rule_ids.0.clone();
     require(!ids.is_empty(), "capability rules required")?;
@@ -964,14 +862,12 @@ fn capability(
             "capability rule component mismatch",
         )?;
     }
-    scope.cite(&raw.fixture_ids.0)?;
     Ok(Capability { rules: ids })
 }
 
 fn composer_submission(
     raw: RawSubmission,
     operation: ComposerOperation,
-    scope: &Scope,
 ) -> Result<ComposerSubmission> {
     require(
         lower_hex_bytes(&raw.prefix_hex, usize::MAX).as_deref() == Some(operation.prefix()),
@@ -980,7 +876,6 @@ fn composer_submission(
     let submit = lower_hex_bytes(&raw.submit_hex, 32)
         .filter(|submit| !submit.is_empty())
         .ok_or_else(|| invalid("composer submit requires 1–32 lowercase hexadecimal bytes"))?;
-    scope.cite(&raw.fixture_ids.0)?;
     Ok(ComposerSubmission { submit })
 }
 
@@ -989,7 +884,6 @@ fn compile_answer(
     rules: &[Rule],
     identities: &mut BTreeSet<String>,
     keys: &mut BTreeSet<String>,
-    scope: &Scope,
 ) -> Result<Answer> {
     let (request, id, choice_id) = (raw.request_rule_id.0, raw.answer_rule_id.0, raw.choice_id.0);
     unique(identities, &id)?;
@@ -1069,38 +963,18 @@ fn compile_answer(
         })
         .collect::<Result<Vec<_>>>()?;
     validate_gates(&stages, rule, rules, &choice_id, &focus)?;
-    scope.cite(&raw.fixture_ids.0)?;
     Ok(Answer {
         key,
         request,
         id,
-        fixtures: raw.fixture_ids.0,
         choice_id,
         focus_matcher_id: focus,
         stages,
     })
 }
 
-fn compile_profile(
-    raw: RawProfile,
-    thresholds: &[(CodingAgent, NativeVersion)],
-    fixtures: &[Fixture],
-) -> Result<Profile> {
+fn compile_profile(raw: RawProfile) -> Result<Profile> {
     let (backend, min) = (raw.backend, raw.min_version);
-    let scope = Scope {
-        backend,
-        interval: Interval {
-            min: &min,
-            next: thresholds
-                .iter()
-                .filter(|(other, threshold)| {
-                    *other == backend && threshold.precedence(&min).is_gt()
-                })
-                .map(|(_, threshold)| threshold)
-                .min_by(|a, b| a.precedence(b)),
-        },
-        fixtures,
-    };
     let rules = raw
         .rules
         .into_iter()
@@ -1111,12 +985,12 @@ fn compile_profile(
         unique(&mut identities, &rule.id)?;
     }
     for rule in &rules {
-        validate_continuation(rule, &rules, &scope)?;
+        validate_continuation(rule, &rules)?;
     }
     let capabilities = raw.capabilities;
     let group = |raw: &Option<RawCapability>, group| {
         raw.as_ref()
-            .map(|raw| capability(raw, group, &rules, &scope))
+            .map(|raw| capability(raw, group, &rules))
             .transpose()
     };
     let detection = group(&capabilities.detection, Group::Detection)?;
@@ -1137,23 +1011,23 @@ fn compile_profile(
         .composer
         .and_then(|composer| composer.submission)
     {
-        Some(submission) => {
-            let compile = |raw: Option<RawSubmission>, operation| {
-                raw.map(|raw| composer_submission(raw, operation, &scope))
-                    .transpose()
-            };
-            [
-                compile(submission.prompt, ComposerOperation::Prompt)?,
-                compile(submission.exec, ComposerOperation::Exec)?,
-            ]
-        }
+        Some(submission) => [
+            Some(composer_submission(
+                submission.prompt,
+                ComposerOperation::Prompt,
+            )?),
+            Some(composer_submission(
+                submission.exec,
+                ComposerOperation::Exec,
+            )?),
+        ],
         None => [None, None],
     };
     let mut keys = BTreeSet::new();
     let answers = capabilities
         .answers
         .into_iter()
-        .map(|answer| compile_answer(answer, &rules, &mut identities, &mut keys, &scope))
+        .map(|answer| compile_answer(answer, &rules, &mut identities, &mut keys))
         .collect::<Result<Vec<_>>>()?;
     Ok(Profile {
         backend,
@@ -1194,24 +1068,6 @@ impl ProfileCatalog {
     pub(crate) fn from_definitions(value: &Value) -> Result<Self> {
         let raw = RawCatalog::deserialize(value).map_err(|cause| invalid(cause.to_string()))?;
         require(raw.schema_version == 1, "unsupported profile schema")?;
-        let mut ids = BTreeSet::new();
-        let fixtures = raw
-            .fixtures
-            .into_iter()
-            .map(|fixture| {
-                unique(&mut ids, &fixture.id.0)?;
-                require(
-                    lower_hex_bytes(&fixture.sha256.0, 32).is_some_and(|hash| hash.len() == 32),
-                    "lowercase source digest required",
-                )?;
-                Ok(Fixture {
-                    id: fixture.id.0,
-                    native: fixture.kind == FixtureKind::Native,
-                    backend: fixture.backend,
-                    version: fixture.native_version,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
         let thresholds = raw
             .profiles
             .iter()
@@ -1228,7 +1084,7 @@ impl ProfileCatalog {
         let profiles = raw
             .profiles
             .into_iter()
-            .map(|profile| compile_profile(profile, &thresholds, &fixtures))
+            .map(compile_profile)
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             profiles,
@@ -1291,6 +1147,18 @@ impl ProfileCatalog {
 
 #[cfg(test)]
 impl ProfileCatalog {
+    /// This catalog without `operation`'s submission plan for `backend`, for missing-plan
+    /// fallback tests.
+    pub(crate) fn without_submission(
+        mut self,
+        backend: CodingAgent,
+        operation: ComposerOperation,
+    ) -> Self {
+        for profile in self.profiles.iter_mut().filter(|p| p.backend == backend) {
+            profile.submissions[operation.index()] = None;
+        }
+        self
+    }
     pub(crate) fn answer_plan(
         &self,
         backend: CodingAgent,
@@ -1618,12 +1486,185 @@ pub(crate) mod test_support {
         Ok(())
     }
 
+    #[derive(Deserialize, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    enum FixtureKind {
+        Synthetic,
+        Native,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceCatalog {
+        fixtures: Vec<ProvenanceFixture>,
+        profiles: Vec<ProvenanceProfile>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ProvenanceFixture {
+        id: NonBlank,
+        kind: FixtureKind,
+        backend: CodingAgent,
+        native_version: NativeVersion,
+        #[serde(rename = "rows", deserialize_with = "positive_bound")]
+        _rows: u16,
+        #[serde(rename = "cols", deserialize_with = "positive_bound")]
+        _cols: u16,
+        #[serde(rename = "source_ref")]
+        _source_ref: NonBlank,
+        sha256: NonBlank,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceProfile {
+        backend: CodingAgent,
+        min_version: NativeVersion,
+        rules: Vec<ProvenanceRule>,
+        capabilities: ProvenanceCapabilities,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceRule {
+        fixture_ids: Option<Ids>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceCapabilities {
+        detection: Option<ProvenanceCapability>,
+        composer: Option<ProvenanceCapability>,
+        annotations: Option<ProvenanceCapability>,
+        answers: Vec<Cited>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceCapability {
+        fixture_ids: Ids,
+        submission: Option<ProvenanceSubmissions>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceSubmissions {
+        prompt: Option<Cited>,
+        exec: Option<Cited>,
+    }
+
+    #[derive(Deserialize)]
+    struct Cited {
+        fixture_ids: Ids,
+    }
+
+    /// A profile's provenance interval: its `min_version` up to the backend's next threshold.
+    struct Interval<'a> {
+        min: &'a NativeVersion,
+        next: Option<&'a NativeVersion>,
+    }
+    impl Interval<'_> {
+        fn contains(&self, version: &NativeVersion) -> bool {
+            version.precedence(self.min).is_ge()
+                && self
+                    .next
+                    .is_none_or(|next| version.precedence(next).is_lt())
+        }
+    }
+
+    /// The bundled-catalog build guard's provenance rules: unique fixture ids with lowercase
+    /// 32-byte digests, and non-empty citations of known fixtures of the profile's backend whose
+    /// capture version lies in the profile's interval; continuations cite native fixtures.
+    pub(crate) fn validate_provenance(definitions: &Value) -> Result<()> {
+        let raw = ProvenanceCatalog::deserialize(definitions)
+            .map_err(|cause| invalid(cause.to_string()))?;
+        let mut ids = BTreeSet::new();
+        for fixture in &raw.fixtures {
+            unique(&mut ids, &fixture.id.0)?;
+            require(
+                lower_hex_bytes(&fixture.sha256.0, 32).is_some_and(|hash| hash.len() == 32),
+                "lowercase source digest required",
+            )?;
+        }
+        let thresholds = raw
+            .profiles
+            .iter()
+            .map(|profile| (profile.backend, &profile.min_version))
+            .collect::<Vec<_>>();
+        for profile in &raw.profiles {
+            let interval = Interval {
+                min: &profile.min_version,
+                next: thresholds
+                    .iter()
+                    .filter(|(other, threshold)| {
+                        *other == profile.backend
+                            && threshold.precedence(&profile.min_version).is_gt()
+                    })
+                    .map(|(_, threshold)| *threshold)
+                    .min_by(|a, b| a.precedence(b)),
+            };
+            let cite = |cited: &Ids| -> Result<()> {
+                require(!cited.0.is_empty(), "capability provenance required")?;
+                for id in &cited.0 {
+                    let fixture = raw
+                        .fixtures
+                        .iter()
+                        .find(|fixture| &fixture.id.0 == id)
+                        .ok_or_else(|| invalid("unknown fixture"))?;
+                    require(
+                        fixture.backend == profile.backend
+                            && interval.contains(&fixture.native_version),
+                        "fixture backend or capture version outside the profile interval",
+                    )?;
+                }
+                Ok(())
+            };
+            for cited in profile
+                .rules
+                .iter()
+                .filter_map(|rule| rule.fixture_ids.as_ref())
+            {
+                cite(cited)?;
+                require(
+                    cited.0.iter().all(|id| {
+                        raw.fixtures.iter().any(|fixture| {
+                            &fixture.id.0 == id && fixture.kind == FixtureKind::Native
+                        })
+                    }),
+                    "continuation cites native fixtures",
+                )?;
+            }
+            let capabilities = &profile.capabilities;
+            for capability in [
+                &capabilities.detection,
+                &capabilities.composer,
+                &capabilities.annotations,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                cite(&capability.fixture_ids)?;
+                if let Some(submission) = &capability.submission {
+                    for cited in [&submission.prompt, &submission.exec].into_iter().flatten() {
+                        cite(&cited.fixture_ids)?;
+                    }
+                }
+            }
+            for answer in &capabilities.answers {
+                cite(&answer.fixture_ids)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A test catalog: production loading followed by the provenance build guard.
+    pub(crate) fn load(definitions: &Value) -> Result<ProfileCatalog> {
+        let catalog = ProfileCatalog::from_definitions(definitions)?;
+        validate_provenance(definitions)?;
+        Ok(catalog)
+    }
+
     impl ProfileCatalog {
         pub(crate) fn from_bundled_definitions(
             definitions: &Value,
             embedded: &[(&str, &[u8])],
         ) -> Result<Self> {
-            let catalog = Self::from_definitions(definitions)?;
+            let catalog = load(definitions)?;
             verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
             let catalog = Self {
                 capture_origin: "bundled_unknown",
@@ -1732,13 +1773,13 @@ pub(crate) mod test_support {
                     "extract":{"operation":{"matcher_id":"operation","capture":"operation"},"choices":[
                         {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
                         {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
-                    ],"native_request_id":null},"verified_noninteraction":false,"sensitive":false}],
+                    ]},"verified_noninteraction":false}],
                 "capabilities":{"detection":{"rule_ids":["synthetic-permission"],"fixture_ids":["synthetic-permission-1"]},"composer":null,"annotations":null,"answers":[]}}]
         })
     }
 
     pub(crate) fn synthetic_catalog() -> ProfileCatalog {
-        ProfileCatalog::from_definitions(&synthetic_definitions()).unwrap()
+        load(&synthetic_definitions()).unwrap()
     }
     pub(crate) fn inspection_fixture_definition() -> Value {
         let mut value = synthetic_definitions();
@@ -1825,8 +1866,8 @@ pub(crate) mod test_support {
                 "extract":{"operation":{"matcher_id":"operation","capture":"operation"},"choices":[
                     {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
                     {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
-                ],"native_request_id":null},
-                "verified_noninteraction":false,"sensitive":false
+                ]},
+                "verified_noninteraction":false
             },
             {
                 "id":GATED_REASON_RULE,"priority":100,"observation":"permission_continuation",
@@ -1835,9 +1876,8 @@ pub(crate) mod test_support {
                     {"id":"heading","scope":"line","pattern":"^Synthetic reject reason$"},
                     {"id":"empty","scope":"line","pattern":"^Reason: \\(empty\\)$"}
                 ],
-                "extract":{"operation":null,"choices":[],"native_request_id":null},
-                "verified_noninteraction":false,"sensitive":false,
-                "continues_rule_id":GATED_RULE,"continues_choice_id":"deny-once",
+                "extract":{"operation":null,"choices":[]},
+                "verified_noninteraction":false,"continues_rule_id":GATED_RULE,"continues_choice_id":"deny-once",
                 "fixture_ids":[GATED_REASON_FIXTURE]
             }
         ]);
@@ -1951,16 +1991,16 @@ pub(crate) mod test_support {
             "extract":{"operation":null,"choices":[
                 {"id":"accept","label":{"matcher_id":"accept","capture":"label"},"scope":"persistent"},
                 {"id":"decline","label":{"matcher_id":"decline","capture":"label"},"scope":"persistent"},
-                {"id":"later","label":{"matcher_id":"later","capture":"label"},"scope":"session"}
-            ],"native_request_id":null},
-            "verified_noninteraction":false,"sensitive":false
+                {"id":"later","label":{"matcher_id":"later","capture":"label"},"scope":"persistent"}
+            ]},
+            "verified_noninteraction":false
         }));
         rules.push(json!({
             "id":QUESTION_NOTICE_RULE,"priority":100,"observation":"question",
             "region":{"screen":"either","start_pattern":"^Synthetic notice$","end_pattern":"^Synthetic notice$","max_rows":1,"cursor":"any"},
             "matchers":[{"id":"notice","scope":"line","pattern":"^Synthetic notice$"}],
-            "extract":{"operation":null,"choices":[],"native_request_id":null},
-            "verified_noninteraction":false,"sensitive":false
+            "extract":{"operation":null,"choices":[]},
+            "verified_noninteraction":false
         }));
         value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
             json!([RULE, QUESTION_RULE, QUESTION_NOTICE_RULE]);
@@ -2026,11 +2066,16 @@ pub(crate) mod test_support {
         rule["region"]["start_pattern"] = json!("^Synthetic state$");
         rule["region"]["end_pattern"] = json!("^State end$");
         rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
-        rule["extract"] = json!({"operation":null,"choices":[],"native_request_id":null});
+        rule["extract"] = json!({"operation":null,"choices":[]});
         rule["verified_noninteraction"] = json!(verified);
         let declaration = json!({"rule_ids":[format!("synthetic-{kind}")],"fixture_ids":[FIXTURE]});
         value["profiles"][0]["capabilities"] = if kind.starts_with("composer_") {
-            json!({"detection":null,"composer":declaration,"annotations":null,"answers":[]})
+            let mut composer = declaration;
+            composer["submission"] = json!({
+                "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
+                "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[FIXTURE]}
+            });
+            json!({"detection":null,"composer":composer,"annotations":null,"answers":[]})
         } else {
             json!({"detection":declaration,"composer":null,"annotations":null,"answers":[]})
         };
@@ -2072,9 +2117,8 @@ pub(crate) mod test_support {
             json!({"id":id,"priority":50,"observation":observation,
                 "region":{"screen":"either","start_pattern":start,"end_pattern":end,"max_rows":4,"cursor":"any"},
                 "matchers":matchers,
-                "extract":{"operation":operation,"choices":[],"native_request_id":null},
-                "verified_noninteraction":false,"sensitive":false,
-                "frame":{"require_patterns":["^Live footer$"],"reject_patterns":["^Transcript viewer$"]}})
+                "extract":{"operation":operation,"choices":[]},
+                "verified_noninteraction":false,"frame":{"require_patterns":["^Live footer$"],"reject_patterns":["^Transcript viewer$"]}})
         }
 
         pub(crate) fn annotated() -> Value {
@@ -2103,34 +2147,38 @@ pub(crate) mod test_support {
     use serde_json::Value;
 
     pub(crate) const EMPTY: &str = "synthetic-composer_empty";
-    pub(crate) const DRAFT: &str = "synthetic-composer_draft";
     pub(crate) const PROMPT_FIXTURE: &str = "synthetic-prompt-plan";
     pub(crate) const EXEC_FIXTURE: &str = "synthetic-exec-plan";
     pub(crate) const VERSION_TWO: &str = "0.0.2-synthetic";
 
+    /// A composer catalog whose submission declares both operations; an absent `prompt` or
+    /// `exec` takes a placeholder submit key, and [`composer_catalog`] removes its plan.
     pub(crate) fn definition(prompt: Option<&str>, exec: Option<&str>) -> Value {
         let mut value = simple_definition("composer_empty", true);
-        let draft = simple_definition("composer_draft", true)["profiles"][0]["rules"][0].clone();
-        value["profiles"][0]["rules"]
-            .as_array_mut()
-            .unwrap()
-            .push(draft);
         for id in [PROMPT_FIXTURE, EXEC_FIXTURE] {
             let mut fixture = value["fixtures"][0].clone();
             fixture["id"] = json!(id);
             value["fixtures"].as_array_mut().unwrap().push(fixture);
         }
-        let prompt = prompt.map(
-            |submit| json!({"prefix_hex":"","submit_hex":submit,"fixture_ids":[PROMPT_FIXTURE]}),
-        );
-        let exec = exec.map(
-            |submit| json!({"prefix_hex":"2120","submit_hex":submit,"fixture_ids":[EXEC_FIXTURE]}),
-        );
+        let prompt = json!({"prefix_hex":"","submit_hex":prompt.unwrap_or("0d"),"fixture_ids":[PROMPT_FIXTURE]});
+        let exec = json!({"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
         value["profiles"][0]["capabilities"]["composer"] = json!({
-            "rule_ids":[DRAFT,EMPTY],"fixture_ids":[FIXTURE],
+            "rule_ids":[EMPTY],"fixture_ids":[FIXTURE],
             "submission":{"prompt":prompt,"exec":exec}
         });
         value
+    }
+
+    /// The [`definition`] catalog with the plan of each absent operation removed.
+    pub(crate) fn composer_catalog(prompt: Option<&str>, exec: Option<&str>) -> ProfileCatalog {
+        let mut catalog = load(&definition(prompt, exec)).unwrap();
+        if prompt.is_none() {
+            catalog = catalog.without_submission(CodingAgent::Codex, ComposerOperation::Prompt);
+        }
+        if exec.is_none() {
+            catalog = catalog.without_submission(CodingAgent::Codex, ComposerOperation::Exec);
+        }
+        catalog
     }
 
     pub(crate) fn operation_name(operation: ComposerOperation) -> &'static str {
@@ -2209,11 +2257,11 @@ pub(crate) mod test_support {
         operation: ComposerOperation,
         label: &str,
     ) -> CafleetError {
-        let catalog = ProfileCatalog::from_definitions(good).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(good).unwrap();
         let _ = plan(&catalog, operation)
             .encode("same-operation positive control")
             .unwrap();
-        match ProfileCatalog::from_definitions(bad) {
+        match crate::coding_agent::catalog::test_support::load(bad) {
             Err(error) => error,
             Ok(_) => panic!("invalid executable definition rejected: {label}"),
         }
@@ -2253,9 +2301,10 @@ mod tests {
         #[test]
         fn a_region_loads_with_one_non_whitespace_panel_separator_glyph() {
             let value = with_separator("/profiles/0/rules/0", json!("│"));
-            ProfileCatalog::from_definitions(&value).unwrap();
+            crate::coding_agent::catalog::test_support::load(&value).unwrap();
             assert!(
-                ProfileCatalog::from_definitions(&question_fixture_definition()).is_ok(),
+                crate::coding_agent::catalog::test_support::load(&question_fixture_definition())
+                    .is_ok(),
                 "panel_separator stays optional"
             );
         }
@@ -2265,7 +2314,7 @@ mod tests {
             for separator in [json!(1), json!(""), json!(" "), json!("││")] {
                 let value = with_separator("/profiles/0/rules/0", separator.clone());
                 assert!(
-                    ProfileCatalog::from_definitions(&value).is_err(),
+                    crate::coding_agent::catalog::test_support::load(&value).is_err(),
                     "{separator}"
                 );
             }
@@ -2279,8 +2328,11 @@ mod tests {
         const ANSWERS: &str = "/profiles/0/capabilities/answers";
 
         fn refusal(value: &Value) -> String {
-            assert!(ProfileCatalog::from_definitions(&question_fixture_definition()).is_ok());
-            match ProfileCatalog::from_definitions(value) {
+            assert!(
+                crate::coding_agent::catalog::test_support::load(&question_fixture_definition())
+                    .is_ok()
+            );
+            match crate::coding_agent::catalog::test_support::load(value) {
                 Err(cause) => cause.message().into_owned(),
                 Ok(_) => panic!("the changed definition loads"),
             }
@@ -2302,7 +2354,9 @@ mod tests {
 
         #[test]
         fn a_choice_answer_resolves_by_its_question_rule_and_choice_key() {
-            let catalog = ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap();
+            let catalog =
+                crate::coding_agent::catalog::test_support::load(&question_fixture_definition())
+                    .unwrap();
             let decline = plan(&catalog, QUESTION_RULE, choice("decline")).expect("decline plan");
             let capability = decline.capability();
             assert_eq!(capability.key(), &choice("decline"));
@@ -2310,7 +2364,6 @@ mod tests {
             assert_eq!(capability.native_version(), VERSION);
             assert_eq!(capability.request_rule_id(), QUESTION_RULE);
             assert_eq!(capability.answer_rule_id(), QUESTION_DECLINE_PLAN);
-            assert_eq!(capability.fixture_ids(), [FIXTURE.to_owned()]);
             assert_eq!(decline.choice_id(), "decline");
             assert_eq!(decline.focus_matcher_id(), "focus");
             let stages = decline
@@ -2364,12 +2417,12 @@ mod tests {
 
         #[test]
         fn a_choice_answer_loads_for_every_declared_choice_scope() {
-            for scope in ["single_request", "session", "persistent"] {
+            for scope in ["single_request", "persistent"] {
                 let value = changed(|value| {
                     value.pointer_mut(QUESTION).unwrap()["extract"]["choices"][2]["scope"] =
                         json!(scope);
                 });
-                let catalog = ProfileCatalog::from_definitions(&value)
+                let catalog = crate::coding_agent::catalog::test_support::load(&value)
                     .unwrap_or_else(|cause| panic!("{scope}: {}", cause.message()));
                 assert!(
                     plan(&catalog, QUESTION_RULE, choice("later")).is_some(),
@@ -2413,7 +2466,7 @@ mod tests {
         fn a_decision_answer_still_requires_a_single_request_choice() {
             let value = changed(|value| {
                 value["profiles"][0]["rules"][0]["extract"]["choices"][0]["scope"] =
-                    json!("session");
+                    json!("persistent");
             });
             assert_eq!(
                 refusal(&value),
@@ -2440,7 +2493,7 @@ mod tests {
                 duplicate["answer_rule_id"] = json!("synthetic-question-later-again");
                 answers(value).push(duplicate);
             });
-            assert!(ProfileCatalog::from_definitions(&value).is_err());
+            assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
         }
 
         #[test]
@@ -2453,13 +2506,13 @@ mod tests {
                 })
             };
             for id in ["a", &"a".repeat(64)] {
-                let catalog = ProfileCatalog::from_definitions(&renamed(id))
+                let catalog = crate::coding_agent::catalog::test_support::load(&renamed(id))
                     .unwrap_or_else(|cause| panic!("{id}: {}", cause.message()));
                 assert!(plan(&catalog, QUESTION_RULE, choice(id)).is_some(), "{id}");
             }
             for id in ["Later", "-later", "ask--later", &"a".repeat(65)] {
                 assert!(
-                    ProfileCatalog::from_definitions(&renamed(id)).is_err(),
+                    crate::coding_agent::catalog::test_support::load(&renamed(id)).is_err(),
                     "{id} is outside the choice-id shape"
                 );
             }
@@ -2467,7 +2520,9 @@ mod tests {
 
         #[test]
         fn marker_focus_loads_and_gates_a_choice_plan() {
-            let catalog = ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap();
+            let catalog =
+                crate::coding_agent::catalog::test_support::load(&question_fixture_definition())
+                    .unwrap();
             assert!(plan(&catalog, QUESTION_RULE, choice("decline")).is_some());
             let unstyled = changed(|value| {
                 value.pointer_mut(QUESTION).unwrap()["matchers"][1]
@@ -2483,14 +2538,14 @@ mod tests {
                 value.pointer_mut(QUESTION).unwrap()["matchers"][1]["focus_style"] =
                     json!("background");
             });
-            assert!(ProfileCatalog::from_definitions(&background).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&background).is_ok());
         }
 
         #[test]
         fn marker_focus_gates_a_decision_plan_as_background_focus_does() {
             let mut marker = gated_fixture_definition();
             marker["profiles"][0]["rules"][0]["matchers"][2]["focus_style"] = json!("marker");
-            let catalog = ProfileCatalog::from_definitions(&marker).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&marker).unwrap();
             let deny = catalog
                 .answer_plan(
                     CodingAgent::Codex,
@@ -2512,14 +2567,14 @@ mod tests {
                     value.pointer_mut(QUESTION).unwrap()["frame"] =
                         json!({"require_patterns":require,"reject_patterns":["^Live composer$"]});
                 });
-                ProfileCatalog::from_definitions(&value)
+                crate::coding_agent::catalog::test_support::load(&value)
                     .unwrap_or_else(|cause| panic!("{require}: {}", cause.message()));
             }
             let permission = changed(|value| {
                 value["profiles"][0]["rules"][0]["frame"] =
                     json!({"require_patterns":[],"reject_patterns":["^Live composer$"]});
             });
-            assert!(ProfileCatalog::from_definitions(&permission).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&permission).is_ok());
         }
 
         #[test]
@@ -2606,9 +2661,9 @@ mod tests {
                 &self,
                 embedded: &[(&str, &[u8])],
             ) -> Result<ProfileCatalog, CafleetError> {
-                ProfileCatalog::from_definitions(&self.definitions).unwrap_or_else(|error| {
-                    panic!("native test declarations are valid: {}", error.message())
-                });
+                crate::coding_agent::catalog::test_support::load(&self.definitions).unwrap_or_else(
+                    |error| panic!("native test declarations are valid: {}", error.message()),
+                );
                 ProfileCatalog::from_bundled_definitions(&self.definitions, embedded)
             }
 
@@ -3007,7 +3062,9 @@ mod tests {
 
     #[test]
     fn permission_inspection_catalog_retains_exact_executable_plans_and_provenance() {
-        let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+        let catalog =
+            crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                .unwrap();
         for (decision, choice, rule, bytes) in [
             (
                 PermissionDecision::Allow,
@@ -3036,10 +3093,6 @@ mod tests {
             assert_eq!(capability.request_rule_id(), "synthetic-permission");
             assert_eq!(capability.answer_rule_id(), rule);
             assert_eq!(capability.key(), &AnswerKey::Decision(decision));
-            assert_eq!(
-                capability.fixture_ids(),
-                &["synthetic-permission-1".to_owned()]
-            );
             assert_eq!(plan.choice_id(), choice);
             assert_eq!(plan.focus_matcher_id(), "form");
             assert_eq!(plan.stages().len(), 2);
@@ -3087,7 +3140,7 @@ mod tests {
         stage["bytes_hex"] = json!("79".repeat(256));
         value["profiles"][0]["capabilities"]["answers"][0]["stages"] =
             json!(vec![stage.clone(); 16]);
-        let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
         let plan = catalog
             .answer_plan(
                 CodingAgent::Codex,
@@ -3101,11 +3154,11 @@ mod tests {
             4096
         );
         value["profiles"][0]["capabilities"]["answers"][0]["stages"] = json!(vec![stage; 17]);
-        assert!(ProfileCatalog::from_definitions(&value).is_err());
+        assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
         value["profiles"][0]["capabilities"]["answers"][0]["stages"] = json!([{
             "bytes_hex":"79".repeat(257),"required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
         }]);
-        assert!(ProfileCatalog::from_definitions(&value).is_err());
+        assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
     }
 
     #[test]
@@ -3116,11 +3169,11 @@ mod tests {
         );
     }
     fn invalid(change: impl FnOnce(&mut Value)) {
-        assert!(ProfileCatalog::from_definitions(&definitions()).is_ok());
+        assert!(crate::coding_agent::catalog::test_support::load(&definitions()).is_ok());
         let mut value = definitions();
         change(&mut value);
         assert!(
-            ProfileCatalog::from_definitions(&value).is_err(),
+            crate::coding_agent::catalog::test_support::load(&value).is_err(),
             "invalid definition accepted"
         );
     }
@@ -3142,7 +3195,7 @@ mod tests {
     }
     #[test]
     fn runtime_profile_capabilities_are_independent_and_version_selected() {
-        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
         let supported = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
         assert_eq!(supported.detection, Coverage::Tested);
         assert_eq!(supported.composer, Coverage::Unknown);
@@ -3169,7 +3222,7 @@ mod tests {
             ("deny", PermissionDecision::Deny, PermissionDecision::Allow),
         ] {
             let value = with_answer(name);
-            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             assert_eq!(
                 catalog
                     .capabilities(CodingAgent::Codex, Some(VERSION))
@@ -3230,7 +3283,7 @@ mod tests {
             json!({}),
             json!({"schema_version":2,"fixtures":[],"profiles":[]}),
         ] {
-            assert!(ProfileCatalog::from_definitions(&value).is_err());
+            assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
         }
         for path in [
             "",
@@ -3257,12 +3310,6 @@ mod tests {
         invalid(|value| {
             value.as_object_mut().unwrap().remove("fixtures");
         });
-        invalid(|value| {
-            value["profiles"][0]["rules"][0]
-                .as_object_mut()
-                .unwrap()
-                .remove("sensitive");
-        });
     }
 
     #[test]
@@ -3283,7 +3330,6 @@ mod tests {
                 "/profiles/0/rules/0/verified_noninteraction",
                 json!("false"),
             ),
-            ("/profiles/0/rules/0/sensitive", json!(0)),
             ("/profiles/0/rules/0/region/screen", json!("scrollback")),
             ("/profiles/0/rules/0/region/max_rows", json!(0)),
             ("/profiles/0/rules/0/region/cursor", json!("nearby")),
@@ -3354,7 +3400,7 @@ mod tests {
     fn runtime_profile_operation_row_margin_must_be_a_nonempty_single_row_string() {
         let mut margined = definitions();
         margined["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = json!(" ");
-        assert!(ProfileCatalog::from_definitions(&margined).is_ok());
+        assert!(crate::coding_agent::catalog::test_support::load(&margined).is_ok());
         for margin in [json!(1), json!(""), json!("\n")] {
             invalid(|value| {
                 value["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = margin;
@@ -3375,7 +3421,7 @@ mod tests {
             operation["row_margin"] = json!(" ");
             operation["margin_rows"] = json!(margin_rows);
             assert!(
-                ProfileCatalog::from_definitions(&value).is_ok(),
+                crate::coding_agent::catalog::test_support::load(&value).is_ok(),
                 "{margin_rows}"
             );
         }
@@ -3400,7 +3446,7 @@ mod tests {
             }
             operation["row_trailer"] = json!("█");
             assert!(
-                ProfileCatalog::from_definitions(&value).is_ok(),
+                crate::coding_agent::catalog::test_support::load(&value).is_ok(),
                 "with margin: {with_margin}"
             );
         }
@@ -3439,7 +3485,7 @@ mod tests {
     #[test]
     fn runtime_profile_answer_scope_focus_stages_and_fixture_relationships_are_checked() {
         let valid = with_answer("allow");
-        assert!(ProfileCatalog::from_definitions(&valid).is_ok());
+        assert!(crate::coding_agent::catalog::test_support::load(&valid).is_ok());
         for (path, replacement) in [
             (
                 "/profiles/0/capabilities/answers/0/decision",
@@ -3484,10 +3530,6 @@ mod tests {
             ),
             (
                 "/profiles/0/rules/0/extract/choices/0/scope",
-                json!("session"),
-            ),
-            (
-                "/profiles/0/rules/0/extract/choices/0/scope",
                 json!("persistent"),
             ),
             ("/profiles/0/rules/0/observation", json!("trust")),
@@ -3495,7 +3537,7 @@ mod tests {
             let mut value = valid.clone();
             *value.pointer_mut(path).unwrap() = replacement;
             assert!(
-                ProfileCatalog::from_definitions(&value).is_err(),
+                crate::coding_agent::catalog::test_support::load(&value).is_err(),
                 "invalid answer relationship {path}"
             );
         }
@@ -3504,7 +3546,7 @@ mod tests {
     #[test]
     fn runtime_profile_answer_objects_have_exact_fields_and_unique_plan_identities() {
         let valid = with_answer("allow");
-        assert!(ProfileCatalog::from_definitions(&valid).is_ok());
+        assert!(crate::coding_agent::catalog::test_support::load(&valid).is_ok());
         for path in [
             "/profiles/0/capabilities/answers/0",
             "/profiles/0/capabilities/answers/0/stages/0",
@@ -3516,14 +3558,14 @@ mod tests {
                 .as_object_mut()
                 .unwrap()
                 .insert("unexpected".into(), json!(true));
-            assert!(ProfileCatalog::from_definitions(&value).is_err());
+            assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
         }
         let mut duplicate = valid.clone();
         duplicate["profiles"][0]["capabilities"]["answers"]
             .as_array_mut()
             .unwrap()
             .push(valid["profiles"][0]["capabilities"]["answers"][0].clone());
-        assert!(ProfileCatalog::from_definitions(&duplicate).is_err());
+        assert!(crate::coding_agent::catalog::test_support::load(&duplicate).is_err());
     }
 
     mod gated_catalog {
@@ -3534,11 +3576,14 @@ mod tests {
         const REASON: &str = "/profiles/0/rules/1";
 
         fn rejected(case: &str, change: impl FnOnce(&mut Value)) {
-            assert!(ProfileCatalog::from_definitions(&gated_fixture_definition()).is_ok());
+            assert!(
+                crate::coding_agent::catalog::test_support::load(&gated_fixture_definition())
+                    .is_ok()
+            );
             let mut value = gated_fixture_definition();
             change(&mut value);
             assert!(
-                ProfileCatalog::from_definitions(&value).is_err(),
+                crate::coding_agent::catalog::test_support::load(&value).is_err(),
                 "{case} must fail catalog loading"
             );
         }
@@ -3550,7 +3595,7 @@ mod tests {
         }
 
         fn plan(decision: PermissionDecision) -> AnswerPlan {
-            ProfileCatalog::from_definitions(&gated_fixture_definition())
+            crate::coding_agent::catalog::test_support::load(&gated_fixture_definition())
                 .unwrap()
                 .answer_plan(
                     CodingAgent::Codex,
@@ -3674,7 +3719,7 @@ mod tests {
                 stage("0d", "deny-once", ("required_focus_choice_id", "deny-once"))
             ]);
             assert!(
-                ProfileCatalog::from_definitions(&ends_on_deny_focus).is_ok(),
+                crate::coding_agent::catalog::test_support::load(&ends_on_deny_focus).is_ok(),
                 "a final focus gate on the answer's own choice is valid"
             );
         }
@@ -3832,7 +3877,7 @@ mod tests {
             let mut textual = definitions();
             textual["profiles"][0]["rules"][0]["matchers"][1]["focus_style"] = json!("background");
             assert!(
-                ProfileCatalog::from_definitions(&textual).is_ok(),
+                crate::coding_agent::catalog::test_support::load(&textual).is_ok(),
                 "an ungated profile may declare a background focus matcher"
             );
         }
@@ -3850,11 +3895,11 @@ mod tests {
                 "choice_id":"deny-once","focus_matcher_id":"deny","fixture_ids":[FIXTURE],
                 "stages":[{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]
             }]);
-            assert!(ProfileCatalog::from_definitions(&value).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&value).is_ok());
             value["profiles"][0]["capabilities"]["answers"][0]["stages"][0]["bytes_hex"] =
                 json!("0d1b");
             assert!(
-                ProfileCatalog::from_definitions(&value).is_err(),
+                crate::coding_agent::catalog::test_support::load(&value).is_err(),
                 "ungated stage 0d1b"
             );
         }
@@ -3871,7 +3916,7 @@ mod tests {
                         ComposerOperation::Prompt => definition(Some(&hex), None),
                         ComposerOperation::Exec => definition(None, Some(&hex)),
                     };
-                    let catalog = ProfileCatalog::from_definitions(&good).unwrap();
+                    let catalog = crate::coding_agent::catalog::test_support::load(&good).unwrap();
                     assert_eq!(
                         plan(&catalog, operation).encode("literal").unwrap(),
                         expected(operation, "literal", &vec![b'z'; length])
@@ -4014,7 +4059,7 @@ mod tests {
                     fixture["native_version"] = json!(VERSION_TWO);
                 }
             }
-            let catalog = ProfileCatalog::from_definitions(&good).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&good).unwrap();
             for (operation, submit) in [
                 (ComposerOperation::Prompt, &b"~"[..]),
                 (ComposerOperation::Exec, &b"kl"[..]),
@@ -4038,7 +4083,7 @@ mod tests {
                 .push(definitions()["profiles"][0]["rules"][0].clone());
             good["profiles"][0]["capabilities"]["detection"] =
                 json!({"rule_ids":[RULE],"fixture_ids":[FIXTURE]});
-            let catalog = ProfileCatalog::from_definitions(&good).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&good).unwrap();
             assert_eq!(
                 catalog.detection_coverage(CodingAgent::Codex, Some(VERSION)),
                 Coverage::Tested
@@ -4341,7 +4386,6 @@ mod tests {
                     observed.raw_evidence["native_version"], CLAUDE_VERSION,
                     "{id}"
                 );
-                assert_ne!(observed.kind, ObservationKind::PermissionDenied, "{id}");
                 assert_eq!(
                     annotation_set(&observed),
                     annotations
@@ -4547,12 +4591,10 @@ mod tests {
                 assert_eq!(form.rule_id, READ_RULE, "{id}");
                 assert_eq!(form.match_evidence, MatchEvidence::Complete, "{id}");
                 assert!(!form.verified_noninteraction, "{id}");
-                assert!(form.native_correlation.is_none(), "{id}");
                 assert!(form.fingerprint.is_some(), "{id}");
                 assert_eq!(form.raw_evidence["operation"], operation, "{id}");
                 assert_eq!(form.raw_evidence["operation_rows"], rows, "{id}");
                 assert_eq!(form.raw_evidence["choices"], json!(READ_CHOICES), "{id}");
-                assert_eq!(form.raw_evidence["native_request_id"], Value::Null, "{id}");
             }
             for (id, top, bottom) in [(READ_FORM, 16, 34), (READ_LONG, 17, 36)] {
                 let region = observe(id)
@@ -5572,7 +5614,6 @@ mod tests {
                     observed.raw_evidence["native_version"], CODEX_VERSION,
                     "{id}"
                 );
-                assert_ne!(observed.kind, ObservationKind::PermissionDenied, "{id}");
                 assert_eq!(
                     annotation_set(&observed),
                     annotations
@@ -5914,8 +5955,6 @@ mod tests {
                 observation.raw_evidence["choices"],
                 json!(["Allow once", "Reject"])
             );
-            assert_eq!(observation.raw_evidence["native_request_id"], Value::Null);
-            assert_eq!(observation.native_correlation, None);
             let region = observation.matched_region.expect("live form region");
             assert_eq!((region.top, region.bottom), (10, 22), "{case}");
         }
@@ -5962,11 +6001,6 @@ mod tests {
                 assert_eq!(
                     observed.raw_evidence["choices"],
                     json!(["Allow once", "Reject"]),
-                    "{id}"
-                );
-                assert_eq!(
-                    observed.raw_evidence["native_request_id"],
-                    Value::Null,
                     "{id}"
                 );
                 assert!(observed.fingerprint.is_some(), "{id}");
@@ -6367,18 +6401,18 @@ mod tests {
         use crate::coding_agent::catalog::test_support::annotation::*;
         use crate::coding_agent::catalog::tests::*;
         fn rejected(label: &str, change: impl FnOnce(&mut Value)) {
-            assert!(ProfileCatalog::from_definitions(&annotated()).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&annotated()).is_ok());
             let mut value = annotated();
             change(&mut value);
             assert!(
-                ProfileCatalog::from_definitions(&value).is_err(),
+                crate::coding_agent::catalog::test_support::load(&value).is_err(),
                 "annotation catalog accepted: {label}"
             );
         }
         #[test]
         fn annotation_catalog_accepts_each_kind_in_the_annotations_group_and_a_null_group() {
-            assert!(ProfileCatalog::from_definitions(&annotated()).is_ok());
-            assert!(ProfileCatalog::from_definitions(&definitions()).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&annotated()).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&definitions()).is_ok());
             for (id, observation) in [
                 (REFUSAL, "automatic_refusal"),
                 (UNAVAILABLE, "automatic_review_unavailable"),
@@ -6392,13 +6426,13 @@ mod tests {
                 value["profiles"][0]["capabilities"]["annotations"] =
                     json!({"rule_ids":[id],"fixture_ids":[FIXTURE]});
                 assert!(
-                    ProfileCatalog::from_definitions(&value).is_ok(),
+                    crate::coding_agent::catalog::test_support::load(&value).is_ok(),
                     "{observation}"
                 );
             }
             let mut without_reject = annotated();
             rule(&mut without_reject, REFUSAL)["frame"]["reject_patterns"] = json!([]);
-            assert!(ProfileCatalog::from_definitions(&without_reject).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&without_reject).is_ok());
         }
 
         #[test]
@@ -6410,7 +6444,7 @@ mod tests {
                     .remove("annotations");
             });
             assert!(
-                ProfileCatalog::from_definitions(&{
+                crate::coding_agent::catalog::test_support::load(&{
                     let mut value = definitions();
                     value["profiles"][0]["capabilities"]
                         .as_object_mut()
@@ -6486,10 +6520,6 @@ mod tests {
                     {"id":"refused","label":{"matcher_id":"operation","capture":"operation"},"scope":"single_request"}
                 ]);
             });
-            rejected("annotation native request id", |value| {
-                rule(value, REFUSAL)["extract"]["native_request_id"] =
-                    json!({"matcher_id":"operation","capture":"operation"});
-            });
             rejected("annotation verified noninteraction", |value| {
                 rule(value, AVAILABLE)["verified_noninteraction"] = json!(true);
             });
@@ -6514,7 +6544,7 @@ mod tests {
             });
             let mut empty_require = annotated();
             rule(&mut empty_require, REFUSAL)["frame"]["require_patterns"] = json!([]);
-            match ProfileCatalog::from_definitions(&empty_require) {
+            match crate::coding_agent::catalog::test_support::load(&empty_require) {
                 Err(cause) => assert_eq!(
                     cause.message(),
                     "invalid native profile: annotation frame requires a live-screen pattern"
@@ -6546,7 +6576,7 @@ mod tests {
         use crate::coding_agent::catalog::tests::*;
 
         fn catalog(profiles: &[(&str, &str)]) -> ProfileCatalog {
-            ProfileCatalog::from_definitions(&thresholds(profiles)).unwrap()
+            crate::coding_agent::catalog::test_support::load(&thresholds(profiles)).unwrap()
         }
 
         /// The label of the threshold profile selected for `probe`, named by its allow plan.
@@ -6583,7 +6613,7 @@ mod tests {
         }
 
         fn rejected(value: &Value, label: &str) {
-            match ProfileCatalog::from_definitions(value) {
+            match crate::coding_agent::catalog::test_support::load(value) {
                 Err(error) => {
                     assert_eq!(error.exit_code(), 2, "{label}: {}", error.message());
                     assert!(
@@ -6715,7 +6745,7 @@ mod tests {
                     .unwrap()
                     .extend(claude[key].as_array().unwrap().iter().cloned());
             }
-            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             for (backend, probe, expected) in [
                 (CodingAgent::Codex, "1.0.0", Some("codex-low")),
                 (CodingAgent::Claude, "1.0.0", None),
@@ -6732,7 +6762,7 @@ mod tests {
 
         #[test]
         fn threshold_validation_rejects_malformed_profile_and_fixture_versions() {
-            assert!(ProfileCatalog::from_definitions(&definitions()).is_ok());
+            assert!(crate::coding_agent::catalog::test_support::load(&definitions()).is_ok());
             for malformed in MALFORMED {
                 let mut value = definitions();
                 value["profiles"][0]["min_version"] = json!(malformed);
@@ -6776,8 +6806,10 @@ mod tests {
             ] {
                 for (profile, captured) in [(0, "1.5.0"), (0, "2.0.0-rc.1"), (1, "9.0.0")] {
                     assert!(
-                        ProfileCatalog::from_definitions(&citing(profile, citation, captured))
-                            .is_ok(),
+                        crate::coding_agent::catalog::test_support::load(&citing(
+                            profile, citation, captured
+                        ))
+                        .is_ok(),
                         "{citation} profile {profile} {captured}"
                     );
                 }
@@ -6801,7 +6833,6 @@ mod tests {
             rows.extend(lines("write disposable.txt"));
             let screen = terminal(&rows, 80, false).snapshot();
             for (run, name) in [("1.4.2", "first"), ("3.1.4", "second")] {
-                let fixture = format!("{FIXTURE}-codex-{name}");
                 let observed = Detector::new(&catalog, CodingAgent::Codex, Some(run))
                     .observe(&screen)
                     .unwrap();
@@ -6829,7 +6860,6 @@ mod tests {
                     .clone();
                 assert_eq!(capability.native_version(), run);
                 assert_eq!(capability.answer_rule_id(), format!("{name}-allow-plan"));
-                assert_eq!(capability.fixture_ids(), &[fixture]);
             }
         }
     }
@@ -6837,46 +6867,14 @@ mod tests {
     use crate::broker::runtime::PermissionDecision;
 
     #[test]
-    fn composer_observation_only_definition_preserves_observation_without_executable_plans() {
-        let value = simple_definition("composer_empty", true);
-        let catalog = ProfileCatalog::from_definitions(&value).unwrap();
-        capabilities(
-            &catalog,
-            CodingAgent::Codex,
-            Some(VERSION),
-            Coverage::Tested,
-            (Coverage::Unknown, Coverage::Unknown),
-        );
-        for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-            assert!(
-                catalog
-                    .composer_plan(CodingAgent::Codex, VERSION, operation)
-                    .is_none()
-            );
-        }
-        assert_eq!(
-            catalog
-                .capabilities(CodingAgent::Codex, Some(VERSION))
-                .detection,
-            Coverage::Unknown
-        );
-        assert!(
-            catalog
-                .capabilities(CodingAgent::Codex, Some(VERSION))
-                .answer_decisions
-                .is_empty()
-        );
-    }
-
-    #[test]
     fn composer_nullable_operations_and_absent_composer_keep_executable_coverage_unknown() {
-        for value in [definition(None, None), definitions()] {
-            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
-            let observation = if value["profiles"][0]["capabilities"]["composer"].is_null() {
-                Coverage::Unknown
-            } else {
-                Coverage::Tested
-            };
+        for (catalog, observation) in [
+            (composer_catalog(None, None), Coverage::Tested),
+            (
+                crate::coding_agent::catalog::test_support::load(&definitions()).unwrap(),
+                Coverage::Unknown,
+            ),
+        ] {
             capabilities(
                 &catalog,
                 CodingAgent::Codex,
@@ -6900,17 +6898,17 @@ mod tests {
             (
                 ComposerOperation::Prompt,
                 ComposerOperation::Exec,
-                definition(Some("7e"), None),
+                composer_catalog(Some("7e"), None),
                 (Coverage::Tested, Coverage::Unknown),
             ),
             (
                 ComposerOperation::Exec,
                 ComposerOperation::Prompt,
-                definition(None, Some("6b6c")),
+                composer_catalog(None, Some("6b6c")),
                 (Coverage::Unknown, Coverage::Tested),
             ),
         ] {
-            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let catalog = value;
             plan(&catalog, operation);
             capabilities(
                 &catalog,
@@ -6946,7 +6944,7 @@ mod tests {
                     "stages":[{"bytes_hex":"78","required_rule_id":RULE,"required_choice_id":choice}]})
             });
         value["profiles"][0]["capabilities"]["answers"] = json!(answers);
-        let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
         let prompt = plan(&catalog, ComposerOperation::Prompt);
         let exec = plan(&catalog, ComposerOperation::Exec);
         assert_eq!(prompt.encode("literal").unwrap(), b"literal~");
@@ -6990,7 +6988,7 @@ mod tests {
 
     #[test]
     fn composer_prompt_preserves_literal_utf8_between_empty_prefix_and_tested_submit_bytes() {
-        let catalog = ProfileCatalog::from_definitions(&definition(Some("7e"), None)).unwrap();
+        let catalog = composer_catalog(Some("7e"), None);
         let literal = "  literal 世界 '$x' `backticks` \\\"quotes\\\"  ";
         let bytes = plan(&catalog, ComposerOperation::Prompt)
             .encode(literal)
@@ -7001,7 +6999,7 @@ mod tests {
 
     #[test]
     fn composer_exec_owns_exact_bang_space_prefix_without_changing_the_caller_literal() {
-        let catalog = ProfileCatalog::from_definitions(&definition(None, Some("6b6c"))).unwrap();
+        let catalog = composer_catalog(None, Some("6b6c"));
         let literal = "printf '%s' 世界 '$x' `literal`";
         let bytes = plan(&catalog, ComposerOperation::Exec)
             .encode(literal)
@@ -7019,7 +7017,7 @@ mod tests {
                     ComposerOperation::Prompt => definition(Some(&hex), None),
                     ComposerOperation::Exec => definition(None, Some(&hex)),
                 };
-                let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+                let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
                 let selected = plan(&catalog, operation);
                 let literal_size = 65536 - operation.prefix().len() - submit_length;
                 let literal = format!(
@@ -7054,7 +7052,7 @@ mod tests {
                 ComposerOperation::Prompt => definition(Some(&hex), None),
                 ComposerOperation::Exec => definition(None, Some(&hex)),
             };
-            let catalog = ProfileCatalog::from_definitions(&good).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&good).unwrap();
             let selected = plan(&catalog, operation);
             assert_eq!(
                 selected.encode("positive").unwrap(),

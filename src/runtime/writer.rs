@@ -1710,10 +1710,9 @@ mod tests {
         let large = |sequence| {
             let mut value = run_transition(&run, sequence);
             let mut raw = value.evidence_json.clone();
-            raw["sensitive"] = serde_json::json!(false);
             raw["excerpt"] = serde_json::json!("x".repeat(6000));
             value.evidence_json = policy.apply(&raw).unwrap();
-            value.kind = RuntimeEventKind::PermissionDeniedObserved;
+            value.kind = RuntimeEventKind::AutomaticRefusalObserved;
             value.cause_json = None;
             let bytes = frame(&value);
             (value, bytes)

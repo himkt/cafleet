@@ -176,7 +176,6 @@ pub(crate) struct ObservedRequest {
     pub(super) semantic: SemanticFingerprint,
     pub(super) choices: Vec<String>,
     pub(super) focus: String,
-    pub(super) native_correlation: Option<String>,
     pub(super) output_seq: u64,
 }
 impl ObservedRequest {
@@ -188,7 +187,6 @@ impl ObservedRequest {
             && self.semantic == other.semantic
             && self.choices == other.choices
             && self.focus == other.focus
-            && self.native_correlation == other.native_correlation
             && self.answer_matches.len() == other.answer_matches.len()
             && self
                 .answer_matches
@@ -398,7 +396,6 @@ impl ObservationController {
                 semantic: first.semantic().clone(),
                 choices: first.choices().to_vec(),
                 focus: first.focus().to_owned(),
-                native_correlation: observed.native_correlation.clone(),
                 output_seq: first.output_seq(),
                 answer_matches,
             }))
@@ -1047,7 +1044,6 @@ pub(crate) mod native_capture {
     use crate::broker::runtime::RunStatus;
     use crate::coding_agent::Detector;
     use crate::coding_agent::ProfileCatalog;
-    use crate::coding_agent::detector::ScreenRegion;
     use crate::runtime::observation::native_capture::exporter::CaptureExporterTask;
     use crate::runtime::observation::native_capture::exporter::InertCaptureExportHooks;
     pub(crate) use crate::runtime::observation::native_capture::exporter::NativeCaptureExportBoundary;
@@ -1144,13 +1140,21 @@ pub(crate) mod native_capture {
     pub(crate) enum CaptureMaskReason {
         ReviewedPrivacy,
     }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct CaptureRegion {
+        pub(crate) top: u16,
+        pub(crate) left: u16,
+        pub(crate) bottom: u16,
+        pub(crate) right: u16,
+    }
     #[derive(Clone, Debug, Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     pub(crate) struct CaptureMask {
         pub(crate) screen: CaptureScreen,
         pub(crate) rows: u16,
         pub(crate) cols: u16,
-        pub(crate) region: ScreenRegion,
+        pub(crate) region: CaptureRegion,
         pub(crate) reason: CaptureMaskReason,
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2174,7 +2178,6 @@ pub(crate) mod native_capture {
 
         use crate::broker::Placement;
         use crate::broker::runtime as storage;
-        use crate::coding_agent::detector::ScreenRegion;
         use crate::digest::sha256_hex;
         use crate::runtime::observation::native_capture::*;
         use crate::runtime::system::test_support::TestChild;
@@ -2231,7 +2234,7 @@ pub(crate) mod native_capture {
                 screen: CaptureScreen::Either,
                 rows: 24,
                 cols: 80,
-                region: ScreenRegion {
+                region: CaptureRegion {
                     top,
                     left,
                     bottom,
@@ -10146,8 +10149,6 @@ stored_enum!(Visibility, "observation.visibility", {
 pub(crate) enum GateReason {
     Candidate,
     Interaction,
-    Working,
-    Draft,
     Unknown,
     ObserverUnavailable,
     Gap,
@@ -10298,7 +10299,6 @@ struct Active {
     rule_id: String,
     fingerprint: SemanticFingerprint,
     evidence: Value,
-    native: Option<String>,
 }
 pub(crate) struct EpisodeTracker {
     run_id: i64,
@@ -10307,11 +10307,8 @@ pub(crate) struct EpisodeTracker {
     active: Option<Active>,
     candidate: Option<Candidate>,
     boundary: Option<Instant>,
-    refusal_boundary: Option<Instant>,
     obscurity: Option<Instant>,
     obscured: bool,
-    refusal_candidate: Option<Candidate>,
-    last_refusal: Option<SemanticFingerprint>,
     last_output: Option<u64>,
     last_time: Option<Instant>,
     finished: bool,
@@ -10356,11 +10353,8 @@ impl EpisodeTracker {
             active: None,
             candidate: None,
             boundary: None,
-            refusal_boundary: None,
             obscurity: None,
             obscured: false,
-            refusal_candidate: None,
-            last_refusal: None,
             last_output: None,
             last_time: None,
             finished: false,
@@ -10445,7 +10439,6 @@ impl EpisodeTracker {
                 .clone()
                 .ok_or_else(|| error("interaction fingerprint required"))?,
             evidence,
-            native: value.native_correlation.clone(),
         });
         self.candidate = None;
         Ok(draft)
@@ -10475,13 +10468,8 @@ impl EpisodeTracker {
             }
             let first = self.annotations.mark_emitted(block);
             let observed_mode = || {
-                self.policy.displayed_mode(
-                    &block.rule_id,
-                    block.raw_evidence["sensitive"]
-                        .as_bool()
-                        .expect("detector evidence carries its sensitivity"),
-                    block.raw_evidence["observed_mode"].as_str(),
-                )
+                self.policy
+                    .displayed_mode(&block.rule_id, block.raw_evidence["observed_mode"].as_str())
             };
             let observation = |automatic_review, observed_mode| EffectivePolicyObservation {
                 automatic_review,
@@ -10564,10 +10552,7 @@ impl EpisodeTracker {
         )?;
         let evidence = self.policy.apply(&value.raw_evidence)?;
         self.current_evidence = Some(evidence.clone());
-        if matches!(
-            value.kind,
-            ObservationKind::Interaction(_) | ObservationKind::PermissionDenied
-        ) {
+        if matches!(value.kind, ObservationKind::Interaction(_)) {
             ensure(
                 value.fingerprint.is_some(),
                 "semantic observation requires fingerprint",
@@ -10661,53 +10646,12 @@ impl EpisodeTracker {
                 }
             }
         }
-        if value.kind == ObservationKind::PermissionDenied {
-            self.refusal_boundary = None;
-            let fingerprint = value
-                .fingerprint
-                .as_ref()
-                .expect("validated refusal fingerprint");
-            if self.last_refusal.as_ref() != Some(fingerprint) {
-                let since = Candidate::since(&mut self.refusal_candidate, fingerprint, now);
-                if settled(now, since, CANDIDATE_SETTLE, &mut update.next_deadline) {
-                    let episode = self
-                        .active
-                        .as_ref()
-                        .filter(|active| {
-                            active.native.is_some() && active.native == value.native_correlation
-                        })
-                        .map(|active| (active.sequence, active.class));
-                    update.transitions.push(self.draft(
-                        RuntimeEventKind::PermissionDeniedObserved,
-                        episode,
-                        evidence.clone(),
-                        None,
-                        at,
-                    ));
-                    self.last_refusal = Some(fingerprint.clone());
-                    self.refusal_candidate = None;
-                }
-            }
-        } else {
-            self.refusal_candidate = None;
-            if value.verified_noninteraction && self.last_refusal.is_some() {
-                let since = *self.refusal_boundary.get_or_insert(now);
-                if settled(now, since, BOUNDARY_SETTLE, &mut update.next_deadline) {
-                    self.last_refusal = None;
-                    self.refusal_boundary = None;
-                }
-            } else {
-                self.refusal_boundary = None;
-            }
-        }
         update.visibility = if self.active.is_some() {
             Visibility::Obscured
         } else {
             Visibility::NotVisible
         };
         update.eligibility = match value.kind {
-            ObservationKind::Working => InputEligibility::Hold(GateReason::Working),
-            ObservationKind::ComposerDraft => InputEligibility::Hold(GateReason::Draft),
             ObservationKind::ComposerEmpty if self.active.is_some() => {
                 InputEligibility::Hold(GateReason::Interaction)
             }
@@ -10735,10 +10679,8 @@ impl EpisodeTracker {
     }
     fn clear_boundaries(&mut self) {
         self.boundary = None;
-        self.refusal_boundary = None;
         self.obscurity = None;
         self.obscured = false;
-        self.refusal_candidate = None;
     }
     pub(crate) fn finish(
         &mut self,
@@ -11089,7 +11031,9 @@ mod tests {
         use crate::runtime::observation::tests::*;
 
         fn gated(bytes: &[u8], sequence: u64) -> ScreenObservation {
-            let catalog = ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap();
+            let catalog =
+                crate::coding_agent::catalog::test_support::load(&gated_fixture_definition())
+                    .unwrap();
             let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             state.feed(bytes).unwrap();
             let mut value = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
@@ -11231,7 +11175,7 @@ mod tests {
                 Ok(())
             }
         }
-        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
         let mut bridge = ParserAlgorithmBridge {
             detector: Detector::new(&catalog, CodingAgent::Codex, Some(VERSION)),
             tracker: tracker(),
@@ -11268,48 +11212,21 @@ mod tests {
         )
     }
 
-    fn correlated(kind: &str, identity: Option<&str>, sequence: u64) -> ScreenObservation {
-        let mut definition = definitions();
-        definition["profiles"][0]["rules"][0]["observation"] = json!(kind);
-        definition["profiles"][0]["rules"][0]["verified_noninteraction"] =
-            json!(kind == "permission_denied");
-        let mut rows = lines("write disposable.txt");
-        if let Some(identity) = identity {
-            rows.insert(5, format!("Native correlation: {identity}"));
-            definition["profiles"][0]["rules"][0]["matchers"].as_array_mut().unwrap().push(json!({"id":"native","scope":"line","pattern":"^Native correlation: (?P<identity>[a-z0-9-]+)$"}));
-            definition["profiles"][0]["rules"][0]["extract"]["native_request_id"] =
-                json!({"matcher_id":"native","capture":"identity"});
-        }
-        sequenced(
-            observation(&definition, &terminal(&rows, 80, false).snapshot()),
-            sequence,
-        )
-    }
-
-    fn secret_observation(
-        secret: &str,
-        sensitive: bool,
-        cols: u16,
-        sequence: u64,
-    ) -> ScreenObservation {
+    fn secret_observation(secret: &str, cols: u16, sequence: u64) -> ScreenObservation {
         let mut definition = definitions();
         let rule = &mut definition["profiles"][0]["rules"][0];
-        rule["sensitive"] = json!(sensitive);
         rule["matchers"][1]["pattern"] =
             json!(format!("^> (?P<label>Allow {})$", regex::escape(secret)));
         rule["matchers"][2]["pattern"] =
             json!(format!("^  (?P<label>Deny {})$", regex::escape(secret)));
-        rule["matchers"].as_array_mut().unwrap().push(json!({"id":"native","scope":"line","pattern":format!("^Native correlation: (?P<identity>{})$",regex::escape(secret))}));
-        rule["extract"]["native_request_id"] = json!({"matcher_id":"native","capture":"identity"});
         let mut rows = lines(secret);
         rows[2] = format!("> Allow {secret}");
         rows[3] = format!("  Deny {secret}");
-        rows.insert(5, format!("Native correlation: {secret}"));
         let value = sequenced(
             observation(&definition, &terminal(&rows, cols, false).snapshot()),
             sequence,
         );
-        for field in ["operation", "choices", "native_request_id", "excerpt"] {
+        for field in ["operation", "choices", "excerpt"] {
             assert!(
                 value.raw_evidence[field].to_string().contains(secret),
                 "canary missing from raw {field}"
@@ -11806,146 +11723,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_refusal_requires_stability_and_retains_deduplication_across_uncertainty() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        let refusal = correlated("permission_denied", None, 1);
-        assert!(
-            tracker
-                .observe(&refusal, origin, NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&refusal, origin + Duration::from_millis(99), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let result = tracker
-            .observe(&refusal, origin + Duration::from_millis(100), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(
-            result.transitions[0].kind,
-            RuntimeEventKind::PermissionDeniedObserved
-        );
-        assert_eq!(result.transitions[0].episode_seq, None);
-        tracker
-            .observe(&unknown(2), origin + Duration::from_millis(150), NOW)
-            .unwrap();
-        let repeated = correlated("permission_denied", None, 3);
-        assert!(
-            tracker
-                .observe(&repeated, origin + Duration::from_millis(200), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&repeated, origin + Duration::from_millis(300), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn runtime_episode_refusal_dedup_resets_after_a_verified_250ms_boundary() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        let first = correlated("permission_denied", None, 1);
-        tracker.observe(&first, origin, NOW).unwrap();
-        tracker
-            .observe(&first, origin + Duration::from_millis(100), NOW)
-            .unwrap();
-        let empty = sequenced(state_observation("composer_empty", true), 2);
-        tracker
-            .observe(&empty, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        tracker
-            .observe(&empty, origin + Duration::from_millis(450), NOW)
-            .unwrap();
-        let next = correlated("permission_denied", None, 3);
-        tracker
-            .observe(&next, origin + Duration::from_millis(500), NOW)
-            .unwrap();
-        let result = tracker
-            .observe(&next, origin + Duration::from_millis(600), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(
-            result.transitions[0].kind,
-            RuntimeEventKind::PermissionDeniedObserved
-        );
-    }
-
-    #[test]
-    fn runtime_episode_uncertainty_restarts_a_pending_refusal_before_its_first_emission() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        tracker
-            .observe(&correlated("permission_denied", None, 1), origin, NOW)
-            .unwrap();
-        tracker
-            .observe(&unknown(2), origin + Duration::from_millis(99), NOW)
-            .unwrap();
-        let refusal = correlated("permission_denied", None, 3);
-        assert!(
-            tracker
-                .observe(&refusal, origin + Duration::from_millis(100), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&refusal, origin + Duration::from_millis(199), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let result = tracker
-            .observe(&refusal, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(
-            result.transitions[0].kind,
-            RuntimeEventKind::PermissionDeniedObserved
-        );
-    }
-
-    #[test]
-    fn runtime_episode_refusal_linkage_requires_a_matching_native_correlation() {
-        for (identity, expected) in [
-            (None, None),
-            (Some("request-2"), None),
-            (Some("request-1"), Some(1)),
-        ] {
-            let origin = Instant::now();
-            let mut tracker = tracker();
-            let request = correlated("permission_request", Some("request-1"), 1);
-            open(&mut tracker, &request, origin);
-            let result = correlated("permission_denied", identity, 2);
-            tracker
-                .observe(&result, origin + Duration::from_millis(200), NOW)
-                .unwrap();
-            let stable = tracker
-                .observe(&result, origin + Duration::from_millis(300), NOW)
-                .unwrap();
-            let event = stable
-                .transitions
-                .iter()
-                .find(|event| event.kind == RuntimeEventKind::PermissionDeniedObserved)
-                .unwrap();
-            assert_eq!(event.episode_seq, expected);
-        }
-    }
-
-    #[test]
     fn runtime_episode_gap_reset_restarts_an_uncommitted_candidate() {
         let origin = Instant::now();
         let mut tracker = tracker();
@@ -12052,8 +11829,6 @@ mod tests {
         for reason in [
             GateReason::Candidate,
             GateReason::Interaction,
-            GateReason::Working,
-            GateReason::Draft,
             GateReason::Unknown,
         ] {
             assert!(tracker().reset_observation(reason).is_err());
@@ -12090,32 +11865,19 @@ mod tests {
 
     #[test]
     fn runtime_episode_noninteraction_states_gate_independently_without_allocating_rows() {
-        for (kind, reason) in [
-            ("working", Some(GateReason::Working)),
-            ("composer_draft", Some(GateReason::Draft)),
-            ("composer_empty", None),
-        ] {
-            let mut tracker = tracker();
-            let result = tracker
-                .observe(&state_observation(kind, true), Instant::now(), NOW)
-                .unwrap();
-            assert!(result.transitions.is_empty());
-            assert!(result.latest_evidence.is_none());
-            match reason {
-                Some(GateReason::Working) => assert!(matches!(
-                    result.eligibility,
-                    InputEligibility::Hold(GateReason::Working)
-                )),
-                Some(_) => assert!(matches!(
-                    result.eligibility,
-                    InputEligibility::Hold(GateReason::Draft)
-                )),
-                None => assert!(matches!(
-                    result.eligibility,
-                    InputEligibility::ComposerEmpty
-                )),
-            }
-        }
+        let result = tracker()
+            .observe(
+                &state_observation("composer_empty", true),
+                Instant::now(),
+                NOW,
+            )
+            .unwrap();
+        assert!(result.transitions.is_empty());
+        assert!(result.latest_evidence.is_none());
+        assert!(matches!(
+            result.eligibility,
+            InputEligibility::ComposerEmpty
+        ));
         let result = tracker().observe(&unknown(1), Instant::now(), NOW).unwrap();
         assert!(matches!(
             result.eligibility,
@@ -12150,8 +11912,8 @@ mod tests {
     #[test]
     fn runtime_episode_evidence_policy_precedes_every_transition_and_redraw_update() {
         let secret = "synthetic-secret-194";
-        for (sensitive, named_sensitive) in [(false, false), (true, false), (false, true)] {
-            let value = secret_observation(secret, sensitive, 80, 1);
+        for named_sensitive in [false, true] {
+            let value = secret_observation(secret, 80, 1);
             let policy = EvidencePolicy::redacted(
                     &json!({"schema_version":1,"patterns":[secret],"sensitive_rules":if named_sensitive {vec![RULE]}else{vec![]}}),
                     &[RULE],
@@ -12165,13 +11927,13 @@ mod tests {
             assert!(evidence.get("semantic_fingerprint").is_none());
             assert_eq!(
                 evidence["operation"],
-                if sensitive || named_sensitive {
+                if named_sensitive {
                     Value::Null
                 } else {
                     json!("[redacted]")
                 }
             );
-            let redraw = secret_observation(secret, sensitive, 100, 2);
+            let redraw = secret_observation(secret, 100, 2);
             let update = tracker
                 .observe(&redraw, origin + Duration::from_millis(200), NOW)
                 .unwrap();
@@ -12185,9 +11947,9 @@ mod tests {
         let secret = "synthetic-secret-194";
         let origin = Instant::now();
         let mut tracker = tracker();
-        let value = secret_observation(secret, false, 80, 1);
+        let value = secret_observation(secret, 80, 1);
         let opened = open(&mut tracker, &value, origin);
-        for field in ["operation", "choices", "native_request_id", "excerpt"] {
+        for field in ["operation", "choices", "excerpt"] {
             assert!(opened.transitions[0].evidence_json[field].is_null());
         }
         assert!(
@@ -12201,7 +11963,7 @@ mod tests {
         let event = pool.materialize(&opened.transitions[0]).unwrap();
         assert!(!serde_json::to_string(&event).unwrap().contains(secret));
         for (sequence, detail) in [(2, "first"), (3, secret)] {
-            let mut redraw = secret_observation(secret, false, 100, sequence);
+            let mut redraw = secret_observation(secret, 100, sequence);
             redraw.raw_evidence["excerpt"] = json!(format!("Detail: {detail}"));
             let update = tracker
                 .observe(
@@ -12456,7 +12218,8 @@ mod tests {
                 .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
-                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
             ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata(), 1..=256)
                 .map(|_| ())
         }
@@ -12502,7 +12265,8 @@ mod tests {
             fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
-                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
             let mut controller = ObservationController::new(
                 &fixture.run,
                 &catalog,
@@ -13799,19 +13563,7 @@ mod tests {
         fn controller_retains_both_superseded_originals_when_the_first_submit_hits_pressure() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
-            let mut definitions = definitions();
-            let mut refusal = definitions["profiles"][0]["rules"][0].clone();
-            refusal["id"] = serde_json::json!("synthetic-refusal");
-            refusal["observation"] = serde_json::json!("permission_denied");
-            refusal["verified_noninteraction"] = serde_json::json!(true);
-            refusal["region"]["start_pattern"] = serde_json::json!("^Synthetic refusal result$");
-            definitions["profiles"][0]["rules"]
-                .as_array_mut()
-                .unwrap()
-                .push(refusal);
-            definitions["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
-                serde_json::json!(["synthetic-permission", "synthetic-refusal"]);
-            let catalog = ProfileCatalog::from_definitions(&definitions).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let mut writer = start(&fixture, hooks.clone());
@@ -13845,16 +13597,16 @@ mod tests {
                 assert!(!controller.has_pending());
             }
             assert_eq!(writer.status().pending_count, 63);
-            let refusal = String::from_utf8(form("write fixture-31.txt"))
+            let obscuring = String::from_utf8(form("write fixture-31.txt"))
                 .unwrap()
-                .replace("Synthetic permission request", "Synthetic refusal result");
+                .replace("Synthetic permission request", "Synthetic partial redraw");
             clock.set(6400);
-            terminal.feed(refusal.as_bytes()).unwrap();
+            terminal.feed(obscuring.as_bytes()).unwrap();
             controller
                 .observer(&writer, &clock)
                 .observe(&terminal.snapshot())
                 .unwrap();
-            clock.set(6500);
+            clock.set(8500);
             controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
@@ -13863,14 +13615,14 @@ mod tests {
             assert!(!writer.status().degraded);
             assert!(!controller.has_pending());
             assert_eq!(committed(&fixture), 0);
-            clock.set(6550);
+            clock.set(8550);
             terminal
                 .feed_observed(
                     &form("write fixture-31.txt"),
                     &mut controller.observer(&writer, &clock),
                 )
                 .unwrap();
-            clock.set(6600);
+            clock.set(8600);
             let replacement = form("write final-original.txt");
             assert_eq!(replacement[0], 0x1b);
             terminal
@@ -13880,7 +13632,7 @@ mod tests {
             terminal
                 .feed_observed(&replacement[1..], &mut controller.observer(&writer, &clock))
                 .unwrap();
-            clock.set(6700);
+            clock.set(8700);
             let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
             assert_retained_pressure(attempt, controller.status());
             let original_sequence = terminal.snapshot().screen_seq;

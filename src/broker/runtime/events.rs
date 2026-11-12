@@ -82,7 +82,6 @@ fn source(kind: RuntimeEventKind) -> &'static str {
         RuntimeEventKind::InteractionOpened
         | RuntimeEventKind::InteractionObscured
         | RuntimeEventKind::InteractionClosed
-        | RuntimeEventKind::PermissionDeniedObserved
         | RuntimeEventKind::AutomaticRefusalObserved
         | RuntimeEventKind::AutomaticReviewUnavailable => "runner_screen",
         _ => "runner_lifecycle",
@@ -544,7 +543,6 @@ fn payload(
         "kind":transition.kind.as_str(),"interaction_id":interaction_id,
         "classification":transition.classification.map(|class| class.as_str()),
         "observed_at":transition.observed_at,"source":source(transition.kind),
-        "native_request_id":transition.evidence_json["native_request_id"],
         "decision_outcome":"unknown","evidence":transition.evidence_json,
     });
     if let Some(reason) = transition.close_reason {
@@ -1017,10 +1015,9 @@ mod tests {
                 "backend":"codex","native_version":"0.163.0",
                 "rule_id":rule,"screen_seq":140,
                 "operation":operation,"operation_rows":operation.map(|text| text.split('\n').count()),
-                "choices":null,"native_request_id":null,
+                "choices":null,
                 "excerpt":format!("notice {SECRET}"),
-                "truncated":false,"sensitive":false,
-            })
+                "truncated":false,})
         }
 
         pub(super) fn refusal_raw(operation: &str) -> Value {
@@ -1097,7 +1094,6 @@ mod tests {
             assert_eq!(payload["interaction_id"], Value::Null);
             assert_eq!(payload["classification"], Value::Null);
             assert_eq!(payload["source"], "runner_screen");
-            assert_eq!(payload["native_request_id"], Value::Null);
             assert_eq!(payload["decision_outcome"], "unknown");
             assert_eq!(event.interaction_id, None);
             assert_eq!(event.notification_state, NotificationState::Inbox);
@@ -2087,7 +2083,7 @@ mod tests {
         fn runtime_payload_v2_other_interaction_classes_have_explicit_null_action() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            let event = fixture.open_as(&owner, InteractionClass::Trust);
+            let event = fixture.open_as(&owner, InteractionClass::UnknownInteraction);
             assert_v2(&event);
             assert_eq!(event.payload_json["director_action"], Value::Null);
         }
@@ -2150,7 +2146,7 @@ mod tests {
         }
 
         #[test]
-        fn runtime_payload_v2_obscurity_closure_and_refusal_have_null_action() {
+        fn runtime_payload_v2_obscurity_and_closure_have_null_action() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             fixture.open(&owner);
@@ -2160,12 +2156,6 @@ mod tests {
                     ..opening(owner.run_id, 2, 1, metadata())
                 },
                 closure(owner.run_id, 3, 1),
-                ObservedTransition {
-                    kind: RuntimeEventKind::PermissionDeniedObserved,
-                    episode_seq: None,
-                    classification: None,
-                    ..opening(owner.run_id, 4, 1, metadata())
-                },
             ];
             let events = transitions
                 .iter()
@@ -2671,7 +2661,6 @@ mod tests {
             assert_eq!(payload[key], id, "{key}");
         }
         assert_eq!(payload["decision_outcome"], "unknown");
-        assert_eq!(payload["native_request_id"], Value::Null);
         assert_eq!(payload["source"], "runner_screen");
         assert_eq!(
             crate::broker::poll_messages(&reader, fixture.director).unwrap(),
@@ -3124,7 +3113,7 @@ mod tests {
         );
         let next = ObservedTransition {
             event_seq: 2,
-            kind: RuntimeEventKind::PermissionDeniedObserved,
+            kind: RuntimeEventKind::AutomaticRefusalObserved,
             cause_json: None,
             ..exit
         };
@@ -3246,7 +3235,7 @@ mod tests {
 
     #[test]
     fn event_shape_regression_rejects_lifecycle_causes_on_screen_transitions() {
-        let kind = RuntimeEventKind::PermissionDeniedObserved;
+        let kind = RuntimeEventKind::AutomaticRefusalObserved;
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
         fixture.reserve(&owner);
@@ -3342,34 +3331,6 @@ mod tests {
         let event = fixture.open(&owner);
         let mut payload = event.payload_json.clone();
         payload["cause"] = json!({"kind":"native_exit","exit_code":7,"exit_signal":null});
-        replace_public_payload(&mut fixture.conn, &event, payload);
-        assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
-    }
-
-    #[test]
-    fn event_shape_regression_binds_public_native_request_id_to_post_policy_evidence() {
-        let mut fixture = Fixture::redacted();
-        let owner = fixture.activate();
-        fixture.reserve(&owner);
-        let evidence = redacted_policy(&["unmatched"])
-            .apply(&raw_evidence("ordinary-request"))
-            .unwrap();
-        let event = storage::persist_transition(
-            &mut fixture.conn,
-            &owner,
-            &opening(owner.run_id, 1, 1, evidence),
-            PersistenceMode::Live,
-        )
-        .unwrap()
-        .0;
-        assert!(!event.payload_json["native_request_id"].is_null());
-        assert_eq!(
-            event.payload_json["native_request_id"],
-            event.payload_json["evidence"]["native_request_id"]
-        );
-        storage::get_event(&fixture.conn, event.event_id).unwrap();
-        let mut payload = event.payload_json.clone();
-        payload["native_request_id"] = json!("unrelated-public-request");
         replace_public_payload(&mut fixture.conn, &event, payload);
         assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
     }

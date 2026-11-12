@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 26/49 tasks complete
+**Progress**: 30/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -128,7 +128,6 @@ Line numbers are at HEAD `79627cb6`. Before each removal the implementer re-loca
 
 | ID | Change | Sources | Contract edits |
 |---|---|---|---|
-| AGT1 | Delete the `#[cfg(test)] impl` with `CodingAgent::validate_spawn_policy_argv` (`mod.rs:457-550`) and the three `*_capture_argv_validation_*` tests. | E.C1 | — |
 | AGT2 | `Settlement::Verified` becomes a unit variant. | E.C2 | — |
 | AGT3 | Drop `&& !cap.fixture_ids().is_empty()` (`inputs.rs:1103`), `AnswerCapability.fixture_ids`, its accessor, `Answer.fixtures` and the test constructors' `fixture_ids` parameter. | E.C3 | `SPEC.md:2270` drops "and the cited fixture identities" |
 | AGT4 | Shrink `ScreenRegion` to `{top, bottom}` without serde; `native_capture` gets its own `CaptureRegion {top, left, bottom, right}` with serde for its masks (`observation.rs:1153`, `:1293-1294`, `:1976`, `:2234`). | E.C4 | — |
@@ -143,7 +142,6 @@ Line numbers are at HEAD `79627cb6`. Before each removal the implementer re-loca
 | AGT13 | Reduce `Detector::match_answers`'s `applies` closure to `observed.match_evidence == MatchEvidence::Complete`, with `debug_assert!` for the backend, version and request-rule equalities. | E.P9 | — |
 | AGT14 | Remove Hermes `--permission-mode manual`; `smart` is the only Hermes choice. | E.P10 | Every Hermes `manual` mention in `SPEC.md` (`:1814`, `:2180`, `:2206`, `:2573` "under either Hermes launch choice"); `cli.md:226` choices and `manual` class list; `docs/docs/concepts/coding-agents.md:45`, `:48`; hermes `{permission_flags}` in `assets/skills/cafleet/reference/coding-agents.md:357` |
 | AGT15 | Delete the Hermes plugin's `_cafleet_env()` and its `env=` arguments (`assets/extensions/hermes/cafleet/__init__.py:88-98`, `:300`). | E.P11 | `SPEC.md:2084` Hermes cell becomes "The gateway's environment" |
-| AGT16 | Remove the `HermesConfig` trait; call `HermesCli` directly and fake it with `test_support::executable_stub` (fakes at `hermes.rs:703`, `:872`, `assets.rs:528`). | E.P12 | — |
 | AGT17 | Delete `pi_extension()`; derive the path from `assets::pi_extensions_dir` and the embedded file list. | E.P13 | — |
 
 AGT7 and AGT8 also delete the `"native_request_id"` extract key and the `"sensitive"` rule key from every rule in `assets/profiles/bundled.json` (both keys appear on every rule) and from every test catalog definition (`catalog.rs` and `detector.rs` tests, `observation.rs` synthetic definitions including `native_capture`'s), in the same step, because `deny_unknown_fields` rejects them once the Rust fields are gone.
@@ -336,7 +334,7 @@ Run each pattern with `grep -rnE --exclude-dir=native` over `src/ assets/ SPEC.m
 | `has no recorded run\|require_runtime\|finalize_deletion` | `missing_run`'s message in `broker/members.rs` and its recovery `snapshot` caller |
 | `hermes: smart, manual\|either Hermes launch choice\|Explicit Hermes`, plus every backtick-quoted `manual` within a Hermes row or sentence | none; `manual` stays for the claude, codex, opencode and pi modes that keep it |
 | `startup_process_evidence\|ExclusiveReceiptGuard\|exclude_previous_owner\|reconcile_input_with_host\|from_exclusive_guard\|receipt-only exclusive ownership\|exclusive receipt\|native startup probe\|RecoveryHealth::Mismatched` | none |
-| `RecoveryBoundary\|failures_are_fatal\|validate_spawn_policy_argv\|HermesConfig\|remaining_budget\|assert_no_debug_or_serialize\|_cafleet_env\|fn pi_extension\|default_tmux_socket\|ignore_missing\|timeout_secs` | `RecoveryBoundary` only under `#[cfg(test)]` |
+| `RecoveryBoundary\|failures_are_fatal\|remaining_budget\|assert_no_debug_or_serialize\|_cafleet_env\|fn pi_extension\|default_tmux_socket\|ignore_missing\|timeout_secs` | `RecoveryBoundary` only under `#[cfg(test)]` |
 | `embedded in the CAFleet binary` near the native screen fixtures, `The loader validates every catalog fixture entry` | none |
 | `run-less\|without a recorded run\|Missing placement\|missing placement` | none; the run-less ordinary-member tests (`cli/fleet.rs:1543`, `cli/member.rs:2720-2752`, `cli/message.rs:980-1030`) assert removed behavior and are deleted with BRK7 |
 
@@ -349,6 +347,8 @@ The `schema_version` patterns target only the removed constant versions; the ope
 | `RequestTokenSource`, `InputDeadlineClock`, `ProcessObservations`, `OutboxIo` (with `Outbox<S>` generics), `ProcessTable` | B.P5 | Drive fault/race tests that cannot be produced against the real OS |
 | `Clock`, `ReceiveIo`, `deliver_pending_with` host injection | H.P7 | Deterministic in-file unit tests for sleeps, busy errors and lock contention |
 | `HermesSettlementHost`, `SpawnProbe` | E.P12 | The settlement host injects clock and sleep; the probe fakes native version probes |
+| `HermesConfig` and its fakes | E.P12 | Deadline and concurrency injection: the setup and doctor tests assert per-call deadlines, call order and concurrent reads that an executable stub cannot observe |
+| `CodingAgent::validate_spawn_policy_argv` and its `*_capture_argv_validation_*` tests | E.C1 | The retained `native_capture` binding validates the spawned argv through it |
 | `RecoveryHost` trait (process/health evidence) | D.P2 | Crash-boundary tests; only `RecoveryBoundary`/`checkpoint` go (LIFE6) |
 | `listen_snapshot_with_clock` | G.P6 | Same deterministic-timing seam class; expires the deadline mid-scan |
 | `#[cfg(test)]` instrumentation inside `Transport`/`TerminalState` (observation hooks, observation phase, deferred child bytes, title callbacks, `feed_observed`, `transport.rs:100-105` … `:1089-1090`) | C.P3 | Compiled out of release builds and already inline `#[cfg(test)]` per § Test placement |
@@ -444,10 +444,10 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 9: Coding agents and the fixture registry split
 
-- [ ] Apply AGT6 with its baseline CHECK edits <!-- completed: -->
-- [ ] Apply AGT1–AGT5, AGT7–AGT10 and AGT12–AGT17 <!-- completed: -->
-- [ ] Apply § Fixture registry split items 1–3 (AGT11) <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply AGT6 with its baseline CHECK edits <!-- completed: 2026-11-12T12:55 -->
+- [x] Apply AGT2–AGT5, AGT7–AGT10, AGT12–AGT15 and AGT17 <!-- completed: 2026-11-12T13:00 -->
+- [x] Apply § Fixture registry split items 1–3 (AGT11) <!-- completed: 2026-11-12T12:55 -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T13:00 -->
 
 ### Step 10: Runtime observation and transport
 

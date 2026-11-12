@@ -1348,13 +1348,7 @@ mod tests {
                 let interaction = fixture.interaction(run, seq, class).unwrap();
                 fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",params![NOW,interaction]).unwrap();
             }
-            for class in [
-                "permission_denied",
-                "working",
-                "composer_empty",
-                "unknown",
-                "bogus",
-            ] {
+            for class in ["composer_empty", "unknown", "bogus"] {
                 assert!(fixture.interaction(run, seq + 1, class).is_err(), "{class}");
             }
         }

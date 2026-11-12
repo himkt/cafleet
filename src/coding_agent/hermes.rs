@@ -259,7 +259,7 @@ const BUSY_TAIL_LINES: usize = 8;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Settlement {
     /// The session's work stopped and none of its registered processes runs.
-    Verified { session_id: String },
+    Verified,
     /// The client had exited before settlement could stop its session.
     ClientAlreadyExited,
 }
@@ -295,7 +295,7 @@ fn settle_session(
         }
     };
     verify_processes(host, &session.hermes_home, &session_id)?;
-    Ok(Settlement::Verified { session_id })
+    Ok(Settlement::Verified)
 }
 
 fn already_exited_warning(member_id: i64) -> String {
@@ -1262,9 +1262,7 @@ mod tests {
         }
 
         fn verified() -> Settlement {
-            Settlement::Verified {
-                session_id: SESSION.into(),
-            }
+            Settlement::Verified
         }
 
         fn settled(host: &mut Host, recorded: Option<&str>) -> Result<Settlement, CafleetError> {
