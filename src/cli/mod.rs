@@ -411,21 +411,6 @@ pub(crate) mod test_support {
         assert!(error.to_string().contains(input), "{args:?}: {error}");
     }
 
-    pub(super) fn isolated_cli(
-        settings: &crate::config::Settings,
-        args: &[&str],
-    ) -> (std::process::Output, String) {
-        isolated_cli_with(
-            settings,
-            args,
-            &[(
-                "tmux",
-                "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"",
-            )],
-            &[],
-        )
-    }
-
     /// Runs the CLI with only `executables` (name, shell body) on PATH and `environment` added.
     /// Runs the libtest child `test` of this binary with `command`'s environment, capturing its
     /// output and bounding it to ten seconds.

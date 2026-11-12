@@ -309,7 +309,7 @@ fn same_association(
 
 fn permission_placement(conn: &Connection, run: &RunRecord) -> Result<Placement> {
     crate::broker::get_member(conn, run.member_id, run.fleet_id)?
-        .and_then(|member| member.placement)
+        .map(|member| member.placement)
         .ok_or_else(|| error("permission member placement unavailable"))
 }
 
@@ -1336,8 +1336,7 @@ pub(super) fn revalidate_run_snapshot(
             let member = crate::broker::get_member(conn, expected.member_id, expected.fleet_id)?
                 .ok_or_else(|| error("input member is absent"))?;
             ensure(
-                member.kind == crate::broker::MemberKind::Member
-                    && member.placement.as_ref() == Some(placement),
+                member.kind == crate::broker::MemberKind::Member && member.placement == *placement,
                 messages.placement_changed,
             )?;
         }
@@ -1889,8 +1888,7 @@ pub(crate) mod test_support {
             )
             .unwrap()
             .unwrap()
-            .placement
-            .unwrap();
+            .placement;
             Self {
                 fixture,
                 owner,
@@ -5649,7 +5647,7 @@ mod tests {
                             case.fixture.run.fleet_id,
                             "alternative",
                             "fixture",
-                            None,
+                            &crate::broker::members::test_support::placement(None),
                         )
                         .unwrap()
                         .member_id;
@@ -5774,7 +5772,7 @@ mod tests {
                         case.fixture.run.fleet_id,
                         "related-history-worker",
                         "assignment",
-                        Some(&placement),
+                        &placement,
                     )
                     .unwrap()
                     .member_id;
@@ -6236,7 +6234,6 @@ mod tests {
             .unwrap()
             .unwrap()
             .placement
-            .unwrap()
     }
 
     fn rows(conn: &Connection, excluded: &[&str]) -> Vec<crate::db::test_support::TableSnapshot> {

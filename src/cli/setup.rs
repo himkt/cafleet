@@ -826,11 +826,9 @@ fn state_summary(state: MemberState, runs: &[&MemberRun]) -> Summary {
 
 /// The literal Director ID shared by every listed run, or `<director-id>` when the runs span
 /// several fleets or a fleet records no Director.
-fn director_label(directors: &[Option<i64>]) -> String {
+fn director_label(directors: &[i64]) -> String {
     match directors.split_first() {
-        Some((Some(first), rest)) if rest.iter().all(|other| *other == Some(*first)) => {
-            first.to_string()
-        }
+        Some((first, rest)) if rest.iter().all(|other| other == first) => first.to_string(),
         _ => "<director-id>".to_owned(),
     }
 }
@@ -2248,7 +2246,7 @@ mod tests {
                     phrases: vec!["owner lock is free".into()],
                 }
             }
-            let same_fleet = [row(3, Some(1)), row(4, Some(1))];
+            let same_fleet = [row(3, 1), row(4, 1)];
             let same_fleet = [lost(&same_fleet[0]), lost(&same_fleet[1])];
             assert_eq!(
                 runtime_check(&same_fleet[0]).detail,
@@ -2258,16 +2256,12 @@ mod tests {
                 state_summary(MemberState::LostRuntime, &[&same_fleet[0], &same_fleet[1]]).detail,
                 "2 lost runtime: 3, 4 — run 'cafleet member recover ID --from-member-id 1' or 'cafleet member delete ID'"
             );
-            for spanning in [
-                [row(3, Some(1)), row(9, Some(7))],
-                [row(3, Some(1)), row(9, None)],
-            ] {
-                let runs = [lost(&spanning[0]), lost(&spanning[1])];
-                assert_eq!(
-                    state_summary(MemberState::LostRuntime, &[&runs[0], &runs[1]]).detail,
-                    "2 lost runtime: 3, 9 — run 'cafleet member recover ID --from-member-id <director-id>' or 'cafleet member delete ID'"
-                );
-            }
+            let spanning = [row(3, 1), row(9, 7)];
+            let runs = [lost(&spanning[0]), lost(&spanning[1])];
+            assert_eq!(
+                state_summary(MemberState::LostRuntime, &[&runs[0], &runs[1]]).detail,
+                "2 lost runtime: 3, 9 — run 'cafleet member recover ID --from-member-id <director-id>' or 'cafleet member delete ID'"
+            );
         }
 
         #[test]
@@ -2328,7 +2322,7 @@ mod tests {
                 run_status: RunStatus::Running,
                 cleanup_state: CleanupState::Incomplete,
                 member_status: "active".into(),
-                director_member_id: None,
+                director_member_id: 1,
             });
             Ok(rows)
         }

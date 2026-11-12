@@ -12,7 +12,7 @@ CREATE INDEX idx_members_fleet_status ON members (fleet_id, status);
 
 CREATE TABLE fleets (
     fleet_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
+    name TEXT NOT NULL,
     created_at TEXT NOT NULL,
     deleted_at TEXT,
     director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT

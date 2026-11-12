@@ -239,7 +239,7 @@ pub(super) fn historical_ownership(
     require(
         member.0 == run.fleet_id
             && director.0 == run.fleet_id
-            && fleet.director_member_id == Some(run.director_member_id)
+            && fleet.director_member_id == run.director_member_id
             && run.member_id != run.director_member_id,
         "member_runs.ownership",
         "member/fleet/Director mismatch",
@@ -312,7 +312,7 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
     )?;
     let fleet = crate::broker::fleets::require_live_fleet(conn, new.fleet_id)?;
     require(
-        fleet.director_member_id == Some(new.director_member_id)
+        fleet.director_member_id == new.director_member_id
             && new.member_id != new.director_member_id
             && crate::broker::members::active_member_fleet(conn, new.member_id)?
                 == Some(new.fleet_id),

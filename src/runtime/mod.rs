@@ -286,7 +286,7 @@ pub(crate) mod test_support {
                 fleet,
                 "worker",
                 "assignment",
-                Some(&placement),
+                &placement,
             )
             .unwrap()
             .member_id;

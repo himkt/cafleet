@@ -2307,7 +2307,7 @@ impl InputCoordinator {
         else {
             return Ok(Some("target_inactive"));
         };
-        if member.kind != MemberKind::Member || member.placement.as_ref() != Some(&self.placement) {
+        if member.kind != MemberKind::Member || member.placement != self.placement {
             return Ok(Some("target_changed"));
         }
         self.lock.validate(conn, &current.owner())?;
@@ -3819,9 +3819,7 @@ impl InputCoordinator {
                 member.kind == MemberKind::Member,
                 "input coordinator requires an ordinary member",
             )?;
-            member
-                .placement
-                .ok_or_else(|| error("input coordinator placement is absent"))
+            Ok(member.placement)
         })?;
         Ok(Self {
             placement,
@@ -8117,7 +8115,6 @@ mod tests {
                     .unwrap()
                     .unwrap()
                     .placement
-                    .expect("wrapped member placement")
                 }
                 pub(crate) fn quiesce_once(&mut self) -> InputDrain {
                     self.coordinator

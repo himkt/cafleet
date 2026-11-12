@@ -2309,8 +2309,7 @@ pub(crate) mod native_capture {
                 )
                 .unwrap()
                 .unwrap()
-                .placement
-                .unwrap();
+                .placement;
                 Self {
                     fixture,
                     artifacts,
@@ -7634,7 +7633,7 @@ pub(crate) mod native_capture {
                 "owned native generation changed",
             )?;
             let placement = crate::broker::get_member(conn, current.member_id, current.fleet_id)?
-                .and_then(|member| member.placement)
+                .map(|member| member.placement)
                 .ok_or_else(|| error("owned placement unavailable"))?;
             ensure(placement == launched.placement, "owned placement changed")?;
             Ok(current)
@@ -8941,7 +8940,7 @@ pub(crate) mod native_capture {
                 crate::db::initialize(conn)?;
                 let fleet = crate::broker::fleets::create_fleet(
                     conn,
-                    Some(format!("native-{}", approved.id).as_str()),
+                    format!("native-{}", approved.id).as_str(),
                     &crate::broker::NewPlacement {
                         backend: "tmux".into(),
                         mux_session: context.session.clone(),

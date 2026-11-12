@@ -4152,8 +4152,7 @@ pub(crate) mod test_support {
             )
             .unwrap()
             .unwrap()
-            .placement
-            .unwrap();
+            .placement;
             Self {
                 fixture,
                 artifacts,

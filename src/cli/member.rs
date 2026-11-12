@@ -210,31 +210,12 @@ pub(crate) enum MemberCommand {
 }
 
 fn require_pane(member: &MemberRecord, action: &str) -> Result<String, CafleetError> {
-    member
-        .placement
-        .as_ref()
-        .and_then(|placement| placement.mux_pane_id.clone())
-        .ok_or_else(|| {
-            CafleetError::App(format!(
-                "member {} has no pane yet (pending placement) — nothing to {action}.",
-                member.member_id
-            ))
-        })
-}
-
-fn load_member(
-    conn: &Connection,
-    member_id: i64,
-    tolerate_missing_placement: bool,
-) -> Result<MemberRecord, CafleetError> {
-    let member = crate::broker::members::active_member(conn, member_id)?;
-    if member.placement.is_none() && !tolerate_missing_placement {
-        return Err(CafleetError::App(format!(
-            "member {member_id} has no placement row; it was not spawned via \
-             `cafleet member create`."
-        )));
-    }
-    Ok(member)
+    member.placement.mux_pane_id.clone().ok_or_else(|| {
+        CafleetError::App(format!(
+            "member {} has no pane yet (pending placement) — nothing to {action}.",
+            member.member_id
+        ))
+    })
 }
 
 fn resolve_coding_agent(
@@ -246,13 +227,9 @@ fn resolve_coding_agent(
     if let Some(agent) = explicit {
         return Ok(agent);
     }
-    let director = broker::get_member(conn, director_id, fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("Director (member {director_id}) not found.")))?;
-    let placement = director.placement.ok_or_else(|| {
-        CafleetError::App(format!(
-            "Director (member {director_id}) has no placement; supply --coding-agent."
-        ))
-    })?;
+    let placement = broker::get_member(conn, director_id, fleet_id)?
+        .expect("the live fleet's root Director is an active member (INV2)")
+        .placement;
     coding_agent(&placement.coding_agent).ok_or(CafleetError::InvalidStoredValue {
         field: "member_placements.coding_agent".into(),
         value: placement.coding_agent,
@@ -375,12 +352,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
     if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
     }
-    let Some(director_id) = fleet.director_member_id else {
-        return Err(CafleetError::App(format!(
-            "fleet {fleet_id} has no root Director recorded; re-create the fleet \
-             with 'cafleet fleet create'."
-        )));
-    };
+    let director_id = fleet.director_member_id;
     let backend = resolve_coding_agent(conn, fleet_id, director_id, args.coding_agent)?;
     let agent_name = backend.name();
 
@@ -407,11 +379,10 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
     let context = crate::multiplexer::MultiplexerContext {
         session: director.mux_session.clone(),
         window_id: director.mux_window_id.clone(),
-        pane_id: director.mux_pane_id.clone().ok_or_else(|| {
-            CafleetError::App(format!(
-                "fleet {fleet_id}'s Director placement records no pane; re-create the fleet with 'cafleet fleet create'."
-            ))
-        })?,
+        pane_id: director
+            .mux_pane_id
+            .clone()
+            .expect("the root Director placement records its pane"),
     };
 
     use crate::runtime as runner;
@@ -568,18 +539,17 @@ fn lock_member_deletion(
         settings,
         deadline,
         |conn| {
-            let member = load_member(conn, member_id, true)?;
-            let targets = member
-                .placement
-                .as_ref()
-                .filter(|placement| placement.mux_pane_id.is_some())
-                .map(|placement| vec![(member_id, placement.clone())])
-                .unwrap_or_default();
+            let member = crate::broker::members::active_member(conn, member_id)?;
+            let targets = if member.placement.mux_pane_id.is_some() {
+                vec![(member_id, member.placement.clone())]
+            } else {
+                Vec::new()
+            };
             Ok((member, targets))
         },
         |conn, snapshot, _guards| {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            let current = load_member(&tx, member_id, true)?;
+            let current = crate::broker::members::active_member(&tx, member_id)?;
             if !crate::cli::fleet::member_deletion_matches(snapshot, &current) {
                 return Ok(None);
             }
@@ -589,20 +559,13 @@ fn lock_member_deletion(
                         .into(),
                 ));
             }
-            let has_pane = current
-                .placement
-                .as_ref()
-                .is_some_and(|placement| placement.mux_pane_id.is_some());
+            let has_pane = current.placement.mux_pane_id.is_some();
             let action = if has_pane {
                 DeleteAction::Close
             } else {
                 let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
                 assert!(changed, "the revalidated member remains active");
-                DeleteAction::Deregistered(if current.placement.is_none() {
-                    crate::cli::fleet::NO_PLACEMENT_STATUS
-                } else {
-                    crate::cli::fleet::PENDING_PANE_STATUS
-                })
+                DeleteAction::Deregistered(crate::cli::fleet::PENDING_PANE_STATUS)
             };
             tx.commit()?;
             Ok(Some(action))
@@ -651,11 +614,7 @@ fn close_member(
         "pane close requires a concrete input-locked placement"
     );
     assert_eq!(locked.snapshot.member_id, member_id);
-    let placement = locked
-        .snapshot
-        .placement
-        .clone()
-        .expect("input-locked member placement");
+    let placement = locked.snapshot.placement.clone();
     let (snapshot, held) = locked.snapshot_and_pane_lock(&settings.database_url, &placement)?;
     crate::cli::fleet::end_member(
         conn,
@@ -669,7 +628,7 @@ fn close_member(
 }
 
 fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
-    let member = load_member(conn, member_id, true)?;
+    let member = crate::broker::members::active_member(conn, member_id)?;
     let value = crate::output::json::member(&member);
     emit(json, &value, || format_member_detail(&member))
 }
@@ -740,13 +699,16 @@ fn dispatch_input(
     deadline: crate::time::Deadline,
 ) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
     let id = member.member_id;
-    let runtime = broker::members::require_runtime(member)?;
+    let runtime = member
+        .runtime
+        .as_ref()
+        .expect("every ordinary member records its run");
     use crate::runtime::InputContext;
     use crate::runtime::SubmissionStatus;
     use crate::runtime::SubmitInput;
 
     let run = &runtime.run;
-    let placement = member.placement.as_ref().expect("placed input member");
+    let placement = &member.placement;
     let random = crate::runtime::system::random_hex32().map_err(|cause| {
         CafleetError::App(format!("cannot generate input operation key: {cause}"))
     })?;
@@ -796,7 +758,7 @@ fn dispatch_to_member(
     deadline: crate::time::Deadline,
 ) -> Result<(MemberRecord, String, Option<i64>, DeliveryProjection), CafleetError> {
     let member = crate::db::with_database_budget(conn, deadline, |conn| {
-        load_member(conn, member_id, false)
+        crate::broker::members::active_member(conn, member_id)
     })?;
     if member.kind == crate::broker::MemberKind::Director {
         return Err(CafleetError::App(dispatch.director_refusal.into()));
@@ -868,11 +830,7 @@ fn exec(
         },
         deadline,
     )?;
-    let agent = &member
-        .placement
-        .as_ref()
-        .expect("placed member")
-        .coding_agent;
+    let agent = &member.placement.coding_agent;
     emit(
         json,
         &crate::output::json::member_exec(member_id, &pane, agent, command, input_id, &delivery),
@@ -887,7 +845,7 @@ fn capture(
     ansi: bool,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let member = load_member(conn, member_id, false)?;
+    let member = crate::broker::members::active_member(conn, member_id)?;
     let pane_id = require_pane(&member, "capture")?;
     let mux = crate::runtime::mux_for_fleet(conn, member.fleet_id, None)?;
     let raw = mux
@@ -1099,7 +1057,9 @@ mod tests {
                 )
             };
             crate::broker::runtime::test_support::create_run(&mut conn, &spec).unwrap();
-            let placement = load_member(&conn, worker, true).unwrap().placement.unwrap();
+            let placement = crate::broker::members::active_member(&conn, worker)
+                .unwrap()
+                .placement;
             let _busy = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
                 .expect("the test holds the pane input");
@@ -1219,7 +1179,7 @@ mod tests {
             drop(runtime_lock);
             let deadline = Deadline::until(Instant::now() + Duration::from_secs(2));
             let mut locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
-            let placement = locked.snapshot.placement.clone().unwrap();
+            let placement = locked.snapshot.placement.clone();
             let database_url = settings.database_url.clone();
             let run_id = run.run_id;
             let expected_epoch = owner.owner_epoch;
@@ -1305,42 +1265,6 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
     use std::time::Instant;
-
-    fn assert_run_less_input_failure(action: &str) {
-        let (_dir, settings, conn, member_id, director) = recovery_entry::run_less_registry();
-        let id = member_id.to_string();
-        let director = director.to_string();
-        let (output, pane_calls) = crate::cli::test_support::isolated_cli(
-            &settings,
-            &[
-                "member",
-                action,
-                &id,
-                "literal input",
-                "--from-member-id",
-                &director,
-                "--json",
-            ],
-        );
-        assert!(pane_calls.is_empty(), "{action}: {pane_calls}");
-        assert_eq!(output.status.code(), Some(1));
-        assert_eq!(
-            String::from_utf8(output.stderr).unwrap(),
-            format!("Error: member {member_id} has no recorded run\n")
-        );
-        assert!(
-            broker::active_member_fleet(&conn, member_id)
-                .unwrap()
-                .is_some()
-        );
-        assert_eq!(
-            conn.query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap(),
-            0
-        );
-    }
 
     #[test]
     fn hermes_member_create_fails_before_registration_when_the_hermes_home_cannot_be_resolved() {
@@ -1476,11 +1400,6 @@ mod tests {
                 config.to_str().unwrap().to_owned()
             )]
         );
-    }
-
-    #[test]
-    fn member_exec_run_less_member_fails_before_pane_io() {
-        assert_run_less_input_failure("exec");
     }
 
     const EXTERNAL_MEMBER_ENV: &str = "CAFLEET_TEST_EXTERNAL_MEMBER_CONFIG";
@@ -1837,7 +1756,7 @@ mod tests {
                     crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
                         .unwrap()
                         .unwrap();
-                let placement = member.placement.as_ref().unwrap();
+                let placement = &member.placement;
                 let pane = placement.mux_pane_id.as_deref().unwrap();
                 for (action, kind, json) in [
                     ("prompt", storage::InputKind::Prompt, true),
@@ -2002,7 +1921,7 @@ mod tests {
                     crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
                         .unwrap()
                         .unwrap();
-                let placement = member.placement.unwrap();
+                let placement = member.placement;
                 let settings = Settings::for_database(std::path::Path::new(
                     fixture.fixture.conn.path().unwrap(),
                 ));
@@ -2115,7 +2034,7 @@ mod tests {
             .unwrap();
             let deadline = Deadline::until(Instant::now() + Duration::from_millis(100));
             let mut locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
-            let placement = locked.snapshot.placement.clone().unwrap();
+            let placement = locked.snapshot.placement.clone();
             assert_eq!(placement.mux_pane_id.as_deref(), Some("%9"));
             let url = settings.database_url.clone();
             let runner = Rc::new(CloseRunner {
@@ -2144,7 +2063,7 @@ mod tests {
                     .unwrap()
                     .is_some()
             );
-            let placement = locked.snapshot.placement.as_ref().unwrap().clone();
+            let placement = locked.snapshot.placement.clone();
             assert!(
                 PaneLock::try_acquire(&settings.database_url, &placement)
                     .unwrap()
@@ -2229,7 +2148,7 @@ mod tests {
             )
             .is_err()
         );
-        let pending = load_member(&conn, worker, false).unwrap();
+        let pending = crate::broker::members::active_member(&conn, worker).unwrap();
         assert!(require_pane(&pending, "capture").is_err());
     }
 
@@ -2557,17 +2476,11 @@ mod tests {
     }
     mod recovery_entry {
         use clap::Parser;
-        use rusqlite::Connection;
-        use tempfile::TempDir;
 
-        use crate::broker::fleets::test_support::create_fleet_fixture;
         use crate::cli::CliArgs;
         use crate::cli::Command;
-        use crate::cli::dispatch;
         use crate::cli::member::MemberCommand;
         use crate::cli::test_support::assert_usage_rejected;
-        use crate::config::Settings;
-        use crate::db::test_support::migrated_conn;
 
         fn exceptional_args() -> Vec<&'static str> {
             vec![
@@ -2708,60 +2621,6 @@ mod tests {
                 args.push(option);
                 assert_usage_rejected(&args);
             }
-        }
-
-        pub(super) fn run_less_registry() -> (TempDir, Settings, Connection, i64, i64) {
-            let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "recovery-entry");
-            let member_id = crate::broker::members::test_support::register(
-                &mut conn,
-                fleet,
-                "run-less",
-                Some("%2"),
-            );
-            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
-            (dir, settings, conn, member_id, director)
-        }
-
-        #[test]
-        fn member_recover_run_less_member_fails_explicitly_before_registry_or_artifact_mutation() {
-            let (dir, settings, conn, member_id, director) = run_less_registry();
-            let path = std::path::PathBuf::from(conn.path().unwrap());
-            drop(conn);
-            let before = std::fs::read(&path).unwrap();
-            let mut names = std::fs::read_dir(dir.path())
-                .unwrap()
-                .map(|entry| entry.unwrap().file_name())
-                .collect::<Vec<_>>();
-            names.sort();
-            let id = member_id.to_string();
-            let director = director.to_string();
-            let args = CliArgs::try_parse_from([
-                "cafleet",
-                "member",
-                "recover",
-                &id,
-                "--from-member-id",
-                &director,
-                "--json",
-            ])
-            .unwrap();
-            let result = dispatch(&settings, args.command);
-            let error = match result {
-                Ok(()) => panic!("a run-less member has no recorded run to recover"),
-                Err(error) => error,
-            };
-            let message = error.message();
-            assert_eq!(message, format!("member {member_id} has no recorded run"));
-            assert_eq!(error.exit_code(), 1);
-            assert_eq!(std::fs::read(&path).unwrap(), before);
-            let mut after_names = std::fs::read_dir(dir.path())
-                .unwrap()
-                .map(|entry| entry.unwrap().file_name())
-                .collect::<Vec<_>>();
-            after_names.sort();
-            assert_eq!(after_names, names);
         }
     }
 

@@ -281,9 +281,7 @@ fn select_listen_snapshot(
     }
     deadline.remaining_at(now())?;
     let live = crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
-    let root = live
-        .director_member_id
-        .expect("a live fleet has its root Director");
+    let root = live.director_member_id;
     for id in [member_id, root] {
         deadline.remaining_at(now())?;
         crate::broker::members::get_member(conn, id, fleet_id)?.ok_or_else(|| {
@@ -374,7 +372,7 @@ pub(crate) mod test_support {
             fleet,
             "worker",
             "listener sender",
-            None,
+            &crate::broker::members::test_support::placement(None),
         )
         .unwrap()
         .member_id;
@@ -458,11 +456,11 @@ mod tests {
         assert!(send_message(&mut conn, director, worker, "inactive recipient").is_err());
         assert!(send_message(&mut conn, worker, director, "inactive sender").is_err());
         conn.execute(
-            "UPDATE fleets SET director_member_id=NULL WHERE fleet_id=?1",
-            [fleet],
+            "UPDATE members SET status='deregistered' WHERE member_id=?1",
+            [director],
         )
         .unwrap();
-        assert!(send_message(&mut conn, director, director, "missing root").is_err());
+        assert!(send_message(&mut conn, director, director, "inactive root").is_err());
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM messages", [], |row| row
                 .get::<_, i64>(0))
@@ -779,21 +777,6 @@ mod tests {
                     ..
                 }
             ));
-        }
-
-        #[test]
-        fn broker_snapshot_requires_a_concrete_root_placement_but_allows_no_subject_placement() {
-            let (_dir, mut conn, fleet, director, worker) = broker_fixture();
-            conn.execute("DELETE FROM member_placements WHERE member_id=?1", [worker])
-                .unwrap();
-            listen_snapshot(&mut conn, worker, Some(fleet), Deadline::new()).unwrap();
-            conn.execute(
-                "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
-                [director],
-            )
-            .unwrap();
-            assert!(listen_snapshot(&mut conn, worker, Some(fleet), Deadline::new()).is_err());
-            assert_handler_cleared(&conn);
         }
 
         #[test]

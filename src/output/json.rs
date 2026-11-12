@@ -23,7 +23,7 @@ pub(crate) fn member(row: &MemberRecord) -> Value {
     json!({"member_id":row.member_id,"name":row.name,"description":row.description,
         "status":row.status.as_str(),"registered_at":row.registered_at,
         "kind":row.kind.as_str(),
-        "placement":row.placement.as_ref().map(placement),
+        "placement":placement(&row.placement),
         "runtime":row.runtime.as_ref().map(runtime_snapshot)})
 }
 
@@ -63,7 +63,7 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
     json!({"member_id":row.member.member_id,"name":row.member.name,
-        "kind":row.member.kind.as_str(),"placement":row.member.placement.as_ref().map(placement),
+        "kind":row.member.kind.as_str(),"placement":placement(&row.member.placement),
         "last_sent":row.last_sent,"last_recv":row.last_recv,"last_ack":row.last_ack,"idle":row.idle})
 }
 

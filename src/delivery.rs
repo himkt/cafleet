@@ -1,7 +1,6 @@
 use crate::broker;
 use crate::broker::MemberKind;
 use crate::broker::MessageRecord;
-use crate::broker::Placement;
 use crate::broker::runtime as storage;
 use crate::broker::runtime::InputDisposition;
 use crate::broker::runtime::InputKind;
@@ -169,21 +168,20 @@ fn deliver_pending_with(
         else {
             return ended(AttemptEnd::NoPending);
         };
-        if let Err(cause) = broker::members::require_runtime(&member) {
-            return ended(AttemptEnd::Failed(notification_error(
-                member_id,
-                initial.message_id,
-                cause,
-            )));
-        }
-        let Some(placement) = member.placement.clone().filter(|p| p.mux_pane_id.is_some()) else {
+        let run = member
+            .runtime
+            .as_ref()
+            .expect("every ordinary member records its run")
+            .run
+            .clone();
+        if member.placement.mux_pane_id.is_none() {
             return ended(AttemptEnd::Held);
-        };
+        }
         deliver_wrapped_pending(
             conn,
             settings,
             (member, initial),
-            &placement,
+            run,
             deadline,
             attempted,
             host,
@@ -195,13 +193,13 @@ fn deliver_wrapped_pending(
     conn: &mut Connection,
     settings: &Settings,
     initial: PreviewSnapshot,
-    placement: &Placement,
+    run: crate::broker::runtime::RunRecord,
     deadline: Deadline,
     attempted: &BTreeSet<i64>,
     host: &mut impl InputCommandHost,
 ) -> Result<AttemptOutcome, CafleetError> {
     let (member, mut message) = initial;
-    let run = broker::members::require_runtime(&member)?.run.clone();
+    let placement = &member.placement.clone();
     let identity = PermissionReceiptIdentity::for_run(&run);
     enum Stage {
         Submission,
@@ -639,12 +637,11 @@ mod tests {
         )
     }
 
-    fn placement_of(conn: &Connection, member_id: i64, fleet_id: i64) -> Placement {
+    fn placement_of(conn: &Connection, member_id: i64, fleet_id: i64) -> broker::Placement {
         broker::get_member(conn, member_id, fleet_id)
             .unwrap()
             .unwrap()
             .placement
-            .unwrap()
     }
 
     fn wrapped_attempt(
@@ -1549,9 +1546,7 @@ mod tests {
         let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
         let settings = settings_for(&conn);
         let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
-        let lock =
-            crate::pane_lock::lock_path(&settings.database_url, member.placement.as_ref().unwrap())
-                .unwrap();
+        let lock = crate::pane_lock::lock_path(&settings.database_url, &member.placement).unwrap();
         let outcome = deliver_pending(
             &mut conn,
             &settings,
@@ -1618,7 +1613,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%2"));
+        assert_eq!(member.placement.mux_pane_id.as_deref(), Some("%2"));
         assert_eq!(message.text, "original");
         let current: String = conn
             .query_row("SELECT text FROM messages", [], |row| row.get(0))

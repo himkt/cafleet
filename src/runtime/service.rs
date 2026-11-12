@@ -1116,11 +1116,7 @@ impl RunnerLoop<'_> {
             let member = broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
                 .ok_or_else(|| error("prepared member became inactive"))?;
             ensure(
-                member
-                    .placement
-                    .and_then(|placement| placement.mux_pane_id)
-                    .as_deref()
-                    == Some(pane),
+                member.placement.mux_pane_id.as_deref() == Some(pane),
                 "start placement changed",
             )
         })?;
@@ -1132,7 +1128,7 @@ impl RunnerLoop<'_> {
                         let prepared = storage::get_run(conn, self.run.run_id)?;
                         let placement =
                             broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
-                                .and_then(|member| member.placement)
+                                .map(|member| member.placement)
                                 .ok_or_else(|| error("capture prepared placement missing"))?;
                         Ok((prepared, placement))
                     })?;

@@ -96,7 +96,7 @@ pub(crate) struct MemberRecord {
     pub(crate) registered_at: String,
     pub(crate) status: MemberStatus,
     pub(crate) kind: MemberKind,
-    pub(crate) placement: Option<Placement>,
+    pub(crate) placement: Placement,
     pub(crate) runtime: Option<crate::broker::runtime::RuntimeSnapshot>,
 }
 
@@ -147,25 +147,25 @@ impl MessageRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FleetRecord {
     pub(crate) fleet_id: i64,
-    pub(crate) name: Option<String>,
+    pub(crate) name: String,
     pub(crate) created_at: String,
     pub(crate) deleted_at: Option<String>,
-    pub(crate) director_member_id: Option<i64>,
+    pub(crate) director_member_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FleetSummary {
     pub(crate) fleet_id: i64,
-    pub(crate) name: Option<String>,
+    pub(crate) name: String,
     pub(crate) created_at: String,
-    pub(crate) director_member_id: Option<i64>,
+    pub(crate) director_member_id: i64,
     pub(crate) member_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CreatedFleet {
     pub(crate) fleet_id: i64,
-    pub(crate) name: Option<String>,
+    pub(crate) name: String,
     pub(crate) created_at: String,
     pub(crate) director: MemberRecord,
 }

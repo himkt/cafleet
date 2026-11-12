@@ -62,7 +62,7 @@ pub(crate) fn press_member_with_mux(
                 "cannot press keys in the Director's own pane".into(),
             ));
         }
-        let placement = member.placement.as_ref().ok_or_else(|| CafleetError::App(format!("member {member_id} has no placement row; it was not spawned via `cafleet member create`.")))?;
+        let placement = &member.placement;
         let pane_id = placement.mux_pane_id.as_ref().ok_or_else(|| {
             CafleetError::App(format!(
                 "member {member_id} has no pane yet (pending placement) — nothing to press."
@@ -263,7 +263,7 @@ mod tests {
         assert!(member.runtime.is_some());
         let probe = Rc::new(Probe {
             database_url: settings.database_url.clone(),
-            placement: member.placement.unwrap(),
+            placement: member.placement,
             member_id: member.member_id,
             until,
             mode,

@@ -270,15 +270,13 @@ pub(super) fn register_pending_run(
         ensure_same_database(conn, &settings.database_identity_json)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let fleet = broker::fleets::require_live_fleet(&tx, member.fleet_id)?;
-        let director = fleet
-            .director_member_id
-            .ok_or_else(|| error("live fleet requires a Director"))?;
+        let director = fleet.director_member_id;
         let registered = broker::members::register_member_rows(
             &tx,
             member.fleet_id,
             &member.name,
             &member.description,
-            Some(&member.placement),
+            &member.placement,
         )?;
         let next: i64 = tx.query_row(
             "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
@@ -573,7 +571,7 @@ fn launch_registered(
             )?;
             tx.commit()?;
             broker::get_member(conn, run.member_id, run.fleet_id)?
-                .and_then(|member| member.placement)
+                .map(|member| member.placement)
                 .ok_or_else(|| error("published placement vanished"))
         })?;
         let started = host.start(&prepared, &placement, deadline)?;
@@ -1237,10 +1235,7 @@ mod tests {
             let member = crate::broker::get_member(&conn, run.member_id, run.fleet_id)
                 .unwrap()
                 .unwrap();
-            assert_eq!(
-                member.placement.as_ref().unwrap().mux_pane_id.as_deref(),
-                Some("%9")
-            );
+            assert_eq!(member.placement.mux_pane_id.as_deref(), Some("%9"));
             assert_eq!(placement.mux_pane_id.as_deref(), Some("%9"));
             self.spawn_count += 1;
             let child = ProcessIdentity {

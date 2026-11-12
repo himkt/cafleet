@@ -525,19 +525,6 @@ pub(crate) fn with_database_deadline<T>(
     Ok(value)
 }
 
-pub(crate) fn finalize_deletion<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    has_run: bool,
-    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    if has_run {
-        with_database_budget(conn, deadline, operation)
-    } else {
-        complete_database_budget(conn, deadline, operation)
-    }
-}
-
 // Pane side effects are irreversible; mandatory storage finalization gets a
 // bounded grace period independent of the input deadline.
 const COMPLETION_GRACE: Duration = Duration::from_secs(1);
@@ -1025,7 +1012,7 @@ mod tests {
         let mut conn = connect("sqlite:///:memory:").unwrap();
         initialize(&mut conn).unwrap();
         assert!(conn.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(404, 'orphan', '', 'active', '')", []).is_err());
-        conn.execute_batch("INSERT INTO fleets(fleet_id, created_at) VALUES(1, 'created'); INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES(1, 1, 'valid', '', 'active', 'registered');").unwrap();
+        conn.execute_batch("INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'valid', 'created'); INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES(1, 1, 'valid', '', 'active', 'registered');").unwrap();
         for (from, to) in [(404, 1), (1, 404)] {
             assert!(conn.execute("INSERT INTO messages(from_member_id, to_member_id, created_at, status_state, status_timestamp, text) VALUES(?1, ?2, '', 'input_required', '', '')", rusqlite::params![from, to]).is_err());
         }

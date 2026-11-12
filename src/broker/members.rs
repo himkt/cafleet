@@ -4,7 +4,6 @@ use crate::broker::MemberRecord;
 use crate::broker::MemberStatus;
 use crate::broker::Placement;
 use crate::broker::RegisteredMember;
-use crate::broker::runtime::RuntimeSnapshot;
 use crate::error::CafleetError;
 use crate::time::now_stamp;
 use crate::time::parse_lenient;
@@ -14,13 +13,6 @@ use rusqlite::params;
 
 pub(crate) fn missing_run(member_id: i64) -> CafleetError {
     CafleetError::App(format!("member {member_id} has no recorded run"))
-}
-
-pub(crate) fn require_runtime(member: &MemberRecord) -> Result<&RuntimeSnapshot, CafleetError> {
-    member
-        .runtime
-        .as_ref()
-        .ok_or_else(|| missing_run(member.member_id))
 }
 
 #[derive(Debug, Clone)]
@@ -38,14 +30,12 @@ pub(crate) fn register_member_rows(
     fleet_id: i64,
     name: &str,
     description: &str,
-    placement: Option<&NewPlacement>,
+    placement: &NewPlacement,
 ) -> Result<RegisteredMember, CafleetError> {
     let now = now_stamp();
     crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
     let member_id = insert_member_row(conn, fleet_id, name, description, &now)?;
-    if let Some(placement) = placement {
-        insert_placement_row(conn, member_id, placement, &now)?;
-    }
+    insert_placement_row(conn, member_id, placement, &now)?;
     Ok(RegisteredMember {
         member_id,
         name: name.into(),
@@ -99,10 +89,9 @@ const MEMBER_COLUMNS: &str = "m.member_id, m.fleet_id, m.name, m.description, m.
     p.mux_server";
 
 const MEMBER_FROM: &str = "FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
-    LEFT JOIN member_placements p ON p.member_id=m.member_id";
+    JOIN member_placements p ON p.member_id=m.member_id";
 
 fn member_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemberRecord> {
-    let backend: Option<String> = row.get(7)?;
     Ok(MemberRecord {
         member_id: row.get(0)?,
         fleet_id: row.get(1)?,
@@ -115,7 +104,7 @@ fn member_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemberRecord> {
         } else {
             MemberKind::Member
         },
-        placement: backend.map(|_| Placement::from_row(row, 7)).transpose()?,
+        placement: Placement::from_row(row, 7)?,
         runtime: None,
     })
 }
@@ -282,7 +271,7 @@ pub(crate) mod test_support {
         fleet_id: i64,
         name: &str,
         description: &str,
-        placement: Option<&NewPlacement>,
+        placement: &NewPlacement,
     ) -> Result<RegisteredMember, CafleetError> {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let member = register_member_rows(&tx, fleet_id, name, description, placement)?;
@@ -338,7 +327,7 @@ pub(crate) mod test_support {
             fleet,
             name,
             "assignment",
-            Some(&placement(pane)),
+            &placement(pane),
         )
         .unwrap()
         .member_id
@@ -367,7 +356,7 @@ mod tests {
             fleet,
             "worker",
             "literal assignment",
-            Some(&placement(None)),
+            &placement(None),
         )
         .unwrap();
         assert_eq!(registered.name, "worker");
@@ -377,17 +366,7 @@ mod tests {
             .unwrap();
         assert_eq!(member.description, "literal assignment");
         assert_eq!(member.kind, MemberKind::Member);
-        assert_eq!(member.placement.unwrap().mux_pane_id, None);
-        let ghost = register_member(&mut conn, fleet, "ghost", "paneless", None)
-            .unwrap()
-            .member_id;
-        assert!(
-            get_member(&conn, ghost, fleet)
-                .unwrap()
-                .unwrap()
-                .placement
-                .is_none()
-        );
+        assert_eq!(member.placement.mux_pane_id, None);
     }
 
     #[test]
@@ -397,16 +376,10 @@ mod tests {
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         conn.execute_batch("CREATE TRIGGER fail_placement BEFORE INSERT ON member_placements BEGIN SELECT RAISE(ABORT, 'placement failure'); END").unwrap();
         assert!(
-            register_member(
-                &mut conn,
-                fleet,
-                "worker",
-                "assignment",
-                Some(&placement(None))
-            )
-            .unwrap_err()
-            .message()
-            .contains("placement failure")
+            register_member(&mut conn, fleet, "worker", "assignment", &placement(None))
+                .unwrap_err()
+                .message()
+                .contains("placement failure")
         );
         assert_eq!(list_members(&conn, fleet).unwrap().len(), 1);
         conn.execute_batch("DROP TRIGGER fail_placement").unwrap();
@@ -417,11 +390,13 @@ mod tests {
     fn live_fleet_and_director_checks_guard_member_registration() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        assert!(register_member(&mut conn, 999, "x", "assignment", None).is_err());
+        assert!(register_member(&mut conn, 999, "x", "assignment", &placement(None)).is_err());
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         assert!(deregister_member(&mut conn, director).is_err());
         crate::broker::fleets::delete_fleet_rows(&conn, fleet).unwrap();
-        assert!(register_member(&mut conn, fleet, "worker", "assignment", None).is_err());
+        assert!(
+            register_member(&mut conn, fleet, "worker", "assignment", &placement(None)).is_err()
+        );
     }
 
     #[test]
@@ -467,16 +442,13 @@ mod tests {
         let (fleet, director) = create_fleet_fixture(&mut conn, "activity");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let pending = register(&mut conn, fleet, "pending", None);
-        let ghost = register_member(&mut conn, fleet, "ghost", "paneless", None)
-            .unwrap()
-            .member_id;
         let message = broker::send_message(&mut conn, director, worker, "hello").unwrap();
         let rows = list_members(&conn, fleet).unwrap();
         assert_eq!(
             rows.iter()
                 .map(|row| row.member.member_id)
                 .collect::<Vec<_>>(),
-            [director, worker, pending, ghost]
+            [director, worker, pending]
         );
         let sender = &rows[0];
         assert_eq!(sender.member.kind, MemberKind::Director);
@@ -491,13 +463,12 @@ mod tests {
             Some(message.created_at.as_str())
         );
         assert_eq!(rows[1].last_ack, None);
-        assert_eq!(rows[2].member.placement.as_ref().unwrap().mux_pane_id, None);
-        assert!(rows[3].member.placement.is_none());
+        assert_eq!(rows[2].member.placement.mux_pane_id, None);
         assert_eq!(
             (
-                rows[3].last_sent.clone(),
-                rows[3].last_recv.clone(),
-                rows[3].idle
+                rows[2].last_sent.clone(),
+                rows[2].last_recv.clone(),
+                rows[2].idle
             ),
             (None, None, None)
         );
@@ -515,7 +486,7 @@ mod tests {
         assert_eq!(rows[0].member.kind, MemberKind::Member);
         assert_eq!(rows[1].member.kind, MemberKind::Director);
         deregister_member(&mut conn, pending).unwrap();
-        assert_eq!(list_members(&conn, fleet).unwrap().len(), 3);
+        assert_eq!(list_members(&conn, fleet).unwrap().len(), 2);
     }
 
     fn activity(sent: Option<&str>, received: Option<&str>, ack: Option<&str>) -> MemberActivity {
@@ -528,7 +499,15 @@ mod tests {
                 registered_at: String::new(),
                 status: MemberStatus::Active,
                 kind: MemberKind::Member,
-                placement: None,
+                placement: Placement {
+                    backend: "tmux".into(),
+                    mux_session: "main".into(),
+                    mux_window_id: "@1".into(),
+                    mux_pane_id: None,
+                    coding_agent: "claude".into(),
+                    created_at: String::new(),
+                    mux_server: "/nonexistent/cafleet-test/tmux.sock".into(),
+                },
                 runtime: None,
             },
             last_sent: sent.map(str::to_owned),

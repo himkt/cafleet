@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 15/49 tasks complete
+**Progress**: 19/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -158,7 +158,7 @@ AGT7 and AGT8 also delete the `"native_request_id"` extract key and the `"sensit
 | BRK4 | Delete `asset_installs.cafleet_version` (INV3), the `cafleet_version` parameter of `record_asset_install`/`install_agent`, and the version from `recorded_asset_install`, which returns `Option<String>` (the timestamp). `install_check` has one recorded arm, `ok` with `recorded at <installed_at>`, and keeps its `no installation recorded at <path>` warn. | F.F9, G.C4 | § Schema delta; `SPEC.md:551` ok cell `recorded at <installed_at>` and warn cell drops the other-version clause; `SPEC.md:554` comparison sentence, `:608`, `:617` example, `:3858` ("upserts its timestamp"); `cli.md:473` example and other-version sentence |
 | BRK5 | `register_member_rows` takes `&NewPlacement`; paneless test members get a pending placement (`mux_pane_id: None`). | G.C5 | — |
 | BRK6 | `MemberRecord.placement` becomes `Placement` via an inner `JOIN` (INV1); delete every placementless branch: CLI5–CLI7, CLI10, `press.rs:65` and `pane_lock.rs:299-301`. | G.C6, F.P6 | `SPEC.md:95`, `:190`, `:518` ("the root Director and members with a pending placement"), `:893` drops "Missing placement fails pane actions; list/show retain diagnostic nulls", `:972` ("Revalidate pending placement"), `:976`, `:980`; `cli.md:57`, `:276` |
-| BRK7 | Remove run-less ordinary-member handling (INV5). Delete `finalize_deletion`; `cli/fleet.rs:544` calls `with_database_budget`. `delivery.rs:172` (ordinary recipients only; the root Director is excluded earlier) and `cli/member.rs:743` (prompt/exec; the Director is refused at `:801`) bind the run with `.expect("every ordinary member records its run")`, and `deliver_wrapped_pending` takes that run instead of calling `require_runtime` again (`delivery.rs:204`). `require_runtime` is deleted. `missing_run` stays only in recovery's `snapshot` (`recovery.rs:161`), where the root Director is the target that reaches it. | G.C10, G.P5, H.C7 | `SPEC.md:517` drops "A run-less ordinary row is ended as §6.3 `member delete` specifies for a run-less row"; `SPEC.md:893` drops "and an ordinary member without a recorded run"; `SPEC.md:968` drops the run-less ordinary row sentence; `SPEC.md:1070` "`runtime` is `null` for the root Director"; `SPEC.md:776` row, `:1233` row, `:1472` run-less clause, `:3418` cause; `cli.md:130`, `:216` drops "Prompt/exec fail before pane I/O for an ordinary member without a recorded run", `:264` drops "(none when run-less)", `:348`, `:537`. Delete the run-less ordinary-member tests (`cli/fleet.rs:1543`, `cli/member.rs:2720-2752`, `cli/message.rs:980-1030`). |
+| BRK7 | Remove run-less ordinary-member handling (INV5). Delete `finalize_deletion`; `cli/fleet.rs:544` calls `complete_database_budget`, the post-close finalization grace `SPEC.md` §6.3 `member delete` specifies for every deletion. `delivery.rs:172` (ordinary recipients only; the root Director is excluded earlier) and `cli/member.rs:743` (prompt/exec; the Director is refused at `:801`) bind the run with `.expect("every ordinary member records its run")`, and `deliver_wrapped_pending` takes that run instead of calling `require_runtime` again (`delivery.rs:204`). `require_runtime` is deleted. `missing_run` stays only in recovery's `snapshot` (`recovery.rs:161`), where the root Director is the target that reaches it. | G.C10, G.P5, H.C7 | `SPEC.md:517` drops "A run-less ordinary row is ended as §6.3 `member delete` specifies for a run-less row"; `SPEC.md:893` drops "and an ordinary member without a recorded run"; `SPEC.md:968` drops the run-less ordinary row sentence; `SPEC.md:1070` "`runtime` is `null` for the root Director"; `SPEC.md:776` row, `:1233` row, `:1472` run-less clause, `:3418` cause; `cli.md:130`, `:216` drops "Prompt/exec fail before pane I/O for an ordinary member without a recorded run", `:264` drops "(none when run-less)", `:348`, `:537`. Delete the run-less ordinary-member tests (`cli/fleet.rs:1543`, `cli/member.rs:2720-2752`, `cli/message.rs:980-1030`). |
 | BRK8 | `record_input_state` accepts only `InProgress → Ready \| Accepted`; delete the `(Ready, InProgress)` arm and the `expected != Ready` guard. | G.C8 | — |
 | BRK9 | Drop `AND from_member_id!=to_member_id` from `PENDING_PREVIEW` and the preview clause `message.from_member_id != run.member_id` in `reserve_input_with_provenance` (`inputs.rs:419`). | G.C9, G.P15 | — |
 | BRK10 | `classify_schema` becomes private and returns a unit `Incompatible` signal; delete the `":memory:"` fallback. | G.C11 | — |
@@ -421,10 +421,10 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 5: Placement, Director and run invariants
 
-- [ ] Apply BRK5, BRK6, CLI5, CLI6, CLI7 and CLI10 <!-- completed: -->
-- [ ] Apply BRK13, BRK14, BRK23 (with its baseline edit) and CLI4 <!-- completed: -->
-- [ ] Apply BRK7 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply BRK5, BRK6, CLI5, CLI6, CLI7 and CLI10 <!-- completed: 2026-11-12T11:41 -->
+- [x] Apply BRK13, BRK14, BRK23 (with its baseline edit) and CLI4 <!-- completed: 2026-11-12T11:41 -->
+- [x] Apply BRK7 <!-- completed: 2026-11-12T11:41 -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T11:41 -->
 
 ### Step 6: Remaining broker simplifications
 
