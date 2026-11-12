@@ -3,8 +3,6 @@ pub(crate) mod evidence;
 mod inputs;
 
 use crate::broker::MemberStatus;
-pub(crate) use crate::broker::runtime::events::original as original_transition;
-pub(crate) use crate::broker::runtime::events::validate_transition as validate_observed_transition;
 pub(crate) use crate::broker::runtime::events::*;
 pub(crate) use crate::broker::runtime::inputs::*;
 use crate::broker::stored_enum;
@@ -161,28 +159,7 @@ pub(crate) fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, Cafle
         )
         .optional()?
         .ok_or_else(|| CafleetError::App(format!("Run {run_id} not found")))?;
-    nonblank(
-        &run.owner_start_identity,
-        "member_runs.owner_start_identity",
-    )?;
-    nonblank(&run.resolved_mode, "member_runs.resolved_mode")?;
-    require(
-        crate::coding_agent::coding_agent(&run.backend).is_some(),
-        "member_runs.backend",
-        "unknown backend",
-    )?;
-    require(
-        run.owner_epoch > 0 && run.owner_pid > 0,
-        "member_runs.owner_epoch",
-        "positive owner identity required",
-    )?;
-    require(
-        run.event_seq_reserved_through >= 0,
-        "member_runs.event_seq_reserved_through",
-        "nonnegative counters required",
-    )?;
     validate_identity(&run.database_identity_json)?;
-    hex(&run.launch_nonce, 64, "member_runs.launch_nonce")?;
     require(
         run.permission_argv_json
             .as_array()
@@ -1316,7 +1293,7 @@ pub(crate) mod test_support {
         event_id: Option<i64>,
     ) -> Value {
         json!({
-            "schema_version":1,"automatic_review":automatic_review,"observed_mode":observed_mode,
+            "automatic_review":automatic_review,"observed_mode":observed_mode,
             "rule_id":"codex-auto-review-unavailable","event_id":event_id,
             "observed_at":"2026-10-29T02:30:00Z",
         })
@@ -1438,11 +1415,7 @@ mod tests {
 
     #[test]
     fn typed_runtime_readers_fail_on_corrupt_required_values() {
-        for (field, value) in [
-            ("status", "invented"),
-            ("database_identity_json", "[]"),
-            ("owner_start_identity", ""),
-        ] {
+        for (field, value) in [("status", "invented"), ("database_identity_json", "[]")] {
             let fixture = Fixture::new();
             fixture
                 .conn

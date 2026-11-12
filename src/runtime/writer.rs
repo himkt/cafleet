@@ -941,7 +941,7 @@ impl<S: OutboxIo> Outbox<S> {
             let digest: [u8; 32] = Sha256::digest(&body).into();
             ensure(digest == checksum, "outbox frame checksum mismatch")?;
             let (transition, effective_policy) = parse_frame_body(&body)?;
-            storage::validate_observed_transition(&run, &transition)?;
+            storage::validate_transition(&run, &transition)?;
             ensure(
                 transition.event_seq >= previous,
                 "outbox sequences regressed",
@@ -976,7 +976,7 @@ impl<S: OutboxIo> Outbox<S> {
         until: Instant,
     ) -> Result<()> {
         let run = self.validate(conn, until)?;
-        storage::validate_observed_transition(&run, value)?;
+        storage::validate_transition(&run, value)?;
         if self.dirty || self.io.byte_len().map_err(io_error)? != self.end {
             let scan = self.scan_validated(run.clone(), until)?;
             if scan.incomplete_tail.is_some() {
@@ -1058,7 +1058,7 @@ impl<S: OutboxIo> Outbox<S> {
                     if let Some(id) = id {
                         let view = storage::get_event(conn, id)?;
                         ensure(
-                            storage::original_transition(&view)? == frame.transition,
+                            storage::original(&view)? == frame.transition,
                             &format!(
                                 "committed outbox frame {}..{} original mismatch",
                                 frame.start, frame.end
@@ -2868,7 +2868,6 @@ pub(crate) mod test_support {
 
     pub(crate) fn record(observation: &EffectivePolicyObservation, event_id: Option<i64>) -> Value {
         serde_json::json!({
-            "schema_version":1,
             "automatic_review":observation.automatic_review.as_str(),
             "observed_mode":observation.observed_mode,
             "rule_id":observation.rule_id,

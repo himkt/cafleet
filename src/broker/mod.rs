@@ -56,7 +56,20 @@ macro_rules! stored_enum {
 pub(crate) use stored_enum;
 
 stored_enum!(MemberStatus, "members.status", {Active => "active", Deregistered => "deregistered"});
-stored_enum!(MemberKind, "member.kind", {Director => "director", Member => "member"});
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemberKind {
+    Director,
+    Member,
+}
+
+impl MemberKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Director => "director",
+            Self::Member => "member",
+        }
+    }
+}
 stored_enum!(MessageStatus, "messages.status_state", {InputRequired => "input_required", Completed => "completed"});
 
 #[derive(Debug, Clone, PartialEq, Eq)]

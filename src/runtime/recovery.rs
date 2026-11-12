@@ -1826,7 +1826,7 @@ mod tests {
                     .unwrap()
                     .effective_policy_json,
                 Some(json!({
-                    "schema_version":1,"automatic_review":"unavailable","observed_mode":null,
+                    "automatic_review":"unavailable","observed_mode":null,
                     "rule_id":"codex-auto-review-unavailable","event_id":rows[0].event.event_id,
                     "observed_at":NOW,
                 }))
@@ -2816,9 +2816,7 @@ mod tests {
             assert_eq!(committed[0].event.kind, RuntimeEventKind::InteractionOpened);
             assert_eq!(committed[0].event.event_seq, 1);
             assert_eq!(
-                sha256_hex(&frame(
-                    &storage::original_transition(&committed[0]).unwrap()
-                )),
+                sha256_hex(&frame(&storage::original(&committed[0]).unwrap())),
                 snapshot["spool_digest"].as_str().unwrap()
             );
             assert!(case.spool_bytes().is_none_or(|bytes| bytes.is_empty()));
@@ -4038,6 +4036,7 @@ mod tests {
                 key,
                 state,
                 deferred,
+                delivery_method: (state != "ready").then_some("profile"),
                 ..InputRow::default()
             }
             .insert(case)

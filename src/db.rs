@@ -262,40 +262,42 @@ pub(crate) fn incompatible_format(path: &str) -> CafleetError {
     ))
 }
 
-pub(crate) fn classify_schema(conn: &Connection) -> SchemaState {
-    let incompatible = || SchemaState::Incompatible {
-        path: conn.path().unwrap_or(":memory:").to_owned(),
-    };
-    let inspect = || -> Result<SchemaState, CafleetError> {
-        let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
-        let populated: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
-            [], |row| row.get(0)
-        )?;
-        if identity == 0 && !populated {
-            return Ok(SchemaState::Missing);
-        }
-        if identity != crate::db::APPLICATION_ID {
-            return Ok(incompatible());
-        }
-        if !ledger_is_baseline(conn)? || !schema_matches(conn)? || !records_running_version(conn)? {
-            return Ok(incompatible());
-        }
-        Ok(SchemaState::Current)
-    };
-    match inspect() {
-        Ok(state) => state,
-        Err(cause) => SchemaState::Unreachable { cause },
+#[derive(Debug, PartialEq, Eq)]
+enum Classification {
+    Missing,
+    Current,
+    Incompatible,
+}
+
+fn classify_schema(conn: &Connection) -> Result<Classification, CafleetError> {
+    let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+    let populated: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
+        [],
+        |row| row.get(0),
+    )?;
+    if identity == 0 && !populated {
+        return Ok(Classification::Missing);
     }
+    if identity != crate::db::APPLICATION_ID
+        || !ledger_is_baseline(conn)?
+        || !schema_matches(conn)?
+        || !records_running_version(conn)?
+    {
+        return Ok(Classification::Incompatible);
+    }
+    Ok(Classification::Current)
 }
 
 pub(crate) fn classify_selected_schema(conn: &Connection, database_url: &str) -> SchemaState {
     match classify_schema(conn) {
-        SchemaState::Incompatible { .. } => match crate::db::database_path(database_url) {
+        Ok(Classification::Missing) => SchemaState::Missing,
+        Ok(Classification::Current) => SchemaState::Current,
+        Ok(Classification::Incompatible) => match crate::db::database_path(database_url) {
             Ok(path) => SchemaState::Incompatible { path: path.into() },
             Err(cause) => SchemaState::Unreachable { cause },
         },
-        state => state,
+        Err(cause) => SchemaState::Unreachable { cause },
     }
 }
 
@@ -774,7 +776,7 @@ mod tests {
     }
 
     fn require_current(conn: &Connection) -> Result<(), CafleetError> {
-        crate::db::classify_schema(conn).require_current()
+        classify_selected_schema(conn, "sqlite:///:memory:").require_current()
     }
 
     fn initialized_conn() -> Connection {
@@ -922,10 +924,10 @@ mod tests {
             [],
         )
         .unwrap();
-        assert!(matches!(
-            classify_schema(&conn),
-            SchemaState::Incompatible { .. }
-        ));
+        assert_eq!(
+            classify_schema(&conn).unwrap(),
+            Classification::Incompatible
+        );
     }
 
     #[test]
@@ -1120,7 +1122,7 @@ mod tests {
                 self.conn.execute(
                     "INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,
              payload_json,notification_state,archive_reason)
-             VALUES(?1,?2,'coverage_unknown',?3,'{\"schema_version\":2}',
+             VALUES(?1,?2,'coverage_unknown',?3,'{}',
              'archived','member_inactive')",
                     params![run, seq, NOW],
                 )?;
@@ -1529,24 +1531,21 @@ mod tests {
     #[test]
     fn classification_preserves_missing_current_identity_and_sql_causes() {
         let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
-        assert!(matches!(classify_schema(&conn), SchemaState::Missing));
+        assert_eq!(classify_schema(&conn).unwrap(), Classification::Missing);
         crate::db::initialize(&mut conn).unwrap();
-        assert!(matches!(classify_schema(&conn), SchemaState::Current));
+        assert_eq!(classify_schema(&conn).unwrap(), Classification::Current);
         conn.execute_batch("PRAGMA application_id=1").unwrap();
-        assert!(matches!(
-            classify_schema(&conn),
-            SchemaState::Incompatible { .. }
-        ));
+        assert_eq!(
+            classify_schema(&conn).unwrap(),
+            Classification::Incompatible
+        );
         conn.pragma_update(None, "application_id", crate::db::APPLICATION_ID)
             .unwrap();
         conn.execute_batch(
             "ALTER TABLE refinery_schema_history RENAME COLUMN version TO missing_version",
         )
         .unwrap();
-        assert!(matches!(
-            classify_schema(&conn),
-            SchemaState::Unreachable { .. }
-        ));
+        assert!(classify_schema(&conn).is_err());
     }
     mod database_scope_tests {
         use crate::db::*;

@@ -15,8 +15,7 @@ use std::time::Instant;
 pub(crate) const MESSAGE_COLUMNS: &str =
     "message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text";
 
-pub(crate) const PENDING_PREVIEW: &str =
-    "status_state='input_required' AND notified_at IS NULL AND from_member_id!=to_member_id";
+pub(crate) const PENDING_PREVIEW: &str = "status_state='input_required' AND notified_at IS NULL";
 
 pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRecord> {
     Ok(MessageRecord {
@@ -280,20 +279,9 @@ fn select_listen_snapshot(
         }
     }
     deadline.remaining_at(now())?;
-    let live = crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
-    let root = live.director_member_id;
-    for id in [member_id, root] {
-        deadline.remaining_at(now())?;
-        crate::broker::members::get_member(conn, id, fleet_id)?.ok_or_else(|| {
-            CafleetError::InvalidStoredValue {
-                field: "members.member_id".into(),
-                value: id.to_string(),
-            }
-        })?;
-        if member_id == root {
-            break;
-        }
-    }
+    crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
+    deadline.remaining_at(now())?;
+    crate::broker::runtime::member_runtime(conn, member_id)?;
     deadline.remaining_at(now())?;
     let mut statement = conn.prepare(&format!(
         "SELECT {MESSAGE_COLUMNS} FROM messages \
@@ -604,17 +592,11 @@ mod tests {
     }
 
     #[test]
-    fn preview_selection_skips_attempted_ids_and_self_messages_without_hiding_pending_rows() {
+    fn preview_selection_skips_attempted_ids_without_hiding_pending_rows() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "selection");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let self_message = broker::send_message(&mut conn, worker, worker, "self").unwrap();
-        conn.execute(
-            "UPDATE messages SET notified_at=NULL WHERE message_id=?1",
-            [self_message.message_id],
-        )
-        .unwrap();
         let previous = broker::send_message(&mut conn, director, worker, "previous").unwrap();
         let next = broker::send_message(&mut conn, director, worker, "next").unwrap();
         let excluded = std::collections::BTreeSet::from([previous.message_id]);

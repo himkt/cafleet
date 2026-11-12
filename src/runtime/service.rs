@@ -3866,7 +3866,7 @@ mod tests {
                         seeded = Some(evidence.to_string());
                         fixture.conn.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,'2026-10-26T17:00:00Z',?3)",rusqlite::params![run.run_id,evidence["evidence_digest"].as_str().unwrap(),evidence.to_string()]).unwrap();
                     } else {
-                        let payload = json!({"schema_version":2,"event_id":1,"event_seq":1,"run_id":run.run_id,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"kind":"coverage_unknown","interaction_id":null,"classification":null,"observed_at":"2026-10-26T17:00:00Z","source":"runner_lifecycle","native_request_id":null,"decision_outcome":"unknown","director_action":null,"evidence":evidence,"cause":{"kind":"coverage_unknown"}});
+                        let payload = json!({"event_id":1,"event_seq":1,"run_id":run.run_id,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"kind":"coverage_unknown","interaction_id":null,"classification":null,"observed_at":"2026-10-26T17:00:00Z","source":"runner_lifecycle","native_request_id":null,"decision_outcome":"unknown","director_action":null,"evidence":evidence,"cause":{"kind":"coverage_unknown"}});
                         seeded = Some(payload.to_string());
                         fixture.conn.execute("INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,payload_json,notification_state,archive_reason) VALUES(?1,1,'coverage_unknown','2026-10-26T17:00:00Z',?2,'archived','member_inactive')",rusqlite::params![run.run_id,payload.to_string()]).unwrap();
                     }

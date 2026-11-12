@@ -148,13 +148,9 @@ pub(crate) fn active_member_fleet(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Option<i64>, CafleetError> {
-    conn.query_row(
-        "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'",
-        [member_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(crate::error::CafleetError::from)
+    Ok(member_fleet_status(conn, member_id)?
+        .filter(|(_, status)| *status == MemberStatus::Active)
+        .map(|(fleet_id, _)| fleet_id))
 }
 
 pub(crate) fn deregister_member_rows(

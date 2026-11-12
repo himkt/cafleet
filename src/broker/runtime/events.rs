@@ -25,12 +25,6 @@ pub(super) fn interaction(conn: &Connection, id: i64) -> Result<InteractionRecor
         [id],
         map_interaction,
     )?;
-    require(
-        interaction.episode_seq > 0
-            && interaction.closed_at.is_some() == interaction.close_reason.is_some(),
-        "member_interactions",
-        "invalid episode or closure",
-    )?;
     evidence::validate(&interaction.evidence_json)?;
     require(
         interaction.evidence_json["evidence_digest"].as_str()
@@ -148,30 +142,18 @@ pub(crate) fn get_event(
         "payload_json",
         "payload exceeds bound",
     )?;
-    match event.notification_state {
-        NotificationState::Inbox => {
-            let message_id = event
-                .message_id
-                .ok_or_else(|| invalid("message_id", "inbox event requires message"))?;
-            require(
-                event.archive_reason.is_none(),
-                "archive_reason",
-                "inbox event cannot be archived",
-            )?;
-            let message = crate::broker::messaging::get_message(conn, message_id)?;
-            require(
-                message.from_member_id == view.run.run.member_id
-                    && message.to_member_id == view.run.run.director_member_id
-                    && message.text == serialized_payload,
-                "message_id",
-                "event/message association mismatch",
-            )?;
-        }
-        NotificationState::Archived => require(
-            event.message_id.is_none() && event.archive_reason.is_some(),
-            "notification_state",
-            "archived event requires only an archive reason",
-        )?,
+    if event.notification_state == NotificationState::Inbox {
+        let message_id = event
+            .message_id
+            .expect("the notification-state CHECK pairs an inbox event with its message");
+        let message = crate::broker::messaging::get_message(conn, message_id)?;
+        require(
+            message.from_member_id == view.run.run.member_id
+                && message.to_member_id == view.run.run.director_member_id
+                && message.text == serialized_payload,
+            "message_id",
+            "event/message association mismatch",
+        )?;
     }
     Ok(view)
 }
@@ -557,7 +539,7 @@ fn payload(
     delivery: Option<&DeliveryFields>,
 ) -> Result<Value, CafleetError> {
     let mut payload = json!({
-        "schema_version":2,"event_id":event_id,"run_id":run.run_id,"event_seq":transition.event_seq,
+        "event_id":event_id,"run_id":run.run_id,"event_seq":transition.event_seq,
         "member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,
         "kind":transition.kind.as_str(),"interaction_id":interaction_id,
         "classification":transition.classification.map(|class| class.as_str()),
@@ -886,10 +868,8 @@ pub(crate) fn update_interaction_evidence(
     })
 }
 
-/// The stored `member_runs.effective_policy_json` record, schema version 1.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredEffectivePolicy {
-    schema_version: u64,
     automatic_review: AutomaticReview,
     observed_mode: Option<String>,
     rule_id: String,
@@ -908,11 +888,6 @@ pub(super) fn validate(run: &RunRecord) -> Result<(), CafleetError> {
         serde_json::to_value(&stored).expect("a stored policy serializes") == *record,
         field,
         "exact effective policy fields required",
-    )?;
-    require(
-        stored.schema_version == 1,
-        field,
-        "unsupported effective policy schema",
     )?;
     require(
         stored.event_id.is_none_or(|id| id > 0)
@@ -962,7 +937,6 @@ fn write_if_changed(
         return Ok(false);
     }
     let record = StoredEffectivePolicy {
-        schema_version: 1,
         automatic_review: observation.automatic_review,
         observed_mode: observation.observed_mode.clone(),
         rule_id: observation.rule_id.clone(),
@@ -1119,7 +1093,6 @@ mod tests {
             kind: &str,
         ) {
             let payload = &event.payload_json;
-            assert_eq!(payload["schema_version"], 2);
             assert_eq!(payload["kind"], kind);
             assert_eq!(payload["interaction_id"], Value::Null);
             assert_eq!(payload["classification"], Value::Null);
@@ -1194,7 +1167,6 @@ mod tests {
 
         fn record(observation: &EffectivePolicyObservation, event_id: Option<i64>) -> Value {
             json!({
-                "schema_version":1,
                 "automatic_review":observation.automatic_review.as_str(),
                 "observed_mode":observation.observed_mode,
                 "rule_id":observation.rule_id,
@@ -1642,7 +1614,6 @@ mod tests {
         let valid = effective_policy("available", Some("auto"), None);
         let mut cases = Vec::new();
         for key in [
-            "schema_version",
             "automatic_review",
             "observed_mode",
             "rule_id",
@@ -1654,8 +1625,6 @@ mod tests {
             cases.push((format!("missing {key}"), missing));
         }
         for (label, key, value) in [
-            ("schema version 2", "schema_version", json!(2)),
-            ("schema version text", "schema_version", json!("1")),
             (
                 "unknown review state",
                 "automatic_review",
@@ -2085,13 +2054,11 @@ mod tests {
         }
 
         fn assert_v2(event: &RuntimeEventRecord) {
-            assert_eq!(event.payload_json["schema_version"], 2);
             assert!(event.payload_json.get("director_action").is_some());
         }
 
         fn independent_v2(fixture: &mut Fixture, event: &RuntimeEventRecord) -> Value {
             let mut payload = event.payload_json.clone();
-            payload["schema_version"] = json!(2);
             payload["director_action"] = action(fixture, event);
             replace_public_payload(&mut fixture.conn, event, payload.clone());
             storage::get_event(&fixture.conn, event.event_id)
@@ -2703,7 +2670,6 @@ mod tests {
         ] {
             assert_eq!(payload[key], id, "{key}");
         }
-        assert_eq!(payload["schema_version"], 2);
         assert_eq!(payload["decision_outcome"], "unknown");
         assert_eq!(payload["native_request_id"], Value::Null);
         assert_eq!(payload["source"], "runner_screen");
@@ -2835,7 +2801,7 @@ mod tests {
                     .execute_batch("DROP TRIGGER injected_failure")
                     .unwrap();
             }
-            let (retried, inserted) = storage::persist_transition(
+            let (_, inserted) = storage::persist_transition(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -2846,7 +2812,6 @@ mod tests {
                 inserted,
                 "{target}: the retry commits the removed failure's write"
             );
-            assert_eq!(retried.payload_json["schema_version"], 2, "{target}");
         }
     }
 
@@ -3081,7 +3046,7 @@ mod tests {
     fn event_read_rejects_a_tampered_message_body_or_public_identity() {
         for damage in [
             "UPDATE messages SET text='{}'",
-            "UPDATE member_runtime_events SET payload_json='{\"schema_version\":2,\"run_id\":404}'",
+            "UPDATE member_runtime_events SET payload_json='{\"run_id\":404}'",
         ] {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();

@@ -1323,7 +1323,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.message().contains("CODEX_HOME"));
-        crate::db::classify_schema(&conn).require_current().unwrap();
+        crate::db::classify_selected_schema(&conn, "sqlite:///:memory:")
+            .require_current()
+            .unwrap();
         assert_eq!(installed_agents(&conn), ["claude"]);
         assert!(!home.path().join(".hermes").exists());
         assert!(!home.path().join(".config/opencode").exists());

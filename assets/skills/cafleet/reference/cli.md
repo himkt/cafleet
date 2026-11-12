@@ -383,7 +383,7 @@ Delivery results contain `input_id,message_id,delivery,stage`, null interaction/
 
 Kinds: `preview,prompt,exec,permission_response`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Stored dispositions: `submitted,not_submitted,abandoned_uncertain`; CLI: `submitted,not-submitted,abandoned-uncertain`. Preview keys: `preview:<run_id>:<message_id>`. Receipts hold digests, excluding literals. Stable receipt IDs.
 
-Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. Unrecorded methods stay null with `method_unrecorded` outside ready. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
+Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. A not-submitted receipt without a recorded method reports a null method with `method_unrecorded`. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
 
 `uncertain_cause` records the transition to uncertainty and survives reconciliation; it is null for input that never became uncertain and for `in_progress` input left by runner loss.
 

@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 19/49 tasks complete
+**Progress**: 21/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -428,8 +428,8 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 6: Remaining broker simplifications
 
-- [ ] Apply BRK8–BRK11 and BRK15–BRK19, BRK21, BRK22 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply BRK8–BRK11 and BRK15–BRK19, BRK21, BRK22 <!-- completed: 2026-11-12T11:52 -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T11:52 -->
 
 ### Step 7: CLI and output
 
