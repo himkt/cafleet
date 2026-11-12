@@ -28,7 +28,7 @@ The user decided to remove both the "certainly" and the "possibly" findings, wit
 
 | Question | Decision |
 |---|---|
-| Single-implementor fault/race test-injection traits | Keep, recorded in § Retained by decision; remove only `HermesConfig` and `RecoveryBoundary`/`checkpoint` |
+| Single-implementor fault/race test-injection traits | Keep, recorded in § Retained by decision; move only `RecoveryBoundary`/`checkpoint` behind `#[cfg(test)]` (`HermesConfig` is kept as a deadline/concurrency seam of the same class) |
 | `native_capture` | Keep the capture drivers (the fixture-recording capability); delete only its self-tests that exercise harness types |
 | Exclusive receipt proof | Remove the mechanism and narrow the receipt contract to the behavior production already has |
 | Schema/vocabulary removals | Remove every listed item, including the write-only audit columns |
@@ -321,7 +321,7 @@ Run each pattern with `grep -rnE --exclude-dir=native` over `src/ assets/ SPEC.m
 | `native_request_id\|native_correlation` | none |
 | `reachability` | hold-reason prose listed in § Contract delta |
 | `Reachability\|reachability=\|"reachability"\|'reachable'\|'suspect'` | none |
-| `"schema_version": ?2\|schema_version=2\|schema_version=1\|"schema_version": ?1, ?"automatic_review"\|descriptor contains schema version` | none (event payloads, effective-policy records and the launch descriptor, in production code, tests and docs) |
+| `"schema_version": ?2\|schema_version=2\|schema_version=1\|"schema_version": ?1, ?"automatic_review"\|descriptor contains schema version` | the unsupported-version rejection tests for the operator redaction file (`src/broker/runtime/evidence.rs`) and the profile catalog (`src/coding_agent/catalog.rs`); nothing in event payloads, effective-policy records or the launch descriptor |
 | `schema_version` in `src/runtime/artifacts.rs` and in `src/broker/runtime/events.rs` outside its operator-file tests | none |
 | `rule\.sensitive\|raw\["sensitive"\]\|"sensitive":\|profile-marked sensitive` | none (`sensitive_rules` and `native_capture`'s policy `sensitive` set do not match) |
 | `\(no placement\)\|NO_PLACEMENT_STATUS\|has no placement\|placement may be null\|records no pane\|no root Director recorded\|no concrete placement\|tolerate_missing_placement` | none |
@@ -337,7 +337,7 @@ Run each pattern with `grep -rnE --exclude-dir=native` over `src/ assets/ SPEC.m
 | `embedded in the CAFleet binary` near the native screen fixtures, `The loader validates every catalog fixture entry` | none |
 | `run-less\|without a recorded run\|Missing placement\|missing placement` | none; the run-less ordinary-member tests (`cli/fleet.rs:1543`, `cli/member.rs:2720-2752`, `cli/message.rs:980-1030`) assert removed behavior and are deleted with BRK7 |
 
-The `schema_version` patterns target only the removed constant versions; the operator event-redaction file, capture policy, bundled catalog, native fixture files, SQLite `PRAGMA schema_version` and `native_capture` producer/policy JSON keep their own `schema_version` and match none of them.
+The `schema_version` patterns target only the removed constant versions; the operator event-redaction file, capture policy, bundled catalog, native fixture files, SQLite `PRAGMA schema_version` and `native_capture` producer/policy JSON keep their own `schema_version`; only the two unsupported-version rejection tests listed above match.
 
 ### Retained by decision
 
