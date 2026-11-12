@@ -140,9 +140,18 @@ struct NativeIo<'a> {
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
     clock: &'a dyn ObservationClock,
+    #[cfg(test)]
     shutdown_unit: Duration,
 }
 impl NativeIo<'_> {
+    #[cfg(not(test))]
+    fn shutdown_clock(&self) -> ShutdownClock {
+        ShutdownClock::new(Instant::now())
+    }
+    #[cfg(test)]
+    fn shutdown_clock(&self) -> ShutdownClock {
+        ShutdownClock::with_unit(Instant::now(), self.shutdown_unit)
+    }
     fn quiesce(
         &mut self,
         coordinator: &mut InputCoordinator,
@@ -172,10 +181,7 @@ impl NativeIo<'_> {
         before_exit(self.controller)?;
         self.controller
             .child_exited(exit, &self.transport.snapshot(), self.writer, self.clock)?;
-        Ok(Some(ShutdownClock::with_unit(
-            Instant::now(),
-            self.shutdown_unit,
-        )))
+        Ok(Some(self.shutdown_clock()))
     }
 }
 
@@ -525,7 +531,9 @@ impl ShutdownHost for LiveShutdown<'_> {
 }
 
 pub(crate) struct RunnerDependencies {
+    #[cfg(test)]
     pub(crate) catalog: &'static crate::coding_agent::ProfileCatalog,
+    #[cfg(test)]
     pub(crate) clock: Arc<dyn ObservationClock>,
     #[cfg(test)]
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
@@ -544,7 +552,9 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         settings,
         descriptor_path,
         RunnerDependencies {
+            #[cfg(test)]
             catalog: crate::coding_agent::ProfileCatalog::bundled(),
+            #[cfg(test)]
             clock: Arc::new(RealObservationClock),
             #[cfg(test)]
             writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
@@ -563,15 +573,31 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 pub(crate) fn run_service(
     settings: &Settings,
     descriptor_path: &Path,
+    #[cfg_attr(
+        not(test),
+        expect(
+            unused_variables,
+            reason = "production dependencies carry only test seams"
+        )
+    )]
     services: RunnerDependencies,
 ) -> Result<i32> {
     #[cfg(test)]
     let mut services = services;
     #[cfg(not(test))]
-    let shutdown_unit = Duration::from_secs(1);
+    let shutdown_clock = || ShutdownClock::new(Instant::now());
     #[cfg(test)]
     let shutdown_unit = services.shutdown_unit;
+    #[cfg(test)]
     let shutdown_clock = || ShutdownClock::with_unit(Instant::now(), shutdown_unit);
+    #[cfg(not(test))]
+    let catalog = crate::coding_agent::ProfileCatalog::bundled();
+    #[cfg(test)]
+    let catalog = services.catalog;
+    #[cfg(not(test))]
+    let observation_clock: Arc<dyn ObservationClock> = Arc::new(RealObservationClock);
+    #[cfg(test)]
+    let observation_clock = services.clock.clone();
 
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
@@ -646,7 +672,7 @@ pub(crate) fn run_service(
     let evidence_policy = match descriptor.spawn.evidence_policy["mode"].as_str() {
         Some("metadata") => storage::evidence::EvidencePolicy::metadata(),
         Some("redacted") => {
-            let ids = services.catalog.rule_ids();
+            let ids = catalog.rule_ids();
             let refs = ids.iter().map(String::as_str).collect::<Vec<_>>();
             storage::evidence::EvidencePolicy::redacted(
                 &descriptor.spawn.evidence_policy["config"],
@@ -655,7 +681,7 @@ pub(crate) fn run_service(
         }
         _ => return Err(error("invalid launch evidence policy")),
     };
-    let mut controller = ObservationController::new(&run, services.catalog, evidence_policy)?;
+    let mut controller = ObservationController::new(&run, catalog, evidence_policy)?;
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -686,7 +712,8 @@ pub(crate) fn run_service(
             transport: &mut transport,
             controller: &mut controller,
             writer: &writer,
-            clock: services.clock.as_ref(),
+            clock: observation_clock.as_ref(),
+            #[cfg(test)]
             shutdown_unit,
         },
         conn: &mut conn,
@@ -701,7 +728,7 @@ pub(crate) fn run_service(
         terminal: &terminal,
         terminate: &terminate,
         resize: &resize,
-        catalog: services.catalog,
+        catalog,
         #[cfg(test)]
         capture: services.capture.take(),
         handshake_deadline,
@@ -789,7 +816,7 @@ pub(crate) fn run_service(
         writer: &mut writer,
         clock,
         controller: &mut controller,
-        observation_clock: services.clock.as_ref(),
+        observation_clock: observation_clock.as_ref(),
         coordinator: coordinator.as_mut(),
     };
     let mut outcome = shutdown(&mut live, clock, native_exit);
@@ -876,7 +903,7 @@ struct RunnerLoop<'a> {
 
 impl RunnerLoop<'_> {
     fn shutdown_clock(&self) -> ShutdownClock {
-        ShutdownClock::with_unit(Instant::now(), self.native.shutdown_unit)
+        self.native.shutdown_clock()
     }
 
     fn serve(&mut self) -> Result<ShutdownClock> {
@@ -1033,7 +1060,7 @@ impl RunnerLoop<'_> {
                 identity, pane_id, ..
             } => {
                 identity.validate(&self.run)?;
-                self.start(client_id, pane_id.as_deref(), accepted_startup)
+                self.start(client_id, pane_id, accepted_startup)
             }
             LifecycleRequest::Health { identity, .. } => {
                 identity.validate(&self.run)?;
@@ -1076,17 +1103,11 @@ impl RunnerLoop<'_> {
         .map_err(io_error)
     }
 
-    fn start(
-        &mut self,
-        client_id: u64,
-        pane: Option<&str>,
-        accepted_startup: &mut bool,
-    ) -> Result<Value> {
+    fn start(&mut self, client_id: u64, pane: &str, accepted_startup: &mut bool) -> Result<Value> {
         ensure(
             !self.started && self.creator_connection == Some(client_id),
             "start requires prepared creator connection",
         )?;
-        let pane = pane.ok_or_else(|| error("start requires concrete pane placement"))?;
         *accepted_startup = true;
         with_database_deadline(self.conn, self.handshake_deadline, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
@@ -1207,10 +1228,7 @@ impl RunnerLoop<'_> {
             let mut observer = native.controller.observer(native.writer, native.clock);
             observer.observe(&native.transport.snapshot())?;
         }
-        let coordinator = self
-            .coordinator
-            .as_mut()
-            .ok_or_else(|| error("running service requires input coordinator"))?;
+        let coordinator = started(&mut self.coordinator);
         let progress = coordinator.progress_with_manual(native.transport, |transport| {
             transport.tick(
                 native.input,
@@ -3971,8 +3989,6 @@ mod tests {
                 "{:?}",
                 outcome.diagnostics
             );
-            assert_eq!(outcome.pending_event_frames, 0);
-            assert_eq!(outcome.unsaved_observation_gap, 0);
             assert_durable_gap(&fixture);
             assert_eq!(fixture.wait().code(), Some(0));
             assert_eq!(count(&fixture, "runner_exited"), 1);

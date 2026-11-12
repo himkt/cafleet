@@ -645,7 +645,7 @@ pub(crate) struct ZeroByteRetirement<'guard> {
     owner: RunOwner,
     input_id: i64,
     interaction_id: i64,
-    input: Option<InputOperation>,
+    input: InputOperation,
     rearm: Option<(NewPermissionResponse, AnswerCapability)>,
     guard: PhantomData<(&'guard mut (), Rc<()>)>,
 }
@@ -661,7 +661,7 @@ impl<'guard> ZeroByteRetirement<'guard> {
             owner: owner.clone(),
             input_id,
             interaction_id,
-            input: Some(receipt.input.clone()),
+            input: receipt.input.clone(),
             rearm: capability.map(|cap| {
                 (
                     NewPermissionResponse {
@@ -675,43 +675,20 @@ impl<'guard> ZeroByteRetirement<'guard> {
         })
     }
 
-    pub(crate) fn from_exclusive_guard(
-        guard: &'guard crate::runtime::ExclusiveReceiptGuard<'_>,
-        owner: &RunOwner,
-        input_id: i64,
-        interaction_id: i64,
-    ) -> Result<Self, CafleetError> {
-        let input = guard.retirement_binding(owner, input_id, interaction_id)?;
-        Ok(Self {
-            owner: owner.clone(),
-            input_id,
-            interaction_id,
-            input: Some(input.clone()),
-            rearm: None,
-            guard: PhantomData,
-        })
-    }
-
     #[cfg(test)]
     pub(crate) fn fixture(
         owner: &RunOwner,
-        input_id: i64,
-        interaction_id: i64,
+        receipt: &PermissionReceipt,
         _: &'guard mut (),
-    ) -> Result<Self, CafleetError> {
-        require(
-            input_id > 0 && interaction_id > 0,
-            "retirement",
-            "positive identities required",
-        )?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             owner: owner.clone(),
-            input_id,
-            interaction_id,
-            input: None,
+            input_id: receipt.input.input_id,
+            interaction_id: receipt.response.metadata.interaction_id,
+            input: receipt.input.clone(),
             rearm: None,
             guard: PhantomData,
-        })
+        }
     }
 }
 
@@ -1034,14 +1011,11 @@ fn validate_proof(
         "retirement",
         "retirement proof does not match current owner/input/interaction",
     )?;
-    if let Some(input) = &proof.input {
-        require(
-            input.same_identity(&receipt.input),
-            "retirement",
-            "retirement immutable receipt changed",
-        )?;
-    }
-    Ok(())
+    require(
+        proof.input.same_identity(&receipt.input),
+        "retirement",
+        "retirement immutable receipt changed",
+    )
 }
 
 fn validate_current_capability(
@@ -2483,13 +2457,7 @@ mod tests {
         .unwrap();
         let recovery = fixture.base.recoverer();
         let mut guard = ();
-        let proof = ZeroByteRetirement::fixture(
-            &recovery,
-            receipt.input.input_id,
-            fixture.request.metadata.interaction_id,
-            &mut guard,
-        )
-        .unwrap();
+        let proof = ZeroByteRetirement::fixture(&recovery, &receipt, &mut guard);
         let released = crate::broker::runtime::test_support::release_permission_claim(
             &mut fixture.base.conn,
             &recovery,
@@ -3234,13 +3202,7 @@ mod tests {
             }
             let audit = rows(&fixture.base.conn, "member_permission_responses");
             let mut guard = ();
-            let proof = ZeroByteRetirement::fixture(
-                &fixture.owner,
-                receipt.input.input_id,
-                fixture.request.metadata.interaction_id,
-                &mut guard,
-            )
-            .unwrap();
+            let proof = ZeroByteRetirement::fixture(&fixture.owner, &receipt, &mut guard);
             let released = crate::broker::runtime::test_support::release_permission_claim(
                 &mut fixture.base.conn,
                 &fixture.owner,
@@ -3301,13 +3263,7 @@ mod tests {
                 .unwrap();
             }
             let mut guard = ();
-            let proof = ZeroByteRetirement::fixture(
-                &fixture.owner,
-                receipt.input.input_id,
-                fixture.request.metadata.interaction_id,
-                &mut guard,
-            )
-            .unwrap();
+            let proof = ZeroByteRetirement::fixture(&fixture.owner, &receipt, &mut guard);
             let before = state(&fixture.base.conn);
             assert!(
                 crate::broker::runtime::test_support::release_permission_claim(
@@ -3338,17 +3294,15 @@ mod tests {
         .unwrap();
         for changed in ["input", "interaction", "epoch"] {
             let mut owner = fixture.owner.clone();
-            let mut input = receipt.input.input_id;
-            let mut interaction = fixture.request.metadata.interaction_id;
+            let mut bound = receipt.clone();
             match changed {
-                "input" => input += 1,
-                "interaction" => interaction += 1,
+                "input" => bound.input.input_id += 1,
+                "interaction" => bound.response.metadata.interaction_id += 1,
                 "epoch" => owner.owner_epoch += 1,
                 _ => unreachable!(),
             }
             let mut guard = ();
-            let proof =
-                ZeroByteRetirement::fixture(&owner, input, interaction, &mut guard).unwrap();
+            let proof = ZeroByteRetirement::fixture(&owner, &bound, &mut guard);
             let before = state(&fixture.base.conn);
             assert!(
                 crate::broker::runtime::test_support::release_permission_claim(
@@ -3379,13 +3333,7 @@ mod tests {
         .unwrap();
         fixture.base.conn.execute_batch("CREATE TRIGGER reject_claim_release BEFORE DELETE ON member_permission_response_claims BEGIN SELECT RAISE(ABORT,'fixture release failure'); END").unwrap();
         let mut guard = ();
-        let proof = ZeroByteRetirement::fixture(
-            &fixture.owner,
-            receipt.input.input_id,
-            fixture.request.metadata.interaction_id,
-            &mut guard,
-        )
-        .unwrap();
+        let proof = ZeroByteRetirement::fixture(&fixture.owner, &receipt, &mut guard);
         let before = state(&fixture.base.conn);
         assert!(
             crate::broker::runtime::test_support::release_permission_claim(

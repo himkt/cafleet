@@ -1,7 +1,6 @@
 use crate::broker::Placement;
 use crate::broker::runtime as storage;
 use crate::broker::runtime::*;
-use crate::broker::stored_enum;
 use crate::config::Settings;
 use crate::pane_lock::PaneLock;
 use crate::runtime::*;
@@ -20,15 +19,11 @@ pub(crate) enum ProcessEvidence {
     Unknown(String),
 }
 #[derive(Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "the synchronous recovery interface transfers one bounded health snapshot by value"
-)]
 pub(crate) enum RecoveryHealth {
-    Matching(HealthSnapshot),
+    Matching,
     Unavailable(String),
-    Mismatched(String),
 }
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum RecoveryBoundary {
     AfterSnapshot,
@@ -46,23 +41,15 @@ pub(crate) trait RecoveryHost {
         process: &ProcessIdentity,
         deadline: Instant,
     ) -> Result<ProcessEvidence>;
-    fn startup_process_evidence(
-        &mut self,
-        run: &RunRecord,
-        placement: Option<&Placement>,
-        deadline: Instant,
-    ) -> Result<ProcessEvidence>;
     fn health(&mut self, run: &RunRecord, deadline: Instant) -> Result<RecoveryHealth>;
     fn cleanup_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome>;
     fn unlink_descriptor(&mut self, path: &std::path::Path, deadline: Instant) -> Result<()> {
         unlink_descriptor_file(path, deadline)
     }
-    fn checkpoint(
-        &mut self,
-        boundary: RecoveryBoundary,
-        run: &RunRecord,
-        deadline: Instant,
-    ) -> Result<()>;
+    #[cfg(test)]
+    fn checkpoint(&mut self, _: RecoveryBoundary, _: &RunRecord, _: Instant) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub(crate) fn unlink_descriptor_file(path: &std::path::Path, deadline: Instant) -> Result<()> {
@@ -75,12 +62,23 @@ pub(crate) struct OwnerTerminationAttestation {
     pub(crate) expected_owner_epoch: i64,
     pub(crate) evidence_ref: String,
 }
-stored_enum!(RecoveryOutcome, "recovery.outcome", {
-    Recovered => "recovered",
-    Recovering => "recovering",
-    LiveOrUnreachable => "live_or_unreachable",
-    OperatorReconciliationRequired => "operator_reconciliation_required",
-});
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoveryOutcome {
+    Recovered,
+    Recovering,
+    LiveOrUnreachable,
+    OperatorReconciliationRequired,
+}
+impl RecoveryOutcome {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Recovered => "recovered",
+            Self::Recovering => "recovering",
+            Self::LiveOrUnreachable => "live_or_unreachable",
+            Self::OperatorReconciliationRequired => "operator_reconciliation_required",
+        }
+    }
+}
 #[derive(Debug)]
 pub(crate) struct RecoveryReport {
     pub(crate) member_id: i64,
@@ -248,7 +246,6 @@ struct BorrowedPane<'a> {
 pub(crate) fn recover_member_with_held_pane_lock(
     conn: &mut Connection,
     settings: &Settings,
-    member_id: i64,
     expected_run: &RunRecord,
     expected_placement: &Placement,
     attestation: Option<&OwnerTerminationAttestation>,
@@ -264,7 +261,7 @@ pub(crate) fn recover_member_with_held_pane_lock(
     recover(
         conn,
         settings,
-        member_id,
+        expected_run.member_id,
         attestation,
         deadline,
         Some(borrowed),
@@ -274,7 +271,6 @@ pub(crate) fn recover_member_with_held_pane_lock(
 pub(crate) fn recover_member_under_pane_lock(
     conn: &mut Connection,
     settings: &Settings,
-    member_id: i64,
     expected_run: &RunRecord,
     expected_placement: &Placement,
     deadline: Instant,
@@ -288,7 +284,7 @@ pub(crate) fn recover_member_under_pane_lock(
     recover(
         conn,
         settings,
-        member_id,
+        expected_run.member_id,
         None,
         deadline,
         Some(borrowed),
@@ -322,12 +318,6 @@ fn recover(
     borrowed: Option<BorrowedPane<'_>>,
     host: &mut impl RecoveryHost,
 ) -> Result<RecoveryCompletion> {
-    if let Some(expected) = &borrowed {
-        ensure(
-            member_id == expected.run.member_id,
-            "borrowed recovery member identity mismatch",
-        )?;
-    }
     let clock = ShutdownClock::new(Instant::now()).clipped(until);
     check_deadline(Instant::now(), until)?;
     ensure(member_id > 0, "positive recovery member ID required")?;
@@ -343,6 +333,8 @@ fn recover(
             .validate_binding(&settings.database_url, expected.placement)?;
     }
     validate_attestation(&run, attestation)?;
+    check_deadline(Instant::now(), until)?;
+    #[cfg(test)]
     host.checkpoint(RecoveryBoundary::AfterSnapshot, &run, until)?;
     let unborrowed_pane = pinned
         .as_ref()
@@ -395,17 +387,14 @@ fn recover(
     let process = run.owner_process();
     let owner = host.process_evidence(&process, until)?;
     let startup = if run.owner_kind == OwnerKind::Creator {
-        host.startup_process_evidence(&run, pinned.as_ref(), until)?
+        ProcessEvidence::Unknown("complete generation-bound startup process set unavailable".into())
     } else {
         ProcessEvidence::Terminated
     };
     let health = host.health(&run, until)?;
     let health_live = match &health {
-        RecoveryHealth::Matching(health) => {
-            health.validate(&run)?;
-            true
-        }
-        RecoveryHealth::Unavailable(reason) | RecoveryHealth::Mismatched(reason) => {
+        RecoveryHealth::Matching => true,
+        RecoveryHealth::Unavailable(reason) => {
             ensure(
                 !reason.is_empty(),
                 "health uncertainty requires a diagnostic",
@@ -413,10 +402,7 @@ fn recover(
             false
         }
     };
-    if matches!(owner, ProcessEvidence::Alive)
-        || matches!(startup, ProcessEvidence::Alive)
-        || health_live
-    {
+    if matches!(owner, ProcessEvidence::Alive) || health_live {
         return completion(run, RecoveryOutcome::LiveOrUnreachable);
     }
     let unknown = matches!(owner, ProcessEvidence::Unknown(_))
@@ -430,6 +416,8 @@ fn recover(
         }
         return Ok(result);
     }
+    check_deadline(Instant::now(), until)?;
+    #[cfg(test)]
     host.checkpoint(RecoveryBoundary::BeforeTakeover, &run, until)?;
     let process = host.current_process()?;
     let recheck = |conn: &Connection| -> Result<()> {
@@ -476,31 +464,17 @@ impl RecoveryHost for NativeRecoveryHost {
             Err(cause) => Ok(ProcessEvidence::Unknown(cause.message().into_owned())),
         }
     }
-    fn startup_process_evidence(
-        &mut self,
-        _: &RunRecord,
-        _: Option<&Placement>,
-        until: Instant,
-    ) -> Result<ProcessEvidence> {
-        check_deadline(Instant::now(), until)?;
-        Ok(ProcessEvidence::Unknown(
-            "complete generation-bound startup process set unavailable".into(),
-        ))
-    }
     fn health(&mut self, run: &RunRecord, until: Instant) -> Result<RecoveryHealth> {
         match crate::runtime::control::request(run, LifecycleRequest::health(run), until) {
             Ok(value) => match HealthSnapshot::decode(value, run) {
-                Ok(health) => Ok(RecoveryHealth::Matching(health)),
-                Err(cause) => Ok(RecoveryHealth::Mismatched(cause.message().into_owned())),
+                Ok(_) => Ok(RecoveryHealth::Matching),
+                Err(cause) => Ok(RecoveryHealth::Unavailable(cause.message().into_owned())),
             },
             Err(cause) => Ok(RecoveryHealth::Unavailable(cause.message().into_owned())),
         }
     }
     fn cleanup_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome> {
         crate::runtime::process::recover_descendants(run, clock)
-    }
-    fn checkpoint(&mut self, _: RecoveryBoundary, _: &RunRecord, until: Instant) -> Result<()> {
-        check_deadline(Instant::now(), until)
     }
 }
 
@@ -695,6 +669,13 @@ fn persist(
     transition: &ObservedTransition,
     effective_policy: Option<&storage::EffectivePolicyObservation>,
     original: bool,
+    #[cfg_attr(
+        not(test),
+        expect(
+            unused_variables,
+            reason = "only the test boundary hook reads the host"
+        )
+    )]
     host: &mut impl RecoveryHost,
     until: Instant,
 ) -> Result<()> {
@@ -717,7 +698,10 @@ fn persist(
         count_commit(&mut result.report, &event, original)?;
     }
     refresh(conn, result, until)?;
-    host.checkpoint(RecoveryBoundary::AfterCommit, &result.run, until)
+    check_deadline(Instant::now(), until)?;
+    #[cfg(test)]
+    host.checkpoint(RecoveryBoundary::AfterCommit, &result.run, until)?;
+    Ok(())
 }
 pub(super) fn loss_transitions(
     conn: &Connection,
@@ -820,6 +804,8 @@ fn perform(
     clock: ShutdownClock,
     until: Instant,
 ) -> Result<()> {
+    check_deadline(Instant::now(), until)?;
+    #[cfg(test)]
     host.checkpoint(RecoveryBoundary::AfterTakeover, &result.run, until)?;
     let mut descriptor = RecoveryDescriptor::pin(conn, &result.run, &lock, until)?;
     let (mut outbox, scan) = Outbox::open_recovery(conn, &result.run, lock.clone(), until)?;
@@ -830,6 +816,8 @@ fn perform(
         with_database_deadline(conn, until, |conn| {
             check_snapshot(conn, &result.run, pinned)
         })?;
+        check_deadline(Instant::now(), until)?;
+        #[cfg(test)]
         host.checkpoint(RecoveryBoundary::BeforeReplay, &result.run, until)?;
         persist(
             conn,
@@ -871,8 +859,12 @@ fn perform(
             .push(json!("owned recovery cleanup remains incomplete"));
         return Ok(());
     }
+    check_deadline(Instant::now(), until)?;
+    #[cfg(test)]
     host.checkpoint(RecoveryBoundary::BeforeCompact, &result.run, until)?;
     outbox.compact_committed(conn, &result.run.owner(), until)?;
+    check_deadline(Instant::now(), until)?;
+    #[cfg(test)]
     host.checkpoint(RecoveryBoundary::BeforeFinish, &result.run, until)?;
     with_database_deadline(conn, until, |conn| {
         check_snapshot(conn, &result.run, pinned)
@@ -2304,8 +2296,8 @@ mod tests {
         use crate::runtime::recovery::test_support::descriptor::*;
         use crate::runtime::recovery::tests::*;
         #[test]
-        fn runner_recovery_verified_creator_recovery_removes_its_private_descriptor() {
-            let mut case = described_creator();
+        fn runner_recovery_verified_recovery_removes_its_private_descriptor() {
+            let mut case = described_run();
             let report = case.recover(&mut new_host()).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, RunStatus::Lost);
@@ -2320,7 +2312,7 @@ mod tests {
         #[test]
         fn runner_recovery_historical_descriptor_survives_reconciler_retries_until_verified_removal()
          {
-            let mut case = described_creator();
+            let mut case = described_run();
             let bytes = owned_bytes(&case);
             let original_epoch = case.fixture.run.owner_epoch;
             for increment in 1..=2 {
@@ -2356,7 +2348,7 @@ mod tests {
 
         #[test]
         fn runner_recovery_foreign_epoch_before_unlink_preserves_descriptor() {
-            let mut case = described_creator();
+            let mut case = described_run();
             let original = owned_bytes(&case);
             let database = case.fixture.conn.path().unwrap().to_owned();
             let mut host = new_host();
@@ -2382,7 +2374,7 @@ mod tests {
         fn runner_recovery_invalid_descriptor_identity_epoch_shape_or_permissions_fails_privately()
         {
             for damage in ["nonce", "symlink"] {
-                let mut case = described_creator();
+                let mut case = described_run();
                 let mut value: Value = serde_json::from_slice(&owned_bytes(&case)).unwrap();
                 if damage == "nonce" {
                     value["launch_nonce"] = json!("b".repeat(64));
@@ -2410,7 +2402,7 @@ mod tests {
 
         #[test]
         fn runner_recovery_exceptional_database_only_reconciliation_preserves_suspect_descriptor() {
-            let mut case = described_creator();
+            let mut case = described_run();
             let before = identity(&case.artifacts.paths.descriptor);
             missing_lock(&mut case);
             let report = case.recover(&mut new_host()).unwrap();
@@ -2426,7 +2418,7 @@ mod tests {
         #[test]
         fn runner_recovery_coordinator_propagates_actual_unlink_failure_and_retries_historical_epoch()
          {
-            let mut case = described_creator();
+            let mut case = described_run();
             let bytes = owned_bytes(&case);
             let mut failed =
                 Host::with_unlink(&case, Instant::now() + Duration::from_secs(2), true);
@@ -2473,7 +2465,7 @@ mod tests {
 
         #[test]
         fn runner_recovery_expired_original_budget_prevents_actual_unlink_dispatch() {
-            let mut case = described_creator();
+            let mut case = described_run();
             let bytes = owned_bytes(&case);
             let mut host =
                 Host::with_unlink(&case, Instant::now() + Duration::from_millis(500), false);
@@ -3314,51 +3306,15 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_creator_free_precreated_lock_requires_complete_startup_evidence() {
-            for evidence in [Evidence::Alive, Evidence::Unknown] {
-                let mut case = Case::creator();
-                let before = rows(&case.fixture.conn);
-                let mut host = new_host();
-                host.startup = evidence;
-                let report = case.recover(&mut host).unwrap();
-                match evidence {
-                    Evidence::Alive => {
-                        assert!(matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable))
-                    }
-                    Evidence::Unknown => assert!(matches!(
-                        report.outcome,
-                        RecoveryOutcome::OperatorReconciliationRequired
-                    )),
-                    Evidence::Terminated => unreachable!(),
-                }
-                assert!(host.calls.iter().any(|name| name == "startup"));
-                assert_eq!(counts(&report), (0, 0, 0));
-                assert_eq!(rows(&case.fixture.conn), before);
-            }
-        }
-
-        #[test]
-        fn runner_recovery_creator_positive_complete_startup_termination_allows_one_bookkeeping_loss()
-         {
+        fn runner_recovery_creator_free_precreated_lock_requires_operator_reconciliation() {
             let mut case = Case::creator();
-            let epoch = case.fixture.run.owner_epoch;
-            let mut host = new_host();
-            let report = case.recover(&mut host).unwrap();
-            assert!(host.calls.iter().any(|name| name == "startup"));
-            assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
-            assert_eq!(report.status, RunStatus::Lost);
-            assert_eq!(
-                events(&case)
-                    .iter()
-                    .filter(|row| row.event.kind == RuntimeEventKind::RunnerLost)
-                    .count(),
-                1
-            );
-            case.refresh();
-            assert_eq!(case.fixture.run.owner_epoch, epoch + 1);
-            assert!(!case.artifacts.paths.descriptor.exists());
             let before = rows(&case.fixture.conn);
-            assert_eq!(counts(&case.recover(&mut new_host()).unwrap()), (0, 0, 0));
+            let report = case.recover(&mut new_host()).unwrap();
+            assert!(matches!(
+                report.outcome,
+                RecoveryOutcome::OperatorReconciliationRequired
+            ));
+            assert_eq!(counts(&report), (0, 0, 0));
             assert_eq!(rows(&case.fixture.conn), before);
         }
 
@@ -3452,7 +3408,6 @@ mod tests {
                     recover_member_with_held_pane_lock(
                         &mut case.fixture.conn,
                         &case.settings,
-                        case.fixture.run.member_id,
                         &expected,
                         &placement,
                         None,
@@ -3610,7 +3565,6 @@ mod tests {
                     recover_member_with_held_pane_lock(
                         conn,
                         &case.settings,
-                        expected.member_id,
                         &expected,
                         &case.placement,
                         None,
@@ -4038,7 +3992,7 @@ mod tests {
 
         #[test]
         fn runner_recovery_settles_a_deferred_ready_receipt_not_submitted_without_replay() {
-            let mut case = Case::creator();
+            let mut case = Case::new();
             let deferred = insert(&case, "prompt:deferred", "ready", true);
             let attempted = insert(&case, "prompt:attempted", "in_progress", false);
             let attempted_before = storage::get_input(&case.fixture.conn, attempted).unwrap();
@@ -4238,7 +4192,6 @@ pub(crate) mod test_support {
             recover_member_with_held_pane_lock(
                 &mut self.fixture.conn,
                 &self.settings,
-                self.fixture.run.member_id,
                 expected,
                 &self.placement,
                 None,
@@ -4339,7 +4292,6 @@ pub(crate) mod test_support {
     pub(crate) struct Host {
         pub(crate) deadline: Instant,
         pub(crate) process: Evidence,
-        pub(crate) startup: Evidence,
         pub(crate) matching_health: bool,
         pub(crate) cleanup: CleanupState,
         pub(crate) calls: Vec<String>,
@@ -4352,7 +4304,6 @@ pub(crate) mod test_support {
             Self {
                 deadline,
                 process: Evidence::Terminated,
-                startup: Evidence::Terminated,
                 matching_health: false,
                 cleanup: CleanupState::Complete,
                 calls: Vec::new(),
@@ -4439,32 +4390,21 @@ pub(crate) mod test_support {
             ));
             Ok(self.process.value())
         }
-        fn startup_process_evidence(
-            &mut self,
-            run: &RunRecord,
-            placement: Option<&Placement>,
-            deadline: Instant,
-        ) -> TestResult<ProcessEvidence> {
-            self.check(deadline)?;
-            assert_eq!(run.owner_kind, OwnerKind::Creator);
-            assert!(placement.is_some());
-            self.calls.push("startup".into());
-            Ok(self.startup.value())
-        }
         fn health(&mut self, run: &RunRecord, deadline: Instant) -> TestResult<RecoveryHealth> {
             self.check(deadline)?;
             self.calls.push("health".into());
             if self.matching_health {
-                Ok(RecoveryHealth::Matching(HealthSnapshot {
-                    identity: ControlIdentity::from_run(run),
-                    runner: ProcessIdentity {
-                        pid: run.runner_pid.unwrap(),
-                        start_identity: run.runner_start_identity.clone().unwrap(),
+                let snapshot = json!({
+                    "identity": ControlIdentity::from_run(run),
+                    "runner": {
+                        "pid": run.runner_pid.unwrap(),
+                        "start_identity": run.runner_start_identity.clone().unwrap(),
                     },
-                    child: None,
-                    output_seq: 1,
-                    observation: None,
-                }))
+                    "child": null,
+                    "output_seq": 1,
+                });
+                HealthSnapshot::decode(snapshot, run)?;
+                Ok(RecoveryHealth::Matching)
             } else {
                 Ok(RecoveryHealth::Unavailable(
                     "bounded injected endpoint unavailable".into(),
@@ -4764,8 +4704,8 @@ pub(crate) mod test_support {
 
         pub(crate) const PRIVATE_VALUE: &str = "descriptor-private-fixture-canary";
 
-        pub(crate) fn described_creator() -> Case {
-            let case = Case::creator();
+        pub(crate) fn described_run() -> Case {
+            let case = Case::new();
             let mut spec = case.fixture.spec();
             spec.argv = vec!["/usr/bin/false".into(), PRIVATE_VALUE.into()];
             spec.environment

@@ -660,7 +660,7 @@ pub(crate) enum LifecycleRequest {
     Start {
         protocol_version: u32,
         identity: ControlIdentity,
-        pane_id: Option<String>,
+        pane_id: String,
     },
     Health {
         protocol_version: u32,
@@ -1232,7 +1232,7 @@ impl HealthSnapshot {
         result.validate(run)?;
         Ok(result)
     }
-    pub(crate) fn validate(&self, run: &RunRecord) -> Result<()> {
+    fn validate(&self, run: &RunRecord) -> Result<()> {
         self.identity.validate(run)?;
         if let Some(observation) = &self.observation {
             observation.validate()?;

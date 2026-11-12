@@ -258,15 +258,10 @@ pub(crate) fn deletion_placements(
 pub(crate) const PENDING_PANE_STATUS: &str = "(pending — no pane)";
 
 pub(crate) trait DeletionHost {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "deletion forwards the validated caller identity and actual retained guard"
-    )]
     fn recover(
         &mut self,
         conn: &mut Connection,
         settings: &Settings,
-        member_id: i64,
         expected_run: &crate::broker::runtime::RunRecord,
         expected_placement: &Placement,
         held: &PaneLock,
@@ -275,7 +270,6 @@ pub(crate) trait DeletionHost {
         crate::runtime::recover_member_under_pane_lock(
             conn,
             settings,
-            member_id,
             expected_run,
             expected_placement,
             deadline.instant(),
@@ -507,9 +501,7 @@ pub(crate) fn end_member(
                 ));
             }
             deadline.remaining()?;
-            let completion = host.recover(
-                conn, settings, member_id, &current, &placement, held, deadline,
-            )?;
+            let completion = host.recover(conn, settings, &current, &placement, held, deadline)?;
             crate::runtime::validate_recovery_completion(&expected, &completion)?;
             if !matches!(
                 completion.report.outcome,
@@ -954,7 +946,6 @@ pub(crate) mod test_support {
             &mut self,
             conn: &mut Connection,
             settings: &Settings,
-            member_id: i64,
             expected_run: &RunRecord,
             expected_placement: &Placement,
             held: &PaneLock,
@@ -964,7 +955,6 @@ pub(crate) mod test_support {
                 return crate::runtime::recover_member_under_pane_lock(
                     conn,
                     settings,
-                    member_id,
                     expected_run,
                     expected_placement,
                     deadline.instant(),
@@ -973,7 +963,6 @@ pub(crate) mod test_support {
             }
             self.assert_connection(conn);
             self.assert_deadline(deadline.instant());
-            assert_eq!(expected_run.member_id, member_id);
             self.assert_pane_owned(expected_placement);
             held.validate_binding(&settings.database_url, expected_placement)
                 .unwrap();
@@ -984,7 +973,6 @@ pub(crate) mod test_support {
             let completion = recover_member_with_held_pane_lock(
                 conn,
                 settings,
-                member_id,
                 expected_run,
                 expected_placement,
                 None,

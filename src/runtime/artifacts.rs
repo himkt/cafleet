@@ -645,7 +645,7 @@ impl RecoveryDescriptor {
 mod tests {
     use crate::broker::runtime as storage;
     use crate::error::CafleetError;
-    use crate::runtime::recovery::test_support::descriptor::described_creator;
+    use crate::runtime::recovery::test_support::descriptor::described_run;
     use crate::runtime::recovery::test_support::descriptor::identity as descriptor_identity;
     use crate::runtime::recovery::test_support::descriptor::owned_bytes;
     use crate::runtime::recovery::test_support::descriptor::secret_free;
@@ -655,7 +655,7 @@ mod tests {
     #[test]
     fn runner_recovery_historical_descriptor_pin_remove_uses_the_supplied_connection_budget() {
         for takeovers in [1, 2] {
-            let mut case = described_creator();
+            let mut case = described_run();
             let lock = case.held.as_ref().unwrap().clone();
             for _ in 0..takeovers {
                 lock.transfer_to_reconciler_with_deadline(
@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn runner_recovery_descriptor_pin_drop_preserves_path_for_explicit_completion() {
-        let mut case = described_creator();
+        let mut case = described_run();
         let bytes = owned_bytes(&case);
         let lock = case.held.as_ref().unwrap().clone();
         let pinned = RecoveryDescriptor::pin(
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn runner_recovery_descriptor_remove_revalidates_owner_and_expired_deadline_before_dispatch() {
         for changed in ["epoch", "deadline"] {
-            let mut case = described_creator();
+            let mut case = described_run();
             let before = descriptor_identity(&case.artifacts.paths.descriptor);
             let lock = case.held.as_ref().unwrap().clone();
             let until = Instant::now() + Duration::from_secs(1);
@@ -762,7 +762,7 @@ mod tests {
 
     #[test]
     fn runner_recovery_actual_descriptor_unlink_closure_failure_preserves_file_and_retries() {
-        let mut case = described_creator();
+        let mut case = described_run();
         let bytes = owned_bytes(&case);
         let lock = case.held.as_ref().unwrap().clone();
         let until = Instant::now() + Duration::from_secs(1);
@@ -1355,7 +1355,7 @@ mod tests {
         use crate::runtime::artifacts::*;
         use crate::runtime::recovery::test_support::Case;
         use crate::runtime::recovery::test_support::TestResult;
-        use crate::runtime::recovery::test_support::descriptor::described_creator;
+        use crate::runtime::recovery::test_support::descriptor::described_run;
         use crate::runtime::recovery::test_support::descriptor::identity;
         use crate::runtime::recovery::test_support::descriptor::owned_bytes;
         use crate::runtime::recovery::test_support::descriptor::secret_free;
@@ -1420,7 +1420,7 @@ mod tests {
                 Change::Content,
                 Change::Appeared,
             ] {
-                let mut case = described_creator();
+                let mut case = described_run();
                 let original = owned_bytes(&case);
                 let path = case.artifacts.paths.descriptor.clone();
                 let retained = case.artifacts.paths.run_dir.join("retained-launch.json");
@@ -1479,7 +1479,7 @@ mod tests {
 
         #[test]
         fn recovery_descriptor_disappearing_after_its_pin_is_a_safe_absence() {
-            let mut case = described_creator();
+            let mut case = described_run();
             let mut pinned = pin(&mut case).unwrap();
             std::fs::remove_file(&case.artifacts.paths.descriptor).unwrap();
             let (result, dispatched) = remove(&mut case, &mut pinned);
@@ -1491,7 +1491,7 @@ mod tests {
         #[test]
         fn recovery_descriptor_pin_refuses_an_invalid_descriptor_privately() {
             for damage in ["size", "json", "member", "permissions", "symlink"] {
-                let mut case = described_creator();
+                let mut case = described_run();
                 let path = case.artifacts.paths.descriptor.clone();
                 let mut value: Value = serde_json::from_slice(&owned_bytes(&case)).unwrap();
                 match damage {

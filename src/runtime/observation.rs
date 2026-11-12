@@ -7949,6 +7949,16 @@ pub(crate) mod native_capture {
             fn close_pane(&mut self, pane: &str, until: Instant) -> Result<()> {
                 self.inner.close_pane(pane, until.min(self.case_until))
             }
+            fn settle_hermes(
+                &mut self,
+                conn: &Connection,
+                run: &storage::RunRecord,
+                pane_id: &str,
+                until: Instant,
+            ) -> Result<()> {
+                self.inner
+                    .settle_hermes(conn, run, pane_id, until.min(self.case_until))
+            }
         }
 
         fn driver_prepare(

@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 36/49 tasks complete
+**Progress**: 39/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -117,7 +117,6 @@ Line numbers are at HEAD `79627cb6`. Before each removal the implementer re-loca
 | LIFE5 | Declare `RecoveryOutcome` as a plain enum with `as_str`, not through `stored_enum!`. | D.C6 | — |
 | LIFE6 | Replace `RecoveryHost::checkpoint(boundary, run, deadline)` with a `check_deadline` call plus a `#[cfg(test)]` boundary hook, removing `RecoveryBoundary` from the production build. | D.P2 | — |
 | LIFE7 | Production calls `ShutdownClock::new` (`service.rs:175`, `:590`, `:897`); `ShutdownClock::with_unit`, `NativeIo.shutdown_unit` and the `RunnerDependencies` `catalog`/`clock` fields become `#[cfg(test)]`. | C.P2, D.P3 | — |
-| LIFE8 | Delete `HealthSnapshot.output_seq` and its write (`service.rs:1200`); the observation test synchronizes on another signal. | D.P4 | — |
 | LIFE9 | Drop the re-validation after `HealthSnapshot::decode` (`recovery.rs:403-407`, `input_client.rs:152-153`); test hosts build snapshots through `decode`. | D.P5 | — |
 | LIFE10 | `tick_running` uses `started(&mut self.coordinator)` (`service.rs:1226-1229`). | D.P6 | — |
 | LIFE11 | Make `ShutdownOutcome.dropped_display_bytes`, `pending_event_frames` and `unsaved_observation_gap` locals of `shutdown()` that feed the same diagnostics. | C.C7 | — |
@@ -356,6 +355,7 @@ The `schema_version` patterns target only the removed constant versions; the ope
 | `PaneCleanup::Attempted { error: None }` | H.P6 | Records the attempted pane for pane ownership during creation |
 | `PtySession::shutdown` from `Drop` | B.P9 | Safety net for error returns between `PtySession::prepare` and `LiveShutdown` |
 | Mixed string and object entries in `cleanup_diagnostics` (`recovery::diagnostics` returns `Vec<Value>`; `format_runtime_recovery` renders non-strings as JSON) | F.P7 | Exceptional takeover records the `owner_termination_attestation` object beside string diagnostics |
+| `HealthSnapshot.output_seq` and its health-reply write | D.P4 | The retained `native_capture` drivers record it, and the runner tests use it as their only screen-progress synchronization signal |
 | `native_capture` drivers and their production seams (`ObservationClockKind`, capture fields, `attach_capture`, `begin_capture_shutdown`, `RunnerDependencies.capture`, `Running.capture`, the `service.rs:1664-1684` child-path dispatch) | A.B4 | User decision: the fixture-recording capability stays |
 
 ### Test policy
@@ -463,9 +463,9 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 12: Lifecycle, service, recovery and control
 
-- [ ] Apply LIFE1 and then LIFE13 <!-- completed: -->
-- [ ] Apply LIFE2–LIFE12 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply LIFE1 and then LIFE13 <!-- completed: 2026-11-12T13:17:33Z -->
+- [x] Apply LIFE2–LIFE7 and LIFE9–LIFE12 <!-- completed: 2026-11-12T13:17:33Z -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T13:17:33Z -->
 
 ### Step 13: native_capture self-tests
 
