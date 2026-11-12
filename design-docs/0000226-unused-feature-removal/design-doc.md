@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 33/49 tasks complete
+**Progress**: 36/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -457,9 +457,9 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 11: Runtime input and writer
 
-- [ ] Apply INP1–INP7 <!-- completed: -->
-- [ ] Apply INP8–INP15 <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Apply INP1–INP7 <!-- completed: 2026-11-12T12:58:37Z -->
+- [x] Apply INP8–INP15 <!-- completed: 2026-11-12T12:58:37Z -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T12:58:37Z -->
 
 ### Step 12: Lifecycle, service, recovery and control
 

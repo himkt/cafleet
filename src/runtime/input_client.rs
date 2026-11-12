@@ -102,7 +102,6 @@ pub(crate) trait InputCommandHost {
     fn lock(
         &mut self,
         settings: &Settings,
-        run: &RunRecord,
         placement: &Placement,
         deadline: Deadline,
     ) -> Result<Option<PaneLock>>;
@@ -120,7 +119,6 @@ impl InputCommandHost for NativeInputHost {
     fn lock(
         &mut self,
         settings: &Settings,
-        _: &RunRecord,
         placement: &Placement,
         deadline: Deadline,
     ) -> Result<Option<PaneLock>> {
@@ -478,7 +476,7 @@ fn prepare_submission_with_host<'a>(
         let attempt =
             PreparedSubmission::new(request, deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, expected_run, expected_placement, deadline)?
+            .lock(settings, expected_placement, deadline)?
             .ok_or_else(|| error("pane input remained busy before submission"))?;
         deadline.remaining()?;
         Ok(SubmissionPreparation::Locked {
@@ -734,7 +732,7 @@ fn reconcile_receipt_with_hosts(
         };
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, &run, &placement, deadline)?
+            .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("receipt pane input remained busy"))?;
         let live = (|| {
             let read_target = |conn: &mut Connection| {
@@ -1081,7 +1079,7 @@ pub(crate) fn respond_permission_with_host(
             with_database_budget(conn, deadline, |conn| permission_placement(conn, &run))?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, &run, &placement, deadline)?
+            .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
         let validate = |conn: &mut Connection| -> Result<()> {
             deadline.remaining()?;
@@ -1206,7 +1204,7 @@ fn inspect_permission_with_host(
         })?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, &run, &placement, deadline)?
+            .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
         let validate = |conn: &mut Connection| -> Result<()> {
             deadline.remaining()?;
@@ -1921,13 +1919,7 @@ pub(crate) mod test_support {
     }
 
     impl InputCommandHost for NoLiveHost {
-        fn lock(
-            &mut self,
-            _: &Settings,
-            _: &RunRecord,
-            _: &Placement,
-            _: Deadline,
-        ) -> Result<Option<PaneLock>> {
+        fn lock(&mut self, _: &Settings, _: &Placement, _: Deadline) -> Result<Option<PaneLock>> {
             Err(self.refuse("lock"))
         }
 
@@ -3270,7 +3262,6 @@ mod tests {
         fn lock(
             &mut self,
             settings: &Settings,
-            _: &RunRecord,
             placement: &Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, CafleetError> {
@@ -3535,7 +3526,6 @@ mod tests {
         fn lock(
             &mut self,
             settings: &Settings,
-            _: &RunRecord,
             placement: &Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, CafleetError> {
@@ -4534,11 +4524,10 @@ mod tests {
         fn lock(
             &mut self,
             settings: &Settings,
-            run: &RunRecord,
             placement: &Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, CafleetError> {
-            self.inner.lock(settings, run, placement, deadline)
+            self.inner.lock(settings, placement, deadline)
         }
 
         fn health(

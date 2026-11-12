@@ -242,7 +242,7 @@ fn deliver_wrapped_pending(
                     break 'submit None;
                 }
                 if guard.is_none() {
-                    guard = host.lock(settings, &run, placement, deadline)?;
+                    guard = host.lock(settings, placement, deadline)?;
                     if guard.is_none() {
                         break 'drain AttemptEnd::Failed(notification_error(
                             member.member_id,
@@ -723,14 +723,13 @@ mod tests {
         fn lock(
             &mut self,
             settings: &Settings,
-            run: &broker::runtime::RunRecord,
             placement: &crate::broker::Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, crate::error::CafleetError> {
             self.calls[0] += 1;
             assert_eq!(deadline.instant(), self.until);
             assert_eq!(placement, &self.placement);
-            let result = self.inner.lock(settings, run, placement, deadline)?;
+            let result = self.inner.lock(settings, placement, deadline)?;
             result
                 .as_ref()
                 .expect("actual available pane lock")

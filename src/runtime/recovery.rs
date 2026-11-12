@@ -3116,14 +3116,9 @@ mod tests {
                         WriterBoundary::Append
                     },
                 });
-                let mut writer = EventWriter::start_with_hooks(
-                    database_url.into(),
-                    run.clone(),
-                    lock,
-                    paths.outbox,
-                    hooks,
-                )
-                .unwrap();
+                let mut writer =
+                    EventWriter::start_with_hooks(database_url.into(), run.clone(), lock, hooks)
+                        .unwrap();
                 writer.submit(opening(&run, 1, 1)).unwrap();
                 let status = writer.finish(deadline);
                 panic!("the selected writer should be killed after fsync: {status:?}");

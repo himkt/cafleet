@@ -754,7 +754,7 @@ impl ObservationController {
         if !self.started || self.exit_recorded.is_some() {
             return Ok(());
         }
-        if self.pending.is_some() || self.gap.is_some() || writer.status().degraded {
+        if self.pending.is_some() || self.gap.is_some() || writer.status().diagnostic.is_some() {
             self.gap(ObservationFailure::Sink, &now)?;
             return Ok(());
         }
@@ -787,7 +787,7 @@ impl ObservationController {
     }
     /// No retained transition, unsaved gap or degraded writer holds new observation work back.
     fn quiet(&self, writer: &EventWriter) -> bool {
-        self.pending.is_none() && self.gap.is_none() && !writer.status().degraded
+        self.pending.is_none() && self.gap.is_none() && !writer.status().diagnostic.is_some()
     }
     pub(crate) fn poll(
         &mut self,
@@ -826,14 +826,14 @@ impl ObservationController {
         if let Some(capture) = &mut self.capture {
             capture.observe(current, native_capture::CaptureTrigger::Timer, clock)?;
         }
-        if !self.terminal_fenced && writer.status().degraded && self.gap.is_none() {
+        if !self.terminal_fenced && writer.status().diagnostic.is_some() && self.gap.is_none() {
             self.gap(ObservationFailure::Sink, &now)?;
         }
         self.route(writer, &now)?;
         if self.pending.is_some() {
             return Ok(self.status());
         }
-        if self.gap.is_some() && !writer.status().degraded {
+        if self.gap.is_some() && !writer.status().diagnostic.is_some() {
             let gap = self.gap.take().expect("gap present");
             let cause = |kind: RuntimeCauseKind| serde_json::json!({"kind":kind.as_str(),"gap_count":gap.count,"gap_started_at":gap.started_at,"gap_ended_at":if kind==RuntimeCauseKind::StorageRecovered{Some(&now.observed_at)}else{None}});
             let first = self.lifecycle(
@@ -1010,7 +1010,8 @@ impl ObservationController {
         let state = writer.status();
         let pending = self.pending_transition_count();
         let evidence = state.pending_evidence || observer.retained_evidence;
-        let degraded = state.degraded || self.gap.is_some() || observer.diagnostic.is_some();
+        let degraded =
+            state.diagnostic.is_some() || self.gap.is_some() || observer.diagnostic.is_some();
         let mut eligibility = observer.eligibility;
         if degraded || pending + state.pending_count > 0 || evidence {
             eligibility = InputEligibility::Hold(GateReason::Gap);
@@ -1025,7 +1026,7 @@ impl ObservationController {
                 .checked_add(state.gap_count)
                 .expect("health gap count overflow"),
             degraded,
-            diagnostic: if state.degraded {
+            diagnostic: if state.diagnostic.is_some() {
                 Some("sink_unavailable".into())
             } else {
                 observer.diagnostic
@@ -12269,9 +12270,7 @@ mod tests {
             let mut controller =
                 ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata())
                     .unwrap();
-            let mut writer = writer_fixture
-                .start(writer_fixture.artifacts.paths.outbox.clone())
-                .unwrap();
+            let mut writer = writer_fixture.start().unwrap();
             writer.set_deadline(until);
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
             running(&mut writer_fixture, &child.identity());
@@ -12379,10 +12378,7 @@ mod tests {
             let counts = writer.finish(until);
             let status = writer.status();
             assert_eq!(counts, (0, 0), "{status:?}");
-            assert!(
-                !status.degraded && status.diagnostic.is_none(),
-                "{status:?}"
-            );
+            assert!(status.diagnostic.is_none(), "{status:?}");
         }
 
         /// The bundled OpenCode fixture `id` with its command rows replaced by `command`, each
@@ -12422,9 +12418,7 @@ mod tests {
             let mut controller =
                 ObservationController::new(&fixture.run, catalog, EvidencePolicy::metadata())
                     .unwrap();
-            let mut writer = writer_fixture
-                .start(writer_fixture.artifacts.paths.outbox.clone())
-                .unwrap();
+            let mut writer = writer_fixture.start().unwrap();
             writer.set_deadline(until);
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
             running(&mut writer_fixture, &child.identity());
@@ -12902,7 +12896,7 @@ mod tests {
                         )
                         .unwrap();
                     self.hooks.wait(WriterBoundary::Persist, 2);
-                    wait_until(|| self.writer.status().degraded);
+                    wait_until(|| self.writer.status().diagnostic.is_some());
                     assert!(self.writer.status().pending_evidence);
                     assert_eq!(committed(&self.fixture), 1);
                     release
@@ -13075,7 +13069,7 @@ mod tests {
                 let release = Release(case.hooks.clone());
                 case.exit(300);
                 case.hooks.wait(WriterBoundary::Persist, 2);
-                wait_until(|| case.writer.status().degraded);
+                wait_until(|| case.writer.status().diagnostic.is_some());
                 case.clock.set(500);
                 case.controller
                     .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
@@ -13583,7 +13577,7 @@ mod tests {
                 .unwrap();
             assert_eq!(writer.status().pending_count, 64);
             assert!(!writer.status().pending_evidence);
-            assert!(!writer.status().degraded);
+            assert!(!writer.status().diagnostic.is_some());
             assert!(!controller.has_pending());
             assert_eq!(committed(&fixture), 0);
             clock.set(8550);
@@ -13699,7 +13693,7 @@ mod tests {
             }
             assert_eq!(writer.status().pending_count, 3);
             assert!(writer.status().pending_evidence);
-            assert!(!writer.status().degraded);
+            assert!(!writer.status().diagnostic.is_some());
             assert!(!controller.has_pending());
             clock.set(400);
             terminal
@@ -13709,7 +13703,7 @@ mod tests {
                 !controller.status().retained_evidence,
                 "a screen_seq-only redraw schedules no refresh"
             );
-            assert!(!writer.status().degraded);
+            assert!(!writer.status().diagnostic.is_some());
             terminal
                 .feed_observed(
                     &detail_rewrite("collided"),
@@ -13724,7 +13718,7 @@ mod tests {
             assert!(status.gap_count > 0);
             assert_eq!(status.eligibility, InputEligibility::Hold(GateReason::Gap));
             assert!(writer.status().pending_evidence);
-            assert!(writer.status().degraded);
+            assert!(writer.status().diagnostic.is_some());
             assert!(
                 writer
                     .status()
@@ -13755,7 +13749,7 @@ mod tests {
                 !controller.has_pending()
                     && !writer.status().pending_evidence
                     && writer.status().pending_count == 0
-                    && !writer.status().degraded
+                    && !writer.status().diagnostic.is_some()
             });
             let first = event_at(&fixture, 1);
             let closed = event_at(&fixture, 2);

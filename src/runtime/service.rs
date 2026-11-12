@@ -183,7 +183,6 @@ fn input_deadline(request: &InputControlRequest, admitted_at: Instant) -> Result
     receive_input_expiration(
         request.expires_at_mono_ns,
         admitted_at,
-        None,
         &mut RealInputDeadlineClock,
     )
 }
@@ -196,20 +195,22 @@ impl RunnerLoop<'_> {
         let InputControlOperation::PermissionInspect(input) = &request.operation else {
             unreachable!("inspection receives an inspection operation");
         };
+        let input = input.clone();
         let context = InputContext {
             run_id: Some(self.run.run_id),
             interaction_id: Some(input.interaction_id),
             ..InputContext::default()
         };
-        self.inspect_within_deadline(request, admitted_at)
+        self.inspect_within_deadline(&request, input, admitted_at)
             .map_err(|source| CafleetError::from(context.failure(source)))
     }
     fn inspect_within_deadline(
         &mut self,
-        request: InputControlRequest,
+        request: &InputControlRequest,
+        input: PermissionInspectInput,
         admitted_at: Instant,
     ) -> Result<InputControlReply> {
-        let deadline = input_deadline(&request, admitted_at)?;
+        let deadline = input_deadline(request, admitted_at)?;
         request.identity.validate(&self.run)?;
         let coordinator = self
             .coordinator
@@ -219,8 +220,7 @@ impl RunnerLoop<'_> {
         coordinator
             .inspect_received(
                 self.conn,
-                &self.run,
-                request,
+                input,
                 (&*self.native.controller, &mut *self.native.transport),
                 deadline,
             )
@@ -260,8 +260,8 @@ impl RunnerLoop<'_> {
             .as_mut()
             .ok_or_else(|| error("native input has not started"))?;
         if responds {
-            if let Some(reply) = coordinator
-                .retained_permission_response(self.conn, &self.run, &request, deadline)?
+            if let Some(reply) =
+                coordinator.retained_permission_response(self.conn, &request, deadline)?
             {
                 return Ok(Some(reply));
             }
@@ -276,13 +276,8 @@ impl RunnerLoop<'_> {
                 )));
             }
         }
-        let reply = coordinator.handle_received(
-            self.conn,
-            &self.run,
-            request,
-            self.native.controller,
-            deadline,
-        )?;
+        let reply =
+            coordinator.handle_received(self.conn, request, self.native.controller, deadline)?;
         if reply.is_none() {
             ensure(
                 self.pending_input_client.is_none(),
@@ -676,7 +671,6 @@ pub(crate) fn run_service(
         settings.database_url.clone(),
         run.clone(),
         lock.clone(),
-        artifacts.paths.outbox.clone(),
         #[cfg(test)]
         services.writer_hooks.clone(),
     )?;
@@ -1158,6 +1152,7 @@ impl RunnerLoop<'_> {
             InputServices {
                 catalog: self.catalog.clone(),
                 token_source: Box::new(SystemRequestTokens),
+                #[cfg(test)]
                 stage_settle: crate::runtime::input::STAGE_SETTLE,
                 #[cfg(test)]
                 hooks: crate::runtime::input::test_support::default_input_hooks(),
@@ -1257,7 +1252,6 @@ impl RunnerLoop<'_> {
         coordinator
             .advance(
                 self.conn,
-                &self.run,
                 self.native.transport,
                 self.native.pty,
                 self.native.controller,
@@ -4151,13 +4145,9 @@ mod tests {
                         monotonic_ns: 1_000_000_000,
                         after: now,
                     });
-                let converted = receive_input_expiration(
-                    11_000_000_000,
-                    actual.admitted_at(),
-                    None,
-                    &mut clock,
-                )
-                .unwrap();
+                let converted =
+                    receive_input_expiration(11_000_000_000, actual.admitted_at(), &mut clock)
+                        .unwrap();
                 assert_eq!(converted, actual.admitted_at() + Duration::from_secs(5));
                 clock.consumed(1, 0);
             }
