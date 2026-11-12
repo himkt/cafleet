@@ -1,7 +1,7 @@
 # Unused feature removal
 
 **Status**: Approved
-**Progress**: 39/49 tasks complete
+**Progress**: 43/49 tasks complete
 **Last Updated**: 2026-11-12
 
 ## Overview
@@ -469,10 +469,10 @@ Every code step applies every consumer edit (including tests) its type or signat
 
 ### Step 13: native_capture self-tests
 
-- [ ] Write the CAP keep/delete classification ledger under BASE <!-- completed: -->
-- [ ] Delete the classified harness self-tests and newly unused helpers <!-- completed: -->
-- [ ] Confirm the four driver entries are listed by `mise //:test -- -- --list --ignored` <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [x] Write the CAP keep/delete classification ledger under BASE <!-- completed: 2026-11-12T13:23:12Z -->
+- [x] Delete the classified harness self-tests and newly unused helpers <!-- completed: 2026-11-12T13:23:12Z -->
+- [x] Confirm the four driver entries are listed by `mise //:test -- -- --list --ignored` <!-- completed: 2026-11-12T13:23:12Z -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-12T13:23:12Z -->
 
 ### Step 14: Visibility and naming tidy
 
