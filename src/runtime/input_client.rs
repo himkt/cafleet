@@ -10,11 +10,7 @@ use crate::runtime::*;
 use crate::time::Deadline;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
-use rusqlite::TransactionBehavior;
 use rusqlite::params;
-use std::marker::PhantomData;
-use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Instant;
 
 pub(crate) struct PreparedSubmission<'a> {
@@ -102,7 +98,6 @@ pub(crate) trait InputCommandHost {
     fn lock(
         &mut self,
         settings: &Settings,
-        run: &RunRecord,
         placement: &Placement,
         deadline: Deadline,
     ) -> Result<Option<PaneLock>>;
@@ -120,7 +115,6 @@ impl InputCommandHost for NativeInputHost {
     fn lock(
         &mut self,
         settings: &Settings,
-        _: &RunRecord,
         placement: &Placement,
         deadline: Deadline,
     ) -> Result<Option<PaneLock>> {
@@ -144,16 +138,6 @@ impl InputCommandHost for NativeInputHost {
     }
 }
 
-fn checked_health(
-    host: &mut impl InputCommandHost,
-    run: &RunRecord,
-    deadline: Instant,
-) -> Result<HealthSnapshot> {
-    let health = host.health(run, deadline)?;
-    health.validate(run)?;
-    Ok(health)
-}
-
 /// Probes the runner's health between two revalidations of the durable target.
 fn bracket_health(
     conn: &mut Connection,
@@ -163,7 +147,7 @@ fn bracket_health(
     validate: impl Fn(&mut Connection) -> Result<()>,
 ) -> Result<()> {
     validate(conn)?;
-    checked_health(host, run, deadline)?;
+    host.health(run, deadline)?;
     validate(conn)
 }
 
@@ -309,7 +293,7 @@ fn same_association(
 
 fn permission_placement(conn: &Connection, run: &RunRecord) -> Result<Placement> {
     crate::broker::get_member(conn, run.member_id, run.fleet_id)?
-        .and_then(|member| member.placement)
+        .map(|member| member.placement)
         .ok_or_else(|| error("permission member placement unavailable"))
 }
 
@@ -478,7 +462,7 @@ fn prepare_submission_with_host<'a>(
         let attempt =
             PreparedSubmission::new(request, deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, expected_run, expected_placement, deadline)?
+            .lock(settings, expected_placement, deadline)?
             .ok_or_else(|| error("pane input remained busy before submission"))?;
         deadline.remaining()?;
         Ok(SubmissionPreparation::Locked {
@@ -522,15 +506,19 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         with_database_budget(conn, deadline, |conn| {
             validate_submission_target(conn, settings, expected_run, expected_placement)
         })?;
-        checked_health(host, expected_run, deadline.instant())?;
+        host.health(expected_run, deadline.instant())?;
         deadline.remaining()?;
         with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(&tx, settings, expected_run, expected_placement)?;
             let changed = tx.execute(
-                "UPDATE member_runs SET reachability='reachable',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
-                rusqlite::params![crate::time::now_stamp(), expected_run.run_id, expected_run.owner_epoch],
+                "UPDATE member_runs SET last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
+                rusqlite::params![
+                    crate::time::now_stamp(),
+                    expected_run.run_id,
+                    expected_run.owner_epoch
+                ],
             )?;
             ensure(changed == 1, "submission health ownership changed")?;
             deadline.remaining()?;
@@ -652,30 +640,26 @@ pub(crate) fn reconcile_input(
     evidence_ref: &str,
     deadline: Deadline,
 ) -> std::result::Result<InputOperation, InputFailure> {
-    reconcile_receipt_with_hosts(
+    reconcile_receipt_with_host(
         conn,
         settings,
         input_id,
         disposition,
         evidence_ref,
         deadline,
-        (
-            &mut NativeInputHost,
-            &mut crate::runtime::recovery::NativeRecoveryHost,
-        ),
+        &mut NativeInputHost,
     )
 }
 
-fn reconcile_receipt_with_hosts(
+fn reconcile_receipt_with_host(
     conn: &mut Connection,
     settings: &Settings,
     input_id: i64,
     disposition: InputDisposition,
     evidence_ref: &str,
     deadline: Deadline,
-    hosts: (&mut impl InputCommandHost, &mut impl RecoveryHost),
+    host: &mut impl InputCommandHost,
 ) -> std::result::Result<InputOperation, InputFailure> {
-    let (host, recovery) = hosts;
     let mut context = InputContext {
         input_id: (input_id > 0).then_some(input_id),
         ..InputContext::default()
@@ -715,96 +699,66 @@ fn reconcile_receipt_with_hosts(
         if original.state == InputState::Settled {
             return Ok(original);
         }
-        let Some(placement) = placement else {
-            return reconcile_input_with_host(
-                conn,
-                settings,
-                &original,
-                &run,
-                None,
-                disposition,
-                evidence_ref,
-                deadline.instant(),
-                recovery,
-            );
-        };
+        let placement = placement.ok_or_else(|| {
+            error("receipt reconciliation requires the member's live runner; the input stays uncertain")
+        })?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, &run, &placement, deadline)?
+            .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("receipt pane input remained busy"))?;
-        let live = (|| {
-            let read_target = |conn: &mut Connection| {
-                with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction()?;
-                    held.validate_binding(&settings.database_url, &placement)?;
-                    validate_receipt_target(&tx, settings, &run, &placement)?;
-                    let input = storage::get_input(&tx, input_id)?;
-                    ensure(
-                        input.same_identity(&original),
-                        "receipt immutable input identity changed",
-                    )?;
-                    deadline.remaining()?;
-                    tx.commit()?;
-                    Ok(input)
-                })
-            };
-            read_target(conn)?;
-            checked_health(host, &run, deadline.instant())?;
-            deadline.remaining()?;
-            read_target(conn)?;
-            let request =
-                |action| control_request(&run, &expiration, InputControlOperation::Receipt(action));
-            let query = request(ReceiptAction::Query {
-                operation_key: original.operation_key.clone(),
-            });
-            let reply = host.exchange(&run, &query, deadline.instant())?;
-            ensure(
-                matches!(reply, InputControlReply::Receipt(ReceiptReply::Present { input_id: actual, .. })
+        let read_target = |conn: &mut Connection| {
+            with_database_budget(conn, deadline, |conn| {
+                let tx = conn.transaction()?;
+                held.validate_binding(&settings.database_url, &placement)?;
+                validate_receipt_target(&tx, settings, &run, &placement)?;
+                let input = storage::get_input(&tx, input_id)?;
+                ensure(
+                    input.same_identity(&original),
+                    "receipt immutable input identity changed",
+                )?;
+                deadline.remaining()?;
+                tx.commit()?;
+                Ok(input)
+            })
+        };
+        read_target(conn)?;
+        host.health(&run, deadline.instant())?;
+        deadline.remaining()?;
+        read_target(conn)?;
+        let request =
+            |action| control_request(&run, &expiration, InputControlOperation::Receipt(action));
+        let query = request(ReceiptAction::Query {
+            operation_key: original.operation_key.clone(),
+        });
+        let reply = host.exchange(&run, &query, deadline.instant())?;
+        ensure(
+            matches!(reply, InputControlReply::Receipt(ReceiptReply::Present { input_id: actual, .. })
                 if actual == input_id),
-                "receipt query has no matching durable input identity",
-            )?;
-            deadline.remaining()?;
-            read_target(conn)?;
-            let reconcile = request(ReceiptAction::Reconcile {
-                input_id,
-                expected: original.state,
-                disposition,
-                evidence_ref: evidence_ref.into(),
-            });
-            host.exchange(&run, &reconcile, deadline.instant())?;
-            let settled = read_target(conn)?;
-            ensure(
-                settled.state == InputState::Settled
-                    && settled.disposition == Some(disposition)
-                    && settled.evidence_ref.as_deref() == Some(evidence_ref),
-                "receipt settlement acknowledgment has no matching durable settlement",
-            )?;
-            deadline.remaining()?;
-            let retirement = request(ReceiptAction::Retire { input_id });
-            host.exchange(&run, &retirement, deadline.instant())?;
-            deadline.remaining()?;
-            let recorded = read_target(conn)?;
-            ensure(recorded == settled, "receipt changed after retirement")?;
-            Ok(recorded)
-        })();
-        match live {
-            Ok(settled) => Ok(settled),
-            Err(original_failure) => {
-                let guard = match ExclusiveReceiptGuard::acquire(
-                    conn,
-                    settings,
-                    &original,
-                    &run,
-                    Some((&placement, &held)),
-                    deadline.instant(),
-                    recovery,
-                ) {
-                    Ok(guard) => guard,
-                    Err(_) => return Err(original_failure),
-                };
-                guard.settle(conn, disposition, evidence_ref, recovery)
-            }
-        }
+            "receipt query has no matching durable input identity",
+        )?;
+        deadline.remaining()?;
+        read_target(conn)?;
+        let reconcile = request(ReceiptAction::Reconcile {
+            input_id,
+            expected: original.state,
+            disposition,
+            evidence_ref: evidence_ref.into(),
+        });
+        host.exchange(&run, &reconcile, deadline.instant())?;
+        let settled = read_target(conn)?;
+        ensure(
+            settled.state == InputState::Settled
+                && settled.disposition == Some(disposition)
+                && settled.evidence_ref.as_deref() == Some(evidence_ref),
+            "receipt settlement acknowledgment has no matching durable settlement",
+        )?;
+        deadline.remaining()?;
+        let retirement = request(ReceiptAction::Retire { input_id });
+        host.exchange(&run, &retirement, deadline.instant())?;
+        deadline.remaining()?;
+        let recorded = read_target(conn)?;
+        ensure(recorded == settled, "receipt changed after retirement")?;
+        Ok(recorded)
     })();
     result.map_err(|source| context.failure(source))
 }
@@ -1077,7 +1031,7 @@ pub(crate) fn respond_permission_with_host(
             with_database_budget(conn, deadline, |conn| permission_placement(conn, &run))?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, &run, &placement, deadline)?
+            .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
         let validate = |conn: &mut Connection| -> Result<()> {
             deadline.remaining()?;
@@ -1202,7 +1156,7 @@ fn inspect_permission_with_host(
         })?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
-            .lock(settings, &run, &placement, deadline)?
+            .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
         let validate = |conn: &mut Connection| -> Result<()> {
             deadline.remaining()?;
@@ -1332,8 +1286,7 @@ pub(super) fn revalidate_run_snapshot(
             let member = crate::broker::get_member(conn, expected.member_id, expected.fleet_id)?
                 .ok_or_else(|| error("input member is absent"))?;
             ensure(
-                member.kind == crate::broker::MemberKind::Member
-                    && member.placement.as_ref() == Some(placement),
+                member.kind == crate::broker::MemberKind::Member && member.placement == *placement,
                 messages.placement_changed,
             )?;
         }
@@ -1364,307 +1317,6 @@ pub(super) fn receipt_placement(conn: &Connection, run: &RunRecord) -> Result<Op
         "active receipt member requires its recorded placement",
     )?;
     Ok(placement)
-}
-
-fn validate_snapshot(
-    conn: &Connection,
-    settings: &Settings,
-    expected_input: &InputOperation,
-    expected_run: &RunRecord,
-    pane: Option<(&Placement, &PaneLock)>,
-) -> Result<RunRecord> {
-    if let Some((placement, held)) = pane {
-        held.validate_binding(&settings.database_url, placement)?;
-    }
-    validate_receipt_database(conn, settings)?;
-    let current = storage::validate_owner(conn, &expected_run.owner())?;
-    ensure(
-        stable_run_identity(&current) == stable_run_identity(expected_run),
-        "exclusive receipt run identity changed",
-    )?;
-    ensure(
-        receipt_placement(conn, &current)?.as_ref() == pane.map(|(placement, _)| placement),
-        "exclusive receipt placement changed",
-    )?;
-    let input = storage::get_input(conn, expected_input.input_id)?;
-    ensure(
-        input.same_identity(expected_input)
-            && input.run_id == expected_run.run_id
-            && input.state == expected_input.state,
-        "exclusive receipt input identity or expected state changed",
-    )?;
-    Ok(current)
-}
-
-fn exclude_previous_owner(
-    run: &RunRecord,
-    placement: Option<&Placement>,
-    deadline: Instant,
-    host: &mut impl RecoveryHost,
-) -> Result<()> {
-    let process = run.owner_process();
-    ensure(
-        matches!(
-            host.process_evidence(&process, deadline)?,
-            ProcessEvidence::Terminated
-        ),
-        "exclusive receipt owner termination is unproven",
-    )?;
-    check_deadline(Instant::now(), deadline)?;
-    ensure(
-        matches!(
-            host.startup_process_evidence(run, placement, deadline)?,
-            ProcessEvidence::Terminated
-        ),
-        "exclusive receipt startup termination is unproven",
-    )?;
-    check_deadline(Instant::now(), deadline)?;
-    match host.health(run, deadline)? {
-        RecoveryHealth::Matching(health) => {
-            health.validate(run)?;
-            return Err(error("exclusive receipt owner is live"));
-        }
-        RecoveryHealth::Unavailable(reason) | RecoveryHealth::Mismatched(reason) => {
-            ensure(
-                !reason.is_empty(),
-                "receipt health uncertainty requires a diagnostic",
-            )?;
-        }
-    }
-    check_deadline(Instant::now(), deadline)
-}
-
-pub(crate) struct ExclusiveReceiptGuard<'a> {
-    settings: &'a Settings,
-    input: &'a InputOperation,
-    run: &'a RunRecord,
-    pane: Option<(&'a Placement, &'a PaneLock)>,
-    lock: Arc<RunLock>,
-    process: ProcessIdentity,
-    deadline: Instant,
-    local: PhantomData<Rc<()>>,
-}
-
-impl<'a> ExclusiveReceiptGuard<'a> {
-    pub(super) fn acquire(
-        conn: &mut Connection,
-        settings: &'a Settings,
-        input: &'a InputOperation,
-        run: &'a RunRecord,
-        pane: Option<(&'a Placement, &'a PaneLock)>,
-        deadline: Instant,
-        host: &mut impl RecoveryHost,
-    ) -> Result<Self> {
-        let deadline = bounded_by_inherited(conn, deadline);
-        check_deadline(Instant::now(), deadline)?;
-        ensure(
-            input.input_id > 0,
-            "positive exclusive receipt input ID required",
-        )?;
-        ensure(
-            input.state != InputState::Settled,
-            "exclusive receipt requires an unresolved input",
-        )?;
-        with_database_deadline(conn, deadline, |conn| {
-            let tx = conn.transaction()?;
-            validate_snapshot(&tx, settings, input, run, pane)?;
-            check_deadline(Instant::now(), deadline)?;
-            tx.commit().map_err(crate::error::CafleetError::from)
-        })?;
-        host.checkpoint(RecoveryBoundary::AfterSnapshot, run, deadline)?;
-        check_deadline(Instant::now(), deadline)?;
-        let lock = with_database_deadline(conn, deadline, |conn| {
-            validate_snapshot(conn, settings, input, run, pane)?;
-            RunLock::acquire(conn, &run.owner())?
-                .ok_or_else(|| error("exclusive receipt original run lock is held"))
-        })?;
-        exclude_previous_owner(run, pane.map(|(placement, _)| placement), deadline, host)?;
-        let process = host.current_process()?;
-        check_deadline(Instant::now(), deadline)?;
-        Ok(Self {
-            settings,
-            input,
-            run,
-            pane,
-            lock: Arc::new(lock),
-            process,
-            deadline,
-            local: PhantomData,
-        })
-    }
-
-    fn placement(&self) -> Option<&'a Placement> {
-        self.pane.map(|(placement, _)| placement)
-    }
-
-    pub(crate) fn zero_byte_retirement(
-        &self,
-        owner: &RunOwner,
-        input_id: i64,
-        interaction_id: i64,
-    ) -> Result<ZeroByteRetirement<'_>> {
-        ZeroByteRetirement::from_exclusive_guard(self, owner, input_id, interaction_id)
-    }
-
-    pub(crate) fn retirement_binding(
-        &self,
-        owner: &RunOwner,
-        input_id: i64,
-        interaction_id: i64,
-    ) -> Result<&InputOperation> {
-        check_deadline(Instant::now(), self.deadline)?;
-        let audit = self
-            .input
-            .permission_response
-            .as_ref()
-            .ok_or_else(|| error("exclusive permission response audit required"))?;
-        ensure(
-            self.input.kind == InputKind::PermissionResponse
-                && self.input.state == InputState::Ready
-                && self.input.input_id == input_id
-                && self.input.run_id == self.run.run_id
-                && audit.metadata.interaction_id == interaction_id,
-            "exclusive proof requires the exact durable Ready permission input",
-        )?;
-        let mut expected_owner = self.run.owner();
-        expected_owner.owner_epoch = expected_owner
-            .owner_epoch
-            .checked_add(1)
-            .ok_or_else(|| error("owner epoch exhausted"))?;
-        expected_owner.owner_kind = OwnerKind::Reconciler;
-        expected_owner.owner_pid = self.process.pid;
-        expected_owner.owner_start_identity = self.process.start_identity.clone();
-        ensure(
-            *owner == expected_owner,
-            "exclusive proof reconciler identity changed",
-        )?;
-        Ok(self.input)
-    }
-
-    fn validate_locked_snapshot(
-        &self,
-        conn: &Connection,
-        input: &InputOperation,
-        run: &RunRecord,
-    ) -> Result<()> {
-        let checked = validate_snapshot(conn, self.settings, input, run, self.pane)?;
-        ensure(
-            checked == *run,
-            "receipt run history changed while ownership was held",
-        )?;
-        self.lock.validate(conn, &run.owner())
-    }
-
-    pub(super) fn settle(
-        self,
-        conn: &mut Connection,
-        disposition: InputDisposition,
-        evidence_ref: &str,
-        host: &mut impl RecoveryHost,
-    ) -> Result<InputOperation> {
-        ensure(
-            !evidence_ref.trim().is_empty(),
-            "nonempty reconciliation evidence required",
-        )?;
-        host.checkpoint(RecoveryBoundary::BeforeTakeover, self.run, self.deadline)?;
-        check_deadline(Instant::now(), self.deadline)?;
-        with_database_deadline(conn, self.deadline, |conn| {
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            check_deadline(Instant::now(), self.deadline)?;
-            let current = validate_snapshot(&tx, self.settings, self.input, self.run, self.pane)?;
-            self.lock.validate(&tx, &current.owner())?;
-            exclude_previous_owner(self.run, self.placement(), self.deadline, host)?;
-            ensure(
-                host.current_process()? == self.process,
-                "receipt reconciler process identity changed",
-            )?;
-            check_deadline(Instant::now(), self.deadline)?;
-            self.validate_locked_snapshot(&tx, self.input, &current)?;
-            check_deadline(Instant::now(), self.deadline)?;
-            let epoch = current
-                .owner_epoch
-                .checked_add(1)
-                .ok_or_else(|| error("owner epoch exhausted"))?;
-            let changed = tx.execute(
-                "UPDATE member_runs SET owner_epoch=?1,owner_kind='reconciler',owner_pid=?2,owner_start_identity=?3 WHERE run_id=?4 AND owner_epoch=?5 AND owner_kind=?6 AND owner_pid=?7 AND owner_start_identity=?8",
-                params![epoch,self.process.pid,self.process.start_identity,current.run_id,current.owner_epoch,current.owner_kind.as_str(),current.owner_pid,current.owner_start_identity],
-            )?;
-            ensure(changed == 1, "exclusive receipt ownership CAS failed")?;
-            let mut expected = current;
-            expected.owner_epoch = epoch;
-            expected.owner_kind = OwnerKind::Reconciler;
-            expected.owner_pid = self.process.pid;
-            expected.owner_start_identity = self.process.start_identity.clone();
-            let owned = storage::get_run(&tx, self.run.run_id)?;
-            ensure(
-                owned == expected,
-                "receipt ownership CAS changed run history",
-            )?;
-            host.checkpoint(RecoveryBoundary::AfterTakeover, &owned, self.deadline)?;
-            check_deadline(Instant::now(), self.deadline)?;
-            exclude_previous_owner(self.run, self.placement(), self.deadline, host)?;
-            self.validate_locked_snapshot(&tx, self.input, &owned)?;
-            check_deadline(Instant::now(), self.deadline)?;
-            let proof = if self.input.kind == InputKind::PermissionResponse
-                && self.input.state == InputState::Ready
-                && disposition == InputDisposition::NotSubmitted
-            {
-                let audit = self
-                    .input
-                    .permission_response
-                    .as_ref()
-                    .expect("validated permission input retains its audit");
-                Some(self.zero_byte_retirement(
-                    &owned.owner(),
-                    self.input.input_id,
-                    audit.metadata.interaction_id,
-                )?)
-            } else {
-                None
-            };
-            let settled = storage::settle_any_input_in_transaction(
-                &tx,
-                &owned.owner(),
-                self.input,
-                disposition,
-                evidence_ref,
-                proof.as_ref(),
-                self.deadline,
-            )?;
-            check_deadline(Instant::now(), self.deadline)?;
-            self.validate_locked_snapshot(&tx, &settled, &owned)?;
-            check_deadline(Instant::now(), self.deadline)?;
-            tx.commit()?;
-            Ok(settled)
-        })
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "receipt ownership binds the explicit fixed snapshot, borrowed guard and settlement inputs"
-)]
-pub(crate) fn reconcile_input_with_host(
-    conn: &mut Connection,
-    settings: &Settings,
-    expected_input: &InputOperation,
-    expected_run: &RunRecord,
-    pane: Option<(&Placement, &PaneLock)>,
-    disposition: InputDisposition,
-    evidence_ref: &str,
-    deadline: Instant,
-    host: &mut impl RecoveryHost,
-) -> Result<InputOperation> {
-    let guard = ExclusiveReceiptGuard::acquire(
-        conn,
-        settings,
-        expected_input,
-        expected_run,
-        pane,
-        deadline,
-        host,
-    )?;
-    guard.settle(conn, disposition, evidence_ref, host)
 }
 
 #[cfg(test)]
@@ -1754,8 +1406,7 @@ pub(crate) mod test_support {
             let evidence = storage::evidence::EvidencePolicy::metadata()
                 .apply(&json!({
                     "backend":"codex","native_version":fixture.run.native_version,
-                    "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,
-                    "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                    "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false
                 }))
                 .unwrap();
             let transition = ObservedTransition {
@@ -1787,7 +1438,6 @@ pub(crate) mod test_support {
                 "fixture-permission",
                 answer_rule,
                 decision,
-                &["synthetic-history-storage".into()],
             )
             .unwrap();
             let request = NewPermissionResponse {
@@ -1885,8 +1535,7 @@ pub(crate) mod test_support {
             )
             .unwrap()
             .unwrap()
-            .placement
-            .unwrap();
+            .placement;
             Self {
                 fixture,
                 owner,
@@ -1921,13 +1570,7 @@ pub(crate) mod test_support {
     }
 
     impl InputCommandHost for NoLiveHost {
-        fn lock(
-            &mut self,
-            _: &Settings,
-            _: &RunRecord,
-            _: &Placement,
-            _: Deadline,
-        ) -> Result<Option<PaneLock>> {
+        fn lock(&mut self, _: &Settings, _: &Placement, _: Deadline) -> Result<Option<PaneLock>> {
             Err(self.refuse("lock"))
         }
 
@@ -1959,145 +1602,9 @@ mod tests {
     use crate::runtime::service::test_support::input_service::wait_input_service_record;
     use crate::runtime::service::test_support::input_service::with_input_service;
     use crate::runtime::test_support::Fixture;
-    use crate::runtime::test_support::mark_exited;
     use std::io::Write;
     use std::net::Shutdown;
     use std::time::Duration;
-
-    pub(crate) enum Termination {
-        Terminated,
-        Alive,
-        Unknown,
-    }
-
-    pub(crate) type BoundaryAction =
-        Box<dyn FnMut(RecoveryBoundary, &RunRecord, Instant) -> Result<()>>;
-
-    pub(crate) struct TypedHost {
-        pub(crate) until: Instant,
-        pub(crate) owner: Termination,
-        pub(crate) startup: Termination,
-        pub(crate) matching_health: bool,
-        pub(crate) calls: Vec<&'static str>,
-        pub(crate) processes: Vec<ProcessIdentity>,
-        pub(crate) startups: Vec<(RunRecord, Option<Placement>)>,
-        pub(crate) action: Option<BoundaryAction>,
-    }
-
-    impl TypedHost {
-        pub(crate) fn new(until: Instant) -> Self {
-            Self {
-                until,
-                owner: Termination::Terminated,
-                startup: Termination::Terminated,
-                matching_health: false,
-                calls: Vec::new(),
-                processes: Vec::new(),
-                startups: Vec::new(),
-                action: None,
-            }
-        }
-
-        pub(crate) fn check(&self, until: Instant) -> Result<()> {
-            assert_eq!(
-                until, self.until,
-                "evidence uses the original effective bound"
-            );
-            Deadline::until(until).remaining().map(|_| ())
-        }
-
-        pub(crate) fn evidence(value: &Termination) -> ProcessEvidence {
-            match value {
-                Termination::Terminated => ProcessEvidence::Terminated,
-                Termination::Alive => ProcessEvidence::Alive,
-                Termination::Unknown => {
-                    ProcessEvidence::Unknown("owned process-set uncertainty".into())
-                }
-            }
-        }
-    }
-
-    impl RecoveryHost for TypedHost {
-        fn current_process(&mut self) -> Result<ProcessIdentity> {
-            self.calls.push("current");
-            self.check(self.until)?;
-            ProcessIdentity::current()
-        }
-
-        fn process_evidence(
-            &mut self,
-            process: &ProcessIdentity,
-            until: Instant,
-        ) -> Result<ProcessEvidence> {
-            self.check(until)?;
-            self.calls.push("owner");
-            self.processes.push(process.clone());
-            Ok(Self::evidence(&self.owner))
-        }
-
-        fn startup_process_evidence(
-            &mut self,
-            run: &RunRecord,
-            placement: Option<&Placement>,
-            until: Instant,
-        ) -> Result<ProcessEvidence> {
-            self.check(until)?;
-            self.calls.push("startup");
-            self.startups.push((run.clone(), placement.cloned()));
-            Ok(Self::evidence(&self.startup))
-        }
-
-        fn health(&mut self, run: &RunRecord, until: Instant) -> Result<RecoveryHealth> {
-            self.check(until)?;
-            self.calls.push("health");
-            if self.matching_health {
-                Ok(RecoveryHealth::Matching(HealthSnapshot {
-                    identity: ControlIdentity::from_run(run),
-                    runner: ProcessIdentity {
-                        pid: run
-                            .runner_pid
-                            .expect("fixture has a real registered runner identity"),
-                        start_identity: run.runner_start_identity.clone().unwrap(),
-                    },
-                    child: None,
-                    output_seq: 1,
-                    observation: None,
-                }))
-            } else {
-                Ok(RecoveryHealth::Unavailable(
-                    "owned receipt endpoint unavailable".into(),
-                ))
-            }
-        }
-
-        fn cleanup_owned(&mut self, _: &RunRecord, _: ShutdownClock) -> Result<ShutdownOutcome> {
-            panic!("receipt-only settlement has no child cleanup capability")
-        }
-
-        fn unlink_descriptor(&mut self, _: &std::path::Path, _: Instant) -> Result<()> {
-            panic!("receipt-only settlement preserves its descriptor")
-        }
-
-        fn checkpoint(
-            &mut self,
-            boundary: RecoveryBoundary,
-            run: &RunRecord,
-            until: Instant,
-        ) -> Result<()> {
-            self.check(until)?;
-            let name = match boundary {
-                RecoveryBoundary::AfterSnapshot => "snapshot",
-                RecoveryBoundary::BeforeTakeover => "before",
-                RecoveryBoundary::AfterTakeover => "after",
-                _ => panic!("receipt-only settlement uses no replay/cleanup boundary"),
-            };
-            self.calls.push(name);
-            if let Some(action) = &mut self.action {
-                action(boundary, run, until)?;
-            }
-            Ok(())
-        }
-    }
 
     fn reconcile_with(
         conn: &mut Connection,
@@ -2108,14 +1615,14 @@ mod tests {
         deadline: Deadline,
         host: &mut impl InputCommandHost,
     ) -> std::result::Result<InputOperation, InputFailure> {
-        reconcile_receipt_with_hosts(
+        reconcile_receipt_with_host(
             conn,
             settings,
             input_id,
             disposition,
             evidence_ref,
             deadline,
-            (host, &mut crate::runtime::recovery::NativeRecoveryHost),
+            host,
         )
     }
 
@@ -3061,10 +2568,9 @@ mod tests {
     }
 
     #[test]
-    fn permission_receipt_live_failure_preserves_original_error_without_exclusive_effects() {
+    fn permission_receipt_live_failure_preserves_original_error_without_effects() {
         use crate::runtime::input_client::test_support::Case;
         use crate::runtime::input_client::test_support::Retained;
-        use crate::runtime::input_client::tests::TypedHost;
 
         let mut case = Case::new(Retained::Accepted);
         let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
@@ -3080,15 +2586,14 @@ mod tests {
             change_digest: false,
             calls: [0; 3],
         };
-        let mut recovery = TypedHost::new(until);
-        let failure = reconcile_receipt_with_hosts(
+        let failure = reconcile_with(
             &mut case.fixture.conn,
             &case.settings,
             case.input_id,
             InputDisposition::Submitted,
             "fixture:live-only-permission-receipt",
             Deadline::until(until),
-            (&mut live, &mut recovery),
+            &mut live,
         )
         .unwrap_err();
         assert_eq!(live.calls, [1, 1, 0]);
@@ -3109,9 +2614,6 @@ mod tests {
             failure.context.operation_key.as_deref(),
             Some(original.input.operation_key.as_str())
         );
-        assert_eq!(recovery.calls, vec!["snapshot"]);
-        assert!(recovery.processes.is_empty());
-        assert!(recovery.startups.is_empty());
         assert_eq!(
             storage::get_run(&case.fixture.conn, run.run_id).unwrap(),
             run
@@ -3125,113 +2627,6 @@ mod tests {
             .unwrap()
             .expect("failed live invocation releases its genuine pane guard")
             .validate_binding(&case.settings.database_url, &placement)
-            .unwrap();
-    }
-
-    #[test]
-    fn exclusive_permission_receipt_client_preserves_uncertain_claim_and_continuous_guard() {
-        use crate::runtime::input_client::test_support::Case;
-        use crate::runtime::input_client::test_support::Retained;
-        use crate::runtime::input_client::tests::TypedHost;
-
-        let mut case = Case::new(Retained::Uncertain);
-        mark_exited(&case.fixture.conn, case.fixture.run.run_id);
-        let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
-        let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        let placement = member_placement(&case.fixture.conn, &run);
-        let before = health_records(&case.fixture.conn);
-        drop(case._lock);
-        let until = Instant::now() + Duration::from_secs(2);
-        let mut live = UnavailableReceiptHost {
-            settings: case.settings.clone(),
-            placement: placement.clone(),
-            until,
-            input_id: case.input_id,
-            change_digest: false,
-            calls: [0; 3],
-        };
-        let mut recovery = TypedHost::new(until);
-        let settings = case.settings.clone();
-        let pinned = placement.clone();
-        recovery.action = Some(Box::new(move |_, _, actual| {
-            assert_eq!(actual, until);
-            assert!(
-                PaneLock::try_acquire(&settings.database_url, &pinned)
-                    .unwrap()
-                    .is_none()
-            );
-            Ok(())
-        }));
-        let result = with_database_budget(&mut case.fixture.conn, Deadline::until(until), |conn| {
-            Ok(reconcile_receipt_with_hosts(
-                conn,
-                &case.settings,
-                case.input_id,
-                InputDisposition::NotSubmitted,
-                "fixture:exclusive-uncertain-permission",
-                Deadline::until(until + Duration::from_secs(1)),
-                (&mut live, &mut recovery),
-            ))
-        })
-        .unwrap()
-        .unwrap();
-        assert_eq!(live.calls, [1, 1, 0]);
-        let current = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
-        let mut expected_run = run.clone();
-        expected_run.owner_epoch += 1;
-        expected_run.owner_kind = OwnerKind::Reconciler;
-        let process = ProcessIdentity::current().unwrap();
-        expected_run.owner_pid = process.pid;
-        expected_run.owner_start_identity = process.start_identity;
-        assert_eq!(current, expected_run);
-        assert!(recovery.calls.contains(&"after"));
-        assert!(
-            recovery
-                .startups
-                .iter()
-                .any(|(checked, actual)| checked == &run && actual.as_ref() == Some(&placement))
-        );
-        let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        assert_eq!(result, receipt.input);
-        let mut expected = original.input.clone();
-        expected.state = InputState::Settled;
-        expected.disposition = Some(InputDisposition::NotSubmitted);
-        expected.evidence_ref = Some("fixture:exclusive-uncertain-permission".into());
-        expected.updated_at = result.updated_at.clone();
-        assert_eq!(result, expected);
-        assert_eq!(receipt.response, original.response);
-        assert_eq!(receipt.claim, original.claim);
-        assert!(
-            receipt.claim.is_some(),
-            "owner exclusion is no zero-byte fact for Uncertain history"
-        );
-        assert_eq!(health_records(&case.fixture.conn), before);
-        let changes = case.fixture.conn.total_changes();
-        let repeated = reconcile_with(
-            &mut case.fixture.conn,
-            &case.settings,
-            case.input_id,
-            InputDisposition::NotSubmitted,
-            "fixture:later-unsubstituted-evidence",
-            Deadline::until(until),
-            &mut NoLiveHost::default(),
-        )
-        .unwrap();
-        assert_eq!(repeated, result);
-        assert_eq!(case.fixture.conn.total_changes(), changes);
-        assert_eq!(
-            storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
-            receipt
-        );
-        PaneLock::acquire_released(&case.settings.database_url, &placement)
-            .unwrap()
-            .unwrap()
-            .validate_binding(&case.settings.database_url, &placement)
-            .unwrap();
-        RunLock::acquire_released(&case.fixture.conn, &current.owner())
-            .unwrap()
-            .unwrap()
-            .validate(&case.fixture.conn, &current.owner())
             .unwrap();
     }
 
@@ -3260,7 +2655,6 @@ mod tests {
         fn lock(
             &mut self,
             settings: &Settings,
-            _: &RunRecord,
             placement: &Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, CafleetError> {
@@ -3308,152 +2702,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn exclusive_receipt_client_keeps_one_guard_original_row_and_error_across_live_fallback() {
-        use crate::runtime::input_client::tests::Termination;
-        use crate::runtime::input_client::tests::TypedHost;
-
-        for mode in [
-            "eligible",
-            "absent_placement",
-            "startup_unknown",
-            "changed_input",
-        ] {
-            let History {
-                mut fixture,
-                settings,
-                placement,
-                row,
-                _artifacts,
-                _run_lock,
-                ..
-            } = History::new(InputState::Uncertain, None);
-            mark_exited(&fixture.conn, fixture.run.run_id);
-            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            drop(_run_lock);
-            let absent = mode == "absent_placement";
-            if absent {
-                assert!(
-                    crate::broker::members::test_support::deregister_member(
-                        &mut fixture.conn,
-                        fixture.run.member_id
-                    )
-                    .unwrap()
-                );
-            }
-            let original = fixture.run.clone();
-            let history = health_records(&fixture.conn);
-            let until = Instant::now() + Duration::from_secs(2);
-            let mut live = UnavailableReceiptHost {
-                settings: settings.clone(),
-                placement: placement.clone(),
-                until,
-                input_id: row.input_id,
-                change_digest: mode == "changed_input",
-                calls: [0; 3],
-            };
-            let mut recovery = TypedHost::new(until);
-            if mode == "startup_unknown" {
-                recovery.startup = Termination::Unknown;
-            }
-            let locked_settings = settings.clone();
-            let locked_placement = placement.clone();
-            recovery.action = Some(Box::new(move |_, _, actual| {
-                assert_eq!(actual, until);
-                if !absent {
-                    assert!(
-                        PaneLock::try_acquire(&locked_settings.database_url, &locked_placement)
-                            .unwrap()
-                            .is_none()
-                    );
-                }
-                Ok(())
-            }));
-            let result = with_database_budget(&mut fixture.conn, Deadline::until(until), |conn| {
-                Ok(reconcile_receipt_with_hosts(
-                    conn,
-                    &settings,
-                    row.input_id,
-                    InputDisposition::Submitted,
-                    "fixture:routed-receipt",
-                    Deadline::until(until + Duration::from_secs(1)),
-                    (&mut live, &mut recovery),
-                ))
-            })
-            .unwrap();
-            assert_eq!(
-                live.calls,
-                if absent { [0; 3] } else { [1, 1, 0] },
-                "{mode}"
-            );
-            let actual = storage::get_input(&fixture.conn, row.input_id).unwrap();
-            let current = storage::get_run(&fixture.conn, original.run_id).unwrap();
-            if matches!(mode, "eligible" | "absent_placement") {
-                assert_eq!(result.unwrap(), actual);
-                assert_eq!(actual.state, InputState::Settled);
-                assert_eq!(actual.disposition, Some(InputDisposition::Submitted));
-                assert_eq!(
-                    actual.evidence_ref.as_deref(),
-                    Some("fixture:routed-receipt")
-                );
-                let process = ProcessIdentity::current().unwrap();
-                let mut expected = original.clone();
-                expected.owner_epoch += 1;
-                expected.owner_kind = OwnerKind::Reconciler;
-                expected.owner_pid = process.pid;
-                expected.owner_start_identity = process.start_identity;
-                assert_eq!(current, expected);
-                assert!(recovery.calls.contains(&"after"));
-                assert!(recovery.processes.contains(&ProcessIdentity {
-                    pid: original.owner_pid,
-                    start_identity: original.owner_start_identity.clone()
-                }));
-                assert!(recovery.startups.iter().any(|(run, pinned)| {
-                    run == &original
-                        && pinned.as_ref() == if absent { None } else { Some(&placement) }
-                }));
-            } else {
-                let failure = result.unwrap_err();
-                assert_eq!(failure.context.input_id, Some(row.input_id));
-                assert_eq!(failure.context.run_id, Some(row.run_id));
-                assert_eq!(
-                    failure.context.operation_key.as_deref(),
-                    Some(row.operation_key.as_str())
-                );
-                if mode == "startup_unknown" {
-                    assert_eq!(
-                        failure.source.to_string(),
-                        "owned first live receipt failure"
-                    );
-                    assert!(recovery.calls.contains(&"startup"));
-                }
-                let mut expected = row.clone();
-                if mode == "changed_input" {
-                    expected.payload_digest = "e".repeat(64);
-                    assert!(!recovery.calls.contains(&"after"));
-                }
-                assert_eq!(
-                    actual, expected,
-                    "{mode}: fallback retains the original input instead of recapturing it"
-                );
-                assert_eq!(current, original);
-            }
-            assert_eq!(health_records(&fixture.conn), history);
-            if !absent {
-                PaneLock::acquire_released(&settings.database_url, &placement)
-                    .unwrap()
-                    .expect("the acquired pane guard is released on every routed outcome")
-                    .validate_binding(&settings.database_url, &placement)
-                    .unwrap();
-            }
-            RunLock::acquire_released(&fixture.conn, &current.owner())
-                .unwrap()
-                .expect("the original namespace is released after settlement or refusal")
-                .validate(&fixture.conn, &current.owner())
-                .unwrap();
-        }
-    }
-
     struct History {
         fixture: Fixture,
         settings: Settings,
@@ -3481,7 +2729,7 @@ mod tests {
         requests: Vec<Value>,
         reply: ReplyMode,
         after_health: Option<Box<dyn FnMut()>>,
-        health_reply: Option<HealthSnapshot>,
+        health_reply: Option<serde_json::Value>,
         exchange_limit: usize,
         expire_retirement: bool,
         wrong_query_id: Option<i64>,
@@ -3525,7 +2773,6 @@ mod tests {
         fn lock(
             &mut self,
             settings: &Settings,
-            _: &RunRecord,
             placement: &Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, CafleetError> {
@@ -3547,7 +2794,7 @@ mod tests {
                     .is_none()
             );
             let health = match self.health_reply.take() {
-                Some(health) => health,
+                Some(reply) => HealthSnapshot::decode(reply, run)?,
                 None => crate::runtime::probe_health(run, deadline)?,
             };
             if let Some(callback) = &mut self.after_health {
@@ -3644,12 +2891,15 @@ mod tests {
             let mut client =
                 crate::runtime::control::ControlClient::connect(&paths.control_socket, deadline)?;
             if matches!(self.reply, ReplyMode::Disconnected) {
-                client.stream.shutdown(Shutdown::Read).map_err(io_error)?;
+                client
+                    .stream_mut()
+                    .shutdown(Shutdown::Read)
+                    .map_err(io_error)?;
                 let bytes = crate::runtime::control::encode_input_request(request)?;
                 let mut offset = 0;
                 while offset < bytes.len() {
                     check_deadline(Instant::now(), deadline)?;
-                    match client.stream.write(&bytes[offset..]) {
+                    match client.stream_mut().write(&bytes[offset..]) {
                         Ok(0) => panic!("owned external request disconnected during send"),
                         Ok(count) => offset += count,
                         Err(cause)
@@ -3750,7 +3000,13 @@ mod tests {
     #[test]
     fn live_receipt_settled_history_is_immutable_before_live_calls_and_the_original_sql_deadline() {
         let mut case = History::new(InputState::Settled, Some(InputDisposition::Submitted));
-        case.fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at='2026-10-27T17:26:00Z' WHERE member_id=?1", [case.fixture.run.member_id]).unwrap();
+        case.fixture
+            .conn
+            .execute(
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                [case.fixture.run.member_id],
+            )
+            .unwrap();
         let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
             .unwrap()
             .unwrap();
@@ -4124,10 +3380,13 @@ mod tests {
             ),
         ] {
             let mut case = History::new(state, disposition);
-            case.fixture.conn.execute(
-                "UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",
-                rusqlite::params!["2026-10-27T14:01:00.000000+00:00", case.fixture.run.member_id],
-            ).unwrap();
+            case.fixture
+                .conn
+                .execute(
+                    "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                    [case.fixture.run.member_id],
+                )
+                .unwrap();
             let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
                 .unwrap()
                 .unwrap();
@@ -4515,11 +3774,10 @@ mod tests {
         fn lock(
             &mut self,
             settings: &Settings,
-            run: &RunRecord,
             placement: &Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, CafleetError> {
-            self.inner.lock(settings, run, placement, deadline)
+            self.inner.lock(settings, placement, deadline)
         }
 
         fn health(
@@ -4677,7 +3935,14 @@ mod tests {
 
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
-            fixture.fixture.conn.execute("UPDATE member_runs SET reachability='suspect',last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1", [run.run_id]).unwrap();
+            fixture
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1",
+                    [run.run_id],
+                )
+                .unwrap();
             let before = storage::get_run(&fixture.fixture.conn, run.run_id).unwrap();
             let records = health_records(&fixture.fixture.conn);
             let update = Arc::new(AtomicBool::new(false));
@@ -4735,14 +4000,12 @@ mod tests {
                 "genuine successful health updates the supplied connection"
             );
             let refreshed = storage::get_run(&fixture.fixture.conn, run.run_id).unwrap();
-            assert_eq!(refreshed.reachability, Reachability::Reachable);
             assert!(refreshed.last_health_at.is_some());
             assert_ne!(
                 refreshed.last_health_at.as_deref(),
                 Some("2000-01-01T00:00:00Z")
             );
             let mut expected = before;
-            expected.reachability = refreshed.reachability;
             expected.last_health_at = refreshed.last_health_at.clone();
             assert_eq!(
                 refreshed, expected,
@@ -4770,7 +4033,7 @@ mod tests {
             let mut case = History::new(InputState::Ready, None);
             let run = case.fixture.run.clone();
             storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
-            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
             storage::persist_transition(
                 &mut case.fixture.conn,
                 &run.owner(),
@@ -4800,13 +4063,12 @@ mod tests {
             if stale {
                 let mut runner = ProcessIdentity::current().unwrap();
                 runner.start_identity.push_str(":stale-health-reply");
-                host.health_reply = Some(HealthSnapshot {
-                    identity: ControlIdentity::from_run(&run),
-                    runner,
-                    child: None,
-                    output_seq: 120,
-                    observation: None,
-                });
+                host.health_reply = Some(serde_json::json!({
+                    "identity": ControlIdentity::from_run(&run),
+                    "runner": runner,
+                    "child": null,
+                    "output_seq": 120,
+                }));
             } else {
                 assert!(
                     !RuntimePaths::for_run(&run.database_identity_json, run.run_id)
@@ -4836,7 +4098,6 @@ mod tests {
             );
             assert!(!failure.source.to_string().contains(&case.request.literal));
             let mut after = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
-            after.reachability = before.reachability;
             after.last_health_at = before.last_health_at.clone();
             assert_eq!(
                 after, before,
@@ -5153,8 +4414,7 @@ mod tests {
                     let evidence = storage::evidence::EvidencePolicy::metadata()
                     .apply(&json!({
                         "backend":"codex","native_version":case.fixture.run.native_version,
-                        "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,
-                        "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                        "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,"excerpt":null,"truncated":false
                     }))
                     .unwrap();
                     let annotation = storage::persist_transition(
@@ -5632,7 +4892,7 @@ mod tests {
                             case.fixture.run.fleet_id,
                             "alternative",
                             "fixture",
-                            None,
+                            &crate::broker::members::test_support::placement(None),
                         )
                         .unwrap()
                         .member_id;
@@ -5757,7 +5017,7 @@ mod tests {
                         case.fixture.run.fleet_id,
                         "related-history-worker",
                         "assignment",
-                        Some(&placement),
+                        &placement,
                     )
                     .unwrap()
                     .member_id;
@@ -6106,800 +5366,57 @@ mod tests {
 
     use crate::time::Deadline;
     use rusqlite::Connection;
-    use serde_json::json;
-    use std::os::unix::fs::MetadataExt;
 
     use std::time::Instant;
-
-    struct ReceiptCase {
-        fixture: Fixture,
-        artifacts: RunArtifacts,
-        settings: Settings,
-        placement: Placement,
-        input: InputOperation,
-    }
-
-    impl ReceiptCase {
-        fn new() -> Self {
-            let mut fixture = Fixture::new();
-            let (artifacts, lock, owner) = fixture.running_owner();
-            let message = crate::broker::send_message(
-                &mut fixture.conn,
-                fixture.run.director_member_id,
-                fixture.run.member_id,
-                "owned exclusive receipt preview",
-            )
-            .unwrap();
-            let input = storage::test_support::reserve_input(
-                &mut fixture.conn,
-                &owner,
-                &NewInput {
-                    operation_key: format!("preview:{}:{}", owner.run_id, message.message_id),
-                    kind: InputKind::Preview,
-                    payload_digest: "d".repeat(64),
-                    message_id: Some(message.message_id),
-                },
-            )
-            .unwrap();
-            let input = storage::record_input_uncertain(
-                &mut fixture.conn,
-                &owner,
-                input.input_id,
-                storage::UncertainCause::WriteFailed,
-            )
-            .unwrap();
-            storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();
-            fixture.conn.execute(
-                "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z',cleanup_diagnostics_json=?1 WHERE run_id=?2",
-                rusqlite::params![json!([{"kind":"owned_terminal_history"}]).to_string(), owner.run_id],
-            ).unwrap();
-            fixture.run = storage::get_run(&fixture.conn, owner.run_id).unwrap();
-            lock.validate(&fixture.conn, &fixture.run.owner()).unwrap();
-            std::fs::write(&artifacts.paths.outbox, [0, 0]).unwrap();
-            let placement = member_placement(&fixture.conn, &fixture.run);
-            let settings =
-                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()));
-            drop(lock);
-            Self {
-                fixture,
-                artifacts,
-                settings,
-                placement,
-                input,
-            }
-        }
-
-        fn invoke(
-            &mut self,
-            held: Option<&PaneLock>,
-            host: &mut TypedHost,
-        ) -> std::result::Result<InputOperation, CafleetError> {
-            crate::runtime::input_client::reconcile_input_with_host(
-                &mut self.fixture.conn,
-                &self.settings,
-                &self.input,
-                &self.fixture.run,
-                held.map(|held| (&self.placement, held)),
-                InputDisposition::Submitted,
-                "fixture:exclusive-receipt",
-                host.until,
-                host,
-            )
-        }
-
-        fn assert_original_lock_available(&self) {
-            let run = storage::get_run(&self.fixture.conn, self.input.run_id).unwrap();
-            assert_lock_released(&self.fixture.conn, &run);
-        }
-
-        fn spool(&self) -> (Vec<u8>, u64, u64) {
-            outbox_spool(&self.artifacts.paths.outbox)
-        }
-    }
-
-    fn outbox_spool(outbox: &std::path::Path) -> (Vec<u8>, u64, u64) {
-        let metadata = std::fs::symlink_metadata(outbox).unwrap();
-        (
-            std::fs::read(outbox).unwrap(),
-            metadata.dev(),
-            metadata.ino(),
-        )
-    }
-
-    fn assert_lock_released(conn: &Connection, run: &RunRecord) {
-        RunLock::acquire_released(conn, &run.owner())
-            .unwrap()
-            .expect("receipt-only ownership releases its original namespace on return")
-            .validate(conn, &run.owner())
-            .unwrap();
-    }
 
     fn member_placement(conn: &Connection, run: &RunRecord) -> Placement {
         crate::broker::get_member(conn, run.member_id, run.fleet_id)
             .unwrap()
             .unwrap()
             .placement
-            .unwrap()
-    }
-
-    fn rows(conn: &Connection, excluded: &[&str]) -> Vec<crate::db::test_support::TableSnapshot> {
-        crate::db::test_support::table_snapshot(conn, |name| !excluded.contains(&name))
-    }
-
-    fn assert_owner_only(before: &RunRecord, after: &RunRecord) {
-        let process = ProcessIdentity::current().unwrap();
-        let mut expected = before.clone();
-        expected.owner_epoch += 1;
-        expected.owner_kind = OwnerKind::Reconciler;
-        expected.owner_pid = process.pid;
-        expected.owner_start_identity = process.start_identity;
-        assert_eq!(*after, expected);
     }
 
     #[test]
-    fn exclusive_permission_ready_proof_and_claim_release_share_the_owner_transaction() {
+    fn absent_placement_receipt_stays_uncertain_without_live_calls() {
         use crate::runtime::input_client::test_support::Case;
         use crate::runtime::input_client::test_support::Retained;
 
-        let mut case = Case::new(Retained::InProgress);
-        storage::record_input_state(
-            &mut case.fixture.conn,
-            &case.fixture.run.owner(),
-            case.input_id,
-            InputState::InProgress,
-            InputState::Ready,
-        )
-        .unwrap();
-        mark_exited(&case.fixture.conn, case.fixture.run.run_id);
-        let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
-        let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        let placement = member_placement(&case.fixture.conn, &run);
-        let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
-            .unwrap()
-            .unwrap();
-        let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id).unwrap();
-        std::fs::write(&paths.outbox, [0, 0]).unwrap();
-        let spool = || outbox_spool(&paths.outbox);
-        let original_spool = spool();
-        let before = rows(&case.fixture.conn, &[]);
-        drop(case._lock);
-        let until = Instant::now() + Duration::from_secs(2);
-        let input_id = case.input_id;
-        let epoch = run.owner_epoch + 1;
+        let mut case = Case::new(Retained::Accepted);
+        let member_id = case.fixture.run.member_id;
         case.fixture
             .conn
-            .execute_batch(&format!(
-                "CREATE TRIGGER reject_exclusive_permission_claim_delete
-             BEFORE DELETE ON member_permission_response_claims WHEN OLD.input_id={input_id}
-             BEGIN
-               SELECT CASE WHEN EXISTS(
-                 SELECT 1 FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id
-                 WHERE i.input_id=OLD.input_id AND i.state='settled'
-                   AND i.disposition='not_submitted'
-                   AND i.evidence_ref='fixture:exclusive-permission-zero'
-                   AND r.owner_epoch={epoch} AND r.owner_kind='reconciler'
-               ) THEN RAISE(ABORT,'owned exclusive permission claim delete failure')
-                 ELSE RAISE(ABORT,'owned exclusive permission delete missing settlement') END;
-             END"
-            ))
+            .execute(
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                [member_id],
+            )
             .unwrap();
-        let mut host = TypedHost::new(until);
-        let expected_run = run.clone();
-        let settings = case.settings.clone();
-        let pinned = placement.clone();
-        host.action = Some(Box::new(move |boundary, current, actual| {
-            assert_eq!(actual, until);
-            assert!(
-                PaneLock::try_acquire(&settings.database_url, &pinned)
-                    .unwrap()
-                    .is_none()
-            );
-            if matches!(boundary, RecoveryBoundary::AfterTakeover) {
-                assert_owner_only(&expected_run, current);
-            }
-            Ok(())
-        }));
-        let failed = crate::runtime::input_client::reconcile_input_with_host(
-            &mut case.fixture.conn,
-            &case.settings,
-            &original.input,
-            &run,
-            Some((&placement, &held)),
-            InputDisposition::NotSubmitted,
-            "fixture:exclusive-permission-zero",
-            until,
-            &mut host,
-        );
-        let removed = case
-            .fixture
-            .conn
-            .execute_batch("DROP TRIGGER reject_exclusive_permission_claim_delete");
-        assert!(
-            removed.is_ok(),
-            "primary={:?}; trigger_cleanup={removed:?}",
-            failed.as_ref().err()
-        );
-        let failure = failed.unwrap_err();
-        assert!(
-            failure
-                .message()
-                .contains("owned exclusive permission claim delete failure"),
-            "actual={failure:?}"
-        );
-        assert!(host.calls.contains(&"after"));
-        assert_eq!(rows(&case.fixture.conn, &[]), before);
-        assert_eq!(spool(), original_spool);
-        assert_lock_released(&case.fixture.conn, &run);
-        let mut retry = TypedHost::new(until);
-        let settled = crate::runtime::input_client::reconcile_input_with_host(
-            &mut case.fixture.conn,
-            &case.settings,
-            &original.input,
-            &run,
-            Some((&placement, &held)),
-            InputDisposition::NotSubmitted,
-            "fixture:exclusive-permission-zero",
-            until,
-            &mut retry,
-        )
-        .unwrap();
-        let receipt = storage::get_permission_response(&case.fixture.conn, input_id).unwrap();
-        assert_eq!(settled, receipt.input);
-        let mut expected = original.input.clone();
-        expected.state = InputState::Settled;
-        expected.disposition = Some(InputDisposition::NotSubmitted);
-        expected.evidence_ref = Some("fixture:exclusive-permission-zero".into());
-        expected.updated_at = settled.updated_at.clone();
-        assert_eq!(settled, expected);
-        assert_eq!(receipt.response, original.response);
-        assert!(receipt.claim.is_none());
-        let current = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
-        assert_owner_only(&run, &current);
-        assert!(current.owner_epoch > receipt.response.metadata.expected_owner_epoch);
-        let excluded = &[
-            "member_runs",
-            "member_input_operations",
-            "member_permission_response_claims",
-        ];
-        let expected_history: Vec<_> = before
-            .into_iter()
-            .filter(|table| !excluded.contains(&table.name.as_str()))
-            .collect();
-        assert_eq!(rows(&case.fixture.conn, excluded), expected_history);
-        assert_eq!(spool(), original_spool);
-        held.validate_binding(&case.settings.database_url, &placement)
-            .unwrap();
-        assert_lock_released(&case.fixture.conn, &current);
-    }
-
-    #[test]
-    fn exclusive_permission_receipt_pins_original_audit_and_creation_after_snapshot() {
-        use crate::runtime::input_client::test_support::Case;
-        use crate::runtime::input_client::test_support::Retained;
-        use std::sync::Arc;
-        use std::sync::atomic::AtomicBool;
-        use std::sync::atomic::Ordering;
-
-        for changed in ["decided_at", "created_at"] {
-            let mut case = Case::new(Retained::Uncertain);
-            let run = case.fixture.run.clone();
-            let original =
-                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-            let placement = member_placement(&case.fixture.conn, &run);
-            let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
-                .unwrap()
-                .unwrap();
-            let excluded = if changed == "decided_at" {
-                "member_permission_responses"
-            } else {
-                "member_input_operations"
-            };
-            let before = rows(&case.fixture.conn, &[excluded]);
-            let path = case.fixture.conn.path().unwrap().to_owned();
-            let input_id = case.input_id;
-            let observed = Arc::new(AtomicBool::new(false));
-            let wrote = observed.clone();
-            drop(case._lock);
-            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
-            host.action = Some(Box::new(move |boundary, _, _| {
-                if matches!(boundary, RecoveryBoundary::AfterSnapshot) {
-                    let conn = Connection::open(&path).unwrap();
-                    let sql = if changed == "decided_at" {
-                        "UPDATE member_permission_responses SET decided_at='2026-10-27T21:55:00Z' WHERE input_id=?1"
-                    } else {
-                        "UPDATE member_input_operations SET created_at='2026-10-27T21:55:00Z' WHERE input_id=?1"
-                    };
-                    assert_eq!(conn.execute(sql, [input_id]).unwrap(), 1);
-                    wrote.store(true, Ordering::Release);
-                }
-                Ok(())
-            }));
-            let result = crate::runtime::input_client::reconcile_input_with_host(
-                &mut case.fixture.conn,
-                &case.settings,
-                &original.input,
-                &run,
-                Some((&placement, &held)),
-                InputDisposition::NotSubmitted,
-                "fixture:exclusive-fixed-permission",
-                host.until,
-                &mut host,
-            );
-            assert!(
-                observed.load(Ordering::Acquire),
-                "actual snapshot callback must update {changed}; result={result:?}"
-            );
-            assert!(result.is_err());
-            assert_eq!(host.calls, vec!["snapshot"]);
-            let mut expected = original.clone();
-            if changed == "decided_at" {
-                expected.response.decided_at = "2026-10-27T21:55:00Z".into();
-                expected
-                    .input
-                    .permission_response
-                    .as_mut()
-                    .unwrap()
-                    .decided_at = expected.response.decided_at.clone();
-            } else {
-                expected.input.created_at = "2026-10-27T21:55:00Z".into();
-            }
-            assert_eq!(
-                storage::get_permission_response(&case.fixture.conn, input_id).unwrap(),
-                expected
-            );
-            assert_eq!(rows(&case.fixture.conn, &[excluded]), before);
-            assert_lock_released(&case.fixture.conn, &run);
-            held.validate_binding(&case.settings.database_url, &placement)
-                .unwrap();
-        }
-    }
-
-    #[test]
-    fn exclusive_receipt_terminal_preview_commits_only_owner_disposition_and_stamp() {
-        let mut case = ReceiptCase::new();
-        let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
-            .unwrap()
-            .unwrap();
-        let before = case.fixture.run.clone();
-        let history = rows(
-            &case.fixture.conn,
-            &["member_runs", "member_input_operations", "messages"],
-        );
-        let message =
-            crate::broker::get_message(&case.fixture.conn, case.input.message_id.unwrap()).unwrap();
-        assert!(notified_at(&case.fixture.conn, message.message_id).is_none());
-        let spool = case.spool();
-        let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
-        let settled = case.invoke(Some(&held), &mut host).unwrap();
-        assert_eq!(settled.input_id, case.input.input_id);
-        assert_eq!(settled.state, InputState::Settled);
-        assert_eq!(settled.disposition, Some(InputDisposition::Submitted));
-        assert_eq!(
-            settled.evidence_ref.as_deref(),
-            Some("fixture:exclusive-receipt")
-        );
-        let mut expected = case.input.clone();
-        expected.state = settled.state;
-        expected.disposition = settled.disposition;
-        expected.evidence_ref = settled.evidence_ref.clone();
-        expected.updated_at = settled.updated_at.clone();
-        assert_eq!(settled, expected);
-        assert_owner_only(
-            &before,
-            &storage::get_run(&case.fixture.conn, before.run_id).unwrap(),
-        );
-        let stamped = crate::broker::get_message(&case.fixture.conn, message.message_id).unwrap();
-        assert!(notified_at(&case.fixture.conn, message.message_id).is_some());
-        assert_eq!(stamped, message);
-        assert_eq!(
-            rows(
-                &case.fixture.conn,
-                &["member_runs", "member_input_operations", "messages"]
-            ),
-            history
-        );
-        assert_eq!(case.spool(), spool);
-        for boundary in ["snapshot", "owner", "startup", "health", "before", "after"] {
-            assert!(host.calls.contains(&boundary), "{boundary}");
-        }
-        assert!(host.processes.contains(&ProcessIdentity {
-            pid: before.owner_pid,
-            start_identity: before.owner_start_identity.clone()
-        }));
-        assert!(
-            host.startups
-                .iter()
-                .any(|(run, placement)| *run == before
-                    && placement.as_ref() == Some(&case.placement))
-        );
-        held.validate_binding(&case.settings.database_url, &case.placement)
-            .unwrap();
-        assert!(
-            PaneLock::try_acquire(&case.settings.database_url, &case.placement)
-                .unwrap()
-                .is_none()
-        );
-        case.assert_original_lock_available();
-    }
-
-    #[test]
-    fn exclusive_receipt_absent_placement_requires_real_inactive_history() {
-        for deleted_fleet in [false, true] {
-            let mut case = ReceiptCase::new();
-            if deleted_fleet {
-                crate::broker::fleets::delete_fleet_rows(
-                    &case.fixture.conn,
-                    case.fixture.run.fleet_id,
-                )
-                .unwrap();
-            } else {
-                assert!(
-                    crate::broker::members::test_support::deregister_member(
-                        &mut case.fixture.conn,
-                        case.fixture.run.member_id
-                    )
-                    .unwrap()
-                );
-            }
-            let count: i64 = case
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT COUNT(*) FROM member_placements WHERE member_id=?1",
-                    [case.fixture.run.member_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0);
-            let history = rows(
-                &case.fixture.conn,
-                &["member_runs", "member_input_operations", "messages"],
-            );
-            let spool = case.spool();
-            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
-            case.invoke(None, &mut host).unwrap();
-            assert!(
-                host.startups
-                    .iter()
-                    .any(|(run, placement)| { run == &case.fixture.run && placement.is_none() })
-            );
-            assert_owner_only(
-                &case.fixture.run,
-                &storage::get_run(&case.fixture.conn, case.input.run_id).unwrap(),
-            );
-            assert_eq!(
-                rows(
-                    &case.fixture.conn,
-                    &["member_runs", "member_input_operations", "messages"]
-                ),
-                history
-            );
-            assert_eq!(case.spool(), spool);
-            case.assert_original_lock_available();
-        }
-
-        let mut case = ReceiptCase::new();
         case.fixture
             .conn
             .execute(
                 "DELETE FROM member_placements WHERE member_id=?1",
-                [case.fixture.run.member_id],
+                [member_id],
             )
             .unwrap();
-        let before = rows(&case.fixture.conn, &[]);
-        let mut host = TypedHost::new(Instant::now() + Duration::from_secs(1));
-        assert!(case.invoke(None, &mut host).is_err());
-        assert_eq!(rows(&case.fixture.conn, &[]), before);
+        let original = storage::get_input(&case.fixture.conn, case.input_id).unwrap();
+        let mut host = NoLiveHost::default();
+        let failure = reconcile_with(
+            &mut case.fixture.conn,
+            &case.settings,
+            case.input_id,
+            InputDisposition::Submitted,
+            "fixture:absent-placement-receipt",
+            Deadline::until(Instant::now() + Duration::from_secs(2)),
+            &mut host,
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.source.message(),
+            "receipt reconciliation requires the member's live runner; the input stays uncertain"
+        );
         assert!(host.calls.is_empty());
-    }
-
-    #[test]
-    fn exclusive_receipt_transaction_failure_rolls_back_owner_stamp_and_input_before_retry() {
-        for after_cas in [false, true] {
-            let mut case = ReceiptCase::new();
-            let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
-                .unwrap()
-                .unwrap();
-            let before = rows(&case.fixture.conn, &[]);
-            let spool = case.spool();
-            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
-            if after_cas {
-                let epoch = case.fixture.run.owner_epoch;
-                host.action = Some(Box::new(move |boundary, run, _| {
-                    if matches!(boundary, RecoveryBoundary::AfterTakeover) {
-                        assert_eq!(run.owner_epoch, epoch + 1);
-                        return Err(error("owned after-CAS receipt failure"));
-                    }
-                    Ok(())
-                }));
-            } else {
-                case.fixture.conn.execute_batch("CREATE TRIGGER exclusive_receipt_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.state='settled' BEGIN SELECT RAISE(FAIL,'owned exclusive settlement failure'); END").unwrap();
-            }
-            let result = case.invoke(Some(&held), &mut host);
-            let removed = if after_cas {
-                Ok(())
-            } else {
-                case.fixture
-                    .conn
-                    .execute_batch("DROP TRIGGER exclusive_receipt_failure")
-            };
-            assert!(
-                removed.is_ok(),
-                "primary={:?}; trigger_cleanup={removed:?}",
-                result.as_ref().err()
-            );
-            let failure = result.unwrap_err();
-            assert!(failure.to_string().contains(if after_cas {
-                "owned after-CAS receipt failure"
-            } else {
-                "owned exclusive settlement failure"
-            }));
-            assert!(host.calls.contains(&"after"));
-            assert_eq!(rows(&case.fixture.conn, &[]), before);
-            assert_eq!(case.spool(), spool);
-            case.assert_original_lock_available();
-            let mut retry = TypedHost::new(host.until);
-            case.invoke(Some(&held), &mut retry).unwrap();
-            assert_owner_only(
-                &case.fixture.run,
-                &storage::get_run(&case.fixture.conn, case.input.run_id).unwrap(),
-            );
-            case.assert_original_lock_available();
-        }
-    }
-
-    #[test]
-    fn exclusive_receipt_requires_original_lock_and_positive_owner_startup_and_health_exclusion() {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        for condition in [
-            "held_lock",
-            "missing_lock",
-            "replaced_lock",
-            "live_reconciler",
-            "unknown_owner",
-            "unknown_startup",
-            "live_startup",
-            "matching_health",
-        ] {
-            let mut case = ReceiptCase::new();
-            let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
-                .unwrap()
-                .unwrap();
-            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
-            let mut original_lock = None;
-            match condition {
-                "held_lock" => {
-                    original_lock =
-                        RunLock::acquire_released(&case.fixture.conn, &case.fixture.run.owner())
-                            .unwrap()
-                }
-                "missing_lock" => std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap(),
-                "replaced_lock" => {
-                    std::fs::rename(
-                        &case.artifacts.paths.owner_lock,
-                        case.fixture._dir.path().join("original-owner.lock"),
-                    )
-                    .unwrap();
-                    std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .mode(0o600)
-                        .open(&case.artifacts.paths.owner_lock)
-                        .unwrap();
-                }
-                "live_reconciler" | "unknown_startup" => {
-                    case.fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_runs SET owner_kind='reconciler' WHERE run_id=?1",
-                            [case.fixture.run.run_id],
-                        )
-                        .unwrap();
-                    case.fixture.run =
-                        storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
-                    if condition == "live_reconciler" {
-                        host.owner = Termination::Alive;
-                    } else {
-                        host.startup = Termination::Unknown;
-                    }
-                }
-                "unknown_owner" => host.owner = Termination::Unknown,
-                "live_startup" => host.startup = Termination::Alive,
-                "matching_health" => host.matching_health = true,
-                _ => unreachable!(),
-            }
-            if condition == "held_lock" {
-                assert!(original_lock.is_some());
-            }
-            let before = rows(&case.fixture.conn, &[]);
-            let spool = case.spool();
-            assert!(case.invoke(Some(&held), &mut host).is_err(), "{condition}");
-            assert_eq!(rows(&case.fixture.conn, &[]), before, "{condition}");
-            assert_eq!(case.spool(), spool, "{condition}");
-            assert!(!host.calls.contains(&"after"), "{condition}");
-            if matches!(condition, "unknown_startup" | "live_startup") {
-                assert!(
-                    host.calls.contains(&"startup"),
-                    "noncreator history still requires startup exclusion"
-                );
-            }
-            held.validate_binding(&case.settings.database_url, &case.placement)
-                .unwrap();
-            if let Some(lock) = original_lock {
-                lock.validate(&case.fixture.conn, &case.fixture.run.owner())
-                    .unwrap();
-            }
-        }
-    }
-
-    #[test]
-    fn exclusive_receipt_revalidates_original_input_placement_and_budget_after_real_sql_entry() {
-        use rusqlite::hooks::AuthAction;
-        use rusqlite::hooks::AuthContext;
-        use rusqlite::hooks::Authorization;
-        use rusqlite::hooks::TransactionOperation;
-        use std::sync::Arc;
-        use std::sync::Mutex;
-        use std::sync::atomic::AtomicBool;
-        use std::sync::atomic::Ordering;
-        use std::sync::mpsc;
-
-        for change in ["digest", "placement", "deadline"] {
-            let mut case = ReceiptCase::new();
-            let journal: String = case
-                .fixture
-                .conn
-                .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(journal, "wal");
-            let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
-                .unwrap()
-                .unwrap();
-            let before = rows(&case.fixture.conn, &[]);
-            let spool = case.spool();
-            let started = Instant::now();
-            let cap = started
-                + if change == "deadline" {
-                    Duration::from_millis(200)
-                } else {
-                    Duration::from_secs(2)
-                };
-            let mut host = TypedHost::new(cap);
-            let (start, started_writer) = mpsc::sync_channel(1);
-            let (locked, writer_locked) = mpsc::sync_channel(1);
-            let (begin, began) = mpsc::sync_channel(1);
-            let armed = Arc::new(AtomicBool::new(false));
-            let observed = Arc::new(AtomicBool::new(false));
-            let budgets = Arc::new(Mutex::new(Vec::new()));
-            let enabled = armed.clone();
-            let observed_begin = observed.clone();
-            let sql_budgets = budgets.clone();
-            let mut begin = Some(begin);
-            case.fixture
-                .conn
-                .authorizer(Some(move |context: AuthContext<'_>| {
-                    if matches!(
-                        context.action,
-                        AuthAction::Read { .. }
-                            | AuthAction::Insert { .. }
-                            | AuthAction::Update { .. }
-                            | AuthAction::Delete { .. }
-                            | AuthAction::Transaction { .. }
-                    ) {
-                        sql_budgets
-                            .lock()
-                            .unwrap()
-                            .push(Deadline::inherited_or_new().instant());
-                    }
-                    if enabled.load(Ordering::Acquire)
-                        && matches!(
-                            context.action,
-                            AuthAction::Transaction {
-                                operation: TransactionOperation::Begin
-                            }
-                        )
-                        && let Some(begin) = begin.take()
-                    {
-                        observed_begin.store(true, Ordering::Release);
-                        begin.send(()).unwrap();
-                    }
-                    Authorization::Allow
-                }))
-                .unwrap();
-            let mut start = Some(start);
-            host.action = Some(Box::new(move |boundary, _, until| {
-                if matches!(boundary, RecoveryBoundary::BeforeTakeover)
-                    && let Some(start) = start.take()
-                {
-                    start.send(()).unwrap();
-                    writer_locked
-                        .recv_timeout(until.saturating_duration_since(Instant::now()))
-                        .unwrap();
-                    armed.store(true, Ordering::Release);
-                }
-                Ok(())
-            }));
-            let path = case.fixture.conn.path().unwrap().to_owned();
-            let input_id = case.input.input_id;
-            let member_id = case.fixture.run.member_id;
-            let expected = Arc::new(Mutex::new(None));
-            let published = expected.clone();
-            let result = std::thread::scope(|scope| {
-                let writer = scope.spawn(move || {
-                    started_writer.recv_timeout(cap.saturating_duration_since(Instant::now())).unwrap();
-                    let conn = Connection::open(path).unwrap();
-                    conn.busy_timeout(Duration::ZERO).unwrap();
-                    conn.execute_batch("BEGIN IMMEDIATE").unwrap();
-                    match change {
-                        "digest" => { conn.execute("UPDATE member_input_operations SET payload_digest=?1 WHERE input_id=?2", rusqlite::params!["e".repeat(64), input_id]).unwrap(); }
-                        "placement" => { conn.execute("DELETE FROM member_placements WHERE member_id=?1", [member_id]).unwrap(); }
-                        "deadline" => {}
-                        _ => unreachable!(),
-                    }
-                    *published.lock().unwrap() = Some(rows(&conn, &[]));
-                    locked.send(()).unwrap();
-                    began.recv_timeout(cap.saturating_duration_since(Instant::now())).unwrap();
-                    let release = if change == "deadline" { cap } else { (Instant::now() + Duration::from_millis(40)).min(cap) };
-                    std::thread::sleep(release.saturating_duration_since(Instant::now()));
-                    conn.execute_batch("COMMIT").unwrap();
-                });
-                let result =
-                    with_database_budget(&mut case.fixture.conn, Deadline::until(cap), |conn| {
-                        Ok(crate::runtime::input_client::reconcile_input_with_host(
-                            conn,
-                            &case.settings,
-                            &case.input,
-                            &case.fixture.run,
-                            Some((&case.placement, &held)),
-                            InputDisposition::Submitted,
-                            "fixture:fixed-after-wait",
-                            cap + Duration::from_secs(1),
-                            &mut host,
-                        ))
-                    });
-                let joined = writer.join();
-                (result, joined)
-            });
-            let removed = case
-                .fixture
-                .conn
-                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
-            assert!(
-                removed.is_ok(),
-                "primary={:?}; writer={:?}; hook_cleanup={removed:?}",
-                result.0.as_ref().map(|value| value.as_ref().err()),
-                result.1.as_ref().err()
-            );
-            assert!(
-                result.1.is_ok(),
-                "owned SQL writer completed; primary={:?}",
-                result.0.as_ref().map(|value| value.as_ref().err())
-            );
-            assert!(result.0.unwrap().is_err(), "{change}");
-            assert!(
-                observed.load(Ordering::Acquire),
-                "{change}: real BEGIN is attempted while the separate writer owns Immediate"
-            );
-            assert!(!host.calls.contains(&"after"), "{change}");
-            assert_eq!(
-                rows(&case.fixture.conn, &[]),
-                *expected.lock().unwrap().as_ref().unwrap(),
-                "{change}"
-            );
-            if change == "deadline" {
-                assert_eq!(rows(&case.fixture.conn, &[]), before);
-                assert!(Instant::now() >= cap);
-                assert!(
-                    started.elapsed() < Duration::from_millis(750),
-                    "the 200ms original bound has a fixed 550ms scheduling tolerance"
-                );
-            }
-            let budgets = budgets.lock().unwrap();
-            assert!(!budgets.is_empty());
-            assert!(budgets.iter().all(|until| *until <= cap));
-            assert_eq!(case.spool(), spool);
-            case.assert_original_lock_available();
-        }
+        assert_eq!(
+            storage::get_input(&case.fixture.conn, case.input_id).unwrap(),
+            original
+        );
     }
 }

@@ -33,8 +33,13 @@ pub(crate) struct ShutdownClock {
 
 impl ShutdownClock {
     pub(crate) fn new(start: Instant) -> Self {
-        Self::with_unit(start, Duration::from_secs(1))
+        Self {
+            start,
+            unit: Duration::from_secs(1),
+            limit: None,
+        }
     }
+    #[cfg(test)]
     pub(crate) fn with_unit(start: Instant, unit: Duration) -> Self {
         Self {
             start,
@@ -93,9 +98,6 @@ pub(crate) struct ShutdownOutcome {
     pub(crate) native_exit: Option<ChildExit>,
     pub(crate) cleanup_state: CleanupState,
     pub(crate) diagnostics: Vec<String>,
-    pub(crate) dropped_display_bytes: u64,
-    pub(crate) pending_event_frames: u64,
-    pub(crate) unsaved_observation_gap: u64,
 }
 
 impl ShutdownOutcome {
@@ -109,9 +111,6 @@ impl ShutdownOutcome {
                 CleanupState::Incomplete
             },
             diagnostics,
-            dropped_display_bytes: 0,
-            pending_event_frames: 0,
-            unsaved_observation_gap: 0,
         }
     }
 
@@ -194,35 +193,30 @@ pub(crate) fn shutdown(
         final_exit,
         "conflicting final native exit status",
     );
-    if let Some(dropped) = note(
+    let dropped_display_bytes = note(
         &mut outcome.diagnostics,
         host.flush_display_until(clock.display_deadline()),
-    ) {
-        outcome.dropped_display_bytes = dropped;
-    }
-    if let Some((pending, gap)) = note(
+    )
+    .unwrap_or(0);
+    let (pending_event_frames, unsaved_observation_gap) = note(
         &mut outcome.diagnostics,
         host.finish_events_until(clock.storage_deadline()),
-    ) {
-        outcome.pending_event_frames = pending;
-        outcome.unsaved_observation_gap = gap;
-    }
+    )
+    .unwrap_or((0, 0));
     note(&mut outcome.diagnostics, host.restore_terminal());
     if host.now() > clock.storage_deadline() {
         outcome
             .diagnostics
             .push("shutdown exceeded its original storage deadline".into());
     }
-    if outcome.dropped_display_bytes > 0 {
+    if dropped_display_bytes > 0 {
         outcome.diagnostics.push(format!(
-            "display truncated: {} undelivered bytes",
-            outcome.dropped_display_bytes
+            "display truncated: {dropped_display_bytes} undelivered bytes"
         ));
     }
-    if outcome.pending_event_frames > 0 || outcome.unsaved_observation_gap > 0 {
+    if pending_event_frames > 0 || unsaved_observation_gap > 0 {
         outcome.diagnostics.push(format!(
-            "pending events={} unsaved observation gap={}",
-            outcome.pending_event_frames, outcome.unsaved_observation_gap
+            "pending events={pending_event_frames} unsaved observation gap={unsaved_observation_gap}"
         ));
     }
     if outcome.native_exit.is_none() && host.native_was_spawned() {
@@ -270,15 +264,13 @@ pub(super) fn register_pending_run(
         ensure_same_database(conn, &settings.database_identity_json)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let fleet = broker::fleets::require_live_fleet(&tx, member.fleet_id)?;
-        let director = fleet
-            .director_member_id
-            .ok_or_else(|| error("live fleet requires a Director"))?;
+        let director = fleet.director_member_id;
         let registered = broker::members::register_member_rows(
             &tx,
             member.fleet_id,
             &member.name,
             &member.description,
-            Some(&member.placement),
+            &member.placement,
         )?;
         let next: i64 = tx.query_row(
             "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
@@ -380,16 +372,11 @@ pub(crate) trait LaunchHost {
     fn close_pane(&mut self, pane_id: &str, deadline: Instant) -> Result<()>;
     fn settle_hermes(
         &mut self,
-        _conn: &Connection,
+        conn: &Connection,
         run: &RunRecord,
-        _pane_id: &str,
-        _deadline: Instant,
-    ) -> Result<()> {
-        Err(error(format!(
-            "hermes settlement of run {} requires the member's multiplexer",
-            run.run_id
-        )))
-    }
+        pane_id: &str,
+        deadline: Instant,
+    ) -> Result<()>;
 }
 pub(crate) struct LaunchOutcome {
     pub(crate) member: RegisteredMember,
@@ -573,7 +560,7 @@ fn launch_registered(
             )?;
             tx.commit()?;
             broker::get_member(conn, run.member_id, run.fleet_id)?
-                .and_then(|member| member.placement)
+                .map(|member| member.placement)
                 .ok_or_else(|| error("published placement vanished"))
         })?;
         let started = host.start(&prepared, &placement, deadline)?;
@@ -722,7 +709,10 @@ impl LaunchHost for NativeLaunchHost<'_> {
         let request = LifecycleRequest::Start {
             protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: prepared.identity.clone(),
-            pane_id: placement.mux_pane_id.clone(),
+            pane_id: placement
+                .mux_pane_id
+                .clone()
+                .expect("published placement carries the created pane"),
         };
         let value = client.exchange(&request, deadline)?;
         serde_json::from_value(value).map_err(io_error)
@@ -770,7 +760,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
     fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<()> {
         self.mux
             .bounded(crate::time::Deadline::until(deadline))
-            .kill_pane(pane, true)
+            .kill_pane(pane)
             .map_err(|cause| error(format!("runner pane cleanup failed: {cause}")))
     }
 }
@@ -1237,10 +1227,7 @@ mod tests {
             let member = crate::broker::get_member(&conn, run.member_id, run.fleet_id)
                 .unwrap()
                 .unwrap();
-            assert_eq!(
-                member.placement.as_ref().unwrap().mux_pane_id.as_deref(),
-                Some("%9")
-            );
+            assert_eq!(member.placement.mux_pane_id.as_deref(), Some("%9"));
             assert_eq!(placement.mux_pane_id.as_deref(), Some("%9"));
             self.spawn_count += 1;
             let child = ProcessIdentity {
@@ -1252,7 +1239,7 @@ mod tests {
             if self.fast_exit {
                 let run = storage::get_run(&conn, run.run_id).unwrap();
                 storage::reserve_event_sequences(&mut conn, &run.owner()).unwrap();
-                let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+                let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
                 storage::persist_transition(
                     &mut conn,
                     &run.owner(),
@@ -2264,11 +2251,19 @@ mod tests {
         host.gap = 3;
         let outcome = shutdown(&mut host, ShutdownClock::new(start), None);
         assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
-        assert_eq!(outcome.dropped_display_bytes, 17);
-        assert_eq!(outcome.pending_event_frames, 2);
-        assert_eq!(outcome.unsaved_observation_gap, 3);
         assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
-        assert!(!outcome.diagnostics.is_empty());
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|line| line == "display truncated: 17 undelivered bytes")
+        );
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|line| line == "pending events=2 unsaved observation gap=3")
+        );
     }
 
     #[test]

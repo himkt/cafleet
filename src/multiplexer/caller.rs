@@ -2,6 +2,7 @@ use crate::coding_agent::CodingAgent;
 use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::DEFAULT_HERDR_SESSION;
+use crate::multiplexer::DEFAULT_TMUX_SOCKET;
 use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MuxBackend;
 use crate::multiplexer::argv;
@@ -12,18 +13,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 const MAX_ANCESTRY: usize = 4096;
-
-/// `CommandRunner` passes the process environment to every child, so a stale `TMUX` would
-/// select its server instead of the default one.
-const DEFAULT_TMUX_SOCKET: &[&str] = &[
-    "env",
-    "-u",
-    "TMUX",
-    "tmux",
-    "display-message",
-    "-p",
-    "#{socket_path}",
-];
 
 const TMUX_GUIDANCE: &str = "the tmux command prompt (the user presses the tmux prefix key in the Director pane, then types :display-message -d 0 \"#{pane_id} #{socket_path}\" and Enter; the status line shows the pane ID, then the server socket)";
 
@@ -46,7 +35,7 @@ pub(crate) struct CallerPane {
 pub(crate) enum WalkEnd {
     Complete,
     Stopped { pid: i64 },
-    Unreadable { pid: i64, cause: String },
+    Unreadable { cause: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,18 +46,23 @@ pub(crate) struct Ancestry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SharedServer {
+    pub(crate) label: String,
+    pub(crate) pid: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Refusal {
-    SharedServer { label: String, pid: i64 },
     PaneNotFound,
     PaneNotAncestor { pane_pid: i64 },
     WalkStopped { pid: i64 },
     NestedPidNamespace,
-    ProcessUnreadable { pid: i64, cause: String },
+    ProcessUnreadable { cause: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Verification {
-    Verified { pane_pid: i64 },
+    Verified,
     Refused(Refusal),
 }
 
@@ -86,7 +80,6 @@ pub(crate) fn walk(table: &dyn ProcessTable) -> Ancestry {
         match table.entry(pid) {
             Err(error) => {
                 break WalkEnd::Unreadable {
-                    pid,
                     cause: error.to_string(),
                 };
             }
@@ -104,14 +97,14 @@ pub(crate) fn walk(table: &dyn ProcessTable) -> Ancestry {
 }
 
 /// Row 1: the nearest ancestor that matches a shared-server signature.
-pub(crate) fn shared_server(ancestry: &Ancestry) -> Option<Refusal> {
+pub(crate) fn shared_server(ancestry: &Ancestry) -> Option<SharedServer> {
     ancestry.entries.iter().find_map(|(pid, argv)| {
         CodingAgent::all().iter().find_map(|agent| {
             agent
                 .shared_server_signatures()
                 .iter()
                 .find(|signature| signature.matches(argv))
-                .map(|signature| Refusal::SharedServer {
+                .map(|signature| SharedServer {
                     label: signature.label(*agent),
                     pid: *pid,
                 })
@@ -215,11 +208,10 @@ pub(crate) fn verify_pane(
         return Ok(Verification::Refused(Refusal::NestedPidNamespace));
     }
     if ancestry.entries.iter().any(|(pid, _)| *pid == pane_pid) {
-        return Ok(Verification::Verified { pane_pid });
+        return Ok(Verification::Verified);
     }
     Ok(Verification::Refused(match &ancestry.end {
-        WalkEnd::Unreadable { pid, cause } => Refusal::ProcessUnreadable {
-            pid: *pid,
+        WalkEnd::Unreadable { cause } => Refusal::ProcessUnreadable {
             cause: cause.clone(),
         },
         WalkEnd::Stopped { pid } => Refusal::WalkStopped { pid: *pid },
@@ -236,10 +228,8 @@ pub(crate) fn identification_guidance(backend: MuxBackend) -> &'static str {
 }
 
 /// The refusal bodies, without the `cafleet fleet create ` prefix.
-pub(crate) fn shared_server_message(refusal: &Refusal) -> String {
-    let Refusal::SharedServer { label, pid } = refusal else {
-        panic!("shared_server_message takes a shared-server refusal, got {refusal:?}");
-    };
+pub(crate) fn shared_server_message(shared: &SharedServer) -> String {
+    let SharedServer { label, pid } = shared;
     format!(
         "cannot verify this session's pane: a shared {label} server (pid {pid}) runs this command, so its multiplexer environment can belong to another pane; ask the user to read the Director pane ID and server with {TMUX_GUIDANCE} in tmux, or with {HERDR_GUIDANCE} in herdr, {RERUN}"
     )
@@ -263,11 +253,8 @@ pub(crate) fn unverified_message(
             format!("the process ancestry stopped at pid {pid} before reaching pid 1")
         }
         Refusal::NestedPidNamespace => "this command runs in a nested PID namespace".to_owned(),
-        Refusal::ProcessUnreadable { cause, .. } => {
+        Refusal::ProcessUnreadable { cause } => {
             format!("the process ancestry could not be read: {cause}")
-        }
-        Refusal::SharedServer { .. } => {
-            panic!("a shared-server refusal renders through shared_server_message")
         }
     };
     format!(
@@ -364,16 +351,20 @@ mod tests {
     }
 
     /// Row 1 through `shared_server`, then rows 2–7 through `verify_pane`.
-    fn decide(table: &FixtureProcessTable, mux: &dyn Multiplexer, pane: &str) -> Verification {
+    fn decide(
+        table: &FixtureProcessTable,
+        mux: &dyn Multiplexer,
+        pane: &str,
+    ) -> Result<Verification, SharedServer> {
         let ancestry = walk(table);
         match shared_server(&ancestry) {
-            Some(refusal) => Verification::Refused(refusal),
-            None => verify_pane(mux, table, &ancestry, pane).unwrap(),
+            Some(shared) => Err(shared),
+            None => Ok(verify_pane(mux, table, &ancestry, pane).unwrap()),
         }
     }
 
-    fn shared(label: &str, pid: i64) -> Verification {
-        Verification::Refused(Refusal::SharedServer {
+    fn shared(label: &str, pid: i64) -> Result<Verification, SharedServer> {
+        Err(SharedServer {
             label: label.to_string(),
             pid,
         })
@@ -437,7 +428,6 @@ mod tests {
                 Ancestry {
                     entries: vec![(30, strings(&["cafleet"]))],
                     end: WalkEnd::Unreadable {
-                        pid: 412,
                         cause: UNREADABLE.to_string(),
                     },
                 }
@@ -485,7 +475,7 @@ mod tests {
             );
             assert_eq!(
                 shared_server(&walk(&table)),
-                Some(Refusal::SharedServer {
+                Some(SharedServer {
                     label: "hermes gateway run".to_string(),
                     pid: 20,
                 })
@@ -506,7 +496,7 @@ mod tests {
             .unreadable(412, UNREADABLE);
             assert_eq!(
                 shared_server(&walk(&table)),
-                Some(Refusal::SharedServer {
+                Some(SharedServer {
                     label: "codex app-server".to_string(),
                     pid: 20,
                 })
@@ -572,7 +562,7 @@ mod tests {
                 };
                 assert_eq!(
                     verify_pane(&*mux, &table, &walk(&table), pane).unwrap(),
-                    Verification::Verified { pane_pid: 20 },
+                    Verification::Verified,
                     "{backend}"
                 );
             }
@@ -589,20 +579,19 @@ mod tests {
                 answer_tmux(&runner, "%3", Some(20));
                 assert_eq!(
                     verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                    Verification::Verified { pane_pid: 20 }
+                    Verification::Verified
                 );
             }
         }
 
         #[test]
-        fn row_5_an_unreadable_walk_refuses_with_its_pid_and_cause() {
+        fn row_5_an_unreadable_walk_refuses_with_its_cause() {
             let table = table(30, &[(30, 412, &["cafleet"])]).unreadable(412, UNREADABLE);
             let runner = FakeRunner::with_binary("tmux");
             answer_tmux(&runner, "%3", Some(99));
             assert_eq!(
                 verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
                 Verification::Refused(Refusal::ProcessUnreadable {
-                    pid: 412,
                     cause: UNREADABLE.to_string(),
                 })
             );
@@ -720,15 +709,13 @@ mod tests {
         }
 
         impl Case {
-            fn verification(&self, pane_pid: Option<i64>) -> Verification {
+            fn verification(&self, pane_pid: Option<i64>) -> Result<Verification, SharedServer> {
                 match self.expected {
                     Expected::SharedServer(label, pid) => shared(label, pid),
-                    Expected::Verified => Verification::Verified {
-                        pane_pid: pane_pid.expect("a verified case names its pane pid"),
-                    },
-                    Expected::NotAncestor => Verification::Refused(Refusal::PaneNotAncestor {
+                    Expected::Verified => Ok(Verification::Verified),
+                    Expected::NotAncestor => Ok(Verification::Refused(Refusal::PaneNotAncestor {
                         pane_pid: pane_pid.expect("a row-7 case names its pane pid"),
-                    }),
+                    })),
                 }
             }
 
@@ -990,7 +977,7 @@ mod tests {
             answer_tmux(&runner, case.pane, case.pane_pid);
             assert_eq!(
                 verify_pane(&tmux_mux(&runner), &table, &walk(&table), case.pane).unwrap(),
-                Verification::Verified { pane_pid: 400625 }
+                Verification::Verified
             );
         }
 
@@ -1060,7 +1047,7 @@ mod tests {
             answer_tmux(&runner, "%1", Some(428571));
             assert_eq!(
                 verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%1").unwrap(),
-                Verification::Verified { pane_pid: 428571 },
+                Verification::Verified,
                 "row 4 alone would accept the chat client pane"
             );
         }
@@ -1127,7 +1114,7 @@ mod tests {
             answer_herdr(&runner, Some(362679));
             assert_eq!(
                 decide(&table, &herdr_mux(&runner), "w4:p3N"),
-                Verification::Verified { pane_pid: 362679 }
+                Ok(Verification::Verified)
             );
         }
     }
@@ -1458,7 +1445,7 @@ mod tests {
 
         #[test]
         fn shared_server_message_names_both_guidances() {
-            let refusal = Refusal::SharedServer {
+            let refusal = SharedServer {
                 label: "codex app-server".to_string(),
                 pid: 407596,
             };
@@ -1467,7 +1454,7 @@ mod tests {
                 "cafleet fleet create cannot verify this session's pane: a shared codex app-server server (pid 407596) runs this command, so its multiplexer environment can belong to another pane; ask the user to read the Director pane ID and server with the tmux command prompt (the user presses the tmux prefix key in the Director pane, then types :display-message -d 0 \"#{pane_id} #{socket_path}\" and Enter; the status line shows the pane ID, then the server socket) in tmux, or with ! env -u HERDR_PANE_ID herdr --session <session> pane current --current (typed by the user into the Director's composer while the Director pane is focused; <session> is the herdr session the user attached, default unless herdr was started with --session <name>, and herdr session list shows the running sessions; the pane ID is result.pane.pane_id and the server is <session>) in herdr, then run cafleet fleet create with --pane <pane-id> --mux-server <server>"
             );
             assert_eq!(
-                shared_server_message(&Refusal::SharedServer {
+                shared_server_message(&SharedServer {
                     label: "hermes gateway run".to_string(),
                     pid: 403471,
                 }),
@@ -1499,7 +1486,6 @@ mod tests {
                     ),
                     (
                         Refusal::ProcessUnreadable {
-                            pid: 412,
                             cause: UNREADABLE.to_string(),
                         },
                         format!("the process ancestry could not be read: {UNREADABLE}"),

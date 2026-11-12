@@ -9,7 +9,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) struct AgentPaths {
-    pub(crate) identity: String,
     base: PathBuf,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
@@ -85,7 +84,6 @@ pub(crate) fn agent_paths(
         CodingAgent::Claude | CodingAgent::Codex | CodingAgent::Hermes => None,
     };
     Ok(AgentPaths {
-        identity: base.display().to_string(),
         base,
         skills_dir,
         presets,
@@ -121,10 +119,10 @@ pub(crate) fn install_agent(
     conn: &mut Connection,
     agent: CodingAgent,
     paths: &AgentPaths,
-    version: &str,
     hermes: HermesSetup<'_>,
     out: &mut dyn Write,
 ) -> Result<(), CafleetError> {
+    let version = crate::cli::VERSION;
     let mut report = |line: String| crate::cli::output_result(writeln!(out, "{line}"));
     let fail = |error: std::io::Error| {
         CafleetError::App(format!(
@@ -166,7 +164,7 @@ pub(crate) fn install_agent(
                 target.display()
             ))
         };
-        let bytes = lookup(PRESETS, source).expect("embedded preset exists");
+        let bytes = preset(source).expect("embedded preset exists");
         std::fs::create_dir_all(target.parent().expect("preset has a parent")).map_err(fail)?;
         remove_existing_target(target).map_err(fail)?;
         std::fs::write(target, bytes).map_err(fail)?;
@@ -205,7 +203,7 @@ pub(crate) fn install_agent(
             HermesSetup::Absent => report("hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
         }
     }
-    crate::broker::record_asset_install(conn, agent.name(), &paths.identity, version)?;
+    crate::broker::record_asset_install(conn, agent.name(), &paths.base.display().to_string())?;
     Ok(())
 }
 
@@ -335,11 +333,8 @@ fn remove_existing_target(target: &Path) -> std::io::Result<()> {
 
 include!(concat!(env!("OUT_DIR"), "/embedded_data.rs"));
 
-pub(crate) fn lookup(
-    table: &'static [(&'static str, &'static [u8])],
-    path: &str,
-) -> Option<&'static [u8]> {
-    table
+pub(crate) fn preset(path: &str) -> Option<&'static [u8]> {
+    PRESETS
         .iter()
         .find(|(entry, _)| *entry == path)
         .map(|(_, bytes)| *bytes)
@@ -577,6 +572,7 @@ mod tests {
     use crate::assets::test_support::PLUGINS_KEY;
     use crate::assets::test_support::Reply;
     use crate::assets::*;
+    use crate::cli::VERSION;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::fs::symlink;
 
@@ -620,9 +616,9 @@ mod tests {
         }
     }
 
-    fn extension_line(agent: CodingAgent, version: &str, target: &Path) -> String {
+    fn extension_line(agent: CodingAgent, target: &Path) -> String {
         format!(
-            "{}: installed extension (v{version}) -> {}",
+            "{}: installed extension (v{VERSION}) -> {}",
             agent.name(),
             target.display()
         )
@@ -725,7 +721,6 @@ mod tests {
                     &mut conn,
                     *agent,
                     &paths,
-                    "test-version",
                     hermes_for(*agent, &fake),
                     &mut Vec::<u8>::new(),
                 )
@@ -736,7 +731,7 @@ mod tests {
                 for (source, target) in &presets {
                     assert_eq!(
                         std::fs::read(target).unwrap(),
-                        lookup(PRESETS, source).unwrap(),
+                        preset(source).unwrap(),
                         "{}",
                         target.display()
                     );
@@ -758,14 +753,14 @@ mod tests {
             if *agent == CodingAgent::Opencode {
                 assert!(!custom.join("skills").exists());
             }
-            let record: String = conn
+            let installed_at: String = conn
                 .query_row(
-                    "SELECT cafleet_version FROM asset_installs WHERE coding_agent=?1 AND path=?2",
-                    rusqlite::params![agent.name(), paths.identity],
+                    "SELECT installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
+                    rusqlite::params![agent.name(), paths.base.display().to_string()],
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!(record, "test-version");
+            assert!(crate::time::parse_lenient(&installed_at).is_some());
         }
     }
 
@@ -788,7 +783,6 @@ mod tests {
                 &mut conn,
                 *agent,
                 &paths,
-                "9.8.7",
                 hermes_for(*agent, &fake),
                 &mut output,
             )
@@ -798,7 +792,7 @@ mod tests {
                 .iter()
                 .map(|(_, target)| {
                     format!(
-                        "{}: installed preset (v9.8.7) -> {}",
+                        "{}: installed preset (v{VERSION}) -> {}",
                         agent.name(),
                         target.display()
                     )
@@ -808,10 +802,10 @@ mod tests {
                 CodingAgent::Opencode | CodingAgent::Pi => expected.extend(
                     extensions
                         .iter()
-                        .map(|(_, target)| extension_line(*agent, "9.8.7", target)),
+                        .map(|(_, target)| extension_line(*agent, target)),
                 ),
                 CodingAgent::Hermes => expected.extend([
-                    extension_line(*agent, "9.8.7", &fake.plugin_dir()),
+                    extension_line(*agent, &fake.plugin_dir()),
                     format!(
                         "hermes: enabled plugin cafleet -> {}",
                         fake.config_path().display()
@@ -820,7 +814,7 @@ mod tests {
                 CodingAgent::Claude | CodingAgent::Codex => {}
             }
             let skills_suffix = format!(
-                " (v9.8.7) -> {}",
+                " (v{VERSION}) -> {}",
                 expected_skills_dir(*agent, &custom, home.path()).display()
             );
             assert!(
@@ -852,7 +846,6 @@ mod tests {
             &mut conn,
             CodingAgent::Opencode,
             &paths,
-            "1.0.0",
             HermesSetup::Absent,
             &mut output,
         )
@@ -901,7 +894,6 @@ mod tests {
             &mut conn,
             CodingAgent::Opencode,
             &paths,
-            "1.0.0",
             HermesSetup::Absent,
             &mut output,
         )
@@ -923,11 +915,11 @@ mod tests {
             lines[1..],
             [
                 format!(
-                    "opencode: installed preset (v1.0.0) -> {}",
+                    "opencode: installed preset (v{VERSION}) -> {}",
                     base.join("agents/cafleet.md").display()
                 ),
                 format!(
-                    "opencode: installed preset (v1.0.0) -> {}",
+                    "opencode: installed preset (v{VERSION}) -> {}",
                     base.join("agents/cafleet-ask.md").display()
                 ),
             ],
@@ -945,12 +937,11 @@ mod tests {
         let mut conn = crate::db::test_support::migrated_conn(&home);
         let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Opencode).unwrap();
         let base = home.path().join(".config/opencode");
-        assert_eq!(paths.identity, base.display().to_string());
+        assert_eq!(paths.base, base);
         install_agent(
             &mut conn,
             CodingAgent::Opencode,
             &paths,
-            "1.0.0",
             HermesSetup::Absent,
             &mut Vec::<u8>::new(),
         )
@@ -958,7 +949,7 @@ mod tests {
         for (source, target) in expected_presets(CodingAgent::Opencode, &base) {
             assert_eq!(
                 std::fs::read(&target).unwrap(),
-                lookup(PRESETS, source).unwrap(),
+                preset(source).unwrap(),
                 "{}",
                 target.display()
             );
@@ -1000,7 +991,6 @@ mod tests {
                 conn,
                 CodingAgent::Pi,
                 &paths,
-                "1.0.0",
                 HermesSetup::Absent,
                 &mut output,
             );
@@ -1016,7 +1006,10 @@ mod tests {
 
         fn skills_line_matches(line: &str, base: &Path) -> bool {
             line.starts_with("pi: installed ")
-                && line.ends_with(&format!(" (v1.0.0) -> {}", base.join("skills").display()))
+                && line.ends_with(&format!(
+                    " (v{VERSION}) -> {}",
+                    base.join("skills").display()
+                ))
         }
 
         #[test]
@@ -1039,7 +1032,11 @@ mod tests {
             ));
             assert_eq!(
                 std::fs::read(extension_target(&base)).unwrap(),
-                lookup(EXTENSIONS, "pi/cafleet.ts").unwrap()
+                EXTENSIONS
+                    .iter()
+                    .find(|(path, _)| *path == "pi/cafleet.ts")
+                    .unwrap()
+                    .1
             );
             assert_executable_record(&base.join("extensions/cafleet.executable"));
             let recorded: Vec<String> = conn
@@ -1068,7 +1065,7 @@ mod tests {
             assert_eq!(
                 installed.lines[1],
                 format!(
-                    "pi: installed extension (v1.0.0) -> {}",
+                    "pi: installed extension (v{VERSION}) -> {}",
                     extension_target(&base).display()
                 )
             );
@@ -1170,14 +1167,7 @@ mod tests {
             let mut conn = crate::db::test_support::migrated_conn(&home);
             let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Hermes).unwrap();
             let mut output = Vec::new();
-            let result = install_agent(
-                &mut conn,
-                CodingAgent::Hermes,
-                &paths,
-                "1.2.3",
-                hermes,
-                &mut output,
-            );
+            let result = install_agent(&mut conn, CodingAgent::Hermes, &paths, hermes, &mut output);
             let base = home.path().join(".hermes");
             let skills = base.join("skills");
             Installed {
@@ -1222,14 +1212,14 @@ mod tests {
             let line = &installed.lines[0];
             assert!(
                 line.starts_with("hermes: installed ")
-                    && line.ends_with(&format!(" (v1.2.3) -> {}", installed.skills.display())),
+                    && line.ends_with(&format!(" (v{VERSION}) -> {}", installed.skills.display())),
                 "{line}"
             );
             line.clone()
         }
 
         fn plugin_line(fake: &FakeHermes) -> String {
-            extension_line(CodingAgent::Hermes, "1.2.3", &fake.plugin_dir())
+            extension_line(CodingAgent::Hermes, &fake.plugin_dir())
         }
 
         fn enabled_line(fake: &FakeHermes) -> String {

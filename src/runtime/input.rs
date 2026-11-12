@@ -49,6 +49,7 @@ pub(crate) enum InputBoundary {
 }
 
 pub(crate) struct InputCheckpoint {
+    #[cfg(test)]
     pub(crate) input_id: i64,
     pub(crate) stage: SubmissionStage,
     pub(crate) written_bytes: u64,
@@ -68,6 +69,7 @@ pub(crate) trait InputHooks: Send + Sync {
 pub(crate) struct InputServices {
     pub(crate) catalog: ProfileCatalog,
     pub(crate) token_source: Box<dyn RequestTokenSource>,
+    #[cfg(test)]
     pub(crate) stage_settle: Duration,
     #[cfg(test)]
     pub(crate) hooks: Arc<dyn InputHooks>,
@@ -144,7 +146,6 @@ struct DeferredAttempt {
 #[derive(Clone)]
 pub(crate) struct CurrentRequest {
     observed: ObservedRequest,
-    identity: ControlIdentity,
     interaction_id: i64,
     event_id: i64,
     message_id: i64,
@@ -153,7 +154,6 @@ pub(crate) struct CurrentRequest {
 impl CurrentRequest {
     fn same_request(&self, other: &Self) -> bool {
         self.observed.request_generation == other.observed.request_generation
-            && self.identity == other.identity
             && self.interaction_id == other.interaction_id
             && self.event_id == other.event_id
             && self.message_id == other.message_id
@@ -741,30 +741,31 @@ impl InputCoordinator {
 }
 
 impl InputCoordinator {
+    #[cfg(not(test))]
+    fn stage_settle(&self) -> Duration {
+        STAGE_SETTLE
+    }
+    #[cfg(test)]
+    fn stage_settle(&self) -> Duration {
+        self.services.stage_settle
+    }
+
     pub(super) fn inspect_received(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
-        request: InputControlRequest,
+        input: PermissionInspectInput,
         live: (&ObservationController, &mut Transport),
         deadline: Instant,
     ) -> std::result::Result<InputControlReply, InputFailure> {
         let (observation, transport) = live;
-        let interaction_id = match &request.operation {
-            InputControlOperation::PermissionInspect(input) => Some(input.interaction_id),
-            _ => None,
-        };
+        let interaction_id = Some(input.interaction_id);
         let result =
             (|| {
                 let deadline = bounded_by_inherited(conn, deadline);
                 check_deadline(Instant::now(), deadline)?;
-                request.identity.validate(&self.run)?;
-                let InputControlOperation::PermissionInspect(input) = request.operation else {
-                    return Err(error("permission inspection operation required"));
-                };
                 let view = with_database_deadline(conn, deadline, |conn| {
                     let tx = conn.transaction()?;
-                    self.validate_live_run(&tx, run)?;
+                    self.validate_live_run(&tx)?;
                     let view = inspection_association(&tx, &self.run, &input)?;
                     check_deadline(Instant::now(), deadline)?;
                     tx.commit()?;
@@ -815,7 +816,6 @@ impl InputCoordinator {
                     )?;
                     let next = CurrentRequest {
                         observed: observed.clone(),
-                        identity: ControlIdentity::from_run(&self.run),
                         interaction_id: interaction.interaction_id,
                         event_id: view.event.event_id,
                         message_id,
@@ -986,7 +986,7 @@ impl InputCoordinator {
             Some(reason.clone())
         } else if let Some(code) = &status.diagnostic {
             Some(format!("observation degraded: {code}"))
-        } else if status.retained_transition || status.retained_draft || status.retained_evidence {
+        } else if status.retained_draft || status.retained_evidence {
             Some("observation update pending".into())
         } else if status.visibility != Visibility::Visible {
             Some("permission request is not visible".into())
@@ -1140,7 +1140,6 @@ impl InputCoordinator {
                         && observed.request_rule_id == bound.observed.request_rule_id
                         && observed.semantic == bound.observed.semantic
                         && observed.choices == bound.observed.choices
-                        && observed.native_correlation == bound.observed.native_correlation
                         && observed_match.map(AnswerMatch::focus_capture)
                             == bound_match.map(AnswerMatch::focus_capture)
                         && observed_match.and_then(AnswerMatch::focused_choice_id)
@@ -1236,7 +1235,6 @@ impl InputCoordinator {
     fn permission_history(
         &self,
         conn: &mut Connection,
-        run: &RunRecord,
         request: &InputControlRequest,
         input: &PermissionRespondInput,
         deadline: Instant,
@@ -1247,9 +1245,7 @@ impl InputCoordinator {
         let mut expected = ControlIdentity::from_run(&self.run);
         expected.owner_epoch = input.expected_owner_epoch;
         ensure(
-            request.identity == expected
-                && input.expected_run_id == self.run.run_id
-                && run.run_id == self.run.run_id,
+            request.identity == expected && input.expected_run_id == self.run.run_id,
             "permission response fixed identity mismatch",
         )?;
         with_database_deadline(conn, deadline, |conn| {
@@ -1285,7 +1281,6 @@ impl InputCoordinator {
     pub(super) fn retained_permission_response(
         &self,
         conn: &mut Connection,
-        run: &RunRecord,
         request: &InputControlRequest,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
@@ -1295,8 +1290,7 @@ impl InputCoordinator {
         let mut known_id = None;
         let result = (|| {
             let deadline = bounded_by_inherited(conn, deadline);
-            let history =
-                self.permission_history(conn, run, request, input, deadline, &mut known_id)?;
+            let history = self.permission_history(conn, request, input, deadline, &mut known_id)?;
             self.retained_projection(&history)
         })();
         result.map_err(|source| self.response_failure(source, input, known_id))
@@ -1305,7 +1299,6 @@ impl InputCoordinator {
     fn permission_received(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         request: InputControlRequest,
         observation: &ObservationController,
         deadline: Instant,
@@ -1317,7 +1310,7 @@ impl InputCoordinator {
         let result = (|| {
             let deadline = bounded_by_inherited(conn, deadline);
             let history =
-                self.permission_history(conn, run, &request, input, deadline, &mut known_id)?;
+                self.permission_history(conn, &request, input, deadline, &mut known_id)?;
             if let Some(reply) = self.retained_projection(&history)? {
                 return Ok(Some(reply));
             }
@@ -1332,8 +1325,7 @@ impl InputCoordinator {
             ensure(
                 token == &input.request_token
                     && binding.interaction_id == input.interaction_id
-                    && binding.event_id == input.event_id
-                    && binding.identity == request.identity,
+                    && binding.event_id == input.event_id,
                 "permission response token identity changed",
             )?;
             if let Some(reason) = answer_kind_mismatch(binding.observed.classification, &input.key)
@@ -1393,7 +1385,7 @@ impl InputCoordinator {
             self.validate_permission_binding(&selection, observation)?;
             with_database_deadline(conn, deadline, |conn| {
                 let tx = conn.transaction()?;
-                self.validate_live(&tx, run)?;
+                self.validate_live(&tx)?;
                 self.validate_permission_association(&tx, &selection)?;
                 check_deadline(Instant::now(), deadline)?;
                 tx.commit().map_err(crate::error::CafleetError::from)
@@ -1536,19 +1528,15 @@ impl InputCoordinator {
         Ok(effective)
     }
 
-    fn validate_live(&self, conn: &Connection, expected: &RunRecord) -> Result<()> {
+    fn validate_live(&self, conn: &Connection) -> Result<()> {
         ensure(
             !self.manual_accounting_failed && !self.input_fenced,
             "manual accounting failure fenced input",
         )?;
-        self.validate_live_run(conn, expected)
+        self.validate_live_run(conn)
     }
 
-    fn validate_live_run(&self, conn: &Connection, expected: &RunRecord) -> Result<()> {
-        ensure(
-            stable_run_identity(expected) == stable_run_identity(&self.run),
-            "input coordinator run identity changed",
-        )?;
+    fn validate_live_run(&self, conn: &Connection) -> Result<()> {
         let current = crate::runtime::input_client::revalidate_run_snapshot(
             conn,
             &self.run,
@@ -1562,11 +1550,7 @@ impl InputCoordinator {
         self.lock.validate(conn, &current.owner())
     }
 
-    fn validate_receipt_owner(&self, conn: &Connection, run: &RunRecord) -> Result<()> {
-        ensure(
-            stable_run_identity(run) == stable_run_identity(&self.run),
-            "receipt caller run identity changed",
-        )?;
+    fn validate_receipt_owner(&self, conn: &Connection) -> Result<()> {
         let current = storage::validate_owner(conn, &self.run.owner())?;
         ensure(
             stable_run_identity(&current) == stable_run_identity(&self.run),
@@ -1578,12 +1562,11 @@ impl InputCoordinator {
     fn receipt_guard_snapshot(
         &self,
         conn: &Connection,
-        run: &RunRecord,
         expected: &storage::PermissionReceipt,
         deadline: Instant,
     ) -> Result<ReceiptGuardBinding> {
         check_deadline(Instant::now(), deadline)?;
-        self.validate_receipt_owner(conn, run)?;
+        self.validate_receipt_owner(conn)?;
         let receipt = storage::get_permission_response(conn, expected.input.input_id)?;
         ensure(receipt == *expected, "permission receipt snapshot changed")?;
         self.validate_receipt_cache(&receipt.input)?;
@@ -1607,7 +1590,6 @@ impl InputCoordinator {
     fn acquire_receipt_guard<'a>(
         &'a mut self,
         conn: &Connection,
-        run: &RunRecord,
         expected: &storage::PermissionReceipt,
         deadline: Instant,
     ) -> Result<InputGuard<'a>> {
@@ -1620,7 +1602,7 @@ impl InputCoordinator {
             "receipt exclusion requires no active writer",
         )?;
         let deadline = bounded_by_inherited(conn, deadline);
-        let binding = self.receipt_guard_snapshot(conn, run, expected, deadline)?;
+        let binding = self.receipt_guard_snapshot(conn, expected, deadline)?;
         Ok(InputGuard {
             retained: None,
             proof: None,
@@ -1634,7 +1616,6 @@ impl InputCoordinator {
     fn acquire_rearm_guard<'a>(
         &'a mut self,
         conn: &Connection,
-        run: &RunRecord,
         expected: &storage::PermissionReceipt,
         selection: &Arc<PermissionSelection>,
         live: (&mut Transport, &ObservationController),
@@ -1642,7 +1623,7 @@ impl InputCoordinator {
     ) -> Result<Option<InputGuard<'a>>> {
         let (transport, observation) = live;
         self.validate_permission_binding(selection, observation)?;
-        self.validate_live(conn, run)?;
+        self.validate_live(conn)?;
         self.validate_permission_association(conn, selection)?;
         ensure(
             self.pending.as_ref().is_some_and(|p| {
@@ -1652,7 +1633,7 @@ impl InputCoordinator {
                 && expected.response.metadata == selection.request.metadata,
             "exact pending ready rearm required",
         )?;
-        let mut binding = self.receipt_guard_snapshot(conn, run, expected, deadline)?;
+        let mut binding = self.receipt_guard_snapshot(conn, expected, deadline)?;
         ensure(binding.zero_known, "ready rearm requires actual zero bytes")?;
         let Some(proof) = transport.take_input_drain() else {
             return Ok(None);
@@ -1700,14 +1681,13 @@ impl InputCoordinator {
     fn receipt_received(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         action: &ReceiptAction,
         deadline: Instant,
     ) -> Result<InputControlReply> {
         use ReceiptAction;
         use ReceiptReply;
         if let ReceiptAction::Retire { input_id } = action {
-            return self.retire_received(conn, run, *input_id, deadline);
+            return self.retire_received(conn, *input_id, deadline);
         }
         let deadline = bounded_by_inherited(conn, deadline);
         check_deadline(Instant::now(), deadline)?;
@@ -1719,7 +1699,7 @@ impl InputCoordinator {
                 validate_operation_key(key)?;
                 with_database_deadline(conn, deadline, |conn| {
                     let tx = conn.transaction()?;
-                    self.validate_receipt_owner(&tx, run)?;
+                    self.validate_receipt_owner(&tx)?;
                     let reply = if let Some(input) = storage::find_input(&tx, self.run.run_id, key)?
                     {
                         input_id = Some(input.input_id);
@@ -1756,7 +1736,7 @@ impl InputCoordinator {
                 )?;
                 let settled = with_database_deadline(conn, deadline, |conn| {
                     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                    self.validate_receipt_owner(&tx, run)?;
+                    self.validate_receipt_owner(&tx)?;
                     let input = storage::get_input(&tx, *id)?;
                     operation_key = Some(input.operation_key.clone());
                     self.validate_receipt_cache(&input)?;
@@ -1781,7 +1761,7 @@ impl InputCoordinator {
                         let owner = self.run.owner();
                         let permission = if input.kind == storage::InputKind::PermissionResponse {
                             let receipt = storage::get_permission_response(&tx, *id)?;
-                            let guard = self.acquire_receipt_guard(&tx, run, &receipt, deadline)?;
+                            let guard = self.acquire_receipt_guard(&tx, &receipt, deadline)?;
                             Some((guard, receipt.response.metadata.interaction_id))
                         } else {
                             None
@@ -1833,7 +1813,6 @@ impl InputCoordinator {
     fn retire_received(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         input_id: i64,
         deadline: Instant,
     ) -> Result<InputControlReply> {
@@ -1842,18 +1821,9 @@ impl InputCoordinator {
         let mut operation_key = None;
         let result = (|| {
             ensure(input_id > 0, "positive retirement input ID required")?;
-            ensure(
-                stable_run_identity(run) == stable_run_identity(&self.run),
-                "retirement caller run identity changed",
-            )?;
             with_database_deadline(conn, deadline, |conn| {
                 let tx = conn.transaction()?;
-                let current = storage::validate_owner(&tx, &self.run.owner())?;
-                ensure(
-                    stable_run_identity(&current) == stable_run_identity(&self.run),
-                    "retirement current run identity changed",
-                )?;
-                self.lock.validate(&tx, &current.owner())?;
+                self.validate_receipt_owner(&tx)?;
                 let input = storage::get_input(&tx, input_id)?;
                 operation_key = Some(input.operation_key.clone());
                 self.validate_receipt_cache(&input)?;
@@ -1889,7 +1859,6 @@ impl InputCoordinator {
         let status = observation.status();
         status.eligibility == InputEligibility::ComposerEmpty
             && status.visibility == Visibility::NotVisible
-            && !status.retained_transition
             && !status.retained_draft
             && !status.retained_evidence
             && status.diagnostic.is_none()
@@ -1919,10 +1888,7 @@ impl InputCoordinator {
         }
         SubmissionResult {
             status,
-            input_id: retained
-                .as_ref()
-                .map_or(operation.input_id, |point| point.input_id)
-                .into(),
+            input_id: operation.input_id.into(),
             stage,
             output_seq: retained.map(|point| point.output_seq),
             reason,
@@ -1933,7 +1899,6 @@ impl InputCoordinator {
     pub(super) fn handle_received(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         request: InputControlRequest,
         observation: &ObservationController,
         deadline: Instant,
@@ -1942,7 +1907,7 @@ impl InputCoordinator {
             &request.operation,
             InputControlOperation::PermissionRespond(_)
         ) {
-            return self.permission_received(conn, run, request, observation, deadline);
+            return self.permission_received(conn, request, observation, deadline);
         }
         let mut known_input_id = None;
         let mut known_key = None;
@@ -1955,7 +1920,7 @@ impl InputCoordinator {
             )?;
             expected.owner_epoch = request.identity.owner_epoch;
             ensure(
-                request.identity == expected && run.run_id == self.run.run_id,
+                request.identity == expected,
                 "input request fixed identity mismatch",
             )?;
             if let InputControlOperation::Receipt(action) = &request.operation {
@@ -1967,12 +1932,12 @@ impl InputCoordinator {
                     | ReceiptAction::Reconcile { input_id, .. } => known_input_id = Some(*input_id),
                 }
                 request.identity.validate(&self.run)?;
-                return self.receipt_received(conn, run, action, deadline).map(Some);
+                return self.receipt_received(conn, action, deadline).map(Some);
             }
             let (input, composer_operation) = match request.operation {
                 InputControlOperation::SubmitPrompt(input) => (input, ComposerOperation::Prompt),
                 InputControlOperation::SubmitExec(input) => (input, ComposerOperation::Exec),
-                _ => return Err(error("composer submission operation required")),
+                _ => unreachable!("serve_input routes only prompt and exec submissions here"),
             };
             known_key = Some(input.operation_key.clone());
             ensure(
@@ -2075,7 +2040,7 @@ impl InputCoordinator {
             };
             if let Some(defer_reason) = defer_reason {
                 let reservation = with_database_deadline(conn, deadline, |conn| {
-                    self.validate_live(conn, run)?;
+                    self.validate_live(conn)?;
                     storage::reserve_input_with_provenance(
                         conn,
                         &self.run.owner(),
@@ -2108,7 +2073,7 @@ impl InputCoordinator {
                 self.operations.len() < RECEIPT_CACHE_CAPACITY,
                 "input receipt cache is at capacity",
             )?;
-            with_database_deadline(conn, deadline, |conn| self.validate_live(conn, run))?;
+            with_database_deadline(conn, deadline, |conn| self.validate_live(conn))?;
             let (method, reason, stages) = self
                 .select_delivery(
                     observation,
@@ -2281,14 +2246,11 @@ impl InputCoordinator {
 
     /// Classifies the queued head's target before its first byte: `None` keeps it live, and a
     /// reason settles it. Ownership loss and storage failures return an error.
-    fn deferred_target(&self, conn: &Connection, run: &RunRecord) -> Result<Option<&'static str>> {
+    fn deferred_target(&self, conn: &Connection) -> Result<Option<&'static str>> {
         ensure(
             !self.manual_accounting_failed && !self.input_fenced,
             "manual accounting failure fenced input",
         )?;
-        if stable_run_identity(run) != stable_run_identity(&self.run) {
-            return Ok(Some("target_changed"));
-        }
         let current = storage::validate_owner(conn, &self.run.owner())?;
         ensure(
             current.status == RunStatus::Running && current.owner_kind == OwnerKind::Runner,
@@ -2307,7 +2269,7 @@ impl InputCoordinator {
         else {
             return Ok(Some("target_inactive"));
         };
-        if member.kind != MemberKind::Member || member.placement.as_ref() != Some(&self.placement) {
+        if member.kind != MemberKind::Member || member.placement != self.placement {
             return Ok(Some("target_changed"));
         }
         self.lock.validate(conn, &current.owner())?;
@@ -2319,7 +2281,6 @@ impl InputCoordinator {
     fn start_deferred(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<()> {
@@ -2382,7 +2343,7 @@ impl InputCoordinator {
                 head.attempt_deadline = None;
                 return Ok(());
             };
-            return self.attempt_deferred(conn, run, observation, deadline, now, selection);
+            return self.attempt_deferred(conn, observation, deadline, now, selection);
         }
         let attempt_deadline = *head
             .attempt_deadline
@@ -2405,7 +2366,6 @@ impl InputCoordinator {
     fn attempt_deferred(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         observation: &ObservationController,
         deadline: Instant,
         now: Instant,
@@ -2435,7 +2395,7 @@ impl InputCoordinator {
                     return Ok(Some("message_consumed"));
                 }
             }
-            self.deferred_target(conn, run)
+            self.deferred_target(conn)
         }) {
             Ok(target) => target,
             Err(cause) if storage_failure(&cause) => {
@@ -2461,7 +2421,7 @@ impl InputCoordinator {
         let settles =
             u32::try_from(selection.2.len() - 1).expect("a plan has a bounded stage count");
         if attempt_deadline.saturating_duration_since(now)
-            <= self.services.stage_settle * settles + STAGE_WRITE_MARGIN
+            <= self.stage_settle() * settles + STAGE_WRITE_MARGIN
         {
             self.note_head_obstacle("delivery_budget_exhausted");
             return Ok(());
@@ -2621,7 +2581,6 @@ impl InputCoordinator {
     fn immediate_preflight(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<Option<InputControlReply>> {
@@ -2663,7 +2622,7 @@ impl InputCoordinator {
             }
             None => {
                 let reservation = with_database_deadline(conn, deadline, |conn| {
-                    self.validate_live(conn, run)?;
+                    self.validate_live(conn)?;
                     storage::reserve_input_with_provenance(
                         conn,
                         &self.run.owner(),
@@ -2757,6 +2716,7 @@ impl InputCoordinator {
             .get(&input_id)
             .ok_or_else(|| error("retained input operation is absent"))?;
         Ok(InputCheckpoint {
+            #[cfg(test)]
             input_id,
             stage: retained.stage,
             written_bytes: retained.written_bytes,
@@ -2890,7 +2850,6 @@ impl InputCoordinator {
     fn validate_write_now(
         &self,
         conn: &mut Connection,
-        run: &RunRecord,
         operation: &PendingInput,
         deadline: Instant,
     ) -> Result<WriteValidation> {
@@ -2902,7 +2861,7 @@ impl InputCoordinator {
         let result = with_database_budget(conn, Deadline::until(effective), |conn| {
             conn.busy_handler(Some(|_| false))?;
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            self.validate_live(&tx, run)?;
+            self.validate_live(&tx)?;
             let id = operation
                 .input_id()
                 .ok_or_else(|| error("input reservation is absent"))?;
@@ -2972,7 +2931,6 @@ impl InputCoordinator {
     fn acquire_write_guard<'a>(
         &'a mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         transport: &mut Transport,
         observation: &ObservationController,
         deadline: Instant,
@@ -3049,8 +3007,7 @@ impl InputCoordinator {
                 retained.attempt_available && !retained.leased,
                 "input attempt permit is consumed",
             )?;
-            if self.validate_write_now(conn, run, pending, effective)? == WriteValidation::Contended
-            {
+            if self.validate_write_now(conn, pending, effective)? == WriteValidation::Contended {
                 self.note_deferred_obstacle("storage_unavailable");
                 return Ok(None);
             }
@@ -3085,7 +3042,6 @@ impl InputCoordinator {
     pub(crate) fn advance(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         transport: &mut Transport,
         pty: &mut impl PtyIo,
         observation: &ObservationController,
@@ -3094,13 +3050,13 @@ impl InputCoordinator {
         let mut terminal_bookkeeping = false;
         let result = (|| {
             if self.pending.is_none() {
-                self.start_deferred(conn, run, observation, deadline)?;
+                self.start_deferred(conn, observation, deadline)?;
                 return Ok(None);
             }
             if self.deferred_preflight(conn, observation)? {
                 return Ok(None);
             }
-            if let Some(reply) = self.immediate_preflight(conn, run, observation, deadline)? {
+            if let Some(reply) = self.immediate_preflight(conn, observation, deadline)? {
                 return Ok(Some(reply));
             }
             let deferred = self
@@ -3112,25 +3068,24 @@ impl InputCoordinator {
             } else {
                 deadline
             };
-            let Some(pending) = self.pending.as_ref() else {
-                return Ok(None);
-            };
+            let pending = self
+                .pending
+                .as_ref()
+                .expect("pending input survives preflight");
             let effective = self.effective_deadline(conn, deadline)?;
             match pending.phase {
                 InputPhase::Blocked => Ok(None),
                 InputPhase::AwaitReservation => {
-                    self.reserve_pending(conn, run, transport, observation, effective)
+                    self.reserve_pending(conn, transport, observation, effective)
                 }
                 InputPhase::AwaitBeforeWrite => self.arm_pending(
                     conn,
-                    run,
                     (transport, observation),
                     effective,
                     &mut terminal_bookkeeping,
                 ),
                 InputPhase::Armed => self.write_pending_stage(
                     conn,
-                    run,
                     (transport, observation),
                     pty,
                     effective,
@@ -3146,7 +3101,7 @@ impl InputCoordinator {
             let source = if terminal_bookkeeping {
                 source
             } else {
-                self.retain_permission_failure(conn, run, deadline, source)
+                self.retain_permission_failure(conn, deadline, source)
             };
             self.failure(source)
         })
@@ -3162,7 +3117,6 @@ impl InputCoordinator {
     fn reserve_pending(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         transport: &mut Transport,
         observation: &ObservationController,
         effective: Instant,
@@ -3176,7 +3130,6 @@ impl InputCoordinator {
             let Some(guard) = with_database_deadline(conn, effective, |conn| {
                 self.acquire_rearm_guard(
                     conn,
-                    run,
                     &ready,
                     &selection,
                     (transport, observation),
@@ -3212,7 +3165,7 @@ impl InputCoordinator {
             let operation = match &pending.delivery {
                 PendingDelivery::Permission(selection) => {
                     let reservation = with_database_deadline(conn, effective, |conn| {
-                        self.validate_live(conn, run)?;
+                        self.validate_live(conn)?;
                         self.validate_permission_association(conn, selection)?;
                         storage::reserve_permission_response(
                             conn,
@@ -3239,7 +3192,7 @@ impl InputCoordinator {
                         defer_reason: None,
                     };
                     let reservation = with_database_deadline(conn, effective, |conn| {
-                        self.validate_live(conn, run)?;
+                        self.validate_live(conn)?;
                         storage::reserve_input_with_provenance(
                             conn,
                             &self.run.owner(),
@@ -3303,7 +3256,6 @@ impl InputCoordinator {
     fn arm_pending(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         (transport, observation): (&mut Transport, &ObservationController),
         effective: Instant,
         terminal_bookkeeping: &mut bool,
@@ -3324,7 +3276,7 @@ impl InputCoordinator {
             };
             if let Some(cause) = interruption {
                 *terminal_bookkeeping = true;
-                return self.interrupt_composer(conn, run, id, observation, effective, cause);
+                return self.interrupt_composer(conn, id, observation, effective, cause);
             }
             if Instant::now() < settle_until {
                 return Ok(None);
@@ -3354,7 +3306,6 @@ impl InputCoordinator {
     fn interrupt_composer(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         id: i64,
         observation: &ObservationController,
         effective: Instant,
@@ -3364,7 +3315,7 @@ impl InputCoordinator {
             .pending
             .as_ref()
             .is_some_and(|pending| pending.deferred().is_some());
-        let reply = self.stop_composer_stages(conn, run, id, effective, cause)?;
+        let reply = self.stop_composer_stages(conn, id, effective, cause)?;
         if deferred {
             Self::publish_result(
                 observation,
@@ -3380,7 +3331,6 @@ impl InputCoordinator {
     fn write_pending_stage(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         (transport, observation): (&mut Transport, &ObservationController),
         pty: &mut impl PtyIo,
         effective: Instant,
@@ -3398,7 +3348,6 @@ impl InputCoordinator {
             *terminal_bookkeeping = true;
             return self.interrupt_composer(
                 conn,
-                run,
                 id,
                 observation,
                 effective,
@@ -3411,8 +3360,7 @@ impl InputCoordinator {
             .expect("armed pending input")
             .bytes
             .clone();
-        let Some(mut guard) =
-            self.acquire_write_guard(conn, run, transport, observation, effective)?
+        let Some(mut guard) = self.acquire_write_guard(conn, transport, observation, effective)?
         else {
             return Ok(None);
         };
@@ -3489,10 +3437,11 @@ impl InputCoordinator {
                 .expect("next stage retained")
                 .bytes
                 .clone();
+            let settle = self.stage_settle();
             let pending = self.pending.as_mut().expect("pending multistage response");
             if let Some(composer) = pending.composer_mut() {
                 composer.written_stages += 1;
-                composer.settle_until = Some(Instant::now() + self.services.stage_settle);
+                composer.settle_until = Some(Instant::now() + settle);
             }
             pending.bytes = next_bytes;
             pending.phase = InputPhase::AwaitBeforeWrite;
@@ -3517,7 +3466,7 @@ impl InputCoordinator {
         };
         *terminal_bookkeeping = true;
         let persisted = with_database_deadline(conn, effective, |conn| {
-            self.validate_live(conn, run)?;
+            self.validate_live(conn)?;
             let next = match stage {
                 SubmissionStage::Submitted => storage::InputState::Accepted,
                 SubmissionStage::ZeroBytes => storage::InputState::Ready,
@@ -3660,7 +3609,6 @@ impl InputCoordinator {
     fn stop_composer_stages(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         id: i64,
         effective: Instant,
         cause: storage::UncertainCause,
@@ -3673,7 +3621,7 @@ impl InputCoordinator {
         // Recording uncertainty writes no child byte, so the input fences, which only withhold
         // write authority, must not keep the stop's cause from being persisted.
         let operation = with_database_deadline(conn, effective, |conn| {
-            self.validate_live_run(conn, run)?;
+            self.validate_live_run(conn)?;
             storage::record_input_uncertain(conn, &self.run.owner(), id, cause)
         })?;
         let retained = self.operations.get_mut(&id).expect("staged input retained");
@@ -3693,7 +3641,6 @@ impl InputCoordinator {
     fn retain_permission_failure(
         &mut self,
         conn: &mut Connection,
-        run: &RunRecord,
         deadline: Instant,
         source: CafleetError,
     ) -> CafleetError {
@@ -3721,7 +3668,7 @@ impl InputCoordinator {
             return source;
         };
         let persisted = with_database_deadline(conn, effective, |conn| {
-            self.validate_live(conn, run)?;
+            self.validate_live(conn)?;
             if zero_bytes {
                 storage::record_input_state(
                     conn,
@@ -3819,9 +3766,7 @@ impl InputCoordinator {
                 member.kind == MemberKind::Member,
                 "input coordinator requires an ordinary member",
             )?;
-            member
-                .placement
-                .ok_or_else(|| error("input coordinator placement is absent"))
+            Ok(member.placement)
         })?;
         Ok(Self {
             placement,
@@ -3962,7 +3907,6 @@ impl InputExpiration {
     pub(crate) fn receive(
         &self,
         admitted_at: Instant,
-        shutdown: Option<Instant>,
         clock: &mut impl InputDeadlineClock,
     ) -> Result<Instant> {
         let sample = clock.sample()?;
@@ -3979,10 +3923,7 @@ impl InputExpiration {
         let admission = admitted_at
             .checked_add(Duration::from_secs(5))
             .ok_or_else(|| error("input admission exceeds the local clock range"))?;
-        let mut deadline = expiration.min(admission);
-        if let Some(shutdown) = shutdown {
-            deadline = deadline.min(shutdown);
-        }
+        let deadline = expiration.min(admission);
         check_deadline(sample.after, deadline)?;
         Ok(deadline)
     }
@@ -3995,11 +3936,9 @@ impl InputExpiration {
 pub(super) fn receive_input_expiration(
     expires_at_mono_ns: u64,
     admitted_at: Instant,
-    shutdown: Option<Instant>,
     clock: &mut impl InputDeadlineClock,
 ) -> Result<Instant> {
-    ensure(expires_at_mono_ns > 0, "positive input expiration required")?;
-    InputExpiration(expires_at_mono_ns).receive(admitted_at, shutdown, clock)
+    InputExpiration(expires_at_mono_ns).receive(admitted_at, clock)
 }
 
 #[cfg(test)]
@@ -4064,10 +4003,7 @@ mod tests {
                             self.until,
                         )
                         .unwrap(),
-                    InputDrain::Quiescent {
-                        human_generation: 0,
-                        output_seq: 0,
-                    }
+                    InputDrain::Quiescent
                 );
             }
         }
@@ -4332,7 +4268,6 @@ mod tests {
                             h.drain();
                             match h.coordinator.advance(
                                 &mut h.fixture.conn,
-                                &h.fixture.run,
                                 &mut h.transport,
                                 &mut h.pty,
                                 &h.controller,
@@ -4628,7 +4563,6 @@ mod tests {
                     .coordinator
                     .acquire_write_guard(
                         &mut h.fixture.conn,
-                        &h.fixture.run,
                         &mut h.transport,
                         &h.controller,
                         h.until,
@@ -4695,7 +4629,6 @@ mod tests {
                             .coordinator
                             .acquire_write_guard(
                                 &mut h.fixture.conn,
-                                &h.fixture.run,
                                 &mut h.transport,
                                 &h.controller,
                                 h.until,
@@ -4789,7 +4722,6 @@ mod tests {
                             host.drain();
                             match host.coordinator.advance(
                                 &mut host.fixture.conn,
-                                &host.fixture.run,
                                 &mut host.transport,
                                 &mut host.pty,
                                 &host.controller,
@@ -4898,10 +4830,15 @@ mod tests {
                 fixture["id"] = serde_json::json!("synthetic-exec-plan");
                 definition["fixtures"].as_array_mut().unwrap().push(fixture);
                 definition["profiles"][0]["capabilities"]["composer"]["submission"] = serde_json::json!({
-                    "prompt":null,
+                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-exec-plan"]},
                     "exec":{"prefix_hex":"2120","submit_hex":"6b6c","fixture_ids":["synthetic-exec-plan"]}
                 });
-                let exec_catalog = ProfileCatalog::from_definitions(&definition).unwrap();
+                let exec_catalog = crate::coding_agent::catalog::test_support::load(&definition)
+                    .unwrap()
+                    .without_submission(
+                        crate::coding_agent::CodingAgent::Codex,
+                        crate::coding_agent::ComposerOperation::Prompt,
+                    );
                 let mut expected = b"! ".to_vec();
                 expected.extend_from_slice(LITERAL.as_bytes());
                 expected.extend_from_slice(b"kl");
@@ -4986,7 +4923,7 @@ mod tests {
                     .push(composer["profiles"][0]["rules"][0].clone());
                 definition["profiles"][0]["capabilities"]["composer"] =
                     composer["profiles"][0]["capabilities"]["composer"].clone();
-                ProfileCatalog::from_definitions(&definition).unwrap()
+                prompt_plan_catalog(&definition)
             }
 
             /// Drives turns until the literal stage has been written, then returns.
@@ -5825,13 +5762,13 @@ mod tests {
                     host.fixture
                         .conn
                         .execute(
-                            "UPDATE members SET status='deregistered',deregistered_at='2026-10-30T00:00:00Z' WHERE member_id=?1",
+                            "UPDATE members SET status='deregistered' WHERE member_id=?1",
                             [host.fixture.run.member_id],
                         )
                         .unwrap();
                     assert_eq!(
                         host.coordinator
-                            .deferred_target(&host.fixture.conn, &host.fixture.run)
+                            .deferred_target(&host.fixture.conn)
                             .unwrap(),
                         Some("target_inactive")
                     );
@@ -6509,10 +6446,10 @@ mod tests {
             const UNCLASSIFIED: &[u8] = b"\x1b[2J\x1b[1;1Hworking on something";
 
             fn planless_catalog() -> ProfileCatalog {
-                let mut definition = catalog_definition();
-                definition["profiles"][0]["capabilities"]["composer"]["submission"] =
-                    serde_json::json!({"prompt":null,"exec":null});
-                ProfileCatalog::from_definitions(&definition).unwrap()
+                prompt_plan_catalog(&catalog_definition()).without_submission(
+                    crate::coding_agent::CodingAgent::Codex,
+                    crate::coding_agent::ComposerOperation::Prompt,
+                )
             }
 
             fn fallback_preview(canonical: &str) -> Vec<u8> {
@@ -6645,16 +6582,12 @@ mod tests {
 
             const DRAFT: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic draft\r\nDraft end";
 
-            /// The prompt-plan catalog with a classified draft composer, so a draft is a busy
-            /// composer rather than an unclassifiable screen.
+            /// The prompt-plan catalog, whose composer the draft screen leaves unverified.
             pub(super) fn busy_catalog() -> ProfileCatalog {
-                let mut definition = catalog_definition();
-                let empty = definition["profiles"][0]["rules"][0].clone();
-                with_draft_rule(&mut definition, empty);
-                ProfileCatalog::from_definitions(&definition).unwrap()
+                prompt_plan_catalog(&catalog_definition())
             }
 
-            /// The permission-form catalog whose composer also classifies a draft as busy.
+            /// The permission-form catalog with the prompt-plan composer.
             fn permission_busy_catalog() -> ProfileCatalog {
                 let mut definition =
                     crate::coding_agent::catalog::test_support::inspection_fixture_definition();
@@ -6667,34 +6600,18 @@ mod tests {
                 definition["profiles"][0]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(empty.clone());
+                    .push(empty);
                 definition["profiles"][0]["capabilities"]["composer"] =
                     composer["profiles"][0]["capabilities"]["composer"].clone();
-                with_draft_rule(&mut definition, empty);
-                ProfileCatalog::from_definitions(&definition).unwrap()
-            }
-
-            fn with_draft_rule(definition: &mut Value, empty: Value) {
-                let mut draft = empty;
-                draft["id"] = serde_json::json!("synthetic-composer-draft");
-                draft["observation"] = serde_json::json!("composer_draft");
-                draft["region"]["start_pattern"] = serde_json::json!("^Synthetic draft$");
-                draft["region"]["end_pattern"] = serde_json::json!("^Draft end$");
-                draft["matchers"] = serde_json::json!([{"id":"draft","scope":"line","pattern":"^Synthetic draft$"}]);
-                definition["profiles"][0]["rules"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(draft);
-                definition["profiles"][0]["capabilities"]["composer"]["rule_ids"] =
-                    serde_json::json!(["synthetic-composer-empty", "synthetic-composer-draft"]);
+                prompt_plan_catalog(&definition)
             }
 
             fn busy(host: &mut Host) {
                 host.show(DRAFT.to_vec());
-                assert_eq!(
+                assert!(matches!(
                     host.controller.health(&host.writer).eligibility,
-                    InputEligibility::Hold(GateReason::Draft)
-                );
+                    InputEligibility::Hold(_)
+                ));
             }
 
             fn fallback_program() -> Vec<u8> {
@@ -6741,7 +6658,7 @@ mod tests {
                     host.show(DRAFT.to_vec());
                     assert!(matches!(
                         host.controller.health(&host.writer).eligibility,
-                        InputEligibility::Hold(GateReason::Draft)
+                        InputEligibility::Hold(GateReason::Unknown)
                     ));
                     busy_then_profile(host);
                 });
@@ -6794,26 +6711,7 @@ mod tests {
 
             #[test]
             fn composer_busy_does_not_hold_a_working_member_whose_composer_row_is_empty() {
-                let mut definition = catalog_definition();
-                let mut working = definition["profiles"][0]["rules"][0].clone();
-                working["id"] = serde_json::json!("synthetic-working");
-                working["observation"] = serde_json::json!("working");
-                working["priority"] = serde_json::json!(50);
-                working["verified_noninteraction"] = serde_json::json!(false);
-                working["region"]["start_pattern"] = serde_json::json!("^Working$");
-                working["region"]["end_pattern"] = serde_json::json!("^Working$");
-                working["matchers"] =
-                    serde_json::json!([{"id":"working","scope":"line","pattern":"^Working$"}]);
-                definition["profiles"][0]["rules"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(working);
-                definition["profiles"][0]["capabilities"]["detection"] = serde_json::json!({
-                    "rule_ids":["synthetic-working"],
-                    "fixture_ids":[definition["fixtures"][0]["id"].clone()]
-                });
-                let catalog = ProfileCatalog::from_definitions(&definition).unwrap();
-                with_busy_host(catalog, encoded(), |host| {
+                with_busy_host(catalog(), encoded(), |host| {
                     host.show(
                         b"\x1b[2J\x1b[21;1HWorking\x1b[23;1HSynthetic state\r\nState end".to_vec(),
                     );
@@ -7169,7 +7067,6 @@ mod tests {
                     .unwrap();
                     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
                     let state = sql_state(None);
-                    let run = h.fixture.run.clone();
                     let until = h.until;
                     let coordinator = &mut h.coordinator;
                     let transport = &mut h.transport;
@@ -7179,7 +7076,7 @@ mod tests {
                     let pending = observed_sql(&mut h.fixture.conn, state.clone(), |conn| {
                         with_database_budget(conn, Deadline::until(until), |conn| {
                             let result = coordinator
-                                .advance(conn, &run, transport, pty, observation, until)
+                                .advance(conn, transport, pty, observation, until)
                                 .map_err(|f| f.source)?;
                             assert!(conn.is_autocommit());
                             Ok(result)
@@ -7249,7 +7146,6 @@ mod tests {
                             .unwrap();
                         let outer = Instant::now() + Duration::from_millis(50);
                         let state = sql_state(during.then_some(outer));
-                        let run = h.fixture.run.clone();
                         let until = h.until;
                         let coordinator = &mut h.coordinator;
                         let transport = &mut h.transport;
@@ -7264,7 +7160,6 @@ mod tests {
                                 }
                                 match coordinator.acquire_write_guard(
                                     conn,
-                                    &run,
                                     transport,
                                     observation,
                                     until,
@@ -7304,7 +7199,6 @@ mod tests {
                         .busy_timeout(Duration::from_millis(321))
                         .unwrap();
                     let outer = Instant::now() + Duration::from_millis(80);
-                    let run = h.fixture.run.clone();
                     let until = h.until;
                     let coordinator = &mut h.coordinator;
                     let transport = &mut h.transport;
@@ -7312,7 +7206,7 @@ mod tests {
                     let mut guard =
                         with_database_budget(&mut h.fixture.conn, Deadline::until(outer), |conn| {
                             coordinator
-                                .acquire_write_guard(conn, &run, transport, observation, until)?
+                                .acquire_write_guard(conn, transport, observation, until)?
                                 .ok_or_else(|| {
                                     CafleetError::App(
                                         "healthy Armed operation yields a real guard".into(),
@@ -7385,20 +7279,32 @@ mod tests {
                 rule["region"]["start_pattern"] = serde_json::json!("^Synthetic state$");
                 rule["region"]["end_pattern"] = serde_json::json!("^State end$");
                 rule["matchers"] = serde_json::json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
-                rule["extract"] =
-                    serde_json::json!({"operation":null,"choices":[],"native_request_id":null});
+                rule["extract"] = serde_json::json!({"operation":null,"choices":[]});
                 rule["verified_noninteraction"] = serde_json::json!(true);
                 value["profiles"][0]["capabilities"] = serde_json::json!({
                     "detection":null,"annotations":null,"answers":[],"composer":{
                         "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
-                        "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":null}
+                        "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
                     }
                 });
                 value
             }
 
             pub(super) fn catalog() -> ProfileCatalog {
-                ProfileCatalog::from_definitions(&catalog_definition()).unwrap()
+                prompt_plan_catalog(&catalog_definition())
+            }
+
+            /// A catalog built on [`catalog_definition`]'s composer, whose exec submission is a
+            /// placeholder: only the prompt operation keeps an executable plan.
+            pub(in crate::runtime::input) fn prompt_plan_catalog(
+                definition: &serde_json::Value,
+            ) -> ProfileCatalog {
+                crate::coding_agent::catalog::test_support::load(definition)
+                    .unwrap()
+                    .without_submission(
+                        crate::coding_agent::CodingAgent::Codex,
+                        crate::coding_agent::ComposerOperation::Exec,
+                    )
             }
 
             pub(super) fn encoded() -> Vec<u8> {
@@ -7704,10 +7610,8 @@ mod tests {
                     }
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                     let mut controller =
-                        ObservationController::new(&fixture.run, catalog, policy, 1..=256).unwrap();
-                    let mut writer = writer_fixture
-                        .start(writer_fixture.artifacts.paths.outbox.clone())
-                        .unwrap();
+                        ObservationController::new(&fixture.run, catalog, policy).unwrap();
+                    let mut writer = writer_fixture.start().unwrap();
                     writer.set_deadline(until);
                     let WriterFixture {
                         mut fixture,
@@ -7765,7 +7669,7 @@ mod tests {
                 let reaped = child.native.try_wait();
                 assert_eq!(counts, (0, 0), "writer cleanup: {status:?}");
                 assert!(
-                    !status.degraded && status.diagnostic.is_none(),
+                    status.diagnostic.is_none(),
                     "writer finish confirms join or reports degradation: {status:?}"
                 );
                 assert!(reaped.unwrap().is_some(), "owned native child was reaped");
@@ -7987,7 +7891,7 @@ mod tests {
                                 )
                             })
                             .unwrap();
-                        if matches!(result, InputDrain::Quiescent { .. }) {
+                        if matches!(result, InputDrain::Quiescent) {
                             return;
                         }
                         std::thread::sleep(Duration::from_millis(1));
@@ -8001,7 +7905,6 @@ mod tests {
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
                     self.coordinator.advance(
                         &mut self.fixture.conn,
-                        &self.fixture.run,
                         &mut self.transport,
                         &mut self.pty,
                         &self.controller,
@@ -8026,10 +7929,10 @@ mod tests {
                             crate::runtime::receive_input_expiration(
                                 request.expires_at_mono_ns,
                                 Instant::now(),
-                                Some(deadline),
                                 &mut crate::runtime::RealInputDeadlineClock,
                             )
                         })
+                        .map(|received| received.min(deadline))
                         .map_err(|source| {
                             let operation_key = match &request.operation {
                                 InputControlOperation::SubmitPrompt(input)
@@ -8043,7 +7946,6 @@ mod tests {
                         })?;
                     self.coordinator.handle_received(
                         &mut self.fixture.conn,
-                        &self.fixture.run,
                         request,
                         &self.controller,
                         deadline,
@@ -8073,7 +7975,6 @@ mod tests {
                     request.operation = InputControlOperation::PermissionRespond(input.clone());
                     self.coordinator.handle_received(
                         &mut self.fixture.conn,
-                        &self.fixture.run,
                         request,
                         &self.controller,
                         deadline,
@@ -8117,7 +8018,6 @@ mod tests {
                     .unwrap()
                     .unwrap()
                     .placement
-                    .expect("wrapped member placement")
                 }
                 pub(crate) fn quiesce_once(&mut self) -> InputDrain {
                     self.coordinator
@@ -8345,7 +8245,9 @@ mod tests {
             definition["profiles"][0]["capabilities"]["composer"] =
                 composer["profiles"][0]["capabilities"]["composer"].clone();
             with_profile_host(
-                ProfileCatalog::from_definitions(&definition).unwrap(),
+                crate::runtime::input::tests::ordinary_prompt::support::prompt_plan_catalog(
+                    &definition,
+                ),
                 expected_program,
                 profile,
                 |h| with_counted_tokens(h, body),
@@ -8409,11 +8311,13 @@ mod tests {
             request: InputControlRequest,
             until: Instant,
         ) -> std::result::Result<PermissionInspection, InputFailure> {
+            let InputControlOperation::PermissionInspect(input) = request.operation else {
+                panic!("an inspection request carries an inspection operation")
+            };
             h.coordinator
                 .inspect_received(
                     &mut h.fixture.conn,
-                    &h.fixture.run,
-                    request,
+                    input,
                     (&h.controller, &mut h.transport),
                     until,
                 )
@@ -8452,12 +8356,11 @@ mod tests {
                 moved.observed.output_seq += 1;
                 assert!(current.same_request(&moved), "output_seq stays unbound");
                 type Mutation<'a> = (&'a str, Box<dyn Fn(&mut CurrentRequest) + 'a>);
-                let mutations: [Mutation; 15] = [
+                let mutations: [Mutation; 13] = [
                     (
                         "request_generation",
                         Box::new(|r| r.observed.request_generation += 1),
                     ),
-                    ("identity", Box::new(|r| r.identity.owner_epoch += 1)),
                     ("interaction_id", Box::new(|r| r.interaction_id += 1)),
                     ("event_id", Box::new(|r| r.event_id += 1)),
                     ("message_id", Box::new(|r| r.message_id += 1)),
@@ -8483,13 +8386,6 @@ mod tests {
                     ),
                     ("choices", Box::new(|r| r.observed.choices.push("x".into()))),
                     ("focus", Box::new(|r| r.observed.focus.push('x'))),
-                    (
-                        "native_correlation",
-                        Box::new(|r| {
-                            r.observed.native_correlation =
-                                Some(format!("{:?}-changed", r.observed.native_correlation));
-                        }),
-                    ),
                     (
                         "answer_matches",
                         Box::new(|r| {
@@ -8721,16 +8617,11 @@ mod tests {
         }
 
         #[test]
-        fn permission_inspection_refuses_stale_associations_identity_and_expired_budget_without_effects()
-         {
+        fn permission_inspection_refuses_stale_associations_and_expired_budget_without_effects() {
             with_inspection(|h, calls, _| {
                 let ids = stable_form(h);
                 let original = token(&inspect(h, ids));
                 let before = counts(h);
-                h.drain();
-                let mut wrong = request(h, ids);
-                wrong.identity.launch_nonce = "f".repeat(64);
-                assert!(inspect_request(h, wrong, h.until).is_err());
                 h.drain();
                 assert!(inspect_request(h, request(h, ids), Instant::now()).is_err());
                 h.fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",rusqlite::params![crate::time::now_stamp(),ids.1]).unwrap();
@@ -8825,7 +8716,8 @@ mod tests {
             use crate::runtime::TerminalSize;
             use crate::runtime::TerminalState;
             let catalog =
-                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
             let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             terminal
@@ -8887,7 +8779,7 @@ mod tests {
 
         #[test]
         fn permission_inspection_current_authority_has_no_debug_or_serialized_representation() {
-            assert_no_debug_or_serialize!(CurrentRequest);
+            assert_not_impl!(CurrentRequest: std::fmt::Debug, serde::Serialize);
         }
     }
     mod permission_response_contracts {
@@ -9128,7 +9020,7 @@ mod tests {
                     "the redraw produced new output"
                 );
                 assert!(
-                    matches!(drained, InputDrain::Quiescent { .. }),
+                    matches!(drained, InputDrain::Quiescent),
                     "a screen_seq-only redraw needs no write, so it settles while the database is locked"
                 );
                 assert!(h.controller.current_request().is_some());
@@ -9237,13 +9129,7 @@ mod tests {
                         });
                     let reply = h
                         .coordinator
-                        .handle_received(
-                            &mut h.fixture.conn,
-                            &h.fixture.run,
-                            request,
-                            &h.controller,
-                            h.until,
-                        )
+                        .handle_received(&mut h.fixture.conn, request, &h.controller, h.until)
                         .unwrap();
                     let Some(InputControlReply::Submission(queued)) = reply else {
                         panic!(
@@ -9626,7 +9512,6 @@ mod tests {
                     request.operation = InputControlOperation::PermissionRespond(retained);
                     h.coordinator.retained_permission_response(
                         &mut h.fixture.conn,
-                        &h.fixture.run,
                         &request,
                         h.until,
                     )
@@ -9765,7 +9650,7 @@ mod tests {
                     .unwrap();
                 loop {
                     let status = h.writer.status();
-                    if status.degraded {
+                    if status.diagnostic.is_some() {
                         assert!(status.pending_evidence);
                         assert!(
                             status
@@ -9802,7 +9687,6 @@ mod tests {
                 let ordinary_literal = ordinary_input.literal.clone();
                 let held = h.coordinator.handle_received(
                     &mut h.fixture.conn,
-                    &h.fixture.run,
                     ordinary,
                     &h.controller,
                     h.until,
@@ -9832,7 +9716,7 @@ mod tests {
                         .is_none()
                 );
                 assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
-                while h.writer.status().degraded {
+                while h.writer.status().diagnostic.is_some() {
                     assert!(
                         Instant::now() < h.until,
                         "original writer recovers in budget"
@@ -9990,13 +9874,7 @@ mod tests {
                 let ordinary = h.request(ordinary_key);
                 let resumed = h
                     .coordinator
-                    .handle_received(
-                        &mut h.fixture.conn,
-                        &h.fixture.run,
-                        ordinary,
-                        &h.controller,
-                        h.until,
-                    )
+                    .handle_received(&mut h.fixture.conn, ordinary, &h.controller, h.until)
                     .unwrap();
                 let projection = match resumed.as_ref() {
                     None => None,
@@ -10249,7 +10127,7 @@ mod tests {
                 .unwrap();
             let guard = h
                 .coordinator
-                .acquire_receipt_guard(&tx, &h.fixture.run, row, h.until)
+                .acquire_receipt_guard(&tx, row, h.until)
                 .unwrap();
             assert!(
                 guard
@@ -10280,7 +10158,7 @@ mod tests {
                 .unwrap();
             let guard = h
                 .coordinator
-                .acquire_receipt_guard(&tx, &h.fixture.run, row, h.until)
+                .acquire_receipt_guard(&tx, row, h.until)
                 .unwrap();
             let proof = guard
                 .zero_byte_retirement(
@@ -10429,7 +10307,6 @@ mod tests {
                     .coordinator
                     .acquire_write_guard(
                         &mut h.fixture.conn,
-                        &h.fixture.run,
                         &mut h.transport,
                         &h.controller,
                         h.until,
@@ -10551,7 +10428,7 @@ mod tests {
                     .unwrap();
                 let mut guard = h
                     .coordinator
-                    .acquire_receipt_guard(&tx, &h.fixture.run, &original, h.until)
+                    .acquire_receipt_guard(&tx, &original, h.until)
                     .unwrap();
                 assert!(
                     guard.begin_write(&h.transport, b"y", h.until).is_err(),
@@ -10567,7 +10444,7 @@ mod tests {
                         .unwrap();
                     let guard = h
                         .coordinator
-                        .acquire_receipt_guard(&tx, &h.fixture.run, &original, h.until)
+                        .acquire_receipt_guard(&tx, &original, h.until)
                         .unwrap();
                     let proof = guard
                         .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
@@ -10744,7 +10621,10 @@ mod tests {
                     &h.fixture.run,
                     h.coordinator.lock.clone(),
                     crate::runtime::input::tests::ordinary_prompt::support::services(
-                        ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap(),
+                        crate::coding_agent::catalog::test_support::load(
+                            &inspection_fixture_definition(),
+                        )
+                        .unwrap(),
                         h.hooks.clone(),
                         h.stage_settle,
                         "receipt-only proof",
@@ -10759,9 +10639,7 @@ mod tests {
                         .conn
                         .transaction_with_behavior(TransactionBehavior::Immediate)
                         .unwrap();
-                    let guard = empty
-                        .acquire_receipt_guard(&tx, &h.fixture.run, &ready, h.until)
-                        .unwrap();
+                    let guard = empty.acquire_receipt_guard(&tx, &ready, h.until).unwrap();
                     assert!(
                         guard
                             .zero_byte_retirement(
@@ -10793,7 +10671,7 @@ mod tests {
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .unwrap();
                 let guard = empty
-                    .acquire_receipt_guard(&tx, &h.fixture.run, &attributed, h.until)
+                    .acquire_receipt_guard(&tx, &attributed, h.until)
                     .unwrap();
                 assert!(
                     guard
@@ -10807,7 +10685,7 @@ mod tests {
                 request.operation =
                     InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
                 assert!(
-                    matches!(empty.handle_received(&mut h.fixture.conn, &h.fixture.run, request, &h.controller, h.until).unwrap(), Some(InputControlReply::Receipt(ReceiptReply::Retired { input_id })) if input_id == id)
+                    matches!(empty.handle_received(&mut h.fixture.conn, request, &h.controller, h.until).unwrap(), Some(InputControlReply::Receipt(ReceiptReply::Retired { input_id })) if input_id == id)
                 );
                 assert_eq!(
                     storage::get_permission_response(&h.fixture.conn, id).unwrap(),
@@ -10849,7 +10727,6 @@ mod tests {
             };
             let result = h.coordinator.advance(
                 &mut h.fixture.conn,
-                &h.fixture.run,
                 &mut h.transport,
                 &mut io,
                 &h.controller,
@@ -10991,13 +10868,7 @@ mod tests {
                 request.operation = InputControlOperation::PermissionRespond(input.clone());
                 assert!(
                     h.coordinator
-                        .handle_received(
-                            &mut h.fixture.conn,
-                            &h.fixture.run,
-                            request,
-                            &h.controller,
-                            expired,
-                        )
+                        .handle_received(&mut h.fixture.conn, request, &h.controller, expired,)
                         .unwrap()
                         .is_none()
                 );
@@ -11239,7 +11110,6 @@ mod tests {
                     .coordinator
                     .acquire_write_guard(
                         &mut h.fixture.conn,
-                        &h.fixture.run,
                         &mut h.transport,
                         &h.controller,
                         h.until,
@@ -11396,7 +11266,7 @@ mod tests {
                         serde_json::to_value(&value.supported_choices).unwrap(),
                         serde_json::json!([
                             {"choice_id":"decline","label":"Keep current","scope":"persistent"},
-                            {"choice_id":"later","label":"Ask later","scope":"session"}
+                            {"choice_id":"later","label":"Ask later","scope":"persistent"}
                         ])
                     );
                     assert!(
@@ -12859,7 +12729,7 @@ mod tests {
 
                 let Err(uncommitted) =
                     h.coordinator
-                        .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                        .retire_received(&mut h.fixture.conn, id, h.until)
                 else {
                     panic!("Accepted Preview requires committed settlement before retirement")
                 };
@@ -12884,18 +12754,11 @@ mod tests {
 
                 let Err(expired) =
                     h.coordinator
-                        .retire_received(&mut h.fixture.conn, &run, id, Instant::now())
+                        .retire_received(&mut h.fixture.conn, id, Instant::now())
                 else {
                     panic!("retirement requires a live original deadline")
                 };
                 assert!(matches!(expired, CafleetError::DeadlineExceeded));
-                let mut foreign_owner = run.clone();
-                foreign_owner.owner_epoch += 1;
-                assert!(
-                    h.coordinator
-                        .retire_received(&mut h.fixture.conn, &foreign_owner, id, h.until)
-                        .is_err()
-                );
                 let mut foreign_request = h.request("unused-retirement-key");
                 foreign_request.operation =
                     InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
@@ -12921,9 +12784,9 @@ mod tests {
                 let original_bytes = pending.bytes.clone();
                 let unrelated_before = cached(h, unrelated_id);
                 assert!(unrelated_before.4 && !unrelated_before.5);
-                let Err(failure) =
-                    h.coordinator
-                        .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                let Err(failure) = h
+                    .coordinator
+                    .retire_received(&mut h.fixture.conn, id, h.until)
                 else {
                     panic!("retirement excludes the actual Armed writer")
                 };
@@ -12984,7 +12847,7 @@ mod tests {
                 let changes = h.fixture.conn.total_changes();
                 let again = h
                     .coordinator
-                    .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                    .retire_received(&mut h.fixture.conn, id, h.until)
                     .unwrap();
                 assert_retired(again, id);
                 assert_eq!(h.fixture.conn.total_changes(), changes);
@@ -12997,13 +12860,13 @@ mod tests {
                     .unwrap();
                 assert!(
                     h.coordinator
-                        .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                        .retire_received(&mut h.fixture.conn, id, h.until)
                         .is_err(),
                     "cache absence still checks the durable row on the supplied connection"
                 );
                 assert!(
                     h.coordinator
-                        .retire_received(&mut h.fixture.conn, &run, i64::MAX, h.until)
+                        .retire_received(&mut h.fixture.conn, i64::MAX, h.until)
                         .is_err()
                 );
                 assert_eq!(cached(h, unrelated_id), other_cache);
@@ -13040,14 +12903,10 @@ mod tests {
     fn received(
         expiration: &InputExpiration,
         admitted_at: Instant,
-        shutdown: Option<Instant>,
         clock: &mut ScriptClock,
         expected: Instant,
     ) {
-        assert_eq!(
-            expiration.receive(admitted_at, shutdown, clock).unwrap(),
-            expected
-        );
+        assert_eq!(expiration.receive(admitted_at, clock).unwrap(), expected);
         clock.consumed(1, 0);
     }
 
@@ -13113,7 +12972,7 @@ mod tests {
         let expiration = expiration(t);
         let mut clock =
             ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
-        received(&expiration, t, None, &mut clock, ms(t, 3000));
+        received(&expiration, t, &mut clock, ms(t, 3000));
     }
 
     #[test]
@@ -13122,25 +12981,7 @@ mod tests {
         let expiration = expiration(t);
         let mut clock =
             ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 9_000_000_000, ms(t, 1100)));
-        received(&expiration, t, None, &mut clock, ms(t, 5000));
-    }
-
-    #[test]
-    fn clock_receive_earlier_shutdown_beats_admission_and_expiration() {
-        let t = anchor();
-        let expiration = expiration(t);
-        let mut clock =
-            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 9_000_000_000, ms(t, 1100)));
-        received(&expiration, t, Some(ms(t, 4000)), &mut clock, ms(t, 4000));
-    }
-
-    #[test]
-    fn clock_receive_later_caps_preserve_shorter_expiration() {
-        let t = anchor();
-        let expiration = expiration(t);
-        let mut clock =
-            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
-        received(&expiration, t, Some(ms(t, 9000)), &mut clock, ms(t, 3000));
+        received(&expiration, t, &mut clock, ms(t, 5000));
     }
 
     #[test]
@@ -13149,18 +12990,13 @@ mod tests {
             let t = anchor();
             let expiration = expiration(t);
             let mut clock = ScriptClock::one(sample(ms(t, 1000), monotonic_ns, ms(t, 1100)));
-            one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
+            one_failure(expiration.receive(t, &mut clock), &clock, 0);
         }
     }
 
     #[test]
     fn clock_receive_rejects_bracket_delay_equal_to_or_past_projected_deadline() {
-        for (before_ms, after_ms, shutdown_ms) in [
-            (1000, 3000, None),
-            (1000, 4000, None),
-            (6000, 6100, None),
-            (1000, 1100, Some(500)),
-        ] {
+        for (before_ms, after_ms) in [(1000, 3000), (1000, 4000), (6000, 6100)] {
             let t = anchor();
             let expiration = expiration(t);
             let mut clock = ScriptClock::one(sample(
@@ -13168,11 +13004,7 @@ mod tests {
                 EXPIRATION - 2_000_000_000,
                 ms(t, after_ms),
             ));
-            one_failure(
-                expiration.receive(t, shutdown_ms.map(|shutdown| ms(t, shutdown)), &mut clock),
-                &clock,
-                0,
-            );
+            one_failure(expiration.receive(t, &mut clock), &clock, 0);
         }
     }
 
@@ -13182,7 +13014,7 @@ mod tests {
         let expiration = expiration(t);
         let mut clock =
             ScriptClock::one(sample(ms(t, 2000), EXPIRATION - 2_000_000_000, ms(t, 1000)));
-        one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
+        one_failure(expiration.receive(t, &mut clock), &clock, 0);
     }
 
     #[test]
@@ -13193,7 +13025,7 @@ mod tests {
             Err(unavailable()),
             Ok(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100))),
         ]);
-        one_failure(expiration.receive(t, None, &mut clock), &clock, 1);
+        one_failure(expiration.receive(t, &mut clock), &clock, 1);
     }
 
     #[test]
@@ -13205,19 +13037,13 @@ mod tests {
             Ok(sample(ms(t, 2000), EXPIRATION - 1_000_000_000, ms(t, 2100))),
             Ok(sample(ms(t, 3000), EXPIRATION, ms(t, 3100))),
         ]);
-        assert_eq!(
-            expiration.receive(t, None, &mut clock).unwrap(),
-            ms(t, 3000)
-        );
+        assert_eq!(expiration.receive(t, &mut clock).unwrap(), ms(t, 3000));
         clock.consumed(1, 2);
         assert_eq!(expiration.monotonic_ns(), EXPIRATION);
-        assert_eq!(
-            expiration.receive(t, None, &mut clock).unwrap(),
-            ms(t, 3000)
-        );
+        assert_eq!(expiration.receive(t, &mut clock).unwrap(), ms(t, 3000));
         clock.consumed(2, 1);
         assert_eq!(expiration.monotonic_ns(), EXPIRATION);
-        assert!(expiration.receive(t, None, &mut clock).is_err());
+        assert!(expiration.receive(t, &mut clock).is_err());
         clock.consumed(3, 0);
         assert_eq!(expiration.monotonic_ns(), EXPIRATION);
     }
@@ -13227,7 +13053,7 @@ mod tests {
         let t = anchor();
         let expiration = expiration(t);
         let mut clock = ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 1, ms(t, 1000)));
-        received(&expiration, t, None, &mut clock, ns(ms(t, 1000), 1));
+        received(&expiration, t, &mut clock, ns(ms(t, 1000), 1));
     }
 }
 

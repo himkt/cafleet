@@ -191,12 +191,8 @@ pub(crate) struct LockedMember {
 
 impl LockedMember {
     pub(crate) fn pane_lock(&self, database_url: &str) -> Result<&PaneLock, CafleetError> {
-        let placement = self
-            .member
-            .placement
-            .as_ref()
-            .expect("locked member has a placement");
-        self.guard.validate_binding(database_url, placement)?;
+        self.guard
+            .validate_binding(database_url, &self.member.placement)?;
         Ok(&self.guard)
     }
 }
@@ -289,20 +285,19 @@ pub(crate) fn lock_deletion<S, T>(
     }
 }
 
+const PRESS_LOCK_RESERVE: Duration = Duration::from_secs(1);
+
 pub(crate) fn lock_member_with_reservation(
     conn: &mut Connection,
     settings: &Settings,
     member: &MemberRecord,
     deadline: Deadline,
-    reservation: Duration,
 ) -> Result<Option<LockedMember>, CafleetError> {
-    let placement = member.placement.as_ref().ok_or_else(|| {
-        CafleetError::App(format!("member {} has no placement row", member.member_id))
-    })?;
+    let placement = &member.placement;
     let Some(guard) = PaneLock::acquire_within(
         &settings.database_url,
         placement,
-        deadline.reserving(reservation),
+        deadline.reserving(PRESS_LOCK_RESERVE),
     )
     .map_err(member_pane_input_error(member.member_id))?
     else {
@@ -363,7 +358,7 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn placement(&self) -> &Placement {
-            self.member.placement.as_ref().unwrap()
+            &self.member.placement
         }
 
         pub(crate) fn hold(&self) -> PaneLock {
@@ -442,8 +437,7 @@ mod tests {
             )
             .unwrap()
             .unwrap()
-            .placement
-            .unwrap();
+            .placement;
             let guards = vec![
                 PaneLock::try_acquire(&database_url, &placement)
                     .unwrap()
@@ -589,13 +583,11 @@ mod tests {
             let director = crate::broker::get_fleet(&fixture.conn, fleet)
                 .unwrap()
                 .unwrap()
-                .director_member_id
-                .unwrap();
+                .director_member_id;
             let director_placement = crate::broker::get_member(&fixture.conn, director, fleet)
                 .unwrap()
                 .unwrap()
-                .placement
-                .unwrap();
+                .placement;
             let mut targets = vec![
                 (director, director_placement),
                 (fixture.member.member_id, fixture.placement().clone()),

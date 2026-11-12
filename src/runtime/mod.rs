@@ -197,17 +197,6 @@ pub(crate) mod test_support {
     use crate::runtime::*;
     pub(crate) const STARTED_AT: &str = "2026-10-27T14:00:00.000000+00:00";
 
-    pub(crate) fn mark_exited(conn: &Connection, run_id: i64) {
-        assert_eq!(
-            conn.execute(
-                "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z' WHERE run_id=?1",
-                [run_id],
-            )
-            .unwrap(),
-            1
-        );
-    }
-
     pub(crate) fn read_fixture_bytes(
         stream: &mut std::os::unix::net::UnixStream,
         mut bytes: &mut [u8],
@@ -286,7 +275,7 @@ pub(crate) mod test_support {
                 fleet,
                 "worker",
                 "assignment",
-                Some(&placement),
+                &placement,
             )
             .unwrap()
             .member_id;

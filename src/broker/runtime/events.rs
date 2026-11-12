@@ -25,12 +25,6 @@ pub(super) fn interaction(conn: &Connection, id: i64) -> Result<InteractionRecor
         [id],
         map_interaction,
     )?;
-    require(
-        interaction.episode_seq > 0
-            && interaction.closed_at.is_some() == interaction.close_reason.is_some(),
-        "member_interactions",
-        "invalid episode or closure",
-    )?;
     evidence::validate(&interaction.evidence_json)?;
     require(
         interaction.evidence_json["evidence_digest"].as_str()
@@ -49,7 +43,6 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeEventRecord> {
         interaction_id: row.get("interaction_id")?,
         kind: row.get("kind")?,
         observed_at: row.get("observed_at")?,
-        committed_at: row.get("committed_at")?,
         payload_json: json_column(row, "payload_json", false)?,
         notification_state: row.get("notification_state")?,
         message_id: row.get("message_id")?,
@@ -89,7 +82,6 @@ fn source(kind: RuntimeEventKind) -> &'static str {
         RuntimeEventKind::InteractionOpened
         | RuntimeEventKind::InteractionObscured
         | RuntimeEventKind::InteractionClosed
-        | RuntimeEventKind::PermissionDeniedObserved
         | RuntimeEventKind::AutomaticRefusalObserved
         | RuntimeEventKind::AutomaticReviewUnavailable => "runner_screen",
         _ => "runner_lifecycle",
@@ -149,30 +141,18 @@ pub(crate) fn get_event(
         "payload_json",
         "payload exceeds bound",
     )?;
-    match event.notification_state {
-        NotificationState::Inbox => {
-            let message_id = event
-                .message_id
-                .ok_or_else(|| invalid("message_id", "inbox event requires message"))?;
-            require(
-                event.archive_reason.is_none(),
-                "archive_reason",
-                "inbox event cannot be archived",
-            )?;
-            let message = crate::broker::messaging::get_message(conn, message_id)?;
-            require(
-                message.from_member_id == view.run.run.member_id
-                    && message.to_member_id == view.run.run.director_member_id
-                    && message.text == serialized_payload,
-                "message_id",
-                "event/message association mismatch",
-            )?;
-        }
-        NotificationState::Archived => require(
-            event.message_id.is_none() && event.archive_reason.is_some(),
-            "notification_state",
-            "archived event requires only an archive reason",
-        )?,
+    if event.notification_state == NotificationState::Inbox {
+        let message_id = event
+            .message_id
+            .expect("the notification-state CHECK pairs an inbox event with its message");
+        let message = crate::broker::messaging::get_message(conn, message_id)?;
+        require(
+            message.from_member_id == view.run.run.member_id
+                && message.to_member_id == view.run.run.director_member_id
+                && message.text == serialized_payload,
+            "message_id",
+            "event/message association mismatch",
+        )?;
     }
     Ok(view)
 }
@@ -558,12 +538,11 @@ fn payload(
     delivery: Option<&DeliveryFields>,
 ) -> Result<Value, CafleetError> {
     let mut payload = json!({
-        "schema_version":2,"event_id":event_id,"run_id":run.run_id,"event_seq":transition.event_seq,
+        "event_id":event_id,"run_id":run.run_id,"event_seq":transition.event_seq,
         "member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,
         "kind":transition.kind.as_str(),"interaction_id":interaction_id,
         "classification":transition.classification.map(|class| class.as_str()),
         "observed_at":transition.observed_at,"source":source(transition.kind),
-        "native_request_id":transition.evidence_json["native_request_id"],
         "decision_outcome":"unknown","evidence":transition.evidence_json,
     });
     if let Some(reason) = transition.close_reason {
@@ -707,10 +686,10 @@ pub(crate) fn persist_transition_in_transaction(
         ),
     };
     conn.execute(
-            "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason)
-             VALUES(?1,?2,?3,?4,?5,?6,'{}',?7,?8,?9)",
+            "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,payload_json,notification_state,message_id,archive_reason)
+             VALUES(?1,?2,?3,?4,?5,'{}',?6,?7,?8)",
             params![run.run_id,transition.event_seq,interaction_id,transition.kind.as_str(),transition.observed_at,
-                now_stamp(),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
+                notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
         )?;
     let event_id = conn.last_insert_rowid();
     let payload = payload(
@@ -742,9 +721,10 @@ pub(crate) fn persist_transition_in_transaction(
             .as_ref()
             .expect("validate_cause requires a native exit cause for RunnerExited");
         let exit_code = cause.get("exit_code").and_then(Value::as_i64);
-        let exit_signal = cause.get("exit_signal").and_then(Value::as_i64);
-        conn.execute("UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2,exit_signal=?3 WHERE run_id=?4",
-                params![transition.observed_at,exit_code,exit_signal,run.run_id])?;
+        conn.execute(
+            "UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2 WHERE run_id=?3",
+            params![transition.observed_at, exit_code, run.run_id],
+        )?;
     }
     get_event(conn, event_id).map(|view| (view.event, true))
 }
@@ -886,10 +866,8 @@ pub(crate) fn update_interaction_evidence(
     })
 }
 
-/// The stored `member_runs.effective_policy_json` record, schema version 1.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredEffectivePolicy {
-    schema_version: u64,
     automatic_review: AutomaticReview,
     observed_mode: Option<String>,
     rule_id: String,
@@ -908,11 +886,6 @@ pub(super) fn validate(run: &RunRecord) -> Result<(), CafleetError> {
         serde_json::to_value(&stored).expect("a stored policy serializes") == *record,
         field,
         "exact effective policy fields required",
-    )?;
-    require(
-        stored.schema_version == 1,
-        field,
-        "unsupported effective policy schema",
     )?;
     require(
         stored.event_id.is_none_or(|id| id > 0)
@@ -962,7 +935,6 @@ fn write_if_changed(
         return Ok(false);
     }
     let record = StoredEffectivePolicy {
-        schema_version: 1,
         automatic_review: observation.automatic_review,
         observed_mode: observation.observed_mode.clone(),
         rule_id: observation.rule_id.clone(),
@@ -1043,10 +1015,9 @@ mod tests {
                 "backend":"codex","native_version":"0.163.0",
                 "rule_id":rule,"screen_seq":140,
                 "operation":operation,"operation_rows":operation.map(|text| text.split('\n').count()),
-                "choices":null,"native_request_id":null,
+                "choices":null,
                 "excerpt":format!("notice {SECRET}"),
-                "truncated":false,"sensitive":false,
-            })
+                "truncated":false,})
         }
 
         pub(super) fn refusal_raw(operation: &str) -> Value {
@@ -1119,12 +1090,10 @@ mod tests {
             kind: &str,
         ) {
             let payload = &event.payload_json;
-            assert_eq!(payload["schema_version"], 2);
             assert_eq!(payload["kind"], kind);
             assert_eq!(payload["interaction_id"], Value::Null);
             assert_eq!(payload["classification"], Value::Null);
             assert_eq!(payload["source"], "runner_screen");
-            assert_eq!(payload["native_request_id"], Value::Null);
             assert_eq!(payload["decision_outcome"], "unknown");
             assert_eq!(event.interaction_id, None);
             assert_eq!(event.notification_state, NotificationState::Inbox);
@@ -1194,7 +1163,6 @@ mod tests {
 
         fn record(observation: &EffectivePolicyObservation, event_id: Option<i64>) -> Value {
             json!({
-                "schema_version":1,
                 "automatic_review":observation.automatic_review.as_str(),
                 "observed_mode":observation.observed_mode,
                 "rule_id":observation.rule_id,
@@ -1524,7 +1492,7 @@ mod tests {
         fn available_update_commits_only_for_a_running_or_degraded_run() {
             for status in [
                 RunStatus::Starting,
-                RunStatus::Stopping,
+                RunStatus::Recovering,
                 RunStatus::Exited,
                 RunStatus::Running,
                 RunStatus::Degraded,
@@ -1642,7 +1610,6 @@ mod tests {
         let valid = effective_policy("available", Some("auto"), None);
         let mut cases = Vec::new();
         for key in [
-            "schema_version",
             "automatic_review",
             "observed_mode",
             "rule_id",
@@ -1654,8 +1621,6 @@ mod tests {
             cases.push((format!("missing {key}"), missing));
         }
         for (label, key, value) in [
-            ("schema version 2", "schema_version", json!(2)),
-            ("schema version text", "schema_version", json!("1")),
             (
                 "unknown review state",
                 "automatic_review",
@@ -2055,7 +2020,6 @@ mod tests {
                 .unwrap();
             let mut raw = raw_evidence(SECRET);
             raw["screen_seq"] = json!(121);
-            raw["sensitive"] = json!(false);
             fixture.update.evidence_json = redacted_policy(&[SECRET]).apply(&raw).unwrap();
             let original_event = fixture.event.clone();
             let update = fixture.refresh(1).unwrap();
@@ -2085,13 +2049,11 @@ mod tests {
         }
 
         fn assert_v2(event: &RuntimeEventRecord) {
-            assert_eq!(event.payload_json["schema_version"], 2);
             assert!(event.payload_json.get("director_action").is_some());
         }
 
         fn independent_v2(fixture: &mut Fixture, event: &RuntimeEventRecord) -> Value {
             let mut payload = event.payload_json.clone();
-            payload["schema_version"] = json!(2);
             payload["director_action"] = action(fixture, event);
             replace_public_payload(&mut fixture.conn, event, payload.clone());
             storage::get_event(&fixture.conn, event.event_id)
@@ -2120,7 +2082,7 @@ mod tests {
         fn runtime_payload_v2_other_interaction_classes_have_explicit_null_action() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            let event = fixture.open_as(&owner, InteractionClass::Trust);
+            let event = fixture.open_as(&owner, InteractionClass::UnknownInteraction);
             assert_v2(&event);
             assert_eq!(event.payload_json["director_action"], Value::Null);
         }
@@ -2183,7 +2145,7 @@ mod tests {
         }
 
         #[test]
-        fn runtime_payload_v2_obscurity_closure_and_refusal_have_null_action() {
+        fn runtime_payload_v2_obscurity_and_closure_have_null_action() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             fixture.open(&owner);
@@ -2193,12 +2155,6 @@ mod tests {
                     ..opening(owner.run_id, 2, 1, metadata())
                 },
                 closure(owner.run_id, 3, 1),
-                ObservedTransition {
-                    kind: RuntimeEventKind::PermissionDeniedObserved,
-                    episode_seq: None,
-                    classification: None,
-                    ..opening(owner.run_id, 4, 1, metadata())
-                },
             ];
             let events = transitions
                 .iter()
@@ -2703,9 +2659,7 @@ mod tests {
         ] {
             assert_eq!(payload[key], id, "{key}");
         }
-        assert_eq!(payload["schema_version"], 2);
         assert_eq!(payload["decision_outcome"], "unknown");
-        assert_eq!(payload["native_request_id"], Value::Null);
         assert_eq!(payload["source"], "runner_screen");
         assert_eq!(
             crate::broker::poll_messages(&reader, fixture.director).unwrap(),
@@ -2835,7 +2789,7 @@ mod tests {
                     .execute_batch("DROP TRIGGER injected_failure")
                     .unwrap();
             }
-            let (retried, inserted) = storage::persist_transition(
+            let (_, inserted) = storage::persist_transition(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -2846,7 +2800,6 @@ mod tests {
                 inserted,
                 "{target}: the retry commits the removed failure's write"
             );
-            assert_eq!(retried.payload_json["schema_version"], 2, "{target}");
         }
     }
 
@@ -2948,7 +2901,13 @@ mod tests {
                     .unwrap();
                 }
                 "director" => {
-                    fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",params![NOW,fixture.director]).unwrap();
+                    fixture
+                        .conn
+                        .execute(
+                            "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                            [fixture.director],
+                        )
+                        .unwrap();
                 }
                 "fleet" => {
                     fixture
@@ -3075,7 +3034,7 @@ mod tests {
     fn event_read_rejects_a_tampered_message_body_or_public_identity() {
         for damage in [
             "UPDATE messages SET text='{}'",
-            "UPDATE member_runtime_events SET payload_json='{\"schema_version\":2,\"run_id\":404}'",
+            "UPDATE member_runtime_events SET payload_json='{\"run_id\":404}'",
         ] {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
@@ -3153,7 +3112,7 @@ mod tests {
         );
         let next = ObservedTransition {
             event_seq: 2,
-            kind: RuntimeEventKind::PermissionDeniedObserved,
+            kind: RuntimeEventKind::AutomaticRefusalObserved,
             cause_json: None,
             ..exit
         };
@@ -3275,7 +3234,7 @@ mod tests {
 
     #[test]
     fn event_shape_regression_rejects_lifecycle_causes_on_screen_transitions() {
-        let kind = RuntimeEventKind::PermissionDeniedObserved;
+        let kind = RuntimeEventKind::AutomaticRefusalObserved;
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
         fixture.reserve(&owner);
@@ -3371,34 +3330,6 @@ mod tests {
         let event = fixture.open(&owner);
         let mut payload = event.payload_json.clone();
         payload["cause"] = json!({"kind":"native_exit","exit_code":7,"exit_signal":null});
-        replace_public_payload(&mut fixture.conn, &event, payload);
-        assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
-    }
-
-    #[test]
-    fn event_shape_regression_binds_public_native_request_id_to_post_policy_evidence() {
-        let mut fixture = Fixture::redacted();
-        let owner = fixture.activate();
-        fixture.reserve(&owner);
-        let evidence = redacted_policy(&["unmatched"])
-            .apply(&raw_evidence("ordinary-request"))
-            .unwrap();
-        let event = storage::persist_transition(
-            &mut fixture.conn,
-            &owner,
-            &opening(owner.run_id, 1, 1, evidence),
-            PersistenceMode::Live,
-        )
-        .unwrap()
-        .0;
-        assert!(!event.payload_json["native_request_id"].is_null());
-        assert_eq!(
-            event.payload_json["native_request_id"],
-            event.payload_json["evidence"]["native_request_id"]
-        );
-        storage::get_event(&fixture.conn, event.event_id).unwrap();
-        let mut payload = event.payload_json.clone();
-        payload["native_request_id"] = json!("unrelated-public-request");
         replace_public_payload(&mut fixture.conn, &event, payload);
         assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
     }

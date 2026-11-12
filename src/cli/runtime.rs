@@ -420,8 +420,7 @@ mod tests {
                     crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
                         .unwrap()
                         .unwrap()
-                        .placement
-                        .unwrap();
+                        .placement;
                 let held = PaneLock::try_acquire(&settings.database_url, &placement)
                     .unwrap()
                     .unwrap();

@@ -39,6 +39,7 @@ pub(crate) trait ObservationClock: Send + Sync {
     #[cfg(test)]
     fn kind(&self) -> ObservationClockKind;
 }
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ObservationPhase {
     ChildOutput,
@@ -176,7 +177,6 @@ pub(crate) struct ObservedRequest {
     pub(super) semantic: SemanticFingerprint,
     pub(super) choices: Vec<String>,
     pub(super) focus: String,
-    pub(super) native_correlation: Option<String>,
     pub(super) output_seq: u64,
 }
 impl ObservedRequest {
@@ -188,7 +188,6 @@ impl ObservedRequest {
             && self.semantic == other.semantic
             && self.choices == other.choices
             && self.focus == other.focus
-            && self.native_correlation == other.native_correlation
             && self.answer_matches.len() == other.answer_matches.len()
             && self
                 .answer_matches
@@ -208,18 +207,21 @@ pub(crate) struct OrderedObservation<'a> {
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
     clock: &'a dyn ObservationClock,
+    #[cfg(test)]
     phase: ObservationPhase,
 }
 impl ScreenObserver for OrderedObservation<'_> {
-    fn input_health(&self) -> Option<ObservationHealth> {
-        Some(self.controller.health(self.writer))
+    fn input_health(&self) -> ObservationHealth {
+        self.controller.health(self.writer)
     }
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
-        self.controller
-            .observe_screen(screen, self.writer, self.clock, self.phase)
-    }
-    fn failures_are_fatal(&self) -> bool {
-        true
+        self.controller.observe_screen(
+            screen,
+            self.writer,
+            self.clock,
+            #[cfg(test)]
+            self.phase,
+        )
     }
     fn parser_failure(&mut self) -> Result<()> {
         self.controller
@@ -231,7 +233,6 @@ impl ObservationController {
         run: &RunRecord,
         catalog: &ProfileCatalog,
         policy: EvidencePolicy,
-        initial: RangeInclusive<i64>,
     ) -> Result<Self> {
         ensure(
             run.run_id > 0
@@ -243,8 +244,7 @@ impl ObservationController {
                 && run.started_at.is_none()
                 && run.ended_at.is_none()
                 && run.recovery_origin_status.is_none()
-                && run.event_seq_reserved_through == 256
-                && initial == (1..=256),
+                && run.event_seq_reserved_through == 256,
             "observation controller requires fresh committed initial grant",
         )?;
         let backend = crate::coding_agent::coding_agent(&run.backend)
@@ -254,11 +254,11 @@ impl ObservationController {
             "observer coverage mismatch",
         )?;
         let mut pool = EventSequencePool::default();
-        pool.supply(initial)?;
+        pool.supply(1..=256)?;
         Ok(Self {
             run: run.clone(),
             detector: Detector::new(catalog, backend, run.native_version.as_deref()),
-            tracker: EpisodeTracker::new(run.run_id, 1, policy)?,
+            tracker: EpisodeTracker::new(run.run_id, policy)?,
             pool,
             pending: None,
             gap: None,
@@ -398,7 +398,6 @@ impl ObservationController {
                 semantic: first.semantic().clone(),
                 choices: first.choices().to_vec(),
                 focus: first.focus().to_owned(),
-                native_correlation: observed.native_correlation.clone(),
                 output_seq: first.output_seq(),
                 answer_matches,
             }))
@@ -560,7 +559,7 @@ impl ObservationController {
             .count
             .checked_add(1)
             .ok_or_else(|| error("gap interval count overflow"))?;
-        self.tracker.reset_observation(GateReason::Gap)?;
+        self.tracker.reset_observation()?;
         Ok(())
     }
     fn delivery_pressure(
@@ -684,8 +683,15 @@ impl ObservationController {
         writer: &'a EventWriter,
         clock: &'a dyn ObservationClock,
     ) -> OrderedObservation<'a> {
-        self.observer_for(writer, clock, ObservationPhase::ChildOutput)
+        OrderedObservation {
+            controller: self,
+            writer,
+            clock,
+            #[cfg(test)]
+            phase: ObservationPhase::ChildOutput,
+        }
     }
+    #[cfg(test)]
     pub(crate) fn observer_for<'a>(
         &'a mut self,
         writer: &'a EventWriter,
@@ -703,11 +709,9 @@ impl ObservationController {
         &mut self,
         screen: &ScreenSnapshot,
         now: &ObservationMoment,
-        phase: ObservationPhase,
+        #[cfg(test)] phase: ObservationPhase,
         #[cfg(test)] clock: &dyn ObservationClock,
     ) -> Result<Option<ScreenObservation>> {
-        #[cfg(not(test))]
-        let _ = phase;
         #[cfg(test)]
         {
             let failed = self
@@ -737,7 +741,7 @@ impl ObservationController {
         screen: &ScreenSnapshot,
         writer: &EventWriter,
         clock: &dyn ObservationClock,
-        phase: ObservationPhase,
+        #[cfg(test)] phase: ObservationPhase,
     ) -> Result<()> {
         let now = self.moment(clock)?;
         self.validate_output(screen)?;
@@ -750,13 +754,14 @@ impl ObservationController {
         if !self.started || self.exit_recorded.is_some() {
             return Ok(());
         }
-        if self.pending.is_some() || self.gap.is_some() || writer.status().degraded {
+        if self.pending.is_some() || self.gap.is_some() || writer.status().diagnostic.is_some() {
             self.gap(ObservationFailure::Sink, &now)?;
             return Ok(());
         }
         let Some(observed) = self.observation(
             screen,
             &now,
+            #[cfg(test)]
             phase,
             #[cfg(test)]
             clock,
@@ -782,7 +787,7 @@ impl ObservationController {
     }
     /// No retained transition, unsaved gap or degraded writer holds new observation work back.
     fn quiet(&self, writer: &EventWriter) -> bool {
-        self.pending.is_none() && self.gap.is_none() && !writer.status().degraded
+        self.pending.is_none() && self.gap.is_none() && !writer.status().diagnostic.is_some()
     }
     pub(crate) fn poll(
         &mut self,
@@ -790,8 +795,15 @@ impl ObservationController {
         writer: &EventWriter,
         clock: &dyn ObservationClock,
     ) -> Result<ObservationStatus> {
-        self.poll_for(current, writer, clock, ObservationPhase::QuietTimer)
+        self.poll_at(
+            current,
+            writer,
+            clock,
+            #[cfg(test)]
+            ObservationPhase::QuietTimer,
+        )
     }
+    #[cfg(test)]
     pub(crate) fn poll_for(
         &mut self,
         current: &ScreenSnapshot,
@@ -799,20 +811,29 @@ impl ObservationController {
         clock: &dyn ObservationClock,
         phase: ObservationPhase,
     ) -> Result<ObservationStatus> {
+        self.poll_at(current, writer, clock, phase)
+    }
+    fn poll_at(
+        &mut self,
+        current: &ScreenSnapshot,
+        writer: &EventWriter,
+        clock: &dyn ObservationClock,
+        #[cfg(test)] phase: ObservationPhase,
+    ) -> Result<ObservationStatus> {
         let now = self.moment(clock)?;
         self.validate_output(current)?;
         #[cfg(test)]
         if let Some(capture) = &mut self.capture {
             capture.observe(current, native_capture::CaptureTrigger::Timer, clock)?;
         }
-        if !self.terminal_fenced && writer.status().degraded && self.gap.is_none() {
+        if !self.terminal_fenced && writer.status().diagnostic.is_some() && self.gap.is_none() {
             self.gap(ObservationFailure::Sink, &now)?;
         }
         self.route(writer, &now)?;
         if self.pending.is_some() {
             return Ok(self.status());
         }
-        if self.gap.is_some() && !writer.status().degraded {
+        if self.gap.is_some() && !writer.status().diagnostic.is_some() {
             let gap = self.gap.take().expect("gap present");
             let cause = |kind: RuntimeCauseKind| serde_json::json!({"kind":kind.as_str(),"gap_count":gap.count,"gap_started_at":gap.started_at,"gap_ended_at":if kind==RuntimeCauseKind::StorageRecovered{Some(&now.observed_at)}else{None}});
             let first = self.lifecycle(
@@ -870,9 +891,7 @@ impl ObservationController {
             && let Some(exit) = self.exit.take()
         {
             self.terminal_fenced = true;
-            let mut update = self
-                .tracker
-                .finish(InteractionCloseReason::ProcessExited, &exit.at)?;
+            let mut update = self.tracker.finish(&exit.at)?;
             let cause = match exit.exit {
                 ChildExit::Code(code) => {
                     serde_json::json!({"kind":RuntimeCauseKind::NativeExit.as_str(),"exit_code":code,"exit_signal":null})
@@ -898,6 +917,7 @@ impl ObservationController {
             let Some(value) = self.observation(
                 current,
                 &now,
+                #[cfg(test)]
                 phase,
                 #[cfg(test)]
                 clock,
@@ -959,8 +979,7 @@ impl ObservationController {
     }
     pub(crate) fn has_pending(&self) -> bool {
         let status = self.status();
-        status.retained_transition
-            || status.retained_draft
+        status.retained_draft
             || status.retained_evidence
             || self.exit.is_some()
             || self.gap.is_some()
@@ -991,7 +1010,8 @@ impl ObservationController {
         let state = writer.status();
         let pending = self.pending_transition_count();
         let evidence = state.pending_evidence || observer.retained_evidence;
-        let degraded = state.degraded || self.gap.is_some() || observer.diagnostic.is_some();
+        let degraded =
+            state.diagnostic.is_some() || self.gap.is_some() || observer.diagnostic.is_some();
         let mut eligibility = observer.eligibility;
         if degraded || pending + state.pending_count > 0 || evidence {
             eligibility = InputEligibility::Hold(GateReason::Gap);
@@ -1006,7 +1026,7 @@ impl ObservationController {
                 .checked_add(state.gap_count)
                 .expect("health gap count overflow"),
             degraded,
-            diagnostic: if state.degraded {
+            diagnostic: if state.diagnostic.is_some() {
                 Some("sink_unavailable".into())
             } else {
                 observer.diagnostic
@@ -1047,7 +1067,6 @@ pub(crate) mod native_capture {
     use crate::broker::runtime::RunStatus;
     use crate::coding_agent::Detector;
     use crate::coding_agent::ProfileCatalog;
-    use crate::coding_agent::detector::ScreenRegion;
     use crate::runtime::observation::native_capture::exporter::CaptureExporterTask;
     use crate::runtime::observation::native_capture::exporter::InertCaptureExportHooks;
     pub(crate) use crate::runtime::observation::native_capture::exporter::NativeCaptureExportBoundary;
@@ -1144,13 +1163,21 @@ pub(crate) mod native_capture {
     pub(crate) enum CaptureMaskReason {
         ReviewedPrivacy,
     }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct CaptureRegion {
+        pub(crate) top: u16,
+        pub(crate) left: u16,
+        pub(crate) bottom: u16,
+        pub(crate) right: u16,
+    }
     #[derive(Clone, Debug, Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     pub(crate) struct CaptureMask {
         pub(crate) screen: CaptureScreen,
         pub(crate) rows: u16,
         pub(crate) cols: u16,
-        pub(crate) region: ScreenRegion,
+        pub(crate) region: CaptureRegion,
         pub(crate) reason: CaptureMaskReason,
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1739,13 +1766,6 @@ pub(crate) mod native_capture {
             state.result = Some(result);
             self.next_sample = None;
         }
-        pub(crate) fn next_deadline(&self) -> Option<Instant> {
-            let state = self.state.lock().expect("capture mailbox");
-            state.request.as_ref().map(|request| {
-                self.next_sample
-                    .map_or(request.deadline, |at| at.min(request.deadline))
-            })
-        }
         pub(crate) fn cancel(&mut self, reason: NativeCaptureStatus) -> Result<()> {
             ensure(
                 matches!(
@@ -2169,27 +2189,14 @@ pub(crate) mod native_capture {
     }
 
     pub(crate) mod test_support {
-        use serde_json::Value;
-        use serde_json::json;
 
-        use crate::broker::Placement;
-        use crate::broker::runtime as storage;
-        use crate::coding_agent::detector::ScreenRegion;
         use crate::digest::sha256_hex;
-        use crate::runtime::observation::native_capture::*;
-        use crate::runtime::system::test_support::TestChild;
-        use crate::runtime::test_support::*;
         use std::fs::OpenOptions;
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
-        use std::os::unix::fs::PermissionsExt;
         use std::path::Path;
-        use std::path::PathBuf;
-        use std::process::Command;
-        use std::process::Stdio;
         use std::sync::atomic::AtomicU64;
         use std::sync::atomic::Ordering;
-        use std::time::Duration;
 
         /// Publishes `bytes` at `path` atomically: waiters poll these marker
         /// paths from other processes, so the name must never be visible
@@ -2222,1283 +2229,15 @@ pub(crate) mod native_capture {
         pub(crate) fn libtest_digest() -> &'static str {
             LIBTEST_DIGEST.get_or_init(|| digest(&std::env::current_exe().unwrap()))
         }
-        pub(super) use crate::coding_agent::catalog::test_support::synthetic_catalog as catalog;
-        pub(crate) fn redacted() -> Value {
-            json!({"mode":"redacted","config":{"schema_version":1,"patterns":["PRIVATE-[A-Z]+"],"sensitive_rules":[]}})
-        }
-        pub(crate) fn mask(top: u16, left: u16, bottom: u16, right: u16) -> CaptureMask {
-            CaptureMask {
-                screen: CaptureScreen::Either,
-                rows: 24,
-                cols: 80,
-                region: ScreenRegion {
-                    top,
-                    left,
-                    bottom,
-                    right,
-                },
-                reason: CaptureMaskReason::ReviewedPrivacy,
-            }
-        }
-
-        pub(crate) use crate::runtime::observation::test_support::controller::Clock;
-
-        pub(crate) struct CaptureFixture {
-            pub(crate) fixture: Fixture,
-            pub(crate) artifacts: RunArtifacts,
-            pub(crate) spec: SpawnSpec,
-            pub(crate) placement: Placement,
-            pub(crate) producer_path: PathBuf,
-            pub(crate) producer_json: Value,
-            pub(crate) clock: Clock,
-            pub(crate) _lock: RunLock,
-            pub(crate) child: Option<TestChild>,
-        }
-        impl CaptureFixture {
-            /// A path inside the fixture's private directory.
-            pub(crate) fn path(&self, name: impl AsRef<std::path::Path>) -> PathBuf {
-                self.fixture._dir.path().join(name)
-            }
-            pub(crate) fn new(policy: Value) -> Self {
-                let mut fixture = Fixture::new();
-                std::fs::set_permissions(
-                    fixture._dir.path(),
-                    std::fs::Permissions::from_mode(0o700),
-                )
-                .unwrap();
-                let artifacts = fixture.artifacts();
-                let held = RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                    .unwrap()
-                    .unwrap();
-                held.transfer_to_runner(
-                    &mut fixture.conn,
-                    &fixture.run.owner(),
-                    ProcessIdentity::current().unwrap(),
-                )
-                .unwrap();
-                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='0.0.1-synthetic',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
-                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                let executable = fixture._dir.path().join("owned-synthetic-process");
-                private_write(&executable,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf '%s\\n' \"$line\" ;; esac; done\n");
-                std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
-                    .unwrap();
-                let mut spec = fixture.spec();
-                spec.evidence_policy = policy;
-                spec.argv = vec![
-                    executable.to_str().unwrap().into(),
-                    "--no-daemon".into(),
-                    "--approve-for-me".into(),
-                    "private assignment canary".into(),
-                ];
-                artifacts
-                    .write_descriptor(&LaunchDescriptor::new(&fixture.run, spec.clone()).unwrap())
-                    .unwrap();
-                let source = fixture._dir.path().join("source-evidence.json");
-                private_write(
-                    &source,
-                    b"{\"kind\":\"synthetic\",\"version\":\"0.0.1-synthetic\"}",
-                );
-                let current = std::env::current_exe().unwrap();
-                let producer_json = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":source,"source_manifest_sha256":digest(&source),"libtest_executable_path":current,"libtest_executable_sha256":libtest_digest(),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"synthetic","native_executable":{"path":executable,"sha256":digest(&executable),"version":"0.0.1-synthetic","version_evidence_ref":source},"launch_evidence_ref":source,"environment_evidence_ref":source});
-                let producer_path = fixture._dir.path().join("producer.json");
-                private_write(&producer_path, &serde_json::to_vec(&producer_json).unwrap());
-                let placement = crate::broker::get_member(
-                    &fixture.conn,
-                    fixture.run.member_id,
-                    fixture.run.fleet_id,
-                )
-                .unwrap()
-                .unwrap()
-                .placement
-                .unwrap();
-                Self {
-                    fixture,
-                    artifacts,
-                    spec,
-                    placement,
-                    producer_path,
-                    producer_json,
-                    clock: Clock::new(),
-                    _lock: held,
-                    child: None,
-                }
-            }
-            pub(crate) fn channel(
-                &self,
-                limits: NativeCaptureLimits,
-                masks: &[CaptureMask],
-            ) -> (NativeCapturePort, NativeCaptureReceiver) {
-                self.channel_with(limits, masks, &catalog())
-            }
-            pub(crate) fn channel_with(
-                &self,
-                limits: NativeCaptureLimits,
-                masks: &[CaptureMask],
-                catalog: &crate::coding_agent::ProfileCatalog,
-            ) -> (NativeCapturePort, NativeCaptureReceiver) {
-                let policy = NativeCapturePolicy::from_launch(&self.spec, masks, catalog).unwrap();
-                native_capture_channel(&self.fixture.run, policy, limits).unwrap()
-            }
-            pub(crate) fn mark_prepared(&mut self) {
-                self.fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET status='prepared' WHERE run_id=?1",
-                        [self.fixture.run.run_id],
-                    )
-                    .unwrap();
-                self.fixture.run =
-                    storage::get_run(&self.fixture.conn, self.fixture.run.run_id).unwrap();
-            }
-            pub(crate) fn producer(&self) -> NativeCaptureProducer {
-                read_native_capture_producer(&self.producer_path, &NativeCaptureLimits::default())
-                    .unwrap()
-            }
-            pub(crate) fn prepare(&mut self, port: &mut NativeCapturePort) {
-                self.mark_prepared();
-                let producer = self.producer();
-                port.bind_prepared(
-                    &self.fixture.run,
-                    &self.placement,
-                    &self.spec,
-                    producer,
-                    &self.clock,
-                )
-                .unwrap();
-            }
-            pub(crate) fn finalize(&mut self, port: &mut NativeCapturePort) {
-                let child = TestChild::new(
-                    Command::new(&self.spec.argv[0])
-                        .args(&self.spec.argv[1..])
-                        .current_dir(&self.spec.cwd)
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .unwrap(),
-                );
-                self.child = Some(child);
-                let child = self
-                    .child
-                    .as_ref()
-                    .expect("owned child guard before identity validation");
-                let identity = ProcessIdentity::read(i64::from(child.id()))
-                    .unwrap()
-                    .unwrap();
-                self.fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at='2026-10-26T17:00:00Z' WHERE run_id=?3",rusqlite::params![identity.pid,identity.start_identity,self.fixture.run.run_id]).unwrap();
-                self.fixture.run =
-                    storage::get_run(&self.fixture.conn, self.fixture.run.run_id).unwrap();
-                port.finalize_source(&self.fixture.run, &self.placement, &identity)
-                    .unwrap();
-            }
-            pub(crate) fn ready(
-                &mut self,
-                limits: NativeCaptureLimits,
-                masks: &[CaptureMask],
-            ) -> (NativeCapturePort, NativeCaptureReceiver) {
-                let (mut port, receiver) = self.channel(limits, masks);
-                self.prepare(&mut port);
-                self.finalize(&mut port);
-                (port, receiver)
-            }
-            pub(crate) fn request(&self, id: &str) -> NativeCaptureRequest {
-                NativeCaptureRequest {
-                    capture_id: id.into(),
-                    run_id: self.fixture.run.run_id,
-                    owner_epoch: self.fixture.run.owner_epoch,
-                    minimum_interval: Duration::from_millis(100),
-                    deadline: self.clock.sample().monotonic + Duration::from_secs(1),
-                }
-            }
-            pub(crate) fn pair(
-                &mut self,
-                port: &mut NativeCapturePort,
-                receiver: &NativeCaptureReceiver,
-                bytes: &[u8],
-            ) -> NativeCaptureLease {
-                self.pair_named(port, receiver, "pair", bytes)
-            }
-            /// Requests capture `id`, then feeds `bytes` and completes the pair 100 ms later.
-            pub(crate) fn pair_named(
-                &mut self,
-                port: &mut NativeCapturePort,
-                receiver: &NativeCaptureReceiver,
-                id: &str,
-                bytes: &[u8],
-            ) -> NativeCaptureLease {
-                let mut terminal = TerminalState::new(self.spec.size).unwrap();
-                terminal.feed(bytes).unwrap();
-                receiver.request(self.request(id)).unwrap();
-                port.observe(
-                    &terminal.snapshot(),
-                    CaptureTrigger::ChildOutput,
-                    &self.clock,
-                )
-                .unwrap();
-                self.clock.set(100);
-                port.observe(&terminal.snapshot(), CaptureTrigger::Timer, &self.clock)
-                    .unwrap();
-                receiver
-                    .try_take()
-                    .unwrap()
-                    .expect("completed post-policy pair")
-            }
-        }
-
-        pub(crate) fn value(lease: &NativeCaptureLease) -> Value {
-            serde_json::to_value(lease.result()).unwrap()
-        }
-        impl Drop for CaptureFixture {
-            fn drop(&mut self) {
-                self.child.take();
-            }
-        }
-        pub(crate) fn objects<'a>(value: &'a Value, key: &str, result: &mut Vec<&'a Value>) {
-            match value {
-                Value::Object(map) => {
-                    if map.contains_key(key) {
-                        result.push(value);
-                    }
-                    for child in map.values() {
-                        objects(child, key, result);
-                    }
-                }
-                Value::Array(values) => {
-                    for child in values {
-                        objects(child, key, result);
-                    }
-                }
-                _ => {}
-            }
-        }
-        pub(crate) fn assert_keys(value: &Value, keys: &[&str]) {
-            let actual: std::collections::BTreeSet<_> = value
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect();
-            assert_eq!(actual, keys.iter().copied().collect());
-        }
-        pub(crate) fn arm(identity: &ControlIdentity) -> NativeCaptureArm {
-            NativeCaptureArm::for_identity("review-pair", identity, 1000)
-        }
-        pub(crate) fn config(fixture: &CaptureFixture) -> NativeCaptureConfig {
-            let policy = fixture.path("capture-policy.json");
-            private_write(
-                &policy,
-                &serde_json::to_vec(&json!({"schema_version":1,"masks":[]})).unwrap(),
-            );
-            NativeCaptureConfig {
-                schema_version: 1,
-                database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-                descriptor_path: fixture.artifacts.paths.descriptor.clone(),
-                expected_run_id: fixture.fixture.run.run_id,
-                expected_launch_nonce: fixture.fixture.run.launch_nonce.clone(),
-                arm_path: fixture.path("arm.json"),
-                output_directory: fixture.fixture._dir.path().to_path_buf(),
-                producer_manifest_path: fixture.producer_path.clone(),
-                capture_policy_path: policy,
-            }
-        }
     }
 
     mod tests {
-        use std::result::Result;
 
         use serde_json::Value;
-        use serde_json::json;
 
-        use crate::broker::runtime as storage;
-        use crate::broker::runtime::*;
         use crate::digest::sha256_hex;
-        use crate::runtime::observation::native_capture::test_support::*;
         use crate::runtime::observation::native_capture::*;
         use crate::runtime::service::test_support::*;
-
-        #[test]
-        fn capture_run_identity_compares_backend_and_native_version_without_a_profile_label() {
-            let fixture = crate::runtime::test_support::Fixture::new();
-            let mut seed = fixture.run.clone();
-            seed.native_version = Some("0.163.0".into());
-            assert!(same_capture_run(&seed, &seed.clone()));
-            let mut later = seed.clone();
-            later.native_version = Some("0.164.0".into());
-            assert!(!same_capture_run(&seed, &later));
-            let mut unprobed = seed.clone();
-            unprobed.native_version = None;
-            assert!(!same_capture_run(&seed, &unprobed));
-            let mut other = seed.clone();
-            other.backend = "claude".into();
-            assert!(!same_capture_run(&seed, &other));
-            let mut recovered = seed.clone();
-            recovered.coverage = Coverage::Tested;
-            assert!(
-                same_capture_run(&seed, &recovered),
-                "coverage follows the selection that backend and native version already determine"
-            );
-        }
-
-        mod collection {
-            use crate::runtime::observation::native_capture::tests::*;
-            use std::time::Duration;
-
-            #[test]
-            fn capture_seed_prepared_and_finalized_boundaries_enable_exactly_one_request() {
-                let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                let (mut port, receiver) = fixture.channel(NativeCaptureLimits::default(), &[]);
-                assert!(receiver.finalized_identity().is_none());
-                assert!(receiver.request(fixture.request("early")).is_err());
-                fixture.prepare(&mut port);
-                assert!(receiver.finalized_identity().is_none());
-                assert!(receiver.request(fixture.request("prepared")).is_err());
-                let producer = read_native_capture_producer(
-                    &fixture.producer_path,
-                    &NativeCaptureLimits::default(),
-                )
-                .unwrap();
-                assert!(
-                    port.bind_prepared(
-                        &fixture.fixture.run,
-                        &fixture.placement,
-                        &fixture.spec,
-                        producer,
-                        &fixture.clock
-                    )
-                    .is_err()
-                );
-                fixture.finalize(&mut port);
-                let identity = receiver.finalized_identity().unwrap();
-                assert_eq!(identity.run_id, fixture.fixture.run.run_id);
-                assert_eq!(identity.owner_epoch, fixture.fixture.run.owner_epoch);
-                let child = ProcessIdentity {
-                    pid: fixture.fixture.run.child_pid.unwrap(),
-                    start_identity: fixture.fixture.run.child_start_identity.clone().unwrap(),
-                };
-                assert!(
-                    port.finalize_source(&fixture.fixture.run, &fixture.placement, &child)
-                        .is_err()
-                );
-                receiver.request(fixture.request("accepted")).unwrap();
-                assert!(receiver.request(fixture.request("second")).is_err());
-                let screen = TerminalState::new(fixture.spec.size).unwrap().snapshot();
-                port.observe(&screen, CaptureTrigger::Timer, &fixture.clock)
-                    .unwrap();
-                fixture.clock.set(100);
-                port.observe(&screen, CaptureTrigger::Timer, &fixture.clock)
-                    .unwrap();
-                let lease = receiver.try_take().unwrap().unwrap();
-                assert!(receiver.request(fixture.request("leased")).is_err());
-                assert!(receiver.try_take().unwrap().is_none());
-                drop(lease);
-                assert!(receiver.request(fixture.request("consumed")).is_err());
-            }
-
-            #[test]
-            fn capture_source_rejects_running_seed_and_mismatched_child_or_placement() {
-                let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                let (mut port, receiver) = fixture.channel(NativeCaptureLimits::default(), &[]);
-                fixture.prepare(&mut port);
-                let identity = ProcessIdentity::current().unwrap();
-                let mut run = fixture.fixture.run.clone();
-                run.status = RunStatus::Running;
-                run.child_pid = Some(identity.pid);
-                run.child_start_identity = Some(identity.start_identity.clone());
-                run.started_at = Some("2026-10-26T17:00:00Z".into());
-                let mut wrong = identity.clone();
-                wrong.start_identity.push_str("-wrong");
-                assert!(
-                    port.finalize_source(&run, &fixture.placement, &wrong)
-                        .is_err()
-                );
-                assert!(receiver.finalized_identity().is_none());
-                let mut placement = fixture.placement.clone();
-                placement.mux_pane_id = Some("%999".into());
-                assert!(port.finalize_source(&run, &placement, &identity).is_err());
-                assert!(receiver.finalized_identity().is_none());
-                let policy =
-                    NativeCapturePolicy::from_launch(&fixture.spec, &[], &catalog()).unwrap();
-                assert!(
-                    native_capture_channel(&run, policy, NativeCaptureLimits::default()).is_err()
-                );
-                fixture.finalize(&mut port);
-                assert!(receiver.finalized_identity().is_some());
-            }
-
-            #[test]
-            fn capture_invalid_request_leaves_the_finalized_channel_unused() {
-                for field in [
-                    "blank",
-                    "run",
-                    "epoch",
-                    "interval_low",
-                    "interval_high",
-                    "past",
-                    "deadline_high",
-                ] {
-                    let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    let (_port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                    let mut request = fixture.request("valid");
-                    match field {
-                        "blank" => request.capture_id = " ".into(),
-                        "run" => request.run_id += 1,
-                        "epoch" => request.owner_epoch += 1,
-                        "interval_low" => request.minimum_interval = Duration::from_millis(99),
-                        "interval_high" => request.minimum_interval = Duration::from_millis(5001),
-                        "past" => {
-                            request.deadline =
-                                fixture.clock.sample().monotonic - Duration::from_millis(1)
-                        }
-                        _ => {
-                            request.deadline =
-                                fixture.clock.sample().monotonic + Duration::from_secs(31)
-                        }
-                    }
-                    assert!(receiver.request(request).is_err(), "{field}");
-                    receiver.request(fixture.request("valid")).unwrap();
-                }
-            }
-
-            #[test]
-            fn capture_slow_consumer_holds_one_immutable_pair_while_observation_keeps_progressing()
-            {
-                let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                let lease = fixture.pair(&mut port, &receiver, b"first");
-                let original = value(&lease);
-                let mut terminal = TerminalState::new(fixture.spec.size).unwrap();
-                let began = std::time::Instant::now();
-                for _ in 0..100 {
-                    terminal.feed(b"more native output\r\n").unwrap();
-                    port.observe(
-                        &terminal.snapshot(),
-                        CaptureTrigger::ChildOutput,
-                        &fixture.clock,
-                    )
-                    .unwrap();
-                }
-                assert!(began.elapsed() < Duration::from_millis(500));
-                assert_eq!(value(&lease), original);
-                assert!(receiver.try_take().unwrap().is_none());
-                assert!(receiver.request(fixture.request("replacement")).is_err());
-            }
-
-            #[test]
-            fn capture_pair_uses_atomic_snapshots_and_second_selection_after_first_end() {
-                let mut fixture = CaptureFixture::new(redacted());
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                let mut terminal = TerminalState::new(fixture.spec.size).unwrap();
-                terminal
-                    .feed(b"\x1b]2;first title\x07\x1b[2;4Hfirst frame")
-                    .unwrap();
-                let first = terminal.snapshot();
-                receiver.request(fixture.request("atomic")).unwrap();
-                port.observe(&first, CaptureTrigger::ChildOutput, &fixture.clock)
-                    .unwrap();
-                assert!(receiver.try_take().unwrap().is_none());
-                assert!(port.next_deadline().is_some());
-                terminal
-                    .resize(TerminalSize { rows: 25, cols: 90 })
-                    .unwrap();
-                terminal
-                    .feed(b"\x1b[?1049h\x1b]2;second title\x07\x1b[3;7Hsecond frame")
-                    .unwrap();
-                let second = terminal.snapshot();
-                fixture.clock.set(99);
-                port.observe(&second, CaptureTrigger::Resize, &fixture.clock)
-                    .unwrap();
-                assert!(receiver.try_take().unwrap().is_none());
-                fixture.clock.set(100);
-                port.observe(&second, CaptureTrigger::Timer, &fixture.clock)
-                    .unwrap();
-                let lease = receiver.try_take().unwrap().unwrap();
-                let result = value(&lease);
-                assert_keys(
-                    &result,
-                    &[
-                        "schema_version",
-                        "capture_id",
-                        "source",
-                        "policy",
-                        "limits",
-                        "status",
-                        "samples",
-                        "diagnostic",
-                    ],
-                );
-                assert_eq!(result["schema_version"], 1);
-                assert_eq!(result["status"], "complete");
-                let samples = result["samples"].as_array().unwrap();
-                assert_eq!(samples.len(), 2);
-                for (index, screen) in [&first, &second].into_iter().enumerate() {
-                    let sample = &samples[index];
-                    assert_keys(
-                        sample,
-                        &[
-                            "sample_index",
-                            "trigger",
-                            "monotonic_start_ns",
-                            "monotonic_end_ns",
-                            "observed_at",
-                            "screen_seq",
-                            "rows",
-                            "cols",
-                            "cursor_row",
-                            "cursor_col",
-                            "alternate_screen",
-                            "title",
-                            "projection",
-                            "unavailable_regions",
-                            "grid",
-                        ],
-                    );
-                    assert_eq!(sample["screen_seq"], screen.screen_seq);
-                    assert_eq!(sample["rows"], screen.rows);
-                    assert_eq!(sample["cols"], screen.cols);
-                    assert_eq!(sample["cursor_row"], screen.cursor_row);
-                    assert_eq!(sample["cursor_col"], screen.cursor_col);
-                    assert_eq!(sample["alternate_screen"], screen.alternate_screen);
-                    assert_eq!(sample["title"], screen.title);
-                    assert!(
-                        sample["monotonic_end_ns"].as_u64().unwrap()
-                            >= sample["monotonic_start_ns"].as_u64().unwrap()
-                    );
-                }
-                assert!(
-                    samples[1]["monotonic_start_ns"].as_u64().unwrap()
-                        - samples[0]["monotonic_end_ns"].as_u64().unwrap()
-                        >= 100_000_000
-                );
-                assert!(
-                    serde_json::to_string(&samples[0])
-                        .unwrap()
-                        .contains("first")
-                );
-                assert!(
-                    !serde_json::to_string(&samples[0])
-                        .unwrap()
-                        .contains("second")
-                );
-                assert!(port.next_deadline().is_none());
-            }
-
-            #[test]
-            fn capture_metadata_projects_no_grid_title_secret_or_private_source_arguments() {
-                let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                let lease = fixture.pair(
-                    &mut port,
-                    &receiver,
-                    b"\x1b]2;PRIVATE-TITLE\x07PRIVATE-CONTENT",
-                );
-                let result = value(&lease);
-                let encoded = serde_json::to_string(&result).unwrap();
-                assert!(!encoded.contains("PRIVATE-"));
-                assert!(!encoded.contains("private assignment canary"));
-                assert!(!encoded.contains("fingerprint"));
-                assert!(!encoded.contains("raw_bytes"));
-                for sample in result["samples"].as_array().unwrap() {
-                    assert!(sample["grid"].is_null());
-                    assert!(sample["title"].is_null());
-                    assert!(!sample["unavailable_regions"].as_array().unwrap().is_empty());
-                }
-                let source = &result["source"];
-                assert_eq!(source["run_id"], fixture.fixture.run.run_id);
-                assert_eq!(source["owner_epoch"], fixture.fixture.run.owner_epoch);
-                assert_eq!(
-                    source["child"]["pid"],
-                    fixture.fixture.run.child_pid.unwrap()
-                );
-                assert_eq!(
-                    source["permission_argv"],
-                    fixture.fixture.run.permission_argv_json
-                );
-                assert_eq!(source["resolved_mode"], "approve-for-me");
-                assert_eq!(source["producer"]["kind"], "synthetic");
-                assert!(
-                    serde_json::to_string(&source["clock"])
-                        .unwrap()
-                        .contains("deterministic")
-                );
-            }
-
-            #[test]
-            fn capture_patterns_mask_whole_logical_fields_across_softwraps_and_cells() {
-                let mut fixture = CaptureFixture::new(redacted());
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                let mut bytes = vec![b'x'; 75];
-                bytes.extend_from_slice(b"PRIVATE-SECRET");
-                let lease = fixture.pair(&mut port, &receiver, &bytes);
-                let result = value(&lease);
-                let encoded = serde_json::to_string(&result).unwrap();
-                assert!(!encoded.contains("PRIVATE-SECRET"));
-                assert!(!encoded.contains("[REDACTED]"));
-                assert!(!encoded.contains("PRIVATE-[A-Z]+"));
-                let mut cells = Vec::new();
-                objects(&result["samples"][0]["grid"], "has_contents", &mut cells);
-                assert_eq!(cells.len(), 24 * 80);
-                assert!(
-                    cells
-                        .iter()
-                        .take(89)
-                        .all(|cell| cell["availability"] == "masked")
-                );
-                assert!(
-                    cells
-                        .iter()
-                        .filter(|cell| cell["availability"] == "masked")
-                        .count()
-                        >= 89
-                );
-                for cell in cells.iter().filter(|cell| cell["availability"] == "masked") {
-                    for field in [
-                        "contents",
-                        "has_contents",
-                        "wide",
-                        "wide_continuation",
-                        "fg",
-                        "bg",
-                        "bold",
-                        "dim",
-                        "italic",
-                        "underline",
-                        "inverse",
-                    ] {
-                        assert!(
-                            cell.get(field)
-                                .expect("required masked cell field")
-                                .is_null(),
-                            "masked {field}"
-                        );
-                    }
-                }
-            }
-
-            #[test]
-            fn capture_missing_in_range_parser_cell_fails_at_the_projection_boundary() {
-                let mut fixture = CaptureFixture::new(redacted());
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                receiver.request(fixture.request("missing-cell")).unwrap();
-                let mut screen = TerminalState::new(fixture.spec.size).unwrap().snapshot();
-                screen.rows += 1;
-                assert!(
-                    port.observe(&screen, CaptureTrigger::ChildOutput, &fixture.clock)
-                        .is_err()
-                );
-            }
-
-            #[test]
-            fn capture_coordinate_mask_includes_wide_partner_and_preserves_empty_cells() {
-                let mut fixture = CaptureFixture::new(redacted());
-                let (mut port, receiver) =
-                    fixture.ready(NativeCaptureLimits::default(), &[mask(0, 2, 1, 3)]);
-                let lease = fixture.pair(&mut port, &receiver, "A界Z".as_bytes());
-                let result = value(&lease);
-                let mut cells = Vec::new();
-                objects(&result["samples"][0]["grid"], "has_contents", &mut cells);
-                assert_eq!(cells.len(), 1920);
-                assert_eq!(
-                    cells
-                        .iter()
-                        .filter(|cell| cell["availability"] == "masked")
-                        .count(),
-                    2
-                );
-                assert!(cells.iter().any(|cell| cell["contents"] == "A"));
-                assert!(cells.iter().any(|cell| cell["contents"] == "Z"));
-                assert!(
-                    cells
-                        .iter()
-                        .any(|cell| cell["contents"] == "" && cell["has_contents"] == false)
-                );
-                assert!(!serde_json::to_string(&result).unwrap().contains('界'));
-            }
-
-            #[test]
-            fn capture_layout_mismatch_masks_whole_content_instead_of_clipping_coordinates() {
-                let mut fixture = CaptureFixture::new(redacted());
-                let (mut port, receiver) =
-                    fixture.ready(NativeCaptureLimits::default(), &[mask(0, 0, 1, 1)]);
-                let mut terminal = TerminalState::new(TerminalSize { rows: 25, cols: 80 }).unwrap();
-                terminal.feed(b"PRIVATE-LAYOUT").unwrap();
-                receiver.request(fixture.request("layout")).unwrap();
-                port.observe(&terminal.snapshot(), CaptureTrigger::Resize, &fixture.clock)
-                    .unwrap();
-                fixture.clock.set(100);
-                port.observe(&terminal.snapshot(), CaptureTrigger::Timer, &fixture.clock)
-                    .unwrap();
-                let result = value(&receiver.try_take().unwrap().unwrap());
-                assert!(
-                    !serde_json::to_string(&result)
-                        .unwrap()
-                        .contains("PRIVATE-LAYOUT")
-                );
-                assert!(
-                    !result["samples"][0]["unavailable_regions"]
-                        .as_array()
-                        .unwrap()
-                        .is_empty()
-                );
-            }
-
-            #[test]
-            fn capture_invalid_mask_geometry_fails_before_collection() {
-                let fixture = CaptureFixture::new(redacted());
-                for invalid in [
-                    mask(0, 0, 0, 1),
-                    mask(0, 0, 1, 0),
-                    mask(0, 0, 25, 1),
-                    mask(0, 0, 1, 81),
-                ] {
-                    assert!(
-                        NativeCapturePolicy::from_launch(&fixture.spec, &[invalid], &catalog())
-                            .is_err()
-                    );
-                }
-            }
-
-            #[test]
-            fn capture_sensitive_rule_narrows_redacted_launch_to_metadata() {
-                let mut policy = redacted();
-                policy["config"]["sensitive_rules"] = json!(["synthetic-permission"]);
-                let mut fixture = CaptureFixture::new(policy);
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                let lease=fixture.pair(&mut port,&receiver,b"\x1b[19;1HSynthetic permission request\r\nOperation: PRIVATE-SECRET\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ");
-                let result = value(&lease);
-                for sample in result["samples"].as_array().unwrap() {
-                    assert!(sample["grid"].is_null());
-                }
-                assert!(
-                    !serde_json::to_string(&result)
-                        .unwrap()
-                        .contains("PRIVATE-SECRET")
-                );
-            }
-
-            #[test]
-            fn capture_lowered_budgets_report_capacity_without_a_padded_complete_pair() {
-                for limits in [
-                    NativeCaptureLimits {
-                        max_cells: 10,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_source_bytes: 4,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_title_bytes: 4,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_scratch_bytes: 1,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_projected_heap_bytes: 1,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_encoded_sample_bytes: 1,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_encoded_result_bytes: 1,
-                        ..Default::default()
-                    },
-                ] {
-                    let mut fixture = CaptureFixture::new(redacted());
-                    let (mut port, receiver) = fixture.ready(limits, &[]);
-                    let result = value(&fixture.pair_named(
-                        &mut port,
-                        &receiver,
-                        "capacity",
-                        b"\x1b]2;title too large\x07content too large",
-                    ));
-                    assert_eq!(result["status"], "capacity");
-                    assert!(result["samples"].as_array().unwrap().len() < 2);
-                }
-            }
-
-            #[test]
-            fn capture_limits_reject_zero_and_expansion_but_allow_lowered_budgets() {
-                assert!(NativeCaptureLimits::default().validate().is_ok());
-                assert!(
-                    NativeCaptureLimits {
-                        max_cells: 1,
-                        ..Default::default()
-                    }
-                    .validate()
-                    .is_ok()
-                );
-                for limits in [
-                    NativeCaptureLimits {
-                        max_cells: 0,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_cells: 32769,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_source_bytes: 1048577,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_patterns: 65,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_pattern_bytes: 4097,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_total_pattern_bytes: 65537,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_compiled_regex_bytes: 262145,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_pattern_input_bytes: 67108865,
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_interval: Duration::from_millis(99),
-                        ..Default::default()
-                    },
-                    NativeCaptureLimits {
-                        max_request_duration: Duration::from_millis(100),
-                        ..Default::default()
-                    },
-                ] {
-                    assert!(limits.validate().is_err());
-                }
-            }
-
-            #[test]
-            fn capture_deadline_owner_exit_and_cancellation_preserve_actual_incomplete_status() {
-                for status in [
-                    NativeCaptureStatus::Deadline,
-                    NativeCaptureStatus::OwnerExit,
-                    NativeCaptureStatus::Cancelled,
-                ] {
-                    let mut fixture = CaptureFixture::new(redacted());
-                    let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                    receiver.request(fixture.request("incomplete")).unwrap();
-                    let terminal = TerminalState::new(fixture.spec.size).unwrap();
-                    port.observe(
-                        &terminal.snapshot(),
-                        CaptureTrigger::ChildOutput,
-                        &fixture.clock,
-                    )
-                    .unwrap();
-                    if status == NativeCaptureStatus::Deadline {
-                        fixture.clock.set(1001);
-                        port.observe(&terminal.snapshot(), CaptureTrigger::Timer, &fixture.clock)
-                            .unwrap();
-                    } else {
-                        port.cancel(status).unwrap();
-                    }
-                    let result = value(&receiver.try_take().unwrap().unwrap());
-                    assert_eq!(result["status"], serde_json::to_value(status).unwrap());
-                    assert_eq!(result["samples"].as_array().unwrap().len(), 1);
-                    assert!(receiver.request(fixture.request("replacement")).is_err());
-                }
-            }
-        }
-
-        mod capture_policy {
-            use crate::runtime::observation::native_capture::tests::*;
-            use std::sync::Mutex;
-
-            #[derive(Default)]
-            struct Compiler {
-                calls: Mutex<Vec<(String, usize)>>,
-            }
-
-            /// A launch spec carrying only `policy`: `NativeCapturePolicy::from_launch` reads
-            /// nothing else, so these tests need no database, run lock or native executable.
-            fn policy_spec(policy: Value) -> SpawnSpec {
-                SpawnSpec {
-                    argv: vec!["/bin/cat".into()],
-                    cwd: std::path::PathBuf::from("/"),
-                    environment: Vec::new(),
-                    evidence_policy: policy,
-                    size: TerminalSize { rows: 24, cols: 80 },
-                }
-            }
-            impl NativeCapturePatternCompiler for Compiler {
-                fn compile(
-                    &self,
-                    pattern: &str,
-                    max_compiled_bytes: usize,
-                ) -> Result<regex::Regex, crate::error::CafleetError> {
-                    self.calls
-                        .lock()
-                        .unwrap()
-                        .push((pattern.into(), max_compiled_bytes));
-                    BoundedCapturePatternCompiler.compile(pattern, max_compiled_bytes)
-                }
-            }
-
-            #[test]
-            fn runner_collector_whole_raw_policy_is_validated_before_the_first_compiler_invocation()
-            {
-                let limits = NativeCaptureLimits::default();
-                for invalid in [
-                    "schema",
-                    "empty",
-                    "later_type",
-                    "count",
-                    "later_bytes",
-                    "aggregate",
-                    "sensitive",
-                    "later_sensitive_type",
-                ] {
-                    let mut policy = redacted();
-                    policy["config"]["patterns"] = json!(["safe first pattern"]);
-                    match invalid {
-                        "schema" => policy["config"]["schema_version"] = json!(2),
-                        "empty" => policy["config"]["patterns"] = json!([]),
-                        "later_type" => {
-                            policy["config"]["patterns"] = json!(["safe first pattern", 7])
-                        }
-                        "count" => {
-                            let mut patterns = vec!["safe".to_owned(); limits.max_patterns + 1];
-                            patterns[0] = "[".into();
-                            policy["config"]["patterns"] = json!(patterns);
-                        }
-                        "later_bytes" => {
-                            policy["config"]["patterns"] = json!([
-                                "safe first pattern",
-                                "x".repeat(limits.max_pattern_bytes + 1)
-                            ])
-                        }
-                        "aggregate" => {
-                            let width = limits.max_pattern_bytes / 2;
-                            let count = limits.max_total_pattern_bytes / width + 1;
-                            assert!(count <= limits.max_patterns);
-                            policy["config"]["patterns"] = json!(vec!["x".repeat(width); count]);
-                        }
-                        "sensitive" => {
-                            policy["config"]["sensitive_rules"] = json!(["unknown-reviewed-rule"])
-                        }
-                        "later_sensitive_type" => {
-                            policy["config"]["sensitive_rules"] = json!(["synthetic-permission", 7])
-                        }
-                        _ => unreachable!(),
-                    }
-                    let compiler = Compiler::default();
-                    assert!(
-                        NativeCapturePolicy::from_launch_with_compiler(
-                            &policy_spec(policy),
-                            &[],
-                            &catalog(),
-                            &compiler
-                        )
-                        .is_err(),
-                        "{invalid}"
-                    );
-                    assert!(compiler.calls.lock().unwrap().is_empty(), "{invalid}");
-                }
-            }
-
-            #[test]
-            fn runner_collector_valid_patterns_compile_once_in_source_order_with_the_approved_cap()
-            {
-                let patterns = ["PRIVATE-[A-Z]+", "[0-9]+", "(?i)secret"];
-                let mut policy = redacted();
-                policy["config"]["patterns"] = json!(patterns);
-                policy["config"]["sensitive_rules"] = json!(["synthetic-permission"]);
-                let compiler = Compiler::default();
-                assert!(
-                    NativeCapturePolicy::from_launch_with_compiler(
-                        &policy_spec(policy),
-                        &[],
-                        &catalog(),
-                        &compiler
-                    )
-                    .is_ok()
-                );
-                let expected: Vec<_> = patterns
-                    .into_iter()
-                    .map(|pattern| {
-                        (
-                            pattern.to_owned(),
-                            NativeCaptureLimits::default().max_compiled_regex_bytes,
-                        )
-                    })
-                    .collect();
-                assert_eq!(*compiler.calls.lock().unwrap(), expected);
-            }
-
-            #[test]
-            fn runner_collector_compact_pattern_expansion_stops_at_the_first_bounded_compilation() {
-                let mut policy = redacted();
-                policy["config"]["patterns"] = json!(["[a-z]{100000}"]);
-                let compiler = Compiler::default();
-                assert!(
-                    NativeCapturePolicy::from_launch_with_compiler(
-                        &policy_spec(policy),
-                        &[],
-                        &catalog(),
-                        &compiler
-                    )
-                    .is_err()
-                );
-                assert_eq!(
-                    *compiler.calls.lock().unwrap(),
-                    vec![(
-                        "[a-z]{100000}".into(),
-                        NativeCaptureLimits::default().max_compiled_regex_bytes
-                    )]
-                );
-            }
-
-            #[test]
-            fn runner_collector_metadata_policy_uses_no_regex_compiler() {
-                let compiler = Compiler::default();
-                assert!(
-                    NativeCapturePolicy::from_launch_with_compiler(
-                        &policy_spec(json!({"mode":"metadata"})),
-                        &[],
-                        &catalog(),
-                        &compiler
-                    )
-                    .is_ok()
-                );
-                assert!(compiler.calls.lock().unwrap().is_empty());
-            }
-
-            #[test]
-            fn runner_collector_channel_selected_compiled_cap_remains_bounded_after_valid_construction()
-             {
-                let mut policy = redacted();
-                policy["config"]["patterns"] = json!(["[a-z]{100}"]);
-                let fixture = CaptureFixture::new(policy);
-                let compiler = Compiler::default();
-                let policy = NativeCapturePolicy::from_launch_with_compiler(
-                    &fixture.spec,
-                    &[],
-                    &catalog(),
-                    &compiler,
-                )
-                .unwrap();
-                let limits = NativeCaptureLimits {
-                    max_compiled_regex_bytes: 128,
-                    ..NativeCaptureLimits::default()
-                };
-                assert!(native_capture_channel(&fixture.fixture.run, policy, limits).is_err());
-                assert_eq!(compiler.calls.lock().unwrap().len(), 1);
-            }
-        }
-
-        mod binding {
-            use crate::runtime::observation::native_capture::tests::*;
-            #[test]
-            fn capture_bind_checks_actual_native_digest_before_any_observation() {
-                let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                let (mut port, receiver) = fixture.channel(NativeCaptureLimits::default(), &[]);
-                let mut producer = fixture.producer_json.clone();
-                producer["native_executable"]["sha256"] = json!("0".repeat(64));
-                let path = fixture.path("wrong-native.json");
-                private_write(&path, &serde_json::to_vec(&producer).unwrap());
-                let producer =
-                    read_native_capture_producer(&path, &NativeCaptureLimits::default()).unwrap();
-                fixture.mark_prepared();
-                assert!(
-                    port.bind_prepared(
-                        &fixture.fixture.run,
-                        &fixture.placement,
-                        &fixture.spec,
-                        producer,
-                        &fixture.clock
-                    )
-                    .is_err()
-                );
-                assert!(receiver.finalized_identity().is_none());
-                assert!(receiver.request(fixture.request("unbound")).is_err());
-            }
-        }
-
-        mod recorded_policy {
-            use crate::coding_agent::ProfileCatalog;
-            use crate::runtime::observation::native_capture::tests::*;
-
-            fn select_catalog(fixture: &mut CaptureFixture, bundled: bool) -> ProfileCatalog {
-                if bundled {
-                    let selected = ProfileCatalog::bundled().capabilities(
-                        crate::coding_agent::CodingAgent::Codex,
-                        fixture.fixture.run.native_version.as_deref(),
-                    );
-                    fixture
-                        .fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_runs SET coverage=?1 WHERE run_id=?2",
-                            rusqlite::params![
-                                selected.detection.as_str(),
-                                fixture.fixture.run.run_id
-                            ],
-                        )
-                        .unwrap();
-                    fixture.fixture.run =
-                        storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
-                            .unwrap();
-                    ProfileCatalog::bundled().clone()
-                } else {
-                    catalog()
-                }
-            }
-
-            #[test]
-            fn runner_collector_actual_permission_options_match_the_recorded_emitted_policy_before_binding()
-             {
-                for mutation in [
-                    "approval",
-                    "missing_approval",
-                    "repeat_approval",
-                    "added_sandbox",
-                    "trailing_sandbox",
-                ] {
-                    let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    let (mut port, receiver) =
-                        fixture.channel_with(NativeCaptureLimits::default(), &[], &catalog());
-                    match mutation {
-                        "approval" => fixture.spec.argv[2] = "--full-auto".into(),
-                        "missing_approval" => {
-                            fixture.spec.argv.remove(2);
-                        }
-                        "repeat_approval" => fixture.spec.argv.push("--approve-for-me".into()),
-                        "added_sandbox" => fixture
-                            .spec
-                            .argv
-                            .splice(3..3, ["--sandbox".into(), "workspace-write".into()])
-                            .for_each(drop),
-                        "trailing_sandbox" => fixture
-                            .spec
-                            .argv
-                            .extend(["--sandbox".into(), "danger-full-access".into()]),
-                        _ => unreachable!(),
-                    }
-                    fixture.mark_prepared();
-                    assert!(
-                        port.bind_prepared(
-                            &fixture.fixture.run,
-                            &fixture.placement,
-                            &fixture.spec,
-                            fixture.producer(),
-                            &fixture.clock
-                        )
-                        .is_err(),
-                        "{mutation}"
-                    );
-                    assert!(receiver.finalized_identity().is_none());
-                    assert!(receiver.request(fixture.request("unbound-policy")).is_err());
-                    let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
-                        .unwrap();
-                    assert!(run.child_pid.is_none());
-                }
-            }
-
-            #[test]
-            fn runner_collector_flag_like_prompt_is_opaque_and_preserves_truthful_permission_source()
-             {
-                let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                *fixture.spec.argv.last_mut().unwrap() =
-                    "explain --ask-for-approval on-request and --sandbox read-only".into();
-                let (mut port, receiver) =
-                    fixture.channel_with(NativeCaptureLimits::default(), &[], &catalog());
-                fixture.prepare(&mut port);
-                fixture.finalize(&mut port);
-                let lease = fixture.pair(&mut port, &receiver, b"safe source control");
-                let result = value(&lease);
-                assert_eq!(
-                    result["source"]["permission_argv"],
-                    fixture.fixture.run.permission_argv_json
-                );
-                assert_eq!(result["source"]["producer"]["catalog_origin"], "synthetic");
-                assert!(
-                    !serde_json::to_string(&result)
-                        .unwrap()
-                        .contains("explain --ask-for-approval")
-                );
-            }
-
-            #[test]
-            fn runner_collector_producer_origin_matches_the_selected_catalog_constructor_after_clone()
-             {
-                for bundled in [false, true] {
-                    let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    let actual = select_catalog(&mut fixture, bundled);
-                    let selected = actual.clone();
-                    let (mut port, receiver) =
-                        fixture.channel_with(NativeCaptureLimits::default(), &[], &selected);
-                    fixture.producer_json["catalog_origin"] = json!(if bundled {
-                        "synthetic"
-                    } else {
-                        "bundled_unknown"
-                    });
-                    std::fs::write(
-                        &fixture.producer_path,
-                        serde_json::to_vec(&fixture.producer_json).unwrap(),
-                    )
-                    .unwrap();
-                    fixture.mark_prepared();
-                    assert!(
-                        port.bind_prepared(
-                            &fixture.fixture.run,
-                            &fixture.placement,
-                            &fixture.spec,
-                            fixture.producer(),
-                            &fixture.clock
-                        )
-                        .is_err(),
-                        "bundled={bundled}"
-                    );
-                    assert!(receiver.finalized_identity().is_none());
-                    assert!(receiver.request(fixture.request("unbound-origin")).is_err());
-                    assert!(fixture.fixture.run.child_pid.is_none());
-                }
-            }
-
-            #[test]
-            fn runner_collector_matching_synthetic_and_bundled_origins_publish_only_their_actual_provenance()
-             {
-                for bundled in [false, true] {
-                    let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    let selected = select_catalog(&mut fixture, bundled);
-                    let origin = if bundled {
-                        "bundled_unknown"
-                    } else {
-                        "synthetic"
-                    };
-                    fixture.producer_json["catalog_origin"] = json!(origin);
-                    std::fs::write(
-                        &fixture.producer_path,
-                        serde_json::to_vec(&fixture.producer_json).unwrap(),
-                    )
-                    .unwrap();
-                    let (mut port, receiver) =
-                        fixture.channel_with(NativeCaptureLimits::default(), &[], &selected);
-                    fixture.prepare(&mut port);
-                    fixture.finalize(&mut port);
-                    let lease = fixture.pair(&mut port, &receiver, b"safe matching origin");
-                    let result = value(&lease);
-                    assert_eq!(result["source"]["producer"]["catalog_origin"], origin);
-                    assert_eq!(
-                        result["source"]["native_version"],
-                        json!(fixture.fixture.run.native_version)
-                    );
-                    assert_eq!(
-                        result["source"]["permission_argv"],
-                        fixture.fixture.run.permission_argv_json
-                    );
-                }
-            }
-        }
 
         mod service_capture {
             use crate::runtime::observation::native_capture::tests::*;
@@ -4530,7 +3269,12 @@ pub(crate) mod native_capture {
         }
         pub(super) fn read_private(path: &Path, limit: usize) -> Result<Vec<u8>> {
             ensure(path.is_absolute(), "private file path must be absolute")?;
-            validate_private_file(path, nix::unistd::geteuid().as_raw(), 0o600)?;
+            crate::runtime::artifacts::private_metadata(
+                path,
+                nix::unistd::geteuid().as_raw(),
+                0o600,
+                false,
+            )?;
             let mut file = OpenOptions::new()
                 .read(true)
                 .custom_flags(nix::libc::O_NOFOLLOW)
@@ -4625,7 +3369,12 @@ pub(crate) mod native_capture {
                 &value.producer_manifest_path,
                 &value.capture_policy_path,
             ] {
-                validate_private_file(path, nix::unistd::geteuid().as_raw(), 0o600)?;
+                crate::runtime::artifacts::private_metadata(
+                    path,
+                    nix::unistd::geteuid().as_raw(),
+                    0o600,
+                    false,
+                )?;
                 ensure(
                     path.is_absolute(),
                     "absolute capture evidence path required",
@@ -4847,7 +3596,12 @@ pub(crate) mod native_capture {
                     Err(cause) => return Err(io_error(cause)),
                 };
                 self.used = true;
-                validate_private_file(&self.path, nix::unistd::geteuid().as_raw(), 0o600)?;
+                crate::runtime::artifacts::private_metadata(
+                    &self.path,
+                    nix::unistd::geteuid().as_raw(),
+                    0o600,
+                    false,
+                )?;
                 let claimed = self.path.with_extension("claimed");
                 std::fs::hard_link(&self.path, &claimed).map_err(io_error)?;
                 let owned = std::fs::symlink_metadata(&claimed).map_err(io_error)?;
@@ -4872,14 +3626,6 @@ pub(crate) mod native_capture {
         pub(crate) enum CapturePublicationStatus {
             Complete,
             Incomplete,
-        }
-        pub(crate) struct NativeCapturePublication {
-            pub(crate) artifact_path: PathBuf,
-            pub(crate) manifest_path: PathBuf,
-            pub(crate) artifact_sha256: String,
-            pub(crate) artifact_bytes: u64,
-            pub(crate) collection_status: NativeCaptureStatus,
-            pub(crate) publication_status: CapturePublicationStatus,
         }
         struct PublicationTemporary {
             path: PathBuf,
@@ -5012,21 +3758,6 @@ pub(crate) mod native_capture {
                 NativeCaptureExportBoundary::ArtifactPublish,
             )
         }
-        pub(crate) fn publish_native_capture(
-            directory: &Path,
-            lease: &NativeCaptureLease,
-            limits: &NativeCaptureLimits,
-            until: Instant,
-        ) -> Result<NativeCapturePublication> {
-            publish_native_capture_with_control(
-                directory,
-                lease,
-                limits,
-                until,
-                None,
-                &InertCaptureExportHooks,
-            )
-        }
         pub(super) fn publish_native_capture_with_control(
             directory: &Path,
             lease: &NativeCaptureLease,
@@ -5036,7 +3767,7 @@ pub(crate) mod native_capture {
                 &crate::runtime::observation::native_capture::exporter::CaptureExportControl,
             >,
             hooks: &dyn NativeCaptureExportHooks,
-        ) -> Result<NativeCapturePublication> {
+        ) -> Result<()> {
             check_deadline(Instant::now(), until)?;
             limits.validate()?;
             let directory_identity = private_directory(directory)?;
@@ -5107,519 +3838,7 @@ pub(crate) mod native_capture {
             if let Some(control) = control {
                 control.acknowledge()?;
             }
-            Ok(NativeCapturePublication {
-                artifact_path,
-                manifest_path,
-                artifact_sha256,
-                artifact_bytes,
-                collection_status: result.status,
-                publication_status,
-            })
-        }
-
-        mod tests {
-            use serde_json::Value;
-            use serde_json::json;
-
-            use crate::runtime::observation::native_capture::files::*;
-            use crate::runtime::observation::native_capture::test_support::*;
-            use std::os::unix::fs::PermissionsExt;
-            use std::os::unix::fs::symlink;
-            use std::time::Duration;
-            use std::time::Instant;
-
-            /// A database fixture in a private directory; arm files need no producer manifest.
-            fn private_fixture() -> crate::runtime::test_support::Fixture {
-                let fixture = crate::runtime::test_support::Fixture::new();
-                std::fs::set_permissions(
-                    fixture._dir.path(),
-                    std::fs::Permissions::from_mode(0o700),
-                )
-                .unwrap();
-                fixture
-            }
-
-            #[test]
-            fn capture_arm_validates_schema_identity_duration_and_safe_capture_id() {
-                let fixture = private_fixture();
-                let identity = ControlIdentity::from_run(&fixture.run);
-                let now = Instant::now();
-                let limits = NativeCaptureLimits::default();
-                let valid = arm(&identity);
-                let request = valid.to_request(&identity, now, &limits).unwrap();
-                assert_eq!(request.deadline, now + Duration::from_millis(1000));
-                assert_eq!(request.minimum_interval, Duration::from_millis(100));
-                for field in [
-                    "schema",
-                    "run",
-                    "epoch",
-                    "blank",
-                    "slash",
-                    "control",
-                    "length",
-                    "unicode",
-                    "interval_low",
-                    "interval_high",
-                    "equal_timeout",
-                    "long_timeout",
-                    "overflow",
-                ] {
-                    let mut invalid = arm(&identity);
-                    match field {
-                        "schema" => invalid.schema_version = 2,
-                        "run" => invalid.run_id += 1,
-                        "epoch" => invalid.owner_epoch += 1,
-                        "blank" => invalid.capture_id = "".into(),
-                        "slash" => invalid.capture_id = "a/b".into(),
-                        "control" => invalid.capture_id = "a\n".into(),
-                        "length" => invalid.capture_id = "a".repeat(129),
-                        "unicode" => invalid.capture_id = "世界".into(),
-                        "interval_low" => invalid.minimum_interval_ms = 99,
-                        "interval_high" => invalid.minimum_interval_ms = 5001,
-                        "equal_timeout" => invalid.timeout_ms = 100,
-                        "long_timeout" => invalid.timeout_ms = 30001,
-                        _ => invalid.timeout_ms = u64::MAX,
-                    }
-                    assert!(
-                        invalid.to_request(&identity, now, &limits).is_err(),
-                        "{field}"
-                    );
-                }
-                let mut value = serde_json::to_value(valid).unwrap();
-                value["native_input"] = json!("forbidden private key");
-                assert!(serde_json::from_value::<NativeCaptureArm>(value).is_err());
-            }
-
-            #[test]
-            fn capture_arm_reader_consumes_once_and_detects_replacement_after_claim() {
-                let fixture = private_fixture();
-                let identity = ControlIdentity::from_run(&fixture.run);
-                let path = fixture._dir.path().join("one-shot-arm.json");
-                let mut reader = NativeCaptureArmReader::new(
-                    &path,
-                    identity.clone(),
-                    NativeCaptureLimits::default(),
-                )
-                .unwrap();
-                assert!(reader.poll(Instant::now()).unwrap().is_none());
-                private_write(&path, &serde_json::to_vec(&arm(&identity)).unwrap());
-                let request = reader.poll(Instant::now()).unwrap().unwrap();
-                assert_eq!(request.capture_id, "review-pair");
-                if path.exists() {
-                    std::fs::remove_file(&path).unwrap();
-                }
-                private_write(&path, &serde_json::to_vec(&arm(&identity)).unwrap());
-                assert!(reader.poll(Instant::now()).is_err());
-            }
-
-            #[test]
-            fn capture_arm_reader_claims_malformed_or_oversized_input_without_accepting_repair() {
-                for bytes in [b"{\"schema_version\":".to_vec(), vec![b'x'; 16385]] {
-                    let fixture = private_fixture();
-                    let identity = ControlIdentity::from_run(&fixture.run);
-                    let path = fixture._dir.path().join("bad-arm.json");
-                    let mut reader = NativeCaptureArmReader::new(
-                        &path,
-                        identity.clone(),
-                        NativeCaptureLimits::default(),
-                    )
-                    .unwrap();
-                    private_write(&path, &bytes);
-                    assert!(reader.poll(Instant::now()).is_err());
-                    if path.exists() {
-                        std::fs::remove_file(&path).unwrap();
-                    }
-                    private_write(&path, &serde_json::to_vec(&arm(&identity)).unwrap());
-                    assert!(reader.poll(Instant::now()).is_err());
-                }
-            }
-
-            #[test]
-            fn capture_arm_reader_rejects_symlinks_public_modes_and_replaced_parent() {
-                for field in ["symlink", "mode", "parent"] {
-                    let fixture = private_fixture();
-                    let parent = fixture._dir.path().join("arm-parent");
-                    std::fs::create_dir(&parent).unwrap();
-                    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700))
-                        .unwrap();
-                    let identity = ControlIdentity::from_run(&fixture.run);
-                    let path = parent.join("arm.json");
-                    let mut reader = NativeCaptureArmReader::new(
-                        &path,
-                        identity.clone(),
-                        NativeCaptureLimits::default(),
-                    )
-                    .unwrap();
-                    match field {
-                        "symlink" => {
-                            let source = fixture._dir.path().join("source-arm.json");
-                            private_write(&source, &serde_json::to_vec(&arm(&identity)).unwrap());
-                            symlink(source, &path).unwrap();
-                        }
-                        "mode" => {
-                            private_write(&path, &serde_json::to_vec(&arm(&identity)).unwrap());
-                            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
-                                .unwrap();
-                        }
-                        _ => {
-                            std::fs::rename(&parent, fixture._dir.path().join("old-parent"))
-                                .unwrap();
-                            std::fs::create_dir(&parent).unwrap();
-                            std::fs::set_permissions(
-                                &parent,
-                                std::fs::Permissions::from_mode(0o700),
-                            )
-                            .unwrap();
-                            private_write(&path, &serde_json::to_vec(&arm(&identity)).unwrap());
-                        }
-                    }
-                    assert!(reader.poll(Instant::now()).is_err(), "{field}");
-                }
-            }
-
-            #[test]
-            fn capture_config_requires_private_bounded_exact_files_and_existing_evidence() {
-                let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                let config = config(&fixture);
-                for field in [
-                    "valid",
-                    "unknown",
-                    "run",
-                    "nonce",
-                    "relative",
-                    "missing_evidence",
-                    "public",
-                    "symlink",
-                    "oversized",
-                ] {
-                    let path = fixture.path(format!("config-{field}.json"));
-                    let mut value = serde_json::to_value(&config).unwrap();
-                    match field {
-                        "unknown" => value["raw_screen"] = json!("private"),
-                        "run" => value["expected_run_id"] = json!(0),
-                        "nonce" => value["expected_launch_nonce"] = json!("A".repeat(64)),
-                        "relative" => value["descriptor_path"] = json!("relative.json"),
-                        "missing_evidence" => {
-                            value["producer_manifest_path"] = json!(fixture.path("absent.json"))
-                        }
-                        _ => {}
-                    }
-                    let bytes = if field == "oversized" {
-                        vec![b' '; 65537]
-                    } else {
-                        serde_json::to_vec(&value).unwrap()
-                    };
-                    private_write(&path, &bytes);
-                    if field == "public" {
-                        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
-                            .unwrap();
-                    }
-                    let selected = if field == "symlink" {
-                        let link = fixture.path("config-link.json");
-                        symlink(&path, &link).unwrap();
-                        link
-                    } else {
-                        path
-                    };
-                    let result =
-                        read_native_capture_config(&selected, &NativeCaptureLimits::default());
-                    assert_eq!(result.is_ok(), field == "valid", "{field}");
-                }
-            }
-
-            #[test]
-            fn capture_producer_binds_actual_libtest_and_rejects_fabricated_build_evidence() {
-                let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                for field in [
-                    "valid",
-                    "unknown",
-                    "libtest_hash",
-                    "libtest_path",
-                    "native_hash",
-                    "parser",
-                    "collector",
-                    "reference",
-                    "oversized",
-                ] {
-                    let mut value = fixture.producer_json.clone();
-                    match field {
-                        "unknown" => value["private_argv"] = json!([]),
-                        "libtest_hash" => {
-                            value["libtest_executable_sha256"] = json!("0".repeat(64))
-                        }
-                        "libtest_path" => value["libtest_executable_path"] = json!("relative"),
-                        "native_hash" => value["native_executable"]["sha256"] = json!("INVALID"),
-                        "parser" => value["parser_version"] = json!("0.0.0"),
-                        "collector" => value["collector_version"] = json!("unknown"),
-                        "reference" => value["environment_evidence_ref"] = json!("\n"),
-                        _ => {}
-                    }
-                    let path = fixture.path(format!("producer-{field}.json"));
-                    private_write(
-                        &path,
-                        &if field == "oversized" {
-                            vec![b' '; 65537]
-                        } else {
-                            serde_json::to_vec(&value).unwrap()
-                        },
-                    );
-                    assert_eq!(
-                        read_native_capture_producer(&path, &NativeCaptureLimits::default())
-                            .is_ok(),
-                        field == "valid",
-                        "{field}"
-                    );
-                }
-            }
-            #[test]
-            fn capture_publication_accepts_only_the_final_manifest_and_matching_complete_artifact()
-            {
-                let mut fixture = CaptureFixture::new(redacted());
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                let lease = fixture.pair(&mut port, &receiver, b"safe fixture");
-                let output = fixture.path("publication");
-                std::fs::create_dir(&output).unwrap();
-                std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o700)).unwrap();
-                let publication = publish_native_capture(
-                    &output,
-                    &lease,
-                    &NativeCaptureLimits::default(),
-                    Instant::now() + Duration::from_secs(2),
-                )
-                .unwrap();
-                assert_eq!(
-                    publication.publication_status,
-                    CapturePublicationStatus::Complete
-                );
-                assert_eq!(publication.collection_status, NativeCaptureStatus::Complete);
-                assert!(publication.artifact_path.ends_with("pair.complete.json"));
-                assert!(publication.manifest_path.ends_with("pair.manifest.json"));
-                let artifact = std::fs::read(&publication.artifact_path).unwrap();
-                assert_eq!(
-                    publication.artifact_sha256,
-                    digest(&publication.artifact_path)
-                );
-                assert_eq!(publication.artifact_bytes, artifact.len() as u64);
-                assert_eq!(
-                    serde_json::from_slice::<Value>(&artifact).unwrap(),
-                    value(&lease)
-                );
-                let manifest: Value =
-                    serde_json::from_slice(&std::fs::read(&publication.manifest_path).unwrap())
-                        .unwrap();
-                assert_keys(
-                    &manifest,
-                    &[
-                        "schema_version",
-                        "capture_id",
-                        "artifact_ref",
-                        "artifact_sha256",
-                        "artifact_bytes",
-                        "collection_status",
-                        "publication_status",
-                        "producer_ref",
-                        "diagnostic",
-                    ],
-                );
-                assert_eq!(manifest["artifact_sha256"], publication.artifact_sha256);
-                assert_eq!(manifest["artifact_bytes"], publication.artifact_bytes);
-                assert_eq!(manifest["collection_status"], "complete");
-                assert_eq!(manifest["publication_status"], "complete");
-                for path in [&publication.artifact_path, &publication.manifest_path] {
-                    assert_eq!(
-                        std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
-                        0o600
-                    );
-                }
-                assert!(receiver.request(fixture.request("while-exported")).is_err());
-            }
-
-            #[test]
-            fn capture_publication_collision_and_expiry_preserve_existing_output_without_success() {
-                for collision in ["artifact", "manifest", "expired"] {
-                    let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                    let lease = fixture.pair(&mut port, &receiver, b"private");
-                    let directory = fixture.fixture._dir.path();
-                    let existing = directory.join(if collision == "artifact" {
-                        "pair.complete.json"
-                    } else {
-                        "pair.manifest.json"
-                    });
-                    if collision != "expired" {
-                        private_write(&existing, b"owned prior output");
-                    }
-                    let until = if collision == "expired" {
-                        Instant::now() - Duration::from_millis(1)
-                    } else {
-                        Instant::now() + Duration::from_secs(2)
-                    };
-                    assert!(
-                        publish_native_capture(
-                            directory,
-                            &lease,
-                            &NativeCaptureLimits::default(),
-                            until
-                        )
-                        .is_err()
-                    );
-                    if collision != "expired" {
-                        assert_eq!(std::fs::read(&existing).unwrap(), b"owned prior output");
-                    }
-                    if collision != "manifest" {
-                        assert!(!directory.join("pair.manifest.json").exists());
-                    }
-                }
-            }
-
-            #[test]
-            fn capture_incomplete_publication_keeps_terminal_reason_and_incomplete_filename() {
-                let mut fixture = CaptureFixture::new(redacted());
-                let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
-                receiver.request(fixture.request("cancelled-pair")).unwrap();
-                port.cancel(NativeCaptureStatus::OwnerExit).unwrap();
-                let lease = receiver.try_take().unwrap().unwrap();
-                let publication = publish_native_capture(
-                    fixture.fixture._dir.path(),
-                    &lease,
-                    &NativeCaptureLimits::default(),
-                    Instant::now() + Duration::from_secs(2),
-                )
-                .unwrap();
-                assert_eq!(
-                    publication.collection_status,
-                    NativeCaptureStatus::OwnerExit
-                );
-                assert_eq!(
-                    publication.publication_status,
-                    CapturePublicationStatus::Incomplete
-                );
-                assert!(
-                    publication
-                        .artifact_path
-                        .ends_with("cancelled-pair.incomplete.json")
-                );
-                assert!(!fixture.path("cancelled-pair.complete.json").exists());
-            }
-
-            mod duplicate_fields {
-                use crate::runtime::observation::native_capture::files::tests::*;
-                fn duplicate_object(
-                    object: &serde_json::Map<String, Value>,
-                    key: &str,
-                    first: &Value,
-                    last: &Value,
-                ) -> String {
-                    assert!(object.contains_key(key));
-                    let mut fields: Vec<String> = object
-                        .iter()
-                        .filter(|(name, _)| name.as_str() != key)
-                        .map(|(name, value)| {
-                            format!(
-                                "{}:{}",
-                                serde_json::to_string(name).unwrap(),
-                                serde_json::to_string(value).unwrap()
-                            )
-                        })
-                        .collect();
-                    let name = serde_json::to_string(key).unwrap();
-                    fields.push(format!("{name}:{}", serde_json::to_string(first).unwrap()));
-                    fields.push(format!("{name}:{}", serde_json::to_string(last).unwrap()));
-                    format!("{{{}}}", fields.join(","))
-                }
-                fn with_native_document(producer: &Value, native: &str) -> String {
-                    let fields: Vec<String> = producer
-                        .as_object()
-                        .unwrap()
-                        .iter()
-                        .map(|(name, value)| {
-                            let value = if name == "native_executable" {
-                                native.to_owned()
-                            } else {
-                                serde_json::to_string(value).unwrap()
-                            };
-                            format!("{}:{value}", serde_json::to_string(name).unwrap())
-                        })
-                        .collect();
-                    format!("{{{}}}", fields.join(","))
-                }
-                fn assert_duplicate_fields_rejected(nested: bool) {
-                    let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    assert!(
-                        read_native_capture_producer(
-                            &fixture.producer_path,
-                            &NativeCaptureLimits::default()
-                        )
-                        .is_ok()
-                    );
-                    let object = if nested {
-                        &fixture.producer_json["native_executable"]
-                    } else {
-                        &fixture.producer_json
-                    };
-                    for (key, valid) in object.as_object().unwrap() {
-                        for invalid_last in [true, false] {
-                            let invalid = valid.clone();
-                            let (first, last) = if invalid_last {
-                                (valid, &invalid)
-                            } else {
-                                (&invalid, valid)
-                            };
-                            let duplicate =
-                                duplicate_object(object.as_object().unwrap(), key, first, last);
-                            let bytes = if nested {
-                                with_native_document(&fixture.producer_json, &duplicate)
-                            } else {
-                                duplicate
-                            };
-                            let path = fixture.path(format!("duplicate-{key}-{invalid_last}.json"));
-                            private_write(&path, bytes.as_bytes());
-                            assert!(
-                                read_native_capture_producer(
-                                    &path,
-                                    &NativeCaptureLimits::default()
-                                )
-                                .is_err(),
-                                "nested={nested}, field={key}, invalid_last={invalid_last}"
-                            );
-                        }
-                    }
-                }
-
-                #[test]
-                fn runner_collector_top_level_identical_duplicate_fields_fail_before_normalization()
-                {
-                    for nested in [false, true] {
-                        assert_duplicate_fields_rejected(nested);
-                    }
-                }
-                #[test]
-                fn runner_collector_nullable_native_version_requires_presence_and_accepts_explicit_null()
-                 {
-                    let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    fixture.producer_json["native_executable"]["version"] = Value::Null;
-                    let null = fixture.path("null-version.json");
-                    private_write(&null, &serde_json::to_vec(&fixture.producer_json).unwrap());
-                    assert!(
-                        read_native_capture_producer(&null, &NativeCaptureLimits::default())
-                            .is_ok()
-                    );
-                    fixture.producer_json["native_executable"]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("version")
-                        .unwrap();
-                    let missing = fixture.path("missing-version.json");
-                    private_write(
-                        &missing,
-                        &serde_json::to_vec(&fixture.producer_json).unwrap(),
-                    );
-                    assert!(
-                        read_native_capture_producer(&missing, &NativeCaptureLimits::default())
-                            .is_err()
-                    );
-                }
-            }
+            Ok(())
         }
     }
 
@@ -7634,7 +5853,7 @@ pub(crate) mod native_capture {
                 "owned native generation changed",
             )?;
             let placement = crate::broker::get_member(conn, current.member_id, current.fleet_id)?
-                .and_then(|member| member.placement)
+                .map(|member| member.placement)
                 .ok_or_else(|| error("owned placement unavailable"))?;
             ensure(placement == launched.placement, "owned placement changed")?;
             Ok(current)
@@ -7908,6 +6127,16 @@ pub(crate) mod native_capture {
             }
             fn close_pane(&mut self, pane: &str, until: Instant) -> Result<()> {
                 self.inner.close_pane(pane, until.min(self.case_until))
+            }
+            fn settle_hermes(
+                &mut self,
+                conn: &Connection,
+                run: &storage::RunRecord,
+                pane_id: &str,
+                until: Instant,
+            ) -> Result<()> {
+                self.inner
+                    .settle_hermes(conn, run, pane_id, until.min(self.case_until))
             }
         }
 
@@ -8799,10 +7028,11 @@ pub(crate) mod native_capture {
                     "private owned case directory required",
                 )?;
             }
-            validate_private_file(
+            crate::runtime::artifacts::private_metadata(
                 Path::new(crate::db::database_path(&case.database_url)?),
                 nix::unistd::geteuid().as_raw(),
                 0o600,
+                false,
             )?;
             let sample = RealInputDeadlineClock.sample()?;
             let remaining = case
@@ -8941,7 +7171,7 @@ pub(crate) mod native_capture {
                 crate::db::initialize(conn)?;
                 let fleet = crate::broker::fleets::create_fleet(
                     conn,
-                    Some(format!("native-{}", approved.id).as_str()),
+                    format!("native-{}", approved.id).as_str(),
                     &crate::broker::NewPlacement {
                         backend: "tmux".into(),
                         mux_session: context.session.clone(),
@@ -9152,766 +7382,6 @@ pub(crate) mod native_capture {
 
             use crate::runtime::observation::native_capture::verification::*;
             use crate::runtime::service::test_support::*;
-
-            mod driver {
-                use crate::runtime::observation::native_capture::verification::*;
-                use serde_json::Value;
-                use serde_json::json;
-                use std::collections::BTreeMap;
-                use std::collections::BTreeSet;
-                use std::path::Path;
-
-                fn configured(
-                    id: &'static str,
-                    permission_mode: &'static str,
-                    config: ClaudeConfigCase,
-                ) -> ApprovedCase {
-                    ApprovedCase::claude(id, permission_mode, config, "guard.db", "guard")
-                }
-                fn refused<T>(result: Result<T>) -> String {
-                    match result {
-                        Ok(_) => panic!("the driver accepted a refused input"),
-                        Err(cause) => cause.message().to_string(),
-                    }
-                }
-                fn paths(list: &[&[&str]]) -> BTreeSet<Vec<String>> {
-                    list.iter()
-                        .map(|path| path.iter().map(|key| (*key).to_owned()).collect())
-                        .collect()
-                }
-
-                #[test]
-                fn every_reviewed_case_passes_the_driver_guards_with_isolated_resources() {
-                    let mut ids = BTreeSet::new();
-                    let mut databases = BTreeSet::new();
-                    let mut sockets = BTreeSet::new();
-                    for approved in &APPROVED_CASES {
-                        if let Err(cause) = approved.validate() {
-                            panic!("{}: {}", approved.id, cause.message());
-                        }
-                        assert!(ids.insert(approved.id), "{}", approved.id);
-                        assert!(databases.insert(approved.database), "{}", approved.id);
-                        assert!(sockets.insert(approved.socket), "{}", approved.id);
-                    }
-                }
-
-                #[test]
-                fn auto_file_tool_stages_refuse_persistent_choices_enter_and_tab() {
-                    let base = || configured("guard-auto", "auto", DRIVER_SEEDED).file(DRIVER_READ);
-                    for stages in [&["33"][..], &["34"]] {
-                        base()
-                            .answer("deny", stages, "claude-read-outside-cells-001")
-                            .validate()
-                            .unwrap();
-                    }
-                    for stages in [&["31"][..], &["32"], &["0d"], &["0a"], &["09"], &["3431"]] {
-                        assert_eq!(
-                            refused(
-                                base()
-                                    .answer("allow", stages, "claude-read-outside-cells-001")
-                                    .validate()
-                            ),
-                            "a file-tool case stage selects a persistent choice, Enter or Tab",
-                            "{stages:?}"
-                        );
-                    }
-                }
-
-                #[test]
-                fn default_file_tool_stages_send_only_the_single_request_digits() {
-                    let base =
-                        || configured("guard-default", "default", DRIVER_SEEDED).file(DRIVER_READ);
-                    for (decision, stages) in [("allow", &["31"][..]), ("deny", &["33"])] {
-                        base()
-                            .answer(decision, stages, "claude-read-file-cells-001")
-                            .validate()
-                            .unwrap();
-                    }
-                    for stages in [&["32"][..], &["34"], &["0d"], &["31", "0d"], &["3133"]] {
-                        assert_eq!(
-                            refused(
-                                base()
-                                    .answer("allow", stages, "claude-read-file-cells-001")
-                                    .validate()
-                            ),
-                            "a default-mode file-tool case may send only 31 or 33",
-                            "{stages:?}"
-                        );
-                    }
-                    assert_eq!(
-                        refused(
-                            configured("guard-plan", "plan", DRIVER_SEEDED)
-                                .file(DRIVER_READ)
-                                .validate()
-                        ),
-                        "a file-tool case runs in auto or default mode"
-                    );
-                }
-
-                #[test]
-                fn nudge_cases_send_exactly_their_dismissal_stages_and_never_escape() {
-                    let decline = || {
-                        configured("guard-decline", "auto", DRIVER_AUTO_DEFAULT_SETTINGS).choice(
-                            NudgeChoice::AutoDefaultDecline,
-                            "claude-auto-default-cells-001",
-                        )
-                    };
-                    let decline_case = decline();
-                    decline_case.validate().unwrap();
-                    assert_eq!(decline_case.stage_hex, ["0e", "0d"]);
-                    for (choice, stages) in [
-                        (NudgeChoice::EnvSetupNotNow, ["32"]),
-                        (NudgeChoice::EnvSetupDontShowAgain, ["33"]),
-                    ] {
-                        let offer = configured("guard-offer", "auto", DRIVER_ENV_SETUP_GLOBAL)
-                            .choice(choice, "claude-auto-env-setup-cells-001");
-                        offer.validate().unwrap();
-                        assert_eq!(offer.stage_hex, stages);
-                    }
-                    for stages in [&["0d"][..], &["0e", "0e", "0d"], &["31"], &["0e"]] {
-                        let mut tampered = decline();
-                        tampered.stage_hex = stages;
-                        assert_eq!(
-                            refused(tampered.validate()),
-                            "a nudge case sends exactly its dismissal stages",
-                            "{stages:?}"
-                        );
-                    }
-                    let mut yes = configured("guard-offer", "auto", DRIVER_ENV_SETUP_GLOBAL)
-                        .choice(
-                            NudgeChoice::EnvSetupNotNow,
-                            "claude-auto-env-setup-cells-001",
-                        );
-                    yes.stage_hex = &["31"];
-                    assert_eq!(
-                        refused(yes.validate()),
-                        "a nudge case sends exactly its dismissal stages"
-                    );
-                    for stages in [&["1b"][..], &["0e", "1b5b42"]] {
-                        let mut escape = decline();
-                        escape.stage_hex = stages;
-                        assert_eq!(
-                            refused(escape.validate()),
-                            "reviewed case stages differ from its driver mode or contain Escape",
-                            "{stages:?}"
-                        );
-                    }
-                }
-
-                #[test]
-                fn configured_answer_cases_name_a_matching_no_answer_baseline() {
-                    let mut missing = configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS)
-                        .bash("allow")
-                        .answer("allow", &["31"], "claude-bash-no-tip-cells-001");
-                    missing.validate().unwrap();
-                    missing.baseline = None;
-                    assert_eq!(
-                        refused(missing.validate()),
-                        "exactly every configured answer case names its baseline"
-                    );
-                    let mut stray =
-                        configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS).bash("allow");
-                    stray.baseline = Some("claude-bash-no-tip-cells-001");
-                    assert_eq!(
-                        refused(stray.validate()),
-                        "exactly every configured answer case names its baseline"
-                    );
-                    for baseline in [
-                        "claude-bash-no-tip-allow-001",
-                        "claude-read-file-cells-001",
-                        "claude-panel-auto-tip-cells-001",
-                    ] {
-                        assert_eq!(
-                            refused(
-                                configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS)
-                                    .bash("allow")
-                                    .answer("allow", &["31"], baseline)
-                                    .validate()
-                            ),
-                            "a baseline is a no-answer case with the same configuration and mode",
-                            "{baseline}"
-                        );
-                    }
-                    assert_eq!(
-                        refused(
-                            configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS)
-                                .bash("allow")
-                                .answer("allow", &["31"], "unreviewed-baseline")
-                                .validate()
-                        ),
-                        "a baseline names an unreviewed case"
-                    );
-                }
-
-                #[test]
-                fn fresh_onboarding_cases_answer_nothing() {
-                    configured(
-                        "guard-fresh",
-                        "default",
-                        ClaudeConfigCase::Fresh { settings: "{}" },
-                    )
-                    .bash("allow")
-                    .validate()
-                    .unwrap();
-                    let mut answered = configured(
-                        "guard-fresh",
-                        "auto",
-                        ClaudeConfigCase::Fresh {
-                            settings: r#"{"permissions":{"defaultMode":"default"}}"#,
-                        },
-                    )
-                    .choice(
-                        NudgeChoice::AutoDefaultDecline,
-                        "claude-primary-auto-default-cells-001",
-                    );
-                    assert_eq!(
-                        refused(answered.validate()),
-                        "a fresh onboarding case answers nothing"
-                    );
-                    answered.baseline = None;
-                    assert_eq!(
-                        refused(answered.validate()),
-                        "a fresh onboarding case answers nothing"
-                    );
-                }
-
-                #[test]
-                fn sidebar_cases_run_the_bash_probe_at_a_sidebar_size() {
-                    for size in [DRIVER_PANEL_SIZE, DRIVER_PANEL_MIN_SIZE] {
-                        configured("guard-panel", "default", DRIVER_PANEL_SETTINGS)
-                            .bash("allow")
-                            .panel(size)
-                            .validate()
-                            .unwrap();
-                    }
-                    for case in [
-                        configured("guard-panel", "default", DRIVER_PANEL_SETTINGS)
-                            .bash("allow")
-                            .panel(DRIVER_FULL_SIZE),
-                        configured("guard-panel", "default", DRIVER_PANEL_SETTINGS)
-                            .panel(DRIVER_PANEL_SIZE),
-                    ] {
-                        assert_eq!(
-                            refused(case.validate()),
-                            "a sidebar case runs the Bash probe at a sidebar size"
-                        );
-                    }
-                }
-
-                #[test]
-                fn settings_overlays_hold_only_tui_and_permissions() {
-                    configured(
-                        "guard-settings",
-                        "auto",
-                        ClaudeConfigCase::Seeded {
-                            settings: r#"{"tui":"fullscreen","permissions":{"defaultMode":"default"}}"#,
-                            global: r#"{"numStartups":5}"#,
-                        },
-                    )
-                    .validate()
-                    .unwrap();
-                    for settings in [r#"{"theme":"dark"}"#, r#"{"permissions":{},"model":"x"}"#] {
-                        assert_eq!(
-                            refused(
-                                configured(
-                                    "guard-settings",
-                                    "auto",
-                                    ClaudeConfigCase::Seeded {
-                                        settings,
-                                        global: "{}"
-                                    },
-                                )
-                                .validate()
-                            ),
-                            "a settings overlay may hold only tui and permissions",
-                            "{settings}"
-                        );
-                    }
-                    assert_eq!(
-                        refused(
-                            configured(
-                                "guard-settings",
-                                "auto",
-                                ClaudeConfigCase::Fresh {
-                                    settings: r#"{"theme":"dark"}"#
-                                },
-                            )
-                            .validate()
-                        ),
-                        "a settings overlay may hold only tui and permissions"
-                    );
-                }
-
-                #[test]
-                fn overlay_placeholders_expand_to_the_absolute_case_directories() {
-                    let overlay = driver_overlay(
-                        r#"{"permissions":{"allow":["Read(/{outside}/**)","Edit(/{cwd}/panel-probe.txt)"],"defaultMode":"default"},"numStartups":5}"#,
-                        Path::new("/tmp/cafleet-194/case"),
-                        Some(Path::new("/tmp/cafleet-194/case-outside")),
-                    )
-                    .unwrap();
-                    assert_eq!(
-                        Value::Object(overlay),
-                        json!({"permissions":{"allow":["Read(//tmp/cafleet-194/case-outside/**)","Edit(//tmp/cafleet-194/case/panel-probe.txt)"],"defaultMode":"default"},"numStartups":5})
-                    );
-                    assert_eq!(
-                        refused(driver_overlay(
-                            r#"{"permissions":{"allow":["Read(/{outside}/**)"]}}"#,
-                            Path::new("/tmp/cafleet-194/case"),
-                            None,
-                        )),
-                        "an overlay names {outside} without a file probe"
-                    );
-                    for overlay in ["[]", r#""{cwd}""#, "5"] {
-                        assert_eq!(
-                            refused(driver_overlay(
-                                overlay,
-                                Path::new("/tmp/cafleet-194/case"),
-                                None
-                            )),
-                            "a configuration overlay is a JSON object",
-                            "{overlay}"
-                        );
-                    }
-                }
-
-                fn seed() -> DriverSeed {
-                    driver_validated_seed(
-                        br#"{"claudeAiOauth":{"accessToken":"t"}}"#.to_vec(),
-                        br#"{"numStartups":2,"hasCompletedOnboarding":true,"projects":{"/tmp/other":{"allowedTools":[]}}}"#,
-                        br#"{"theme":"dark"}"#,
-                        false,
-                    )
-                    .unwrap()
-                }
-                fn decoded(files: Vec<(&'static str, Vec<u8>)>) -> Vec<(&'static str, Value)> {
-                    files
-                        .into_iter()
-                        .map(|(name, bytes)| (name, serde_json::from_slice(&bytes).unwrap()))
-                        .collect()
-                }
-
-                #[test]
-                fn seeded_configuration_trusts_the_cwd_and_replaces_overlay_top_level_keys() {
-                    let files = driver_claude_files(
-                        ClaudeConfigCase::Seeded {
-                            settings: r#"{"permissions":{"allow":["Read(/{outside}/**)"]}}"#,
-                            global: r#"{"numStartups":5,"autoModeEnvSetup":{"denials":5}}"#,
-                        },
-                        seed(),
-                        Path::new("/tmp/cafleet-194/case"),
-                        Some(Path::new("/tmp/cafleet-194/case-outside")),
-                    )
-                    .unwrap();
-                    assert_eq!(
-                        decoded(files),
-                        [
-                            (
-                                ".credentials.json",
-                                json!({"claudeAiOauth":{"accessToken":"t"}})
-                            ),
-                            (
-                                ".claude.json",
-                                json!({"numStartups":5,"hasCompletedOnboarding":true,
-                                    "projects":{"/tmp/other":{"allowedTools":[]},
-                                        "/tmp/cafleet-194/case":{"hasTrustDialogAccepted":true}},
-                                    "autoModeEnvSetup":{"denials":5}})
-                            ),
-                            (
-                                "settings.json",
-                                json!({"theme":"dark","permissions":{"allow":["Read(//tmp/cafleet-194/case-outside/**)"]}})
-                            ),
-                        ]
-                    );
-                    assert_eq!(
-                        refused(driver_claude_files(
-                            DRIVER_SEEDED,
-                            seed(),
-                            Path::new("/tmp/other"),
-                            None
-                        )),
-                        "the seed already names the case cwd"
-                    );
-                }
-
-                #[test]
-                fn fresh_configuration_copies_only_the_credentials_and_its_settings_overlay() {
-                    let files = driver_claude_files(
-                        ClaudeConfigCase::Fresh {
-                            settings: r#"{"permissions":{"defaultMode":"default"}}"#,
-                        },
-                        seed(),
-                        Path::new("/tmp/cafleet-194/case"),
-                        None,
-                    )
-                    .unwrap();
-                    assert_eq!(
-                        decoded(files),
-                        [
-                            (
-                                ".credentials.json",
-                                json!({"claudeAiOauth":{"accessToken":"t"}})
-                            ),
-                            (
-                                "settings.json",
-                                json!({"permissions":{"defaultMode":"default"}})
-                            ),
-                        ]
-                    );
-                    let empty = driver_claude_files(
-                        ClaudeConfigCase::Fresh { settings: "{}" },
-                        seed(),
-                        Path::new("/tmp/cafleet-194/case"),
-                        None,
-                    )
-                    .unwrap();
-                    assert_eq!(decoded(empty)[1], ("settings.json", json!({})));
-                }
-
-                #[test]
-                fn the_seed_must_be_theme_only_without_local_settings_or_nudge_state() {
-                    let credentials = || b"{}".to_vec();
-                    assert_eq!(
-                        refused(driver_validated_seed(
-                            credentials(),
-                            b"{}",
-                            br#"{"theme":"dark"}"#,
-                            true
-                        )),
-                        "the Claude seed configuration must hold no local settings file"
-                    );
-                    for settings in [
-                        &br#"{}"#[..],
-                        br#"{"theme":"dark","permissions":{}}"#,
-                        br#"{"theme":1}"#,
-                        br#"["theme"]"#,
-                    ] {
-                        assert_eq!(
-                            refused(driver_validated_seed(credentials(), b"{}", settings, false)),
-                            "the seed settings.json must be exactly a theme-only object"
-                        );
-                    }
-                    for global in [
-                        &br#"{"hasSeenAutoDefaultNudge":true}"#[..],
-                        br#"{"autoModeEnvSetup":{"denials":1}}"#,
-                    ] {
-                        assert_eq!(
-                            refused(driver_validated_seed(
-                                credentials(),
-                                global,
-                                br#"{"theme":"dark"}"#,
-                                false
-                            )),
-                            "the seed .claude.json must hold no auto-mode nudge state"
-                        );
-                    }
-                    assert_eq!(
-                        refused(driver_validated_seed(
-                            credentials(),
-                            b"[]",
-                            br#"{"theme":"dark"}"#,
-                            false
-                        )),
-                        "seed .claude.json must be an object"
-                    );
-                }
-
-                #[test]
-                fn launch_policy_omits_the_backend_default_and_resolves_every_configured_case() {
-                    assert_eq!(
-                        configured("guard-mode", "auto", DRIVER_SEEDED).requested_mode(),
-                        None
-                    );
-                    assert_eq!(
-                        configured("guard-mode", "default", DRIVER_SEEDED).requested_mode(),
-                        Some("default")
-                    );
-                    for approved in APPROVED_CASES
-                        .iter()
-                        .filter(|approved| approved.claude_config.is_some())
-                    {
-                        let policy = approved
-                            .backend
-                            .resolve_policy(approved.requested_mode())
-                            .unwrap();
-                        assert_eq!(
-                            policy.resolved_mode(),
-                            approved.permission_mode,
-                            "{}",
-                            approved.id
-                        );
-                    }
-                    for approved in APPROVED_CASES.iter().filter(|approved| {
-                        matches!(approved.backend, CodingAgent::Opencode | CodingAgent::Pi)
-                    }) {
-                        assert_eq!(approved.requested_mode(), None, "{}", approved.id);
-                        assert_eq!(
-                            approved
-                                .backend
-                                .resolve_policy(None)
-                                .unwrap()
-                                .resolved_mode(),
-                            approved.permission_mode,
-                            "{}",
-                            approved.id
-                        );
-                    }
-                }
-
-                #[test]
-                fn every_configured_case_owns_a_private_claude_configuration_directory() {
-                    for approved in &APPROVED_CASES {
-                        let expected = approved.claude_config.map(|_| {
-                            (
-                                "CLAUDE_CONFIG_DIR".to_owned(),
-                                Path::new(DRIVER_PRIVATE_ROOT)
-                                    .join(format!("{}-claude", approved.id))
-                                    .to_string_lossy()
-                                    .into_owned(),
-                            )
-                        });
-                        let environment = approved.child_environment();
-                        assert_eq!(
-                            environment
-                                .iter()
-                                .find(|(name, _)| name == "CLAUDE_CONFIG_DIR")
-                                .cloned(),
-                            expected,
-                            "{}",
-                            approved.id
-                        );
-                    }
-                }
-
-                #[test]
-                fn batched_cases_issue_two_read_or_two_bash_calls_in_default_mode() {
-                    configured("guard-batched", "default", DRIVER_SEEDED)
-                        .file(DRIVER_READ)
-                        .batched()
-                        .answer("deny", &["33"], "claude-read-file-cells-001")
-                        .validate()
-                        .unwrap();
-                    configured("guard-batched", "default", DRIVER_SEEDED)
-                        .bash("allow")
-                        .batched()
-                        .validate()
-                        .unwrap();
-                    for case in [
-                        configured("guard-batched", "auto", DRIVER_SEEDED)
-                            .file(DRIVER_READ)
-                            .batched(),
-                        configured("guard-batched", "default", DRIVER_SEEDED)
-                            .file(FileProbe::Edit)
-                            .batched(),
-                        configured("guard-batched", "default", DRIVER_SEEDED)
-                            .file(FileProbe::BashTouch)
-                            .batched(),
-                        configured("guard-batched", "default", DRIVER_SEEDED).batched(),
-                        configured("guard-batched", "default", DRIVER_PANEL_SETTINGS)
-                            .bash("allow")
-                            .panel(DRIVER_PANEL_SIZE)
-                            .batched(),
-                        ApprovedCase::opencode_survey("guard-batched", "guard.db", "guard", 120)
-                            .batched(),
-                    ] {
-                        assert_eq!(
-                            refused(case.validate()),
-                            "a batched case issues two Read or two Bash probe calls in a configured default-mode case"
-                        );
-                    }
-                }
-
-                #[test]
-                fn configuration_changes_mask_the_case_directories_and_name_new_files() {
-                    let before = BTreeMap::from([(
-                        ".claude.json".to_owned(),
-                        json!({"numStartups":5,"projects":{"/tmp/cafleet-194/case":{"hasTrustDialogAccepted":true}}}),
-                    )]);
-                    let after = BTreeMap::from([
-                        (
-                            ".claude.json".to_owned(),
-                            json!({"numStartups":6,"projects":{
-                                "/tmp/cafleet-194/case":{"hasTrustDialogAccepted":true,"lastCost":1},
-                                "/tmp/cafleet-194/case-outside":{"seen":true}}}),
-                        ),
-                        ("settings.json".to_owned(), json!({"theme":"dark"})),
-                    ]);
-                    assert_eq!(
-                        driver_changed_configuration(
-                            &before,
-                            &after,
-                            Path::new("/tmp/cafleet-194/case"),
-                            Some(Path::new("/tmp/cafleet-194/case-outside")),
-                        ),
-                        paths(&[
-                            &[".claude.json", "numStartups"],
-                            &[".claude.json", "projects", "<cwd>", "lastCost"],
-                            &[".claude.json", "projects", "<outside>"],
-                            &["settings.json"],
-                        ])
-                    );
-                }
-
-                #[test]
-                fn a_choice_answer_changes_exactly_the_baseline_paths_and_its_documented_key() {
-                    let baseline = paths(&[&[".claude.json", "numStartups"]]);
-                    let decline = Some(NudgeChoice::AutoDefaultDecline.documented_change());
-                    let declined = BTreeMap::from([(
-                        ".claude.json".to_owned(),
-                        json!({"numStartups":6,"hasSeenAutoDefaultNudge":true}),
-                    )]);
-                    let changed = paths(&[
-                        &[".claude.json", "numStartups"],
-                        &[".claude.json", "hasSeenAutoDefaultNudge"],
-                    ]);
-                    driver_compare_configuration(&changed, &baseline, decline, &declined).unwrap();
-                    assert_eq!(
-                        refused(driver_compare_configuration(
-                            &baseline, &baseline, decline, &declined
-                        )),
-                        "changed configuration key paths differ from the baseline plus the documented change"
-                    );
-                    let mut extra = changed.clone();
-                    extra.insert(vec![
-                        "settings.json".into(),
-                        "permissions".into(),
-                        "defaultMode".into(),
-                    ]);
-                    assert_eq!(
-                        refused(driver_compare_configuration(
-                            &extra, &baseline, decline, &declined
-                        )),
-                        "changed configuration key paths differ from the baseline plus the documented change"
-                    );
-                    let not_declined = BTreeMap::from([(
-                        ".claude.json".to_owned(),
-                        json!({"numStartups":6,"hasSeenAutoDefaultNudge":false}),
-                    )]);
-                    assert_eq!(
-                        refused(driver_compare_configuration(
-                            &changed,
-                            &baseline,
-                            decline,
-                            &not_declined
-                        )),
-                        "the answer's documented configuration change is absent"
-                    );
-                }
-
-                #[test]
-                fn environment_setup_answers_set_their_documented_keys() {
-                    let baseline = BTreeSet::new();
-                    let not_now = Some(NudgeChoice::EnvSetupNotNow.documented_change());
-                    let changed = paths(&[&[".claude.json", "autoModeEnvSetup", "dismissedAt"]]);
-                    let snoozed = BTreeMap::from([(
-                        ".claude.json".to_owned(),
-                        json!({"autoModeEnvSetup":{"denials":5,"dismissedAt":1793000000000_u64}}),
-                    )]);
-                    driver_compare_configuration(&changed, &baseline, not_now, &snoozed).unwrap();
-                    let unset = BTreeMap::from([(
-                        ".claude.json".to_owned(),
-                        json!({"autoModeEnvSetup":{"denials":5,"dismissedAt":null}}),
-                    )]);
-                    assert_eq!(
-                        refused(driver_compare_configuration(
-                            &changed, &baseline, not_now, &unset
-                        )),
-                        "the answer's documented configuration change is absent"
-                    );
-                    let dont_show = Some(NudgeChoice::EnvSetupDontShowAgain.documented_change());
-                    let dismissed = BTreeMap::from([(
-                        ".claude.json".to_owned(),
-                        json!({"autoModeEnvSetup":{"denials":5,"dismissed":true}}),
-                    )]);
-                    driver_compare_configuration(
-                        &paths(&[&[".claude.json", "autoModeEnvSetup", "dismissed"]]),
-                        &baseline,
-                        dont_show,
-                        &dismissed,
-                    )
-                    .unwrap();
-                    assert_eq!(
-                        refused(driver_compare_configuration(
-                            &changed, &baseline, dont_show, &dismissed
-                        )),
-                        "changed configuration key paths differ from the baseline plus the documented change"
-                    );
-                }
-
-                #[test]
-                fn a_permission_answer_changes_exactly_the_baseline_paths() {
-                    let baseline = paths(&[&[".claude.json", "numStartups"]]);
-                    let after = BTreeMap::new();
-                    driver_compare_configuration(&baseline, &baseline, None, &after).unwrap();
-                    for changed in [
-                        paths(&[]),
-                        paths(&[
-                            &[".claude.json", "numStartups"],
-                            &["settings.json", "permissions"],
-                        ]),
-                    ] {
-                        assert_eq!(
-                            refused(driver_compare_configuration(
-                                &changed, &baseline, None, &after
-                            )),
-                            "changed configuration key paths differ from the baseline plus the documented change"
-                        );
-                    }
-                }
-
-                const SIDEBAR_COLS: u16 = 166;
-                fn sidebar_screen(rows: &[String]) -> vt100::Parser {
-                    let mut parser = vt100::Parser::new(
-                        u16::try_from(rows.len()).unwrap().try_into().unwrap(),
-                        SIDEBAR_COLS.try_into().unwrap(),
-                        0,
-                    );
-                    parser.process(rows.join("\r\n").as_bytes());
-                    parser
-                }
-                fn panel_row(left: &str, column: usize, panel: &str) -> String {
-                    format!("{left:<column$}\x1b[2;48;5;235m│\x1b[22m {panel}\x1b[0m")
-                }
-
-                #[test]
-                fn the_sidebar_separator_is_one_shared_column_with_a_panel_background() {
-                    let rows = [
-                        panel_row(" Bash command", 92, "src/lib.rs"),
-                        panel_row(" ❯ 1. Yes", 92, "+after"),
-                        panel_row("", 92, ""),
-                        "─".repeat(SIDEBAR_COLS as usize),
-                        "❯\u{a0}".into(),
-                    ];
-                    assert_eq!(
-                        driver_panel_separator_column(sidebar_screen(&rows).screen()),
-                        Some(92)
-                    );
-                    let narrow = [panel_row(" Bash command", 80, "src/lib.rs")];
-                    assert_eq!(
-                        driver_panel_separator_column(sidebar_screen(&narrow).screen()),
-                        Some(80)
-                    );
-                }
-
-                #[test]
-                fn differing_columns_a_boxed_gutter_or_an_edge_glyph_are_no_separator() {
-                    let differing = [
-                        panel_row(" Bash command", 92, "src/lib.rs"),
-                        panel_row(" ❯ 1. Yes", 80, "+after"),
-                    ];
-                    let gutter = [format!("{:<50}│ touch /tmp/cafleet-f-out/p4.txt", "")];
-                    let shallow = [panel_row(" Bash", 30, "panel")];
-                    let edge = [format!("{:<165}\x1b[48;5;235m│\x1b[0m", " Bash command")];
-                    let empty = [" Bash command".to_owned()];
-                    for rows in [&differing[..], &gutter, &shallow, &edge, &empty] {
-                        assert_eq!(
-                            driver_panel_separator_column(sidebar_screen(rows).screen()),
-                            None,
-                            "{rows:?}"
-                        );
-                    }
-                }
-            }
 
             use crate::runtime::service::test_support::observation_services::capture;
             use crate::runtime::service::test_support::observation_services::health;
@@ -10147,8 +7617,6 @@ stored_enum!(Visibility, "observation.visibility", {
 pub(crate) enum GateReason {
     Candidate,
     Interaction,
-    Working,
-    Draft,
     Unknown,
     ObserverUnavailable,
     Gap,
@@ -10299,7 +7767,6 @@ struct Active {
     rule_id: String,
     fingerprint: SemanticFingerprint,
     evidence: Value,
-    native: Option<String>,
 }
 pub(crate) struct EpisodeTracker {
     run_id: i64,
@@ -10308,11 +7775,8 @@ pub(crate) struct EpisodeTracker {
     active: Option<Active>,
     candidate: Option<Candidate>,
     boundary: Option<Instant>,
-    refusal_boundary: Option<Instant>,
     obscurity: Option<Instant>,
     obscured: bool,
-    refusal_candidate: Option<Candidate>,
-    last_refusal: Option<SemanticFingerprint>,
     last_output: Option<u64>,
     last_time: Option<Instant>,
     finished: bool,
@@ -10345,23 +7809,17 @@ fn wall_time(value: &str) -> Result<()> {
     )
 }
 impl EpisodeTracker {
-    pub(crate) fn new(run_id: i64, next_episode_seq: i64, policy: EvidencePolicy) -> Result<Self> {
-        ensure(
-            run_id > 0 && next_episode_seq > 0,
-            "positive run/episode identities required",
-        )?;
+    pub(crate) fn new(run_id: i64, policy: EvidencePolicy) -> Result<Self> {
+        ensure(run_id > 0, "positive run identity required")?;
         Ok(Self {
             run_id,
-            next_episode: Some(next_episode_seq),
+            next_episode: Some(1),
             policy,
             active: None,
             candidate: None,
             boundary: None,
-            refusal_boundary: None,
             obscurity: None,
             obscured: false,
-            refusal_candidate: None,
-            last_refusal: None,
             last_output: None,
             last_time: None,
             finished: false,
@@ -10446,7 +7904,6 @@ impl EpisodeTracker {
                 .clone()
                 .ok_or_else(|| error("interaction fingerprint required"))?,
             evidence,
-            native: value.native_correlation.clone(),
         });
         self.candidate = None;
         Ok(draft)
@@ -10476,13 +7933,8 @@ impl EpisodeTracker {
             }
             let first = self.annotations.mark_emitted(block);
             let observed_mode = || {
-                self.policy.displayed_mode(
-                    &block.rule_id,
-                    block.raw_evidence["sensitive"]
-                        .as_bool()
-                        .expect("detector evidence carries its sensitivity"),
-                    block.raw_evidence["observed_mode"].as_str(),
-                )
+                self.policy
+                    .displayed_mode(&block.rule_id, block.raw_evidence["observed_mode"].as_str())
             };
             let observation = |automatic_review, observed_mode| EffectivePolicyObservation {
                 automatic_review,
@@ -10565,10 +8017,7 @@ impl EpisodeTracker {
         )?;
         let evidence = self.policy.apply(&value.raw_evidence)?;
         self.current_evidence = Some(evidence.clone());
-        if matches!(
-            value.kind,
-            ObservationKind::Interaction(_) | ObservationKind::PermissionDenied
-        ) {
+        if matches!(value.kind, ObservationKind::Interaction(_)) {
             ensure(
                 value.fingerprint.is_some(),
                 "semantic observation requires fingerprint",
@@ -10662,53 +8111,12 @@ impl EpisodeTracker {
                 }
             }
         }
-        if value.kind == ObservationKind::PermissionDenied {
-            self.refusal_boundary = None;
-            let fingerprint = value
-                .fingerprint
-                .as_ref()
-                .expect("validated refusal fingerprint");
-            if self.last_refusal.as_ref() != Some(fingerprint) {
-                let since = Candidate::since(&mut self.refusal_candidate, fingerprint, now);
-                if settled(now, since, CANDIDATE_SETTLE, &mut update.next_deadline) {
-                    let episode = self
-                        .active
-                        .as_ref()
-                        .filter(|active| {
-                            active.native.is_some() && active.native == value.native_correlation
-                        })
-                        .map(|active| (active.sequence, active.class));
-                    update.transitions.push(self.draft(
-                        RuntimeEventKind::PermissionDeniedObserved,
-                        episode,
-                        evidence.clone(),
-                        None,
-                        at,
-                    ));
-                    self.last_refusal = Some(fingerprint.clone());
-                    self.refusal_candidate = None;
-                }
-            }
-        } else {
-            self.refusal_candidate = None;
-            if value.verified_noninteraction && self.last_refusal.is_some() {
-                let since = *self.refusal_boundary.get_or_insert(now);
-                if settled(now, since, BOUNDARY_SETTLE, &mut update.next_deadline) {
-                    self.last_refusal = None;
-                    self.refusal_boundary = None;
-                }
-            } else {
-                self.refusal_boundary = None;
-            }
-        }
         update.visibility = if self.active.is_some() {
             Visibility::Obscured
         } else {
             Visibility::NotVisible
         };
         update.eligibility = match value.kind {
-            ObservationKind::Working => InputEligibility::Hold(GateReason::Working),
-            ObservationKind::ComposerDraft => InputEligibility::Hold(GateReason::Draft),
             ObservationKind::ComposerEmpty if self.active.is_some() => {
                 InputEligibility::Hold(GateReason::Interaction)
             }
@@ -10723,12 +8131,8 @@ impl EpisodeTracker {
         };
         Ok(update)
     }
-    pub(crate) fn reset_observation(&mut self, reason: GateReason) -> Result<()> {
+    pub(crate) fn reset_observation(&mut self) -> Result<()> {
         self.current_evidence = None;
-        ensure(
-            matches!(reason, GateReason::Gap | GateReason::ObserverUnavailable),
-            "reset requires observation-gap cause",
-        )?;
         self.candidate = None;
         self.clear_boundaries();
         self.annotations.forget_candidates();
@@ -10736,22 +8140,15 @@ impl EpisodeTracker {
     }
     fn clear_boundaries(&mut self) {
         self.boundary = None;
-        self.refusal_boundary = None;
         self.obscurity = None;
         self.obscured = false;
-        self.refusal_candidate = None;
     }
-    pub(crate) fn finish(
-        &mut self,
-        reason: InteractionCloseReason,
-        at: &str,
-    ) -> Result<EpisodeUpdate> {
-        ensure(
-            reason == InteractionCloseReason::ProcessExited,
-            "live finish requires process exit",
-        )?;
+    pub(crate) fn finish(&mut self, at: &str) -> Result<EpisodeUpdate> {
         wall_time(at)?;
-        let transitions = self.close(reason, None, at).into_iter().collect();
+        let transitions = self
+            .close(InteractionCloseReason::ProcessExited, None, at)
+            .into_iter()
+            .collect();
         self.finished = true;
         self.candidate = None;
         Ok(EpisodeUpdate {
@@ -10860,7 +8257,7 @@ pub(crate) mod test_support {
     use serde_json::json;
     pub(crate) const NOW: &str = "2026-10-26T15:35:00.000000+00:00";
     pub(crate) fn tracker() -> EpisodeTracker {
-        EpisodeTracker::new(1, 1, EvidencePolicy::metadata()).unwrap()
+        EpisodeTracker::new(1, EvidencePolicy::metadata()).unwrap()
     }
 
     pub(crate) fn open(
@@ -10913,7 +8310,7 @@ pub(crate) mod test_support {
     impl Run {
         pub(crate) fn new(policy: EvidencePolicy, observe: fn(&str) -> ScreenObservation) -> Self {
             Self {
-                tracker: EpisodeTracker::new(1, 1, policy).unwrap(),
+                tracker: EpisodeTracker::new(1, policy).unwrap(),
                 origin: Instant::now(),
                 sequence: 0,
                 observe,
@@ -11090,7 +8487,9 @@ mod tests {
         use crate::runtime::observation::tests::*;
 
         fn gated(bytes: &[u8], sequence: u64) -> ScreenObservation {
-            let catalog = ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap();
+            let catalog =
+                crate::coding_agent::catalog::test_support::load(&gated_fixture_definition())
+                    .unwrap();
             let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             state.feed(bytes).unwrap();
             let mut value = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
@@ -11214,6 +8613,12 @@ mod tests {
             transitions: usize,
         }
         impl ScreenObserver for ParserAlgorithmBridge {
+            fn input_health(&self) -> ObservationHealth {
+                unreachable!("the parser bridge is never asked to quiesce input")
+            }
+            fn parser_failure(&mut self) -> std::result::Result<(), crate::error::CafleetError> {
+                Ok(())
+            }
             fn observe(
                 &mut self,
                 screen: &ScreenSnapshot,
@@ -11232,7 +8637,7 @@ mod tests {
                 Ok(())
             }
         }
-        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
         let mut bridge = ParserAlgorithmBridge {
             detector: Detector::new(&catalog, CodingAgent::Codex, Some(VERSION)),
             tracker: tracker(),
@@ -11269,48 +8674,21 @@ mod tests {
         )
     }
 
-    fn correlated(kind: &str, identity: Option<&str>, sequence: u64) -> ScreenObservation {
-        let mut definition = definitions();
-        definition["profiles"][0]["rules"][0]["observation"] = json!(kind);
-        definition["profiles"][0]["rules"][0]["verified_noninteraction"] =
-            json!(kind == "permission_denied");
-        let mut rows = lines("write disposable.txt");
-        if let Some(identity) = identity {
-            rows.insert(5, format!("Native correlation: {identity}"));
-            definition["profiles"][0]["rules"][0]["matchers"].as_array_mut().unwrap().push(json!({"id":"native","scope":"line","pattern":"^Native correlation: (?P<identity>[a-z0-9-]+)$"}));
-            definition["profiles"][0]["rules"][0]["extract"]["native_request_id"] =
-                json!({"matcher_id":"native","capture":"identity"});
-        }
-        sequenced(
-            observation(&definition, &terminal(&rows, 80, false).snapshot()),
-            sequence,
-        )
-    }
-
-    fn secret_observation(
-        secret: &str,
-        sensitive: bool,
-        cols: u16,
-        sequence: u64,
-    ) -> ScreenObservation {
+    fn secret_observation(secret: &str, cols: u16, sequence: u64) -> ScreenObservation {
         let mut definition = definitions();
         let rule = &mut definition["profiles"][0]["rules"][0];
-        rule["sensitive"] = json!(sensitive);
         rule["matchers"][1]["pattern"] =
             json!(format!("^> (?P<label>Allow {})$", regex::escape(secret)));
         rule["matchers"][2]["pattern"] =
             json!(format!("^  (?P<label>Deny {})$", regex::escape(secret)));
-        rule["matchers"].as_array_mut().unwrap().push(json!({"id":"native","scope":"line","pattern":format!("^Native correlation: (?P<identity>{})$",regex::escape(secret))}));
-        rule["extract"]["native_request_id"] = json!({"matcher_id":"native","capture":"identity"});
         let mut rows = lines(secret);
         rows[2] = format!("> Allow {secret}");
         rows[3] = format!("  Deny {secret}");
-        rows.insert(5, format!("Native correlation: {secret}"));
         let value = sequenced(
             observation(&definition, &terminal(&rows, cols, false).snapshot()),
             sequence,
         );
-        for field in ["operation", "choices", "native_request_id", "excerpt"] {
+        for field in ["operation", "choices", "excerpt"] {
             assert!(
                 value.raw_evidence[field].to_string().contains(secret),
                 "canary missing from raw {field}"
@@ -11712,7 +9090,7 @@ mod tests {
             &[RULE],
         )
         .unwrap();
-        let mut tracker = EpisodeTracker::new(1, 1, policy).unwrap();
+        let mut tracker = EpisodeTracker::new(1, policy).unwrap();
         let origin = Instant::now();
         let first = detailed("first", 1);
         assert!(first.fingerprint == detailed("second", 1).fingerprint);
@@ -11807,152 +9185,12 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_refusal_requires_stability_and_retains_deduplication_across_uncertainty() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        let refusal = correlated("permission_denied", None, 1);
-        assert!(
-            tracker
-                .observe(&refusal, origin, NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&refusal, origin + Duration::from_millis(99), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let result = tracker
-            .observe(&refusal, origin + Duration::from_millis(100), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(
-            result.transitions[0].kind,
-            RuntimeEventKind::PermissionDeniedObserved
-        );
-        assert_eq!(result.transitions[0].episode_seq, None);
-        tracker
-            .observe(&unknown(2), origin + Duration::from_millis(150), NOW)
-            .unwrap();
-        let repeated = correlated("permission_denied", None, 3);
-        assert!(
-            tracker
-                .observe(&repeated, origin + Duration::from_millis(200), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&repeated, origin + Duration::from_millis(300), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn runtime_episode_refusal_dedup_resets_after_a_verified_250ms_boundary() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        let first = correlated("permission_denied", None, 1);
-        tracker.observe(&first, origin, NOW).unwrap();
-        tracker
-            .observe(&first, origin + Duration::from_millis(100), NOW)
-            .unwrap();
-        let empty = sequenced(state_observation("composer_empty", true), 2);
-        tracker
-            .observe(&empty, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        tracker
-            .observe(&empty, origin + Duration::from_millis(450), NOW)
-            .unwrap();
-        let next = correlated("permission_denied", None, 3);
-        tracker
-            .observe(&next, origin + Duration::from_millis(500), NOW)
-            .unwrap();
-        let result = tracker
-            .observe(&next, origin + Duration::from_millis(600), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(
-            result.transitions[0].kind,
-            RuntimeEventKind::PermissionDeniedObserved
-        );
-    }
-
-    #[test]
-    fn runtime_episode_uncertainty_restarts_a_pending_refusal_before_its_first_emission() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        tracker
-            .observe(&correlated("permission_denied", None, 1), origin, NOW)
-            .unwrap();
-        tracker
-            .observe(&unknown(2), origin + Duration::from_millis(99), NOW)
-            .unwrap();
-        let refusal = correlated("permission_denied", None, 3);
-        assert!(
-            tracker
-                .observe(&refusal, origin + Duration::from_millis(100), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&refusal, origin + Duration::from_millis(199), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let result = tracker
-            .observe(&refusal, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(
-            result.transitions[0].kind,
-            RuntimeEventKind::PermissionDeniedObserved
-        );
-    }
-
-    #[test]
-    fn runtime_episode_refusal_linkage_requires_a_matching_native_correlation() {
-        for (identity, expected) in [
-            (None, None),
-            (Some("request-2"), None),
-            (Some("request-1"), Some(1)),
-        ] {
-            let origin = Instant::now();
-            let mut tracker = tracker();
-            let request = correlated("permission_request", Some("request-1"), 1);
-            open(&mut tracker, &request, origin);
-            let result = correlated("permission_denied", identity, 2);
-            tracker
-                .observe(&result, origin + Duration::from_millis(200), NOW)
-                .unwrap();
-            let stable = tracker
-                .observe(&result, origin + Duration::from_millis(300), NOW)
-                .unwrap();
-            let event = stable
-                .transitions
-                .iter()
-                .find(|event| event.kind == RuntimeEventKind::PermissionDeniedObserved)
-                .unwrap();
-            assert_eq!(event.episode_seq, expected);
-        }
-    }
-
-    #[test]
     fn runtime_episode_gap_reset_restarts_an_uncommitted_candidate() {
         let origin = Instant::now();
         let mut tracker = tracker();
         let value = permission("write disposable.txt");
         tracker.observe(&value, origin, NOW).unwrap();
-        tracker.reset_observation(GateReason::Gap).unwrap();
+        tracker.reset_observation().unwrap();
         assert!(
             tracker
                 .observe(&value, origin + Duration::from_secs(5), NOW)
@@ -11983,7 +9221,7 @@ mod tests {
         tracker
             .observe(&empty, origin + Duration::from_millis(200), NOW)
             .unwrap();
-        tracker.reset_observation(GateReason::Gap).unwrap();
+        tracker.reset_observation().unwrap();
         let fresh = tracker
             .observe(&empty, origin + Duration::from_secs(5), NOW)
             .unwrap();
@@ -12022,7 +9260,7 @@ mod tests {
         tracker
             .observe(&unknown(2), origin + Duration::from_millis(200), NOW)
             .unwrap();
-        tracker.reset_observation(GateReason::Gap).unwrap();
+        tracker.reset_observation().unwrap();
         let unseen = unknown(3);
         assert!(
             tracker
@@ -12049,74 +9287,34 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_reset_and_finish_validate_their_lifecycle_scope() {
-        for reason in [
-            GateReason::Candidate,
-            GateReason::Interaction,
-            GateReason::Working,
-            GateReason::Draft,
-            GateReason::Unknown,
-        ] {
-            assert!(tracker().reset_observation(reason).is_err());
-        }
-        for reason in [GateReason::Gap, GateReason::ObserverUnavailable] {
-            tracker().reset_observation(reason).unwrap();
-        }
-        for reason in [
-            InteractionCloseReason::MonitorLost,
-            InteractionCloseReason::NotVisible,
-            InteractionCloseReason::Superseded,
-        ] {
-            assert!(tracker().finish(reason, NOW).is_err());
-        }
+    fn runtime_episode_finish_closes_the_active_episode_once_with_process_exit() {
         let origin = Instant::now();
         let mut tracker = tracker();
         open(&mut tracker, &permission("write disposable.txt"), origin);
-        let closed = tracker
-            .finish(InteractionCloseReason::ProcessExited, NOW)
-            .unwrap();
+        let closed = tracker.finish(NOW).unwrap();
         assert_eq!(closed.transitions.len(), 1);
         assert_eq!(
             closed.transitions[0].close_reason,
             Some(InteractionCloseReason::ProcessExited)
         );
-        assert!(
-            tracker
-                .finish(InteractionCloseReason::ProcessExited, NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
+        assert!(tracker.finish(NOW).unwrap().transitions.is_empty());
     }
 
     #[test]
     fn runtime_episode_noninteraction_states_gate_independently_without_allocating_rows() {
-        for (kind, reason) in [
-            ("working", Some(GateReason::Working)),
-            ("composer_draft", Some(GateReason::Draft)),
-            ("composer_empty", None),
-        ] {
-            let mut tracker = tracker();
-            let result = tracker
-                .observe(&state_observation(kind, true), Instant::now(), NOW)
-                .unwrap();
-            assert!(result.transitions.is_empty());
-            assert!(result.latest_evidence.is_none());
-            match reason {
-                Some(GateReason::Working) => assert!(matches!(
-                    result.eligibility,
-                    InputEligibility::Hold(GateReason::Working)
-                )),
-                Some(_) => assert!(matches!(
-                    result.eligibility,
-                    InputEligibility::Hold(GateReason::Draft)
-                )),
-                None => assert!(matches!(
-                    result.eligibility,
-                    InputEligibility::ComposerEmpty
-                )),
-            }
-        }
+        let result = tracker()
+            .observe(
+                &state_observation("composer_empty", true),
+                Instant::now(),
+                NOW,
+            )
+            .unwrap();
+        assert!(result.transitions.is_empty());
+        assert!(result.latest_evidence.is_none());
+        assert!(matches!(
+            result.eligibility,
+            InputEligibility::ComposerEmpty
+        ));
         let result = tracker().observe(&unknown(1), Instant::now(), NOW).unwrap();
         assert!(matches!(
             result.eligibility,
@@ -12126,8 +9324,7 @@ mod tests {
 
     #[test]
     fn runtime_episode_rejects_regressing_output_sequences_and_invalid_identity() {
-        assert!(EpisodeTracker::new(0, 1, EvidencePolicy::metadata()).is_err());
-        assert!(EpisodeTracker::new(1, 0, EvidencePolicy::metadata()).is_err());
+        assert!(EpisodeTracker::new(0, EvidencePolicy::metadata()).is_err());
         let origin = Instant::now();
         let mut tracker = tracker();
         tracker
@@ -12151,14 +9348,14 @@ mod tests {
     #[test]
     fn runtime_episode_evidence_policy_precedes_every_transition_and_redraw_update() {
         let secret = "synthetic-secret-194";
-        for (sensitive, named_sensitive) in [(false, false), (true, false), (false, true)] {
-            let value = secret_observation(secret, sensitive, 80, 1);
+        for named_sensitive in [false, true] {
+            let value = secret_observation(secret, 80, 1);
             let policy = EvidencePolicy::redacted(
                     &json!({"schema_version":1,"patterns":[secret],"sensitive_rules":if named_sensitive {vec![RULE]}else{vec![]}}),
                     &[RULE],
                 )
                 .unwrap();
-            let mut tracker = EpisodeTracker::new(1, 1, policy).unwrap();
+            let mut tracker = EpisodeTracker::new(1, policy).unwrap();
             let origin = Instant::now();
             let result = open(&mut tracker, &value, origin);
             let evidence = &result.transitions[0].evidence_json;
@@ -12166,13 +9363,13 @@ mod tests {
             assert!(evidence.get("semantic_fingerprint").is_none());
             assert_eq!(
                 evidence["operation"],
-                if sensitive || named_sensitive {
+                if named_sensitive {
                     Value::Null
                 } else {
                     json!("[redacted]")
                 }
             );
-            let redraw = secret_observation(secret, sensitive, 100, 2);
+            let redraw = secret_observation(secret, 100, 2);
             let update = tracker
                 .observe(&redraw, origin + Duration::from_millis(200), NOW)
                 .unwrap();
@@ -12186,9 +9383,9 @@ mod tests {
         let secret = "synthetic-secret-194";
         let origin = Instant::now();
         let mut tracker = tracker();
-        let value = secret_observation(secret, false, 80, 1);
+        let value = secret_observation(secret, 80, 1);
         let opened = open(&mut tracker, &value, origin);
-        for field in ["operation", "choices", "native_request_id", "excerpt"] {
+        for field in ["operation", "choices", "excerpt"] {
             assert!(opened.transitions[0].evidence_json[field].is_null());
         }
         assert!(
@@ -12202,7 +9399,7 @@ mod tests {
         let event = pool.materialize(&opened.transitions[0]).unwrap();
         assert!(!serde_json::to_string(&event).unwrap().contains(secret));
         for (sequence, detail) in [(2, "first"), (3, secret)] {
-            let mut redraw = secret_observation(secret, false, 100, sequence);
+            let mut redraw = secret_observation(secret, 100, sequence);
             redraw.raw_evidence["excerpt"] = json!(format!("Detail: {detail}"));
             let update = tracker
                 .observe(
@@ -12400,15 +9597,8 @@ mod tests {
             assert_private_cause_stays_local(&fixture);
         }
         #[test]
-        fn runner_child_output_parser_and_detector_failures_keep_transport_and_typed_metadata() {
+        fn runner_detector_failures_keep_transport_and_typed_metadata() {
             for (point, operation, form, fired, diagnostic) in [
-                (
-                    "child_output",
-                    "parser",
-                    "form-output-failure",
-                    "ChildOutput/Parser",
-                    "parser_unavailable",
-                ),
                 (
                     "child_output",
                     "detector",
@@ -12457,8 +9647,9 @@ mod tests {
                 .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
-                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata(), 1..=256)
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
+            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata())
                 .map(|_| ())
         }
 
@@ -12503,17 +9694,12 @@ mod tests {
             fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
-                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-            let mut controller = ObservationController::new(
-                &fixture.run,
-                &catalog,
-                EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
-            let mut writer = writer_fixture
-                .start(writer_fixture.artifacts.paths.outbox.clone())
-                .unwrap();
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
+            let mut controller =
+                ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata())
+                    .unwrap();
+            let mut writer = writer_fixture.start().unwrap();
             writer.set_deadline(until);
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
             running(&mut writer_fixture, &child.identity());
@@ -12621,10 +9807,7 @@ mod tests {
             let counts = writer.finish(until);
             let status = writer.status();
             assert_eq!(counts, (0, 0), "{status:?}");
-            assert!(
-                !status.degraded && status.diagnostic.is_none(),
-                "{status:?}"
-            );
+            assert!(status.diagnostic.is_none(), "{status:?}");
         }
 
         /// The bundled OpenCode fixture `id` with its command rows replaced by `command`, each
@@ -12661,16 +9844,10 @@ mod tests {
             fixture.conn.execute("UPDATE member_runs SET backend='opencode',native_version='2.1.4',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog = ProfileCatalog::bundled();
-            let mut controller = ObservationController::new(
-                &fixture.run,
-                catalog,
-                EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
-            let mut writer = writer_fixture
-                .start(writer_fixture.artifacts.paths.outbox.clone())
-                .unwrap();
+            let mut controller =
+                ObservationController::new(&fixture.run, catalog, EvidencePolicy::metadata())
+                    .unwrap();
+            let mut writer = writer_fixture.start().unwrap();
             writer.set_deadline(until);
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
             running(&mut writer_fixture, &child.identity());
@@ -12750,7 +9927,7 @@ mod tests {
 
         #[test]
         fn permission_inspection_observed_authority_has_no_debug_or_serialized_representation() {
-            assert_no_debug_or_serialize!(ObservedRequest);
+            assert_not_impl!(ObservedRequest: std::fmt::Debug, serde::Serialize);
         }
     }
     mod controller_tests {
@@ -12777,7 +9954,7 @@ mod tests {
             policy: storage::evidence::EvidencePolicy,
         ) -> (ObservationController, TestChild, TerminalState) {
             let mut controller =
-                ObservationController::new(&fixture.fixture.run, catalog, policy, 1..=256).unwrap();
+                ObservationController::new(&fixture.fixture.run, catalog, policy).unwrap();
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
             running(fixture, &child.identity());
             let terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
@@ -12815,7 +9992,6 @@ mod tests {
                     &fixture.fixture.run,
                     &catalog(),
                     storage::evidence::EvidencePolicy::metadata(),
-                    1..=256,
                 )
                 .unwrap()
             }
@@ -13106,13 +10282,9 @@ mod tests {
                     configure_run(&mut fixture);
                     let hooks = Arc::new(Hooks::default());
                     let writer = start(&fixture, hooks.clone());
-                    let mut controller = ObservationController::new(
-                        &fixture.fixture.run,
-                        &catalog(),
-                        policy,
-                        1..=256,
-                    )
-                    .unwrap();
+                    let mut controller =
+                        ObservationController::new(&fixture.fixture.run, &catalog(), policy)
+                            .unwrap();
                     if let Some(hooks) = observation_hooks {
                         controller.set_observation_hooks(hooks).unwrap();
                     }
@@ -13153,7 +10325,7 @@ mod tests {
                         )
                         .unwrap();
                     self.hooks.wait(WriterBoundary::Persist, 2);
-                    wait_until(|| self.writer.status().degraded);
+                    wait_until(|| self.writer.status().diagnostic.is_some());
                     assert!(self.writer.status().pending_evidence);
                     assert_eq!(committed(&self.fixture), 1);
                     release
@@ -13286,7 +10458,6 @@ mod tests {
                     storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
                         .unwrap();
                 assert_eq!(run.status, RunStatus::Exited);
-                assert_eq!(run.exit_signal, Some(15));
                 for _ in 0..3 {
                     case.controller
                         .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
@@ -13327,7 +10498,7 @@ mod tests {
                 let release = Release(case.hooks.clone());
                 case.exit(300);
                 case.hooks.wait(WriterBoundary::Persist, 2);
-                wait_until(|| case.writer.status().degraded);
+                wait_until(|| case.writer.status().diagnostic.is_some());
                 case.clock.set(500);
                 case.controller
                     .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
@@ -13340,10 +10511,6 @@ mod tests {
                 assert!(!case.controller.has_pending());
                 assert_eq!(case.controller.unsaved_gap_count(), 0);
                 assert_eq!(case.controller.status().gap_count, 0);
-                let run =
-                    storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
-                        .unwrap();
-                assert_eq!(run.observation_gap_count, 0);
                 assert_eq!(
                     events
                         .iter()
@@ -13408,22 +10575,10 @@ mod tests {
                 ObservationController::new(
                     &fixture.fixture.run,
                     &catalog,
-                    storage::evidence::EvidencePolicy::metadata(),
-                    1..=256
+                    storage::evidence::EvidencePolicy::metadata()
                 )
                 .is_ok()
             );
-            for range in [0..=255, 1..=255, 2..=257, 257..=512] {
-                assert!(
-                    ObservationController::new(
-                        &fixture.fixture.run,
-                        &catalog,
-                        storage::evidence::EvidencePolicy::metadata(),
-                        range
-                    )
-                    .is_err()
-                );
-            }
             for field in [
                 "epoch",
                 "reservation",
@@ -13447,8 +10602,7 @@ mod tests {
                     ObservationController::new(
                         &run,
                         &catalog,
-                        storage::evidence::EvidencePolicy::metadata(),
-                        1..=256
+                        storage::evidence::EvidencePolicy::metadata()
                     )
                     .is_err(),
                     "{field}"
@@ -13550,7 +10704,6 @@ mod tests {
                     &fixture.fixture.run,
                     &catalog(),
                     storage::evidence::EvidencePolicy::metadata(),
-                    1..=256,
                 )
                 .unwrap();
                 controller.observer_failed(reason, &Clock::new()).unwrap();
@@ -13572,7 +10725,6 @@ mod tests {
                 &fixture.fixture.run,
                 &catalog(),
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
             )
             .unwrap();
             let screen = TerminalState::new(TerminalSize { rows: 24, cols: 80 })
@@ -13657,7 +10809,6 @@ mod tests {
                 ["interaction_opened", "interaction_closed", "runner_exited"]
             );
             let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert_eq!(run.exit_signal, Some(15));
             assert_eq!(run.exit_code, None);
             writer.finish(deadline());
         }
@@ -13806,19 +10957,7 @@ mod tests {
         fn controller_retains_both_superseded_originals_when_the_first_submit_hits_pressure() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
-            let mut definitions = definitions();
-            let mut refusal = definitions["profiles"][0]["rules"][0].clone();
-            refusal["id"] = serde_json::json!("synthetic-refusal");
-            refusal["observation"] = serde_json::json!("permission_denied");
-            refusal["verified_noninteraction"] = serde_json::json!(true);
-            refusal["region"]["start_pattern"] = serde_json::json!("^Synthetic refusal result$");
-            definitions["profiles"][0]["rules"]
-                .as_array_mut()
-                .unwrap()
-                .push(refusal);
-            definitions["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
-                serde_json::json!(["synthetic-permission", "synthetic-refusal"]);
-            let catalog = ProfileCatalog::from_definitions(&definitions).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let mut writer = start(&fixture, hooks.clone());
@@ -13852,32 +10991,32 @@ mod tests {
                 assert!(!controller.has_pending());
             }
             assert_eq!(writer.status().pending_count, 63);
-            let refusal = String::from_utf8(form("write fixture-31.txt"))
+            let obscuring = String::from_utf8(form("write fixture-31.txt"))
                 .unwrap()
-                .replace("Synthetic permission request", "Synthetic refusal result");
+                .replace("Synthetic permission request", "Synthetic partial redraw");
             clock.set(6400);
-            terminal.feed(refusal.as_bytes()).unwrap();
+            terminal.feed(obscuring.as_bytes()).unwrap();
             controller
                 .observer(&writer, &clock)
                 .observe(&terminal.snapshot())
                 .unwrap();
-            clock.set(6500);
+            clock.set(8500);
             controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
             assert_eq!(writer.status().pending_count, 64);
             assert!(!writer.status().pending_evidence);
-            assert!(!writer.status().degraded);
+            assert!(!writer.status().diagnostic.is_some());
             assert!(!controller.has_pending());
             assert_eq!(committed(&fixture), 0);
-            clock.set(6550);
+            clock.set(8550);
             terminal
                 .feed_observed(
                     &form("write fixture-31.txt"),
                     &mut controller.observer(&writer, &clock),
                 )
                 .unwrap();
-            clock.set(6600);
+            clock.set(8600);
             let replacement = form("write final-original.txt");
             assert_eq!(replacement[0], 0x1b);
             terminal
@@ -13887,7 +11026,7 @@ mod tests {
             terminal
                 .feed_observed(&replacement[1..], &mut controller.observer(&writer, &clock))
                 .unwrap();
-            clock.set(6700);
+            clock.set(8700);
             let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
             assert_retained_pressure(attempt, controller.status());
             let original_sequence = terminal.snapshot().screen_seq;
@@ -13983,7 +11122,7 @@ mod tests {
             }
             assert_eq!(writer.status().pending_count, 3);
             assert!(writer.status().pending_evidence);
-            assert!(!writer.status().degraded);
+            assert!(!writer.status().diagnostic.is_some());
             assert!(!controller.has_pending());
             clock.set(400);
             terminal
@@ -13993,7 +11132,7 @@ mod tests {
                 !controller.status().retained_evidence,
                 "a screen_seq-only redraw schedules no refresh"
             );
-            assert!(!writer.status().degraded);
+            assert!(!writer.status().diagnostic.is_some());
             terminal
                 .feed_observed(
                     &detail_rewrite("collided"),
@@ -14008,7 +11147,7 @@ mod tests {
             assert!(status.gap_count > 0);
             assert_eq!(status.eligibility, InputEligibility::Hold(GateReason::Gap));
             assert!(writer.status().pending_evidence);
-            assert!(writer.status().degraded);
+            assert!(writer.status().diagnostic.is_some());
             assert!(
                 writer
                     .status()
@@ -14039,7 +11178,7 @@ mod tests {
                 !controller.has_pending()
                     && !writer.status().pending_evidence
                     && writer.status().pending_count == 0
-                    && !writer.status().degraded
+                    && !writer.status().diagnostic.is_some()
             });
             let first = event_at(&fixture, 1);
             let closed = event_at(&fixture, 2);

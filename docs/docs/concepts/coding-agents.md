@@ -42,10 +42,10 @@ New members run through the CAFleet PTY runner with a declared detection-coverag
 | `claude` | `auto` (`auto`) | `dontAsk`, `bypassPermissions` | `default`, `manual`, `acceptEdits`, `plan` |
 | `codex` | `approve-for-me` (`auto`) | `never` | `on-request` |
 | `opencode` | `cafleet-ask` (`manual`) | `cafleet` | — |
-| `hermes` | `smart` (`auto`) | — | `manual` |
+| `hermes` | `smart` (`auto`) | — | — |
 | `pi` | `cafleet-ask` (`manual`) | `cafleet` | — |
 
-Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and your Hermes configuration's `approvals.mode` ([Hermes configuration](#hermes-configuration)) governs the session. pi has no native per-tool approval, so both pi modes run the CAFleet member gate, which runs only the member's broker message commands: `cafleet-ask` opens the gate's approval form for every other command, and `cafleet` blocks it without a prompt ([pi configuration](#pi-configuration)).
+Hermes has no launch flag for its mode: CAFleet records its only choice, `smart`, and your Hermes configuration's `approvals.mode` ([Hermes configuration](#hermes-configuration)) governs the session. pi has no native per-tool approval, so both pi modes run the CAFleet member gate, which runs only the member's broker message commands: `cafleet-ask` opens the gate's approval form for every other command, and `cafleet` blocks it without a prompt ([pi configuration](#pi-configuration)).
 
 Every Codex member runs with `--no-daemon`, as its own Codex session outside the shared background server, so its commands always see the member's own pane.
 

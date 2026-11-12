@@ -140,9 +140,18 @@ struct NativeIo<'a> {
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
     clock: &'a dyn ObservationClock,
+    #[cfg(test)]
     shutdown_unit: Duration,
 }
 impl NativeIo<'_> {
+    #[cfg(not(test))]
+    fn shutdown_clock(&self) -> ShutdownClock {
+        ShutdownClock::new(Instant::now())
+    }
+    #[cfg(test)]
+    fn shutdown_clock(&self) -> ShutdownClock {
+        ShutdownClock::with_unit(Instant::now(), self.shutdown_unit)
+    }
     fn quiesce(
         &mut self,
         coordinator: &mut InputCoordinator,
@@ -172,10 +181,7 @@ impl NativeIo<'_> {
         before_exit(self.controller)?;
         self.controller
             .child_exited(exit, &self.transport.snapshot(), self.writer, self.clock)?;
-        Ok(Some(ShutdownClock::with_unit(
-            Instant::now(),
-            self.shutdown_unit,
-        )))
+        Ok(Some(self.shutdown_clock()))
     }
 }
 
@@ -183,7 +189,6 @@ fn input_deadline(request: &InputControlRequest, admitted_at: Instant) -> Result
     receive_input_expiration(
         request.expires_at_mono_ns,
         admitted_at,
-        None,
         &mut RealInputDeadlineClock,
     )
 }
@@ -196,20 +201,22 @@ impl RunnerLoop<'_> {
         let InputControlOperation::PermissionInspect(input) = &request.operation else {
             unreachable!("inspection receives an inspection operation");
         };
+        let input = input.clone();
         let context = InputContext {
             run_id: Some(self.run.run_id),
             interaction_id: Some(input.interaction_id),
             ..InputContext::default()
         };
-        self.inspect_within_deadline(request, admitted_at)
+        self.inspect_within_deadline(&request, input, admitted_at)
             .map_err(|source| CafleetError::from(context.failure(source)))
     }
     fn inspect_within_deadline(
         &mut self,
-        request: InputControlRequest,
+        request: &InputControlRequest,
+        input: PermissionInspectInput,
         admitted_at: Instant,
     ) -> Result<InputControlReply> {
-        let deadline = input_deadline(&request, admitted_at)?;
+        let deadline = input_deadline(request, admitted_at)?;
         request.identity.validate(&self.run)?;
         let coordinator = self
             .coordinator
@@ -219,8 +226,7 @@ impl RunnerLoop<'_> {
         coordinator
             .inspect_received(
                 self.conn,
-                &self.run,
-                request,
+                input,
                 (&*self.native.controller, &mut *self.native.transport),
                 deadline,
             )
@@ -260,8 +266,8 @@ impl RunnerLoop<'_> {
             .as_mut()
             .ok_or_else(|| error("native input has not started"))?;
         if responds {
-            if let Some(reply) = coordinator
-                .retained_permission_response(self.conn, &self.run, &request, deadline)?
+            if let Some(reply) =
+                coordinator.retained_permission_response(self.conn, &request, deadline)?
             {
                 return Ok(Some(reply));
             }
@@ -276,13 +282,8 @@ impl RunnerLoop<'_> {
                 )));
             }
         }
-        let reply = coordinator.handle_received(
-            self.conn,
-            &self.run,
-            request,
-            self.native.controller,
-            deadline,
-        )?;
+        let reply =
+            coordinator.handle_received(self.conn, request, self.native.controller, deadline)?;
         if reply.is_none() {
             ensure(
                 self.pending_input_client.is_none(),
@@ -369,21 +370,20 @@ struct LiveShutdown<'a> {
     observation_clock: &'a dyn ObservationClock,
     coordinator: Option<&'a mut InputCoordinator>,
 }
-fn record_observation_failure(
-    controller: &mut ObservationController,
-    progress: &TransportProgress,
-    clock: &dyn ObservationClock,
-) -> Result<()> {
-    ensure(
-        progress.observation_error.is_some() == progress.observation_failure.is_some(),
-        "transport observation failure requires typed provenance",
-    )?;
-    if let Some(failure) = progress.observation_failure {
-        controller.observer_failed(failure, clock)?;
-    }
-    Ok(())
-}
 impl LiveShutdown<'_> {
+    fn poll_shutdown(&mut self) -> Result<ObservationStatus> {
+        let snapshot = self.transport.snapshot();
+        #[cfg(test)]
+        return self.controller.poll_for(
+            &snapshot,
+            self.writer,
+            self.observation_clock,
+            ObservationPhase::ShutdownDrain,
+        );
+        #[cfg(not(test))]
+        self.controller
+            .poll(&snapshot, self.writer, self.observation_clock)
+    }
     #[cfg(test)]
     fn await_native_exit_before_parsing(&mut self, deadline: Instant) -> Result<()> {
         if !self
@@ -440,28 +440,23 @@ impl ShutdownHost for LiveShutdown<'_> {
 
         while Instant::now() < deadline {
             let mut tick = |transport: &mut Transport| {
-                transport.tick(
-                    self.input,
-                    self.pty,
-                    self.output,
-                    &mut self.controller.observer_for(
-                        self.writer,
-                        self.observation_clock,
-                        ObservationPhase::ShutdownDrain,
-                    ),
-                )
+                #[cfg(test)]
+                let mut observer = self.controller.observer_for(
+                    self.writer,
+                    self.observation_clock,
+                    ObservationPhase::ShutdownDrain,
+                );
+                #[cfg(not(test))]
+                let mut observer = self
+                    .controller
+                    .observer(self.writer, self.observation_clock);
+                transport.tick(self.input, self.pty, self.output, &mut observer)
             };
             let progress = match self.coordinator.as_mut() {
                 Some(coordinator) => coordinator.progress_with_manual(self.transport, tick)?,
                 None => tick(self.transport)?,
             };
-            record_observation_failure(self.controller, &progress, self.observation_clock)?;
-            self.controller.poll_for(
-                &self.transport.snapshot(),
-                self.writer,
-                self.observation_clock,
-                ObservationPhase::ShutdownDrain,
-            )?;
+            self.poll_shutdown()?;
             self.send_exit()?;
             if !self.pty.survivors()? && progress.child_eof {
                 break;
@@ -510,12 +505,7 @@ impl ShutdownHost for LiveShutdown<'_> {
             return Err(crate::error::CafleetError::DeadlineExceeded);
         }
         while self.controller.has_pending() && Instant::now() < deadline {
-            self.controller.poll_for(
-                &self.transport.snapshot(),
-                self.writer,
-                self.observation_clock,
-                ObservationPhase::ShutdownDrain,
-            )?;
+            self.poll_shutdown()?;
             nap_until(deadline);
         }
         let (pending, gap) = self.writer.finish(deadline);
@@ -541,7 +531,9 @@ impl ShutdownHost for LiveShutdown<'_> {
 }
 
 pub(crate) struct RunnerDependencies {
+    #[cfg(test)]
     pub(crate) catalog: &'static crate::coding_agent::ProfileCatalog,
+    #[cfg(test)]
     pub(crate) clock: Arc<dyn ObservationClock>,
     #[cfg(test)]
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
@@ -560,7 +552,9 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         settings,
         descriptor_path,
         RunnerDependencies {
+            #[cfg(test)]
             catalog: crate::coding_agent::ProfileCatalog::bundled(),
+            #[cfg(test)]
             clock: Arc::new(RealObservationClock),
             #[cfg(test)]
             writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
@@ -579,15 +573,31 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 pub(crate) fn run_service(
     settings: &Settings,
     descriptor_path: &Path,
+    #[cfg_attr(
+        not(test),
+        expect(
+            unused_variables,
+            reason = "production dependencies carry only test seams"
+        )
+    )]
     services: RunnerDependencies,
 ) -> Result<i32> {
     #[cfg(test)]
     let mut services = services;
     #[cfg(not(test))]
-    let shutdown_unit = Duration::from_secs(1);
+    let shutdown_clock = || ShutdownClock::new(Instant::now());
     #[cfg(test)]
     let shutdown_unit = services.shutdown_unit;
+    #[cfg(test)]
     let shutdown_clock = || ShutdownClock::with_unit(Instant::now(), shutdown_unit);
+    #[cfg(not(test))]
+    let catalog = crate::coding_agent::ProfileCatalog::bundled();
+    #[cfg(test)]
+    let catalog = services.catalog;
+    #[cfg(not(test))]
+    let observation_clock: Arc<dyn ObservationClock> = Arc::new(RealObservationClock);
+    #[cfg(test)]
+    let observation_clock = services.clock.clone();
 
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
@@ -655,14 +665,14 @@ pub(crate) fn run_service(
     )
     .map_err(io_error)?;
     listener.set_nonblocking(true).map_err(io_error)?;
-    let range = with_database_deadline(&mut conn, handshake_deadline, |conn| {
+    with_database_deadline(&mut conn, handshake_deadline, |conn| {
         storage::reserve_event_sequences(conn, &owner)
     })?;
     run = storage::get_run(&conn, owner.run_id)?;
     let evidence_policy = match descriptor.spawn.evidence_policy["mode"].as_str() {
         Some("metadata") => storage::evidence::EvidencePolicy::metadata(),
         Some("redacted") => {
-            let ids = services.catalog.rule_ids();
+            let ids = catalog.rule_ids();
             let refs = ids.iter().map(String::as_str).collect::<Vec<_>>();
             storage::evidence::EvidencePolicy::redacted(
                 &descriptor.spawn.evidence_policy["config"],
@@ -671,8 +681,7 @@ pub(crate) fn run_service(
         }
         _ => return Err(error("invalid launch evidence policy")),
     };
-    let mut controller =
-        ObservationController::new(&run, services.catalog, evidence_policy, range)?;
+    let mut controller = ObservationController::new(&run, catalog, evidence_policy)?;
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -688,7 +697,6 @@ pub(crate) fn run_service(
         settings.database_url.clone(),
         run.clone(),
         lock.clone(),
-        artifacts.paths.outbox.clone(),
         #[cfg(test)]
         services.writer_hooks.clone(),
     )?;
@@ -704,7 +712,8 @@ pub(crate) fn run_service(
             transport: &mut transport,
             controller: &mut controller,
             writer: &writer,
-            clock: services.clock.as_ref(),
+            clock: observation_clock.as_ref(),
+            #[cfg(test)]
             shutdown_unit,
         },
         conn: &mut conn,
@@ -719,7 +728,7 @@ pub(crate) fn run_service(
         terminal: &terminal,
         terminate: &terminate,
         resize: &resize,
-        catalog: services.catalog,
+        catalog,
         #[cfg(test)]
         capture: services.capture.take(),
         handshake_deadline,
@@ -807,7 +816,7 @@ pub(crate) fn run_service(
         writer: &mut writer,
         clock,
         controller: &mut controller,
-        observation_clock: services.clock.as_ref(),
+        observation_clock: observation_clock.as_ref(),
         coordinator: coordinator.as_mut(),
     };
     let mut outcome = shutdown(&mut live, clock, native_exit);
@@ -894,7 +903,7 @@ struct RunnerLoop<'a> {
 
 impl RunnerLoop<'_> {
     fn shutdown_clock(&self) -> ShutdownClock {
-        ShutdownClock::with_unit(Instant::now(), self.native.shutdown_unit)
+        self.native.shutdown_clock()
     }
 
     fn serve(&mut self) -> Result<ShutdownClock> {
@@ -1051,7 +1060,7 @@ impl RunnerLoop<'_> {
                 identity, pane_id, ..
             } => {
                 identity.validate(&self.run)?;
-                self.start(client_id, pane_id.as_deref(), accepted_startup)
+                self.start(client_id, pane_id, accepted_startup)
             }
             LifecycleRequest::Health { identity, .. } => {
                 identity.validate(&self.run)?;
@@ -1094,17 +1103,11 @@ impl RunnerLoop<'_> {
         .map_err(io_error)
     }
 
-    fn start(
-        &mut self,
-        client_id: u64,
-        pane: Option<&str>,
-        accepted_startup: &mut bool,
-    ) -> Result<Value> {
+    fn start(&mut self, client_id: u64, pane: &str, accepted_startup: &mut bool) -> Result<Value> {
         ensure(
             !self.started && self.creator_connection == Some(client_id),
             "start requires prepared creator connection",
         )?;
-        let pane = pane.ok_or_else(|| error("start requires concrete pane placement"))?;
         *accepted_startup = true;
         with_database_deadline(self.conn, self.handshake_deadline, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
@@ -1116,11 +1119,7 @@ impl RunnerLoop<'_> {
             let member = broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
                 .ok_or_else(|| error("prepared member became inactive"))?;
             ensure(
-                member
-                    .placement
-                    .and_then(|placement| placement.mux_pane_id)
-                    .as_deref()
-                    == Some(pane),
+                member.placement.mux_pane_id.as_deref() == Some(pane),
                 "start placement changed",
             )
         })?;
@@ -1132,7 +1131,7 @@ impl RunnerLoop<'_> {
                         let prepared = storage::get_run(conn, self.run.run_id)?;
                         let placement =
                             broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
-                                .and_then(|member| member.placement)
+                                .map(|member| member.placement)
                                 .ok_or_else(|| error("capture prepared placement missing"))?;
                         Ok((prepared, placement))
                     })?;
@@ -1174,6 +1173,7 @@ impl RunnerLoop<'_> {
             InputServices {
                 catalog: self.catalog.clone(),
                 token_source: Box::new(SystemRequestTokens),
+                #[cfg(test)]
                 stage_settle: crate::runtime::input::STAGE_SETTLE,
                 #[cfg(test)]
                 hooks: crate::runtime::input::test_support::default_input_hooks(),
@@ -1218,15 +1218,17 @@ impl RunnerLoop<'_> {
             native
                 .transport
                 .resize(native.pty, terminal_size(self.terminal)?)?;
-            native
-                .controller
-                .observer_for(native.writer, native.clock, ObservationPhase::Resize)
-                .observe(&native.transport.snapshot())?;
+            #[cfg(test)]
+            let mut observer = native.controller.observer_for(
+                native.writer,
+                native.clock,
+                ObservationPhase::Resize,
+            );
+            #[cfg(not(test))]
+            let mut observer = native.controller.observer(native.writer, native.clock);
+            observer.observe(&native.transport.snapshot())?;
         }
-        let coordinator = self
-            .coordinator
-            .as_mut()
-            .ok_or_else(|| error("running service requires input coordinator"))?;
+        let coordinator = started(&mut self.coordinator);
         let progress = coordinator.progress_with_manual(native.transport, |transport| {
             transport.tick(
                 native.input,
@@ -1235,7 +1237,6 @@ impl RunnerLoop<'_> {
                 &mut native.controller.observer(native.writer, native.clock),
             )
         })?;
-        record_observation_failure(native.controller, &progress, native.clock)?;
         native
             .controller
             .poll(&native.transport.snapshot(), native.writer, native.clock)?;
@@ -1269,7 +1270,6 @@ impl RunnerLoop<'_> {
         coordinator
             .advance(
                 self.conn,
-                &self.run,
                 self.native.transport,
                 self.native.pty,
                 self.native.controller,
@@ -1289,7 +1289,7 @@ impl RunnerLoop<'_> {
         let result = match self.native.quiesce(coordinator, deadline) {
             Err(failure) => Err(CafleetError::from(failure)),
             Ok(InputDrain::Pending) => Ok(None),
-            Ok(InputDrain::Quiescent { .. }) => {
+            Ok(InputDrain::Quiescent) => {
                 if self.terminate.load(Ordering::Acquire) {
                     return Ok(Some(self.shutdown_clock()));
                 }
@@ -1337,7 +1337,7 @@ impl RunnerLoop<'_> {
             return Ok(());
         }
         let deadline = Instant::now() + Duration::from_secs(5);
-        if let Ok(InputDrain::Quiescent { .. }) = self.native.quiesce(coordinator, deadline)
+        if let Ok(InputDrain::Quiescent) = self.native.quiesce(coordinator, deadline)
             && !self.terminate.load(Ordering::Acquire)
             && !self.resize.load(Ordering::Acquire)
             && let Err(failure) = self.advance(deadline)
@@ -2163,7 +2163,7 @@ pub(crate) mod test_support {
             rule["region"]["start_pattern"] = json!("^Synthetic state$");
             rule["region"]["end_pattern"] = json!("^State end$");
             rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
-            rule["extract"] = json!({"operation":null,"choices":[],"native_request_id":null});
+            rule["extract"] = json!({"operation":null,"choices":[]});
             rule["verified_noninteraction"] = json!(true);
             catalog["profiles"][0]["capabilities"] = json!({"detection":null,"annotations":null,"answers":[],"composer":{
                 "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
@@ -2587,7 +2587,6 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod observation_services {
-        use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
         use crate::runtime::service::test_support::*;
         use std::os::unix::fs::OpenOptionsExt;
@@ -2697,7 +2696,7 @@ pub(crate) mod test_support {
         ) -> Result<i32, CafleetError> {
             let value: Value = serde_json::from_slice(&std::fs::read(config).map_err(io_error)?)
                 .map_err(io_error)?;
-            let catalog = ProfileCatalog::from_definitions(&value["catalog"])?;
+            let catalog = crate::coding_agent::catalog::test_support::load(&value["catalog"])?;
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
             let services = crate::runtime::service::RunnerDependencies {
                 catalog: Box::leak(Box::new(catalog)),
@@ -3870,9 +3869,9 @@ mod tests {
                         seeded = Some(evidence.to_string());
                         fixture.conn.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,'2026-10-26T17:00:00Z',?3)",rusqlite::params![run.run_id,evidence["evidence_digest"].as_str().unwrap(),evidence.to_string()]).unwrap();
                     } else {
-                        let payload = json!({"schema_version":2,"event_id":1,"event_seq":1,"run_id":run.run_id,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"kind":"coverage_unknown","interaction_id":null,"classification":null,"observed_at":"2026-10-26T17:00:00Z","source":"runner_lifecycle","native_request_id":null,"decision_outcome":"unknown","director_action":null,"evidence":evidence,"cause":{"kind":"coverage_unknown"}});
+                        let payload = json!({"event_id":1,"event_seq":1,"run_id":run.run_id,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"kind":"coverage_unknown","interaction_id":null,"classification":null,"observed_at":"2026-10-26T17:00:00Z","source":"runner_lifecycle","decision_outcome":"unknown","director_action":null,"evidence":evidence,"cause":{"kind":"coverage_unknown"}});
                         seeded = Some(payload.to_string());
-                        fixture.conn.execute("INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,committed_at,payload_json,notification_state,archive_reason) VALUES(?1,1,'coverage_unknown','2026-10-26T17:00:00Z','2026-10-26T17:00:00Z',?2,'archived','member_inactive')",rusqlite::params![run.run_id,payload.to_string()]).unwrap();
+                        fixture.conn.execute("INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,payload_json,notification_state,archive_reason) VALUES(?1,1,'coverage_unknown','2026-10-26T17:00:00Z',?2,'archived','member_inactive')",rusqlite::params![run.run_id,payload.to_string()]).unwrap();
                     }
                 });
                 let run =
@@ -3958,7 +3957,6 @@ mod tests {
                 "{diagnostics:?}"
             );
             assert_eq!(run.status, RunStatus::Exited, "{diagnostics:?}");
-            assert_eq!(run.exit_signal, Some(9), "{diagnostics:?}");
             assert_eq!(run.child_pid, Some(started.child.pid));
             assert_eq!(
                 run.child_start_identity.as_deref(),
@@ -3991,150 +3989,9 @@ mod tests {
                 "{:?}",
                 outcome.diagnostics
             );
-            assert_eq!(outcome.pending_event_frames, 0);
-            assert_eq!(outcome.unsaved_observation_gap, 0);
             assert_durable_gap(&fixture);
             assert_eq!(fixture.wait().code(), Some(0));
             assert_eq!(count(&fixture, "runner_exited"), 1);
-            assert_private_cause_stays_local(&fixture);
-        }
-
-        #[test]
-        fn shutdown_parser_loss_after_terminal_fence_remains_unsaved_without_live_append() {
-            let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
-                configure(fixture, spec, "shutdown_drain", "parser");
-                let config_path = fixture._dir.path().join("observation-services.json");
-                let mut config: Value =
-                    serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
-                config["buffered_tail"] = json!({"database_url":format!("sqlite:///{}",fixture.conn.path().unwrap()),"run_id":fixture.run.run_id});
-                std::fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
-                spec.environment.push((
-                    "CAFLEET_REVIEW_BUFFERED_TAIL_WRITTEN".into(),
-                    fixture
-                        ._dir
-                        .path()
-                        .join("buffered-tail-written")
-                        .to_str()
-                        .unwrap()
-                        .into(),
-                ));
-                install_trap(
-                    spec,
-                    "umask 077; if printf \"review-after-terminal-tail\\n\"; then /usr/bin/touch \"$CAFLEET_REVIEW_BUFFERED_TAIL_WRITTEN\" || exit 9; else exit 8; fi; exit 0",
-                );
-            });
-            fixture.start_running();
-            arm(&fixture);
-            let mut wire = fixture.connect("post-terminal observation loss");
-            wire.0
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let request = fixture.request("shutdown", fixture.prepared.as_ref().unwrap());
-            let begin = Instant::now();
-            let reply = wire.exchange(&request).unwrap_or_else(|cause| {
-                panic!(
-                    "bounded shutdown reply failed: {cause}; {}; buffered markers={:?}",
-                    fixture.connection_diagnostic("buffered tail shutdown"),
-                    std::fs::read_dir(fixture.fixture._dir.path())
-                        .unwrap()
-                        .map(|entry| entry.unwrap().file_name())
-                        .collect::<Vec<_>>()
-                )
-            });
-            assert!(begin.elapsed() < Duration::from_secs(5));
-            assert!(reply.get("error").is_none(), "{reply}");
-            let outcome: ShutdownOutcome = serde_json::from_value(reply["result"].clone()).unwrap();
-            let written = fixture
-                .fixture
-                ._dir
-                .path()
-                .join("buffered-tail-written")
-                .exists();
-            let fired = fixture
-                .fixture
-                ._dir
-                .path()
-                .join("observation-fault-fired")
-                .exists();
-            let stages: Vec<_> = [
-                "buffered-tail-order-selected.json",
-                "buffered-tail-native-terminated",
-                "buffered-tail-parser-entered",
-                "buffered-tail-post-fence-parser",
-            ]
-            .into_iter()
-            .map(|file| (file, fixture.fixture._dir.path().join(file).exists()))
-            .collect();
-            let gate_error = std::fs::read_to_string(
-                fixture.fixture._dir.path().join("buffered-tail-gate-error"),
-            );
-            let native_at_parser = std::fs::read_to_string(
-                fixture
-                    .fixture
-                    ._dir
-                    .path()
-                    .join("buffered-tail-parser-native.json"),
-            );
-            let final_kinds = crate::runtime::service::test_support::observation_services::kinds(
-                &fixture.fixture.conn,
-                fixture.fixture.run.run_id,
-            );
-            let final_run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert!(
-                written && fired,
-                "post-terminal tail: written={written}, fired={fired}, stages={stages:?}, gate_error={gate_error:?}, native_at_parser={native_at_parser:?}, final_kinds={final_kinds:?}, final_run_status={:?}, outcome={outcome:?}; {}",
-                final_run.status,
-                fixture.connection_diagnostic("post-terminal tail write and parser hook")
-            );
-            assert_fired(&fixture, "ShutdownDrain/Parser");
-            let selected: Value = serde_json::from_slice(
-                &std::fs::read(
-                    fixture
-                        .fixture
-                        ._dir
-                        .path()
-                        .join("buffered-tail-order-selected.json"),
-                )
-                .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(selected["run_id"], fixture.fixture.run.run_id);
-            let remaining_ns = selected["remaining_ns"].as_u64().unwrap();
-            assert!(
-                remaining_ns > 0 && remaining_ns <= 2_000_000_000,
-                "actual original child budget: {selected}"
-            );
-            assert!(
-                fixture
-                    .fixture
-                    ._dir
-                    .path()
-                    .join("buffered-tail-native-terminated")
-                    .exists()
-            );
-            assert!(
-                fixture
-                    .fixture
-                    ._dir
-                    .path()
-                    .join("buffered-tail-post-fence-parser")
-                    .exists()
-            );
-            assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
-            assert_eq!(outcome.pending_event_frames, 0);
-            assert!(outcome.unsaved_observation_gap > 0);
-            assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
-            let _exit = fixture.wait();
-            let kinds = crate::runtime::service::test_support::observation_services::kinds(
-                &fixture.fixture.conn,
-                fixture.fixture.run.run_id,
-            );
-            assert_eq!(kinds, ["runner_exited"]);
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert_eq!(run.status, RunStatus::Exited);
-            assert_eq!(run.exit_code, Some(0));
-            assert_eq!(run.cleanup_state, CleanupState::Incomplete);
             assert_private_cause_stays_local(&fixture);
         }
     }
@@ -4171,25 +4028,21 @@ mod tests {
         #[test]
         fn pacing_keeps_the_idle_sleep_without_outer_input() {
             let now = Instant::now();
-            let mut child_only = progress(0, 0);
-            child_only.child_bytes = 512;
-            child_only.display_bytes = 512;
-            for idle in [progress(0, 0), child_only] {
-                assert_eq!(tick_sleep(&idle, None, now), Duration::from_millis(2));
-                assert_eq!(
-                    tick_sleep(&idle, Some(now + Duration::from_secs(1)), now),
-                    Duration::from_millis(2)
-                );
-                assert_eq!(
-                    tick_sleep(&idle, Some(now + Duration::from_micros(500)), now),
-                    Duration::from_micros(500),
-                    "an earlier observation deadline still shortens the idle sleep"
-                );
-                assert_eq!(
-                    tick_sleep(&idle, Some(now - Duration::from_millis(1)), now),
-                    Duration::ZERO
-                );
-            }
+            let idle = progress(0, 0);
+            assert_eq!(tick_sleep(&idle, None, now), Duration::from_millis(2));
+            assert_eq!(
+                tick_sleep(&idle, Some(now + Duration::from_secs(1)), now),
+                Duration::from_millis(2)
+            );
+            assert_eq!(
+                tick_sleep(&idle, Some(now + Duration::from_micros(500)), now),
+                Duration::from_micros(500),
+                "an earlier observation deadline still shortens the idle sleep"
+            );
+            assert_eq!(
+                tick_sleep(&idle, Some(now - Duration::from_millis(1)), now),
+                Duration::ZERO
+            );
         }
     }
     mod input_admission_tests {
@@ -4308,13 +4161,9 @@ mod tests {
                         monotonic_ns: 1_000_000_000,
                         after: now,
                     });
-                let converted = receive_input_expiration(
-                    11_000_000_000,
-                    actual.admitted_at(),
-                    None,
-                    &mut clock,
-                )
-                .unwrap();
+                let converted =
+                    receive_input_expiration(11_000_000_000, actual.admitted_at(), &mut clock)
+                        .unwrap();
                 assert_eq!(converted, actual.admitted_at() + Duration::from_secs(5));
                 clock.consumed(1, 0);
             }

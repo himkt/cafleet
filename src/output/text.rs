@@ -22,11 +22,7 @@ pub(crate) fn format_message(message: &MessageRecord) -> String {
         message.message_id, message.from_member_id, message.status_timestamp
     );
     let body = truncate_text(&message.text, TEXT_BODY_LIMIT);
-    if body.is_empty() {
-        header
-    } else {
-        format!("{header}\n{body}")
-    }
+    format!("{header}\n{body}")
 }
 
 pub(crate) fn format_messages(messages: &[MessageRecord]) -> String {
@@ -73,12 +69,11 @@ pub(crate) fn format_fleet_list(fleets: &[FleetSummary]) -> String {
     }
     let mut lines = vec!["FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT".into()];
     for fleet in fleets {
-        let director = fleet.director_member_id.map(|id| id.to_string());
         lines.push(format!(
             "{} {} {} {} {}",
             fleet.fleet_id,
-            director.as_deref().unwrap_or("-"),
-            fleet.name.as_deref().unwrap_or("-"),
+            fleet.director_member_id,
+            fleet.name,
             fleet.member_count,
             fleet.created_at
         ));
@@ -89,9 +84,7 @@ pub(crate) fn format_fleet_list(fleets: &[FleetSummary]) -> String {
 pub(crate) fn format_fleet_show(fleet: &FleetRecord) -> String {
     let mut text = format!(
         "fleet_id: {}\nname: {}\ncreated_at: {}",
-        fleet.fleet_id,
-        fleet.name.as_deref().unwrap_or("-"),
-        fleet.created_at
+        fleet.fleet_id, fleet.name, fleet.created_at
     );
     if let Some(deleted) = &fleet.deleted_at {
         text.push_str(&format!("\ndeleted_at: {deleted}"));
@@ -226,12 +219,12 @@ pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     ];
     for row in members {
         let member = &row.member;
-        let (backend, pane) = member.placement.as_ref().map_or(("-", "-"), |placement| {
-            (
-                placement.coding_agent.as_str(),
-                placement.mux_pane_id.as_deref().unwrap_or("(pending)"),
-            )
-        });
+        let backend = member.placement.coding_agent.as_str();
+        let pane = member
+            .placement
+            .mux_pane_id
+            .as_deref()
+            .unwrap_or("(pending)");
         lines.push(format!(
             "  {:<9}  {:<13}  {:<8}  {backend:<8}  {pane:<7}  {}",
             member.member_id,
@@ -536,12 +529,10 @@ mod tests {
             format_message(&message),
             format!("[5 | from:2 | acked]\n{}", message.text)
         );
-        message.text.clear();
-        assert_eq!(format_message(&message), "[5 | from:2 | acked]");
         assert_eq!(format_messages(&[]), "No messages found.");
         assert_eq!(
-            format_messages(&[message.clone(), message]),
-            "[5 | from:2 | acked]\n\n[5 | from:2 | acked]"
+            format_messages(&[message.clone(), message.clone()]),
+            format!("{0}\n\n{0}", format_message(&message))
         );
     }
 
@@ -555,7 +546,15 @@ mod tests {
             status: MemberStatus::Active,
             kind: MemberKind::Member,
             registered_at: "registered".into(),
-            placement: None,
+            placement: Placement {
+                backend: "tmux".into(),
+                mux_session: "s".into(),
+                mux_window_id: "@1".into(),
+                mux_pane_id: None,
+                coding_agent: "codex".into(),
+                created_at: "created".into(),
+                mux_server: "/tmp/tmux-1000/default".into(),
+            },
             runtime: None,
         };
         let mut row = MemberActivity {
@@ -566,19 +565,9 @@ mod tests {
             idle: None,
         };
         assert_eq!(format_member_list(&[]), "0 members.");
-        assert!(format_member_list(&[row.clone()]).contains("member    -         -        -"));
-        row.member.placement = Some(Placement {
-            backend: "tmux".into(),
-            mux_session: "s".into(),
-            mux_window_id: "@1".into(),
-            mux_pane_id: None,
-            coding_agent: "codex".into(),
-            created_at: "created".into(),
-            mux_server: "/tmp/tmux-1000/default".into(),
-        });
         row.idle = Some(60);
         assert!(format_member_list(&[row.clone()]).contains("codex     (pending)  1m"));
-        row.member.placement.as_mut().unwrap().mux_pane_id = Some("%9".into());
+        row.member.placement.mux_pane_id = Some("%9".into());
         assert!(format_member_list(&[row.clone()]).contains("codex     %9"));
         assert_eq!(format_member_detail(&row.member), "7 worker active");
         for (idle, expected) in [

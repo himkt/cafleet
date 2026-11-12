@@ -354,7 +354,7 @@ After a restart on the same session, re-arm with `cafleet_listen` on the first t
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the `clarify` tool with one single-select question; its result records the chosen `user_response` (members relay) |
-| `{permission_flags}` | no permission argv; the recorded mode is `smart` (default, class `auto`) or `manual` (class `manual`), and the operator configuration's `approvals.mode` governs the session, with hardline floors, the sudo guard and `approvals.deny` enforced |
+| `{permission_flags}` | no permission argv; the only recorded mode is `smart` (default, class `auto`), and the operator configuration's `approvals.mode` governs the session, with hardline floors, the sudo guard and `approvals.deny` enforced |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (spawn flag `--effort <level>`, forwarded as `--reasoning <level>`) |

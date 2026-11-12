@@ -8,7 +8,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeSet;
 
-const SCREEN_FIELDS: [&str; 4] = ["operation", "choices", "native_request_id", "excerpt"];
+const SCREEN_FIELDS: [&str; 3] = ["operation", "choices", "excerpt"];
 const COPIED_FIELDS: [&str; 5] = [
     "backend",
     "native_version",
@@ -87,11 +87,7 @@ impl EvidencePolicy {
         let rule = result["rule_id"]
             .as_str()
             .ok_or_else(|| invalid("rule_id", "string required"))?;
-        let sensitive = raw
-            .get("sensitive")
-            .and_then(Value::as_bool)
-            .ok_or_else(|| invalid("sensitive", "boolean required"))?;
-        let metadata = self.metadata_only(rule, sensitive);
+        let metadata = self.metadata_only(rule);
         result.insert(
             "evidence_policy".into(),
             json!(if metadata { "metadata" } else { "redacted" }),
@@ -168,10 +164,9 @@ impl EvidencePolicy {
     pub(crate) fn displayed_mode(
         &self,
         rule: &str,
-        sensitive: bool,
         mode: Option<&str>,
     ) -> Result<Option<String>, CafleetError> {
-        if self.metadata_only(rule, sensitive) {
+        if self.metadata_only(rule) {
             return Ok(None);
         }
         let mut truncated = false;
@@ -181,8 +176,8 @@ impl EvidencePolicy {
             .map(str::to_owned))
     }
 
-    fn metadata_only(&self, rule: &str, sensitive: bool) -> bool {
-        self.mode == EventEvidence::Metadata || sensitive || self.sensitive_rules.contains(rule)
+    fn metadata_only(&self, rule: &str) -> bool {
+        self.mode == EventEvidence::Metadata || self.sensitive_rules.contains(rule)
     }
 
     fn transform(&self, value: &Value, truncated: &mut bool) -> Result<Value, CafleetError> {
@@ -266,8 +261,8 @@ pub(crate) fn run_metadata(
 ) -> Result<Value, CafleetError> {
     EvidencePolicy::metadata().apply(&json!({
         "backend":run.backend,"native_version":run.native_version,
-        "rule_id":rule_id,"screen_seq":screen_seq,"operation":null,"choices":null,"native_request_id":null,
-        "excerpt":null,"truncated":false,"sensitive":false
+        "rule_id":rule_id,"screen_seq":screen_seq,"operation":null,"choices":null,
+        "excerpt":null,"truncated":false
     }))
 }
 
@@ -312,7 +307,7 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
         "unknown policy",
     )?;
     require(
-        !object.contains_key("semantic_fingerprint") && !object.contains_key("sensitive"),
+        !object.contains_key("semantic_fingerprint"),
         "evidence_json",
         "in-memory evidence cannot be persisted",
     )?;
@@ -376,7 +371,7 @@ mod tests {
         let second = policy
             .apply(&raw_evidence("a different hidden native request"))
             .unwrap();
-        for field in ["operation", "choices", "native_request_id", "excerpt"] {
+        for field in ["operation", "choices", "excerpt"] {
             assert_eq!(first.get(field), Some(&Value::Null), "{field}");
         }
         assert_eq!(first["evidence_digest"], second["evidence_digest"]);
@@ -386,7 +381,7 @@ mod tests {
         assert_eq!(first["evidence_policy"], "metadata");
     }
 
-    const EVIDENCE_KEYS: [&str; 12] = [
+    const EVIDENCE_KEYS: [&str; 11] = [
         "backend",
         "native_version",
         "rule_id",
@@ -396,7 +391,6 @@ mod tests {
         "operation",
         "operation_rows",
         "choices",
-        "native_request_id",
         "excerpt",
         "evidence_digest",
     ];
@@ -535,7 +529,7 @@ mod tests {
     fn matching_redaction_replaces_each_normalized_field_in_full() {
         let policy = redacted_policy(&[SECRET]);
         let sanitized = policy.apply(&raw_evidence(SECRET)).unwrap();
-        for field in ["operation", "native_request_id", "excerpt"] {
+        for field in ["operation", "excerpt"] {
             assert_eq!(sanitized[field], "[redacted]", "{field}");
         }
         assert_eq!(sanitized["choices"], json!(["[redacted]", "deny"]));
@@ -545,26 +539,17 @@ mod tests {
     }
 
     #[test]
-    fn sensitive_forms_and_selected_rules_reduce_the_entire_form_to_metadata() {
-        for by_profile in [false, true] {
-            let sensitive_rules = if by_profile {
-                json!([])
-            } else {
-                json!(["native-tool-permission"])
-            };
-            let policy = evidence::EvidencePolicy::redacted(
-            &json!({"schema_version":1,"patterns":["unmatched"],"sensitive_rules":sensitive_rules}),
+    fn selected_sensitive_rules_reduce_the_entire_form_to_metadata() {
+        let policy = evidence::EvidencePolicy::redacted(
+            &json!({"schema_version":1,"patterns":["unmatched"],"sensitive_rules":["native-tool-permission"]}),
             &["native-tool-permission"],
         )
         .unwrap();
-            let mut raw = raw_evidence(SECRET);
-            raw["sensitive"] = json!(by_profile);
-            let sanitized = policy.apply(&raw).unwrap();
-            for field in ["operation", "choices", "native_request_id", "excerpt"] {
-                assert_eq!(sanitized[field], Value::Null, "{field}");
-            }
-            assert!(!sanitized.to_string().contains(SECRET));
+        let sanitized = policy.apply(&raw_evidence(SECRET)).unwrap();
+        for field in ["operation", "choices", "excerpt"] {
+            assert_eq!(sanitized[field], Value::Null, "{field}");
         }
+        assert!(!sanitized.to_string().contains(SECRET));
     }
 
     #[test]

@@ -175,10 +175,14 @@ impl CodingAgent {
             )))?;
         }
         if self == Self::Pi {
-            let extension = pi_extension(&config);
-            std::fs::read(&extension).map_err(|error| CafleetError::App(format!(
-                "cannot read the CAFleet pi extension at {}: {error}; run 'cafleet setup --coding-agent pi' first", extension.display()
-            )))?;
+            for (relative, _) in
+                crate::assets::embedded_extension(crate::assets::PI_EXTENSION_PREFIX)
+            {
+                let extension = crate::assets::pi_extensions_dir(&config).join(relative);
+                std::fs::read(&extension).map_err(|error| CafleetError::App(format!(
+                    "cannot read the CAFleet pi extension at {}: {error}; run 'cafleet setup --coding-agent pi' first", extension.display()
+                )))?;
+            }
         }
         Ok(executable)
     }
@@ -208,10 +212,6 @@ impl CodingAgent {
         argv[0] = program.into();
         Ok(argv)
     }
-}
-
-pub(crate) fn pi_extension(base: &Path) -> PathBuf {
-    base.join("extensions/cafleet.ts")
 }
 
 /// A long-lived backend server whose tool commands carry the environment of the pane that
@@ -332,7 +332,7 @@ impl CodingAgent {
             ],
             Self::Codex => &["on-request", "never", "approve-for-me"],
             Self::Opencode => &["cafleet", "cafleet-ask"],
-            Self::Hermes => &["smart", "manual"],
+            Self::Hermes => &["smart"],
             Self::Pi => &["cafleet", "cafleet-ask"],
         }
     }
@@ -390,8 +390,10 @@ impl CodingAgent {
         effort: Option<&str>,
         policy: &LaunchPolicySelection,
     ) -> Result<Vec<String>, CafleetError> {
-        self.validate_model(model)?;
-        self.validate_effort(effort)?;
+        assert!(
+            self.validate_model(model).is_ok() && self.validate_effort(effort).is_ok(),
+            "member create validates model and effort before argv construction"
+        );
         assert!(
             self.validate_prompt(prompt).is_ok(),
             "member create validates the spawn prompt before argv construction"
@@ -613,7 +615,7 @@ pub(crate) use crate::runtime::system::BoundedOutput;
 
 /// Runs a native command with null stdin and bounded output, returning its
 /// UTF-8 stdout or the failure detail that callers prefix with the command.
-pub(crate) fn run_bounded(
+fn run_bounded(
     executable: &Path,
     args: &[&str],
     environment: &[(&str, &Path)],
@@ -959,18 +961,6 @@ mod tests {
         assert_eq!(
             failure.message(),
             "--effort for the hermes backend must be one of none, minimal, low, medium, high, xhigh, max, ultra (got 'HIGH')."
-        );
-        assert!(
-            CodingAgent::Hermes
-                .build_spawn_argv_with_policy(
-                    "assignment",
-                    "worker",
-                    cwd(),
-                    None,
-                    Some("HIGH"),
-                    &CodingAgent::Hermes.resolve_policy(None).unwrap()
-                )
-                .is_err()
         );
         assert!(CodingAgent::Opencode.validate_effort(Some("high")).is_err());
     }
@@ -1447,7 +1437,7 @@ mod tests {
 
         #[test]
         fn native_launch_identity_selects_the_boundary_profile_from_its_minimum_onwards() {
-            let catalog = ProfileCatalog::from_definitions(&thresholds(&[
+            let catalog = crate::coding_agent::catalog::test_support::load(&thresholds(&[
                 ("low", "1.0.0"),
                 ("high", "2.0.0"),
             ]))
@@ -1470,7 +1460,7 @@ mod tests {
 
         #[test]
         fn native_launch_identity_rejects_a_known_version_below_the_lowest_boundary() {
-            let several = ProfileCatalog::from_definitions(&thresholds(&[
+            let several = crate::coding_agent::catalog::test_support::load(&thresholds(&[
                 ("high", "2.0.0"),
                 ("low", "1.0.0"),
             ]))
@@ -1509,7 +1499,8 @@ mod tests {
         #[test]
         fn native_launch_identity_without_any_profile_for_the_backend_records_unknown_silently() {
             let catalog =
-                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
             for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
                 let identity = launched(backend, "2.1.302", &catalog);
                 assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
@@ -1667,7 +1658,7 @@ mod tests {
     fn runtime_policy_help_lists_every_catalog_with_its_default() {
         assert_eq!(
             CodingAgent::permission_mode_help(),
-            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet-ask); hermes: smart, manual (default smart); pi: cafleet, cafleet-ask (default cafleet-ask)"
+            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet-ask); hermes: smart (default smart); pi: cafleet, cafleet-ask (default cafleet-ask)"
         );
     }
 
@@ -2019,7 +2010,6 @@ mod tests {
                         "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '{model}')."
                     )
                 );
-                assert!(argv("assignment", Some(&model), None, None).is_err());
             }
             for model in ["kimi:high", "provider/model:free:max"] {
                 assert!(
@@ -2076,7 +2066,6 @@ mod tests {
                         "--effort for the pi backend must be one of off, minimal, low, medium, high, xhigh, max (got '{value}')."
                     )
                 );
-                assert!(argv("assignment", None, Some(value), None).is_err());
             }
         }
 

@@ -1,5 +1,6 @@
 use crate::broker;
 use crate::broker::MemberKind;
+use crate::broker::MemberRecord;
 use crate::config::Settings;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
@@ -7,7 +8,6 @@ use crate::multiplexer::Multiplexer;
 use crate::multiplexer::PressKeys;
 use crate::time::Deadline;
 use rusqlite::Connection;
-use std::time::Duration;
 
 pub(crate) struct KeyAcknowledgment {
     pub(crate) member_id: i64,
@@ -36,54 +36,43 @@ pub(crate) fn press_member(
     deadline
         .remaining()
         .map_err(|cause| effect_error(member_id, cause, false))?;
-    let mux = with_database_budget(conn, deadline, |conn| {
+    let (member, mux) = with_database_budget(conn, deadline, |conn| {
         let member = broker::active_member(conn, member_id)?;
-        crate::runtime::mux_for_fleet(conn, member.fleet_id, Some(deadline))
+        let mux = crate::runtime::mux_for_fleet(conn, member.fleet_id, Some(deadline))?;
+        Ok((member, mux))
     })
     .map_err(|cause| effect_error(member_id, cause, false))?;
-    press_member_with_mux(conn, settings, member_id, keys, deadline, &*mux)
+    press_member_with_mux(conn, settings, member, keys, deadline, &*mux)
 }
 
 pub(crate) fn press_member_with_mux(
     conn: &mut Connection,
     settings: &Settings,
-    member_id: i64,
+    member: MemberRecord,
     keys: &PressKeys,
     deadline: Deadline,
     mux: &dyn Multiplexer,
 ) -> Result<KeyAcknowledgment, CafleetError> {
+    let member_id = member.member_id;
     let mut started = false;
     let result = (|| {
-        let member = with_database_budget(conn, deadline, |conn| {
-            broker::active_member(conn, member_id)
-        })?;
         if member.kind == MemberKind::Director {
             return Err(CafleetError::App(
                 "cannot press keys in the Director's own pane".into(),
             ));
         }
-        let placement = member.placement.as_ref().ok_or_else(|| CafleetError::App(format!("member {member_id} has no placement row; it was not spawned via `cafleet member create`.")))?;
+        let placement = &member.placement;
         let pane_id = placement.mux_pane_id.as_ref().ok_or_else(|| {
             CafleetError::App(format!(
                 "member {member_id} has no pane yet (pending placement) — nothing to press."
             ))
         })?;
-        if mux.name() != placement.backend {
-            return Err(CafleetError::App(
-                "press backend does not match the recorded placement".into(),
-            ));
-        }
         let _span = crate::time::DeferTermination::begin()?;
-        let locked = crate::pane_lock::lock_member_with_reservation(
-            conn,
-            settings,
-            &member,
-            deadline,
-            Duration::from_secs(1),
-        )?
-        .ok_or_else(|| {
-            CafleetError::App(format!("member {member_id}'s pane input remained busy"))
-        })?;
+        let locked =
+            crate::pane_lock::lock_member_with_reservation(conn, settings, &member, deadline)?
+                .ok_or_else(|| {
+                    CafleetError::App(format!("member {member_id}'s pane input remained busy"))
+                })?;
         mux.validate_key_target(placement, deadline)
             .map_err(|cause| CafleetError::App(cause.to_string()))?;
         deadline.remaining()?;
@@ -125,6 +114,19 @@ mod tests {
     use crate::multiplexer::TimedRunError;
     use crate::pane_lock::PaneLock;
     use crate::runtime::press::*;
+
+    /// Loads `member_id` as `press_member` does and presses `keys` through `mux`.
+    fn press_loaded(
+        conn: &mut rusqlite::Connection,
+        settings: &Settings,
+        member_id: i64,
+        keys: &PressKeys,
+        deadline: Deadline,
+        mux: &dyn Multiplexer,
+    ) -> Result<KeyAcknowledgment, CafleetError> {
+        let member = crate::broker::active_member(conn, member_id).unwrap();
+        press_member_with_mux(conn, settings, member, keys, deadline, mux)
+    }
     use crate::runtime::test_support::Fixture;
     use crate::time::Deadline;
     use nix::sys::signal::SigSet;
@@ -169,7 +171,7 @@ mod tests {
             assert_eq!(name, "tmux");
             true
         }
-        fn run(&self, _: &[String], _: Option<u64>) -> Result<String, RunError> {
+        fn run(&self, _: &[String]) -> Result<String, RunError> {
             panic!("press probes and write retain absolute deadlines")
         }
         fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
@@ -263,7 +265,7 @@ mod tests {
         assert!(member.runtime.is_some());
         let probe = Rc::new(Probe {
             database_url: settings.database_url.clone(),
-            placement: member.placement.unwrap(),
+            placement: member.placement,
             member_id: member.member_id,
             until,
             mode,
@@ -358,7 +360,7 @@ mod tests {
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, probe, mux) = setup(&fixture, Mode::Success, until);
         let before = crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        let value = press_member_with_mux(
+        let value = press_loaded(
             &mut fixture.conn,
             &settings,
             fixture.run.member_id,
@@ -389,11 +391,11 @@ mod tests {
     }
 
     #[test]
-    fn press_entry_refuses_director_backend_mismatch_and_a_busy_shared_lock_before_probes() {
+    fn press_entry_refuses_director_and_a_busy_shared_lock_before_probes() {
         let mut fixture = Fixture::new();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, probe, mux) = setup(&fixture, Mode::Success, until);
-        let director = failure(press_member_with_mux(
+        let director = failure(press_loaded(
             &mut fixture.conn,
             &settings,
             fixture.run.director_member_id,
@@ -408,40 +410,11 @@ mod tests {
         assert_zero_effect(&director, fixture.run.director_member_id);
         assert!(probe.calls.borrow().is_empty());
 
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_placements SET backend='herdr' WHERE member_id=?1",
-                [fixture.run.member_id],
-            )
-            .unwrap();
-        let mismatch = failure(press_member_with_mux(
-            &mut fixture.conn,
-            &settings,
-            fixture.run.member_id,
-            &keys(),
-            Deadline::until(until),
-            &*mux,
-        ));
-        assert_eq!(
-            primary(&mismatch).message(),
-            "press backend does not match the recorded placement"
-        );
-        assert_zero_effect(&mismatch, fixture.run.member_id);
-        assert!(probe.calls.borrow().is_empty());
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_placements SET backend='tmux' WHERE member_id=?1",
-                [fixture.run.member_id],
-            )
-            .unwrap();
-
         let held = PaneLock::try_acquire(&settings.database_url, &probe.placement)
             .unwrap()
             .unwrap();
         let busy_until = Instant::now() + Duration::from_millis(1100);
-        let busy = failure(press_member_with_mux(
+        let busy = failure(press_loaded(
             &mut fixture.conn,
             &settings,
             fixture.run.member_id,
@@ -472,7 +445,7 @@ mod tests {
             };
             let until = Instant::now() + budget;
             let (settings, probe, mux) = setup(&fixture, mode, until);
-            let cause = failure(press_member_with_mux(
+            let cause = failure(press_loaded(
                 &mut fixture.conn,
                 &settings,
                 fixture.run.member_id,
@@ -510,7 +483,7 @@ mod tests {
             let mut fixture = Fixture::new();
             let until = Instant::now() + Duration::from_secs(2);
             let (settings, probe, mux) = setup(&fixture, mode, until);
-            let cause = failure(press_member_with_mux(
+            let cause = failure(press_loaded(
                 &mut fixture.conn,
                 &settings,
                 fixture.run.member_id,

@@ -262,40 +262,42 @@ pub(crate) fn incompatible_format(path: &str) -> CafleetError {
     ))
 }
 
-pub(crate) fn classify_schema(conn: &Connection) -> SchemaState {
-    let incompatible = || SchemaState::Incompatible {
-        path: conn.path().unwrap_or(":memory:").to_owned(),
-    };
-    let inspect = || -> Result<SchemaState, CafleetError> {
-        let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
-        let populated: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
-            [], |row| row.get(0)
-        )?;
-        if identity == 0 && !populated {
-            return Ok(SchemaState::Missing);
-        }
-        if identity != crate::db::APPLICATION_ID {
-            return Ok(incompatible());
-        }
-        if !ledger_is_baseline(conn)? || !schema_matches(conn)? || !records_running_version(conn)? {
-            return Ok(incompatible());
-        }
-        Ok(SchemaState::Current)
-    };
-    match inspect() {
-        Ok(state) => state,
-        Err(cause) => SchemaState::Unreachable { cause },
+#[derive(Debug, PartialEq, Eq)]
+enum Classification {
+    Missing,
+    Current,
+    Incompatible,
+}
+
+fn classify_schema(conn: &Connection) -> Result<Classification, CafleetError> {
+    let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+    let populated: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
+        [],
+        |row| row.get(0),
+    )?;
+    if identity == 0 && !populated {
+        return Ok(Classification::Missing);
     }
+    if identity != crate::db::APPLICATION_ID
+        || !ledger_is_baseline(conn)?
+        || !schema_matches(conn)?
+        || !records_running_version(conn)?
+    {
+        return Ok(Classification::Incompatible);
+    }
+    Ok(Classification::Current)
 }
 
 pub(crate) fn classify_selected_schema(conn: &Connection, database_url: &str) -> SchemaState {
     match classify_schema(conn) {
-        SchemaState::Incompatible { .. } => match crate::db::database_path(database_url) {
+        Ok(Classification::Missing) => SchemaState::Missing,
+        Ok(Classification::Current) => SchemaState::Current,
+        Ok(Classification::Incompatible) => match crate::db::database_path(database_url) {
             Ok(path) => SchemaState::Incompatible { path: path.into() },
             Err(cause) => SchemaState::Unreachable { cause },
         },
-        state => state,
+        Err(cause) => SchemaState::Unreachable { cause },
     }
 }
 
@@ -523,19 +525,6 @@ pub(crate) fn with_database_deadline<T>(
     let value = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, operation)?;
     deadline.remaining()?;
     Ok(value)
-}
-
-pub(crate) fn finalize_deletion<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    has_run: bool,
-    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    if has_run {
-        with_database_budget(conn, deadline, operation)
-    } else {
-        complete_database_budget(conn, deadline, operation)
-    }
 }
 
 // Pane side effects are irreversible; mandatory storage finalization gets a
@@ -787,7 +776,7 @@ mod tests {
     }
 
     fn require_current(conn: &Connection) -> Result<(), CafleetError> {
-        crate::db::classify_schema(conn).require_current()
+        classify_selected_schema(conn, "sqlite:///:memory:").require_current()
     }
 
     fn initialized_conn() -> Connection {
@@ -812,10 +801,10 @@ mod tests {
         let mut conn = initialized_conn();
         conn.execute_batch(
                 "INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'preserved', 'created');
-                 INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, deregistered_at) VALUES
-                    (1, 1, 'Director', 'director assignment', 'active', 'registered', NULL),
-                    (2, 1, 'worker', 'worker assignment', 'active', 'registered', NULL),
-                    (3, 1, 'departed', 'finished assignment', 'deregistered', 'registered', 'departed');
+                 INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES
+                    (1, 1, 'Director', 'director assignment', 'active', 'registered'),
+                    (2, 1, 'worker', 'worker assignment', 'active', 'registered'),
+                    (3, 1, 'departed', 'finished assignment', 'deregistered', 'registered');
                  INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, mux_server, coding_agent, created_at) VALUES
                     (1, 'main', '@1', '%0', 'tmux', '/tmp/tmux-0/default', 'claude', 'placed'),
                     (2, 'main', '@1', NULL, 'tmux', '/tmp/tmux-0/default', 'codex', 'placed');
@@ -824,7 +813,7 @@ mod tests {
                     (7, 1, 2, 'created-7', 'input_required', 'status-7', 'pending unicode 世界', NULL),
                     (8, 1, 2, 'created-8', 'input_required', 'status-8', 'notified', 'notified-8'),
                     (9, 2, 1, 'created-9', 'completed', 'status-9', 'completed', NULL);
-                 INSERT INTO asset_installs VALUES('claude', '/preserved/config', '0.29.0', 'installed');"
+                 INSERT INTO asset_installs VALUES('claude', '/preserved/config', 'installed');"
             ).unwrap();
         assert!(schema_matches(&conn).unwrap());
         require_current(&conn).unwrap();
@@ -935,10 +924,10 @@ mod tests {
             [],
         )
         .unwrap();
-        assert!(matches!(
-            classify_schema(&conn),
-            SchemaState::Incompatible { .. }
-        ));
+        assert_eq!(
+            classify_schema(&conn).unwrap(),
+            Classification::Incompatible
+        );
     }
 
     #[test]
@@ -988,7 +977,11 @@ mod tests {
             ),
             ("members", "name TEXT NOT NULL", "name TEXT"),
             ("messages", "text TEXT NOT NULL", "text INTEGER NOT NULL"),
-            ("member_placements", "DEFAULT 'tmux'", "DEFAULT 'herdr'"),
+            (
+                "member_placements",
+                "backend TEXT NOT NULL,",
+                "backend TEXT NOT NULL DEFAULT 'tmux',",
+            ),
             ("messages", "ON DELETE RESTRICT", "ON DELETE CASCADE"),
         ] {
             let conn = initialized_conn();
@@ -1021,7 +1014,7 @@ mod tests {
         let mut conn = connect("sqlite:///:memory:").unwrap();
         initialize(&mut conn).unwrap();
         assert!(conn.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(404, 'orphan', '', 'active', '')", []).is_err());
-        conn.execute_batch("INSERT INTO fleets(fleet_id, created_at) VALUES(1, 'created'); INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES(1, 1, 'valid', '', 'active', 'registered');").unwrap();
+        conn.execute_batch("INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'valid', 'created'); INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES(1, 1, 'valid', '', 'active', 'registered');").unwrap();
         for (from, to) in [(404, 1), (1, 404)] {
             assert!(conn.execute("INSERT INTO messages(from_member_id, to_member_id, created_at, status_state, status_timestamp, text) VALUES(?1, ?2, '', 'input_required', '', '')", rusqlite::params![from, to]).is_err());
         }
@@ -1102,16 +1095,16 @@ mod tests {
                 self.conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
              database_identity_json,launch_nonce,runtime_path,resolved_mode,mode_source,
-             permission_argv_json,event_evidence,coverage,status,created_at,
-             owner_epoch,owner_kind,owner_pid,owner_start_identity,reachability,
-             cleanup_state,event_seq_reserved_through,observation_gap_count,native_session_json)
-             VALUES(?1,?2,?3,?8,?4,?5,'/isolated/runtime','never','default',
+             permission_argv_json,event_evidence,coverage,status,
+             owner_epoch,owner_kind,owner_pid,owner_start_identity,
+             cleanup_state,event_seq_reserved_through,native_session_json)
+             VALUES(?1,?2,?3,?7,?4,?5,'/isolated/runtime','never','default',
              '[\"--ask-for-approval\",\"never\",\"--sandbox\",\"workspace-write\"]',
-             'metadata','unknown',?6,?7,1,'creator',1234,'fixture-owner','reachable',
-             'incomplete',0,0,?9)",
+             'metadata','unknown',?6,1,'creator',1234,'fixture-owner',
+             'incomplete',0,?8)",
             params![self.member,self.fleet,self.director,
                 json!({"canonical_path": self.conn.path().unwrap(), "instance_id": "a".repeat(32), "device":1,"inode":2}).to_string(),
-                "b".repeat(64),status,NOW,backend,native_session_json],
+                "b".repeat(64),status,backend,native_session_json],
         )?;
                 Ok(self.conn.last_insert_rowid())
             }
@@ -1127,12 +1120,12 @@ mod tests {
 
             fn archived_event(&self, run: i64, seq: i64) -> rusqlite::Result<i64> {
                 self.conn.execute(
-                "INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,committed_at,
+                    "INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,
              payload_json,notification_state,archive_reason)
-             VALUES(?1,?2,'coverage_unknown',?3,?3,'{\"schema_version\":2}',
+             VALUES(?1,?2,'coverage_unknown',?3,'{}',
              'archived','member_inactive')",
-                params![run, seq, NOW],
-            )?;
+                    params![run, seq, NOW],
+                )?;
                 Ok(self.conn.last_insert_rowid())
             }
 
@@ -1190,14 +1183,7 @@ mod tests {
         #[test]
         fn every_nonterminal_status_enforces_one_live_run_per_member() {
             let fixture = Fixture::new();
-            for status in [
-                "starting",
-                "prepared",
-                "running",
-                "degraded",
-                "stopping",
-                "recovering",
-            ] {
+            for status in ["starting", "prepared", "running", "degraded", "recovering"] {
                 let run = fixture.run(status).unwrap();
                 assert!(fixture.run("starting").is_err(), "{status}");
                 fixture
@@ -1245,7 +1231,6 @@ mod tests {
                 ("status", "bogus"),
                 ("mode_source", "inherited"),
                 ("owner_kind", "member"),
-                ("reachability", "dead"),
                 ("cleanup_state", "unknown"),
                 ("coverage", "universal"),
                 ("event_evidence", "raw"),
@@ -1280,18 +1265,15 @@ mod tests {
                     "{field}"
                 );
             }
-            for field in ["event_seq_reserved_through", "observation_gap_count"] {
-                assert!(
-                    fixture
-                        .conn
-                        .execute(
-                            &format!("UPDATE member_runs SET {field}=-1 WHERE run_id=?1"),
-                            [run]
-                        )
-                        .is_err(),
-                    "{field}"
-                );
-            }
+            assert!(
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET event_seq_reserved_through=-1 WHERE run_id=?1",
+                        [run]
+                    )
+                    .is_err()
+            );
         }
 
         #[test]
@@ -1366,13 +1348,7 @@ mod tests {
                 let interaction = fixture.interaction(run, seq, class).unwrap();
                 fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",params![NOW,interaction]).unwrap();
             }
-            for class in [
-                "permission_denied",
-                "working",
-                "composer_empty",
-                "unknown",
-                "bogus",
-            ] {
+            for class in ["composer_empty", "unknown", "bogus"] {
                 assert!(fixture.interaction(run, seq + 1, class).is_err(), "{class}");
             }
         }
@@ -1549,24 +1525,21 @@ mod tests {
     #[test]
     fn classification_preserves_missing_current_identity_and_sql_causes() {
         let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
-        assert!(matches!(classify_schema(&conn), SchemaState::Missing));
+        assert_eq!(classify_schema(&conn).unwrap(), Classification::Missing);
         crate::db::initialize(&mut conn).unwrap();
-        assert!(matches!(classify_schema(&conn), SchemaState::Current));
+        assert_eq!(classify_schema(&conn).unwrap(), Classification::Current);
         conn.execute_batch("PRAGMA application_id=1").unwrap();
-        assert!(matches!(
-            classify_schema(&conn),
-            SchemaState::Incompatible { .. }
-        ));
+        assert_eq!(
+            classify_schema(&conn).unwrap(),
+            Classification::Incompatible
+        );
         conn.pragma_update(None, "application_id", crate::db::APPLICATION_ID)
             .unwrap();
         conn.execute_batch(
             "ALTER TABLE refinery_schema_history RENAME COLUMN version TO missing_version",
         )
         .unwrap();
-        assert!(matches!(
-            classify_schema(&conn),
-            SchemaState::Unreachable { .. }
-        ));
+        assert!(classify_schema(&conn).is_err());
     }
     mod database_scope_tests {
         use crate::db::*;

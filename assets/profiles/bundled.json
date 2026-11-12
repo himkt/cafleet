@@ -2429,11 +2429,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-idle-composer",
@@ -2455,11 +2453,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
-          "verified_noninteraction": true,
-          "sensitive": false
+          "verified_noninteraction": true
         },
         {
           "id": "claude-auto-ask-permission",
@@ -2538,11 +2534,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-bash-permission-auto-tip",
@@ -2621,11 +2615,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-read-outside-permission",
@@ -2704,11 +2696,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-bash-permission-no-tip",
@@ -2782,11 +2772,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-read-file-permission",
@@ -2860,11 +2848,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-edit-file-permission",
@@ -2937,11 +2923,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-create-file-permission",
@@ -3014,11 +2998,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-auto-startup",
@@ -3083,11 +3065,9 @@
                 },
                 "scope": "persistent"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-auto-env-setup-wizard",
@@ -3120,11 +3100,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-auto-default-nudge",
@@ -3180,11 +3158,9 @@
                 },
                 "scope": "persistent"
               }
-            ],
-            "native_request_id": null
+            ]
           },
           "verified_noninteraction": false,
-          "sensitive": false,
           "frame": {
             "require_patterns": [],
             "reject_patterns": [
@@ -3213,11 +3189,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "verified_noninteraction": false,
-          "sensitive": false,
           "frame": {
             "require_patterns": [
               "^❯\\u{a0}"
@@ -3251,8 +3225,7 @@
               "matcher_id": "operation",
               "capture": "operation"
             },
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "frame": {
             "require_patterns": [
@@ -3262,8 +3235,7 @@
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-auto-refusal-notice",
@@ -3289,8 +3261,7 @@
               "matcher_id": "operation",
               "capture": "operation"
             },
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "frame": {
             "require_patterns": [
@@ -3300,8 +3271,7 @@
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-auto-unavailable",
@@ -3324,8 +3294,7 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "frame": {
             "require_patterns": [
@@ -3335,8 +3304,7 @@
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "claude-auto-mode-indicator",
@@ -3358,8 +3326,7 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "frame": {
             "require_patterns": [
@@ -3369,8 +3336,7 @@
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         }
       ],
       "capabilities": {
@@ -3887,11 +3853,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "codex-idle-composer",
@@ -3913,11 +3877,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
-          "verified_noninteraction": true,
-          "sensitive": false
+          "verified_noninteraction": true
         },
         {
           "id": "codex-auto-review-refusal",
@@ -3943,8 +3905,7 @@
               "capture": "operation",
               "row_margin": "  "
             },
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "frame": {
             "require_patterns": [
@@ -3954,8 +3915,7 @@
               "^  k keep & next · esc dismiss & close"
             ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "codex-auto-review-indicator",
@@ -3977,8 +3937,7 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "frame": {
             "require_patterns": [
@@ -3988,8 +3947,7 @@
               "^  k keep & next · esc dismiss & close"
             ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         }
       ],
       "capabilities": {
@@ -4172,11 +4130,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "opencode-reject-reason",
@@ -4203,11 +4159,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "verified_noninteraction": false,
-          "sensitive": false,
           "continues_rule_id": "opencode-shell-permission",
           "continues_choice_id": "deny-once",
           "fixture_ids": [
@@ -4292,11 +4246,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "opencode-reject-reason-compact",
@@ -4323,11 +4275,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
           "verified_noninteraction": false,
-          "sensitive": false,
           "continues_rule_id": "opencode-shell-permission-compact",
           "continues_choice_id": "deny-once",
           "fixture_ids": [
@@ -4355,11 +4305,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
-          "verified_noninteraction": true,
-          "sensitive": false
+          "verified_noninteraction": true
         }
       ],
       "capabilities": {
@@ -4603,11 +4551,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "hermes-approval-override",
@@ -4681,11 +4627,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "hermes-idle-composer",
@@ -4707,11 +4651,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
-          "verified_noninteraction": true,
-          "sensitive": false
+          "verified_noninteraction": true
         }
       ],
       "capabilities": {
@@ -4951,11 +4893,9 @@
                 },
                 "scope": "single_request"
               }
-            ],
-            "native_request_id": null
+            ]
           },
-          "verified_noninteraction": false,
-          "sensitive": false
+          "verified_noninteraction": false
         },
         {
           "id": "pi-idle-composer",
@@ -4977,11 +4917,9 @@
           ],
           "extract": {
             "operation": null,
-            "choices": [],
-            "native_request_id": null
+            "choices": []
           },
-          "verified_noninteraction": true,
-          "sensitive": false
+          "verified_noninteraction": true
         }
       ],
       "capabilities": {

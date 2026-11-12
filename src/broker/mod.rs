@@ -56,7 +56,20 @@ macro_rules! stored_enum {
 pub(crate) use stored_enum;
 
 stored_enum!(MemberStatus, "members.status", {Active => "active", Deregistered => "deregistered"});
-stored_enum!(MemberKind, "member.kind", {Director => "director", Member => "member"});
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemberKind {
+    Director,
+    Member,
+}
+
+impl MemberKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Director => "director",
+            Self::Member => "member",
+        }
+    }
+}
 stored_enum!(MessageStatus, "messages.status_state", {InputRequired => "input_required", Completed => "completed"});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +109,7 @@ pub(crate) struct MemberRecord {
     pub(crate) registered_at: String,
     pub(crate) status: MemberStatus,
     pub(crate) kind: MemberKind,
-    pub(crate) placement: Option<Placement>,
+    pub(crate) placement: Placement,
     pub(crate) runtime: Option<crate::broker::runtime::RuntimeSnapshot>,
 }
 
@@ -147,25 +160,25 @@ impl MessageRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FleetRecord {
     pub(crate) fleet_id: i64,
-    pub(crate) name: Option<String>,
+    pub(crate) name: String,
     pub(crate) created_at: String,
     pub(crate) deleted_at: Option<String>,
-    pub(crate) director_member_id: Option<i64>,
+    pub(crate) director_member_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FleetSummary {
     pub(crate) fleet_id: i64,
-    pub(crate) name: Option<String>,
+    pub(crate) name: String,
     pub(crate) created_at: String,
-    pub(crate) director_member_id: Option<i64>,
+    pub(crate) director_member_id: i64,
     pub(crate) member_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CreatedFleet {
     pub(crate) fleet_id: i64,
-    pub(crate) name: Option<String>,
+    pub(crate) name: String,
     pub(crate) created_at: String,
     pub(crate) director: MemberRecord,
 }

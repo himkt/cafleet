@@ -59,8 +59,8 @@ impl CommandRunner for SystemRunner {
         std::env::var_os("PATH").is_some_and(|path| find_executable_in(&path, name).is_some())
     }
 
-    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
-        run_process(argv, timeout_secs.map(Duration::from_secs))
+    fn run(&self, argv: &[String]) -> Result<String, RunError> {
+        run_process(argv, None)
     }
 
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
@@ -661,7 +661,10 @@ mod tests {
                 "cafleet-process-test".to_owned(),
                 self.dir.path().to_str().unwrap().to_owned(),
             ];
-            SystemRunner.run(&argv, timeout)
+            match timeout {
+                Some(secs) => SystemRunner.run_for(&argv, Duration::from_secs(secs)),
+                None => SystemRunner.run(&argv),
+            }
         }
 
         fn write(&self, name: &str, bytes: &[u8]) {
@@ -797,7 +800,10 @@ mod tests {
     fn runner_preserves_binary_not_found_classification() {
         let fixture = ProcessFixture::new();
         let missing = fixture.dir.path().join("missing-executable");
-        let result = SystemRunner.run(&[missing.to_str().unwrap().to_owned()], Some(1));
+        let result = SystemRunner.run_for(
+            &[missing.to_str().unwrap().to_owned()],
+            Duration::from_secs(1),
+        );
         assert!(
             matches!(result, Err(RunError::BinaryNotFound(_))),
             "{result:?}"

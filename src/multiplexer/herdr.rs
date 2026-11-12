@@ -109,20 +109,20 @@ impl HerdrMultiplexer {
     }
 
     fn run_json(&self, argv: &[String]) -> Result<Value, MultiplexerError> {
-        parse_envelope(&self.core.run(argv, None)?)
+        parse_envelope(&self.core.run(argv)?)
     }
 
     /// The `result` of a pane read, or `None` when herdr reports `pane_not_found`.
     fn pane_read(&self, parts: &[&str]) -> Result<Option<Value>, MultiplexerError> {
         let argv = self.core.argv(parts);
-        match self.core.runner.run(&argv, None) {
+        match self.core.runner.run(&argv) {
             Ok(out) => parse_envelope(&out).map(Some),
             Err(crate::multiplexer::RunError::Failed { ref stderr })
                 if is_pane_not_found(stderr) =>
             {
                 Ok(None)
             }
-            Err(error) => Err(self.core.map_error(&argv, None, error)),
+            Err(error) => Err(self.core.map_error(&argv, error)),
         }
     }
 
@@ -228,17 +228,18 @@ impl Multiplexer for HerdrMultiplexer {
             None => self.split_pane(&reference.pane_id, "right", &cwd)?,
             Some(target) => self.split_pane(target, "down", &cwd)?,
         };
-        let mut pane = PaneOwnership::new(new_pane_id.clone(), |id| self.kill_pane(id, true));
+        let mut pane = PaneOwnership::new(new_pane_id.clone(), |id| self.kill_pane(id));
         let result: Result<(), MultiplexerError> = (|| {
             if !column.is_empty() {
                 let _ = self.resize_tab_column(&reference.pane_id);
             }
-            self.core.run(
-                &self
-                    .core
-                    .argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
-                None,
-            )?;
+            self.core.run(&self.core.argv(&[
+                "herdr",
+                "pane",
+                "run",
+                &new_pane_id,
+                &shlex_join(command),
+            ]))?;
             Ok(())
         })();
         if let Err(error) = result {
@@ -253,41 +254,30 @@ impl Multiplexer for HerdrMultiplexer {
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
         crate::multiplexer::check_capture_lines(lines)?;
         let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
-        let raw = self.core.run(
-            &self.core.argv(&[
-                "herdr",
-                "pane",
-                "read",
-                target_pane_id,
-                "--format",
-                "ansi",
-                "--source",
-                "recent-unwrapped",
-                "--lines",
-                &fetch_depth.to_string(),
-            ]),
-            None,
-        )?;
+        let raw = self.core.run(&self.core.argv(&[
+            "herdr",
+            "pane",
+            "read",
+            target_pane_id,
+            "--format",
+            "ansi",
+            "--source",
+            "recent-unwrapped",
+            "--lines",
+            &fetch_depth.to_string(),
+        ]))?;
         Ok(crate::multiplexer::capture_window(&raw, lines))
     }
 
-    fn kill_pane(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        if let Some(tab_id) = self.close_reading_tab(target_pane_id, ignore_missing)? {
+    fn kill_pane(&self, target_pane_id: &str) -> Result<(), MultiplexerError> {
+        if let Some(tab_id) = self.close_reading_tab(target_pane_id)? {
             let _ = self.resize_after_close(&tab_id);
         }
         Ok(())
     }
 
-    fn close_pane(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        let tab_id = self.close_reading_tab(target_pane_id, ignore_missing)?;
+    fn close_pane(&self, target_pane_id: &str) -> Result<(), MultiplexerError> {
+        let tab_id = self.close_reading_tab(target_pane_id)?;
         *self.closed_tab.borrow_mut() = tab_id;
         Ok(())
     }
@@ -320,7 +310,7 @@ impl HerdrMultiplexer {
         ]);
         let result = self
             .core
-            .run(&args, None)
+            .run(&args)
             .and_then(|raw| parse_envelope(&raw))
             .map_err(|error| error.with_pane_cleanup(PaneCleanup::Unknown))?;
         let id = str_field(&result["pane"], "pane split", "pane_id")
@@ -398,35 +388,29 @@ impl HerdrMultiplexer {
                 (&column[i + 1], "up", -delta)
             };
             let pane_id = str_field(pane, "pane layout", "pane_id")?;
-            self.core.run(
-                &self.core.argv(&[
-                    "herdr",
-                    "pane",
-                    "resize",
-                    "--pane",
-                    pane_id,
-                    "--direction",
-                    direction,
-                    "--amount",
-                    &amount.to_string(),
-                ]),
-                None,
-            )?;
+            self.core.run(&self.core.argv(&[
+                "herdr",
+                "pane",
+                "resize",
+                "--pane",
+                pane_id,
+                "--direction",
+                direction,
+                "--amount",
+                &amount.to_string(),
+            ]))?;
         }
         Ok(())
     }
 
-    fn close_reading_tab(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<Option<String>, MultiplexerError> {
+    fn close_reading_tab(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
         let target_tab_id = self.pane_tab_id(target_pane_id);
-        self.core.run_tolerating_missing(
-            &self.core.argv(&["herdr", "pane", "close", target_pane_id]),
-            ignore_missing,
-            None,
-        )?;
+        self.core.run_tolerating_missing(&self.core.argv(&[
+            "herdr",
+            "pane",
+            "close",
+            target_pane_id,
+        ]))?;
         Ok(target_tab_id)
     }
 
@@ -487,20 +471,17 @@ impl HerdrMultiplexer {
             return Ok(());
         }
         let pane_id = str_field(&panes[0], "pane layout", "pane_id")?;
-        self.core.run(
-            &self.core.argv(&[
-                "herdr",
-                "pane",
-                "resize",
-                "--pane",
-                pane_id,
-                "--direction",
-                "right",
-                "--amount",
-                &delta.to_string(),
-            ]),
-            None,
-        )?;
+        self.core.run(&self.core.argv(&[
+            "herdr",
+            "pane",
+            "resize",
+            "--pane",
+            pane_id,
+            "--direction",
+            "right",
+            "--amount",
+            &delta.to_string(),
+        ]))?;
         Ok(())
     }
 }
@@ -826,7 +807,7 @@ mod tests {
         }))));
         runner.succeed(1);
         let mux = on_server(runner.clone());
-        mux.kill_pane("w1:p2", false).unwrap();
+        mux.kill_pane("w1:p2").unwrap();
         assert_eq!(
             runner.run_argvs(),
             vec![
@@ -867,7 +848,7 @@ mod tests {
         }}))));
         runner.succeed(1);
         let mux = on_server(runner.clone());
-        mux.close_pane("w1:p2", false).unwrap();
+        mux.close_pane("w1:p2").unwrap();
         assert_eq!(runner.run_argvs().len(), 2);
         mux.restore_after_close().unwrap();
         let calls = runner.run_argvs();
@@ -894,7 +875,7 @@ mod tests {
         }));
         runner.respond(Ok(String::new()));
         let mux = on_server(runner.clone());
-        mux.kill_pane("w1:p2", false).unwrap();
+        mux.kill_pane("w1:p2").unwrap();
         assert_eq!(
             runner.run_argvs(),
             vec![
@@ -906,7 +887,7 @@ mod tests {
     }
 
     #[test]
-    fn kill_pane_close_error_honors_ignore_missing() {
+    fn kill_pane_tolerates_a_pane_gone_close() {
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Err(RunError::Failed {
             stderr: herdr_error_stderr("pane_not_found"),
@@ -915,20 +896,7 @@ mod tests {
             stderr: herdr_error_stderr("pane_not_found"),
         }));
         let mux = on_server(runner);
-        mux.kill_pane("w1:p2", true).unwrap();
-
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Err(RunError::Failed {
-            stderr: herdr_error_stderr("pane_not_found"),
-        }));
-        runner.respond(Err(RunError::Failed {
-            stderr: herdr_error_stderr("pane_not_found"),
-        }));
-        let mux = on_server(runner);
-        assert!(
-            mux.kill_pane("w1:p2", false).is_err(),
-            "without ignore_missing the close failure propagates"
-        );
+        mux.kill_pane("w1:p2").unwrap();
     }
 
     #[test]

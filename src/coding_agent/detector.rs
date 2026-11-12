@@ -1,7 +1,6 @@
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
-use crate::coding_agent::catalog::AnswerKey;
 use crate::coding_agent::catalog::Capture;
 use crate::coding_agent::catalog::CursorRule;
 use crate::coding_agent::catalog::FocusStyle;
@@ -22,11 +21,8 @@ use std::collections::BTreeMap;
 #[serde(try_from = "String")]
 pub(crate) enum ObservationKind {
     Interaction(InteractionClass),
-    PermissionDenied,
     PermissionContinuation,
-    Working,
     ComposerEmpty,
-    ComposerDraft,
     Unknown,
     AutomaticRefusal,
     AutomaticReviewUnavailable,
@@ -46,11 +42,8 @@ impl ObservationKind {
             return Ok(Self::Interaction(class));
         }
         Ok(match value {
-            "permission_denied" => Self::PermissionDenied,
             "permission_continuation" => Self::PermissionContinuation,
-            "working" => Self::Working,
             "composer_empty" => Self::ComposerEmpty,
-            "composer_draft" => Self::ComposerDraft,
             "unknown" => Self::Unknown,
             "automatic_refusal" => Self::AutomaticRefusal,
             "automatic_review_unavailable" => Self::AutomaticReviewUnavailable,
@@ -61,11 +54,8 @@ impl ObservationKind {
     fn name(self) -> &'static str {
         match self {
             Self::Interaction(class) => class.as_str(),
-            Self::PermissionDenied => "permission_denied",
             Self::PermissionContinuation => "permission_continuation",
-            Self::Working => "working",
             Self::ComposerEmpty => "composer_empty",
-            Self::ComposerDraft => "composer_draft",
             Self::Unknown => "unknown",
             Self::AutomaticRefusal => "automatic_refusal",
             Self::AutomaticReviewUnavailable => "automatic_review_unavailable",
@@ -92,13 +82,11 @@ pub(crate) struct SemanticFingerprint {
     parts: Vec<SemanticPart>,
 }
 type SemanticPart = (&'static str, Option<String>, Vec<String>);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+/// The full-width rows `top..bottom` a rule's region matched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ScreenRegion {
     pub(crate) top: u16,
-    pub(crate) left: u16,
     pub(crate) bottom: u16,
-    pub(crate) right: u16,
 }
 #[derive(Clone)]
 pub(crate) struct ScreenObservation {
@@ -109,7 +97,6 @@ pub(crate) struct ScreenObservation {
     pub(crate) raw_evidence: Value,
     pub(crate) fingerprint: Option<SemanticFingerprint>,
     pub(crate) verified_noninteraction: bool,
-    pub(crate) native_correlation: Option<String>,
     pub(crate) output_seq: u64,
     pub(crate) continues_rule_id: Option<String>,
     pub(crate) annotations: Vec<AnnotationBlock>,
@@ -317,7 +304,6 @@ struct Matched<'a> {
     region: ScreenRegion,
     operation: Option<String>,
     choices: Vec<String>,
-    native: Option<String>,
     mode: Option<String>,
     excerpt: String,
     focuses: BTreeMap<String, String>,
@@ -408,22 +394,19 @@ fn qualifying_regions(
             }
             let region = ScreenRegion {
                 top: line.start,
-                left: 0,
                 bottom: last.end + 1,
-                right: screen.cols,
             };
-            // A pending-wrap cursor (column == cols) stands on its row's last cell.
+            // A pending-wrap cursor (column == cols) stands on its row's last cell, inside the
+            // full-width region.
             let inside = screen.cursor_row >= region.top
                 && screen.cursor_row < region.bottom
-                && (screen.cursor_col < region.right
-                    || (region.right == screen.cols && screen.cursor_col == screen.cols));
+                && screen.cursor_col <= screen.cols;
             let qualified = match rule.region.cursor {
                 CursorRule::AtEnd => {
                     last.boundaries.get(found.end())
                         == Some(&(screen.cursor_row, screen.cursor_col))
                 }
                 CursorRule::Inside => inside,
-                CursorRule::Outside => !inside,
                 CursorRule::Any => true,
             };
             if qualified {
@@ -538,10 +521,6 @@ fn extract<'a>(
         }
         None => None,
     };
-    let native = match &rule.native {
-        Some(reference) => Some(captured(reference, &values)?),
-        None => None,
-    };
     let choices = rule
         .choices
         .iter()
@@ -557,7 +536,6 @@ fn extract<'a>(
         region,
         operation,
         choices,
-        native,
         mode,
         excerpt: region_text,
         focuses,
@@ -678,21 +656,13 @@ fn answer_match(
         output_seq: screen.screen_seq,
     }
 }
-/// `base` with the fields every matched rule records: its id, operation, excerpt and
-/// sensitivity.
-fn evidence(
-    base: &Value,
-    rule: &Rule,
-    operation: Option<&str>,
-    excerpt: &str,
-    sensitive: bool,
-) -> Value {
+/// `base` with the fields every matched rule records: its id, operation and excerpt.
+fn evidence(base: &Value, rule: &Rule, operation: Option<&str>, excerpt: &str) -> Value {
     let mut evidence = base.clone();
     evidence["rule_id"] = json!(rule.id);
     evidence["operation"] = json!(operation);
     evidence["operation_rows"] = json!(operation.map(|text| text.split('\n').count()));
     evidence["excerpt"] = json!(excerpt);
-    evidence["sensitive"] = json!(sensitive);
     evidence
 }
 impl Detector {
@@ -709,15 +679,13 @@ impl Detector {
         };
         let applies = |plan: &AnswerPlan| {
             let capability = plan.capability();
-            let answered = match capability.key() {
-                AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
-                AnswerKey::Choice(_) => InteractionClass::Question,
-            };
-            capability.backend() == self.backend
-                && self.version.as_deref() == Some(capability.native_version())
-                && observed.kind == ObservationKind::Interaction(answered)
-                && observed.match_evidence == MatchEvidence::Complete
-                && observed.rule_id == capability.request_rule_id()
+            debug_assert!(
+                capability.backend() == self.backend
+                    && self.version.as_deref() == Some(capability.native_version())
+                    && observed.rule_id == capability.request_rule_id(),
+                "answer plans come from the observed request rule of this detector's profile"
+            );
+            observed.match_evidence == MatchEvidence::Complete
         };
         let applicable = plans
             .iter()
@@ -772,7 +740,6 @@ impl Detector {
                     matched.rule,
                     matched.operation.as_deref(),
                     &matched.excerpt,
-                    matched.rule.sensitive,
                 );
                 raw_evidence["observed_mode"] = json!(matched.mode);
                 AnnotationBlock {
@@ -803,10 +770,9 @@ impl Detector {
             rule_id: "unmatched-screen".into(),
             match_evidence: MatchEvidence::Absent,
             matched_region: None,
-            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"operation_rows":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}),
+            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"operation_rows":null,"choices":null,"excerpt":null,"truncated":false}),
             fingerprint: None,
             verified_noninteraction: false,
-            native_correlation: None,
             output_seq: screen.screen_seq,
             continues_rule_id: None,
             annotations: Vec::new(),
@@ -875,7 +841,6 @@ impl Detector {
         };
         observation.matched_region = Some(best.region);
         observation.verified_noninteraction = !conflict && best.rule.verified;
-        observation.native_correlation = if conflict { None } else { best.native.clone() };
         if observation.kind == ObservationKind::PermissionContinuation {
             observation.continues_rule_id = best
                 .rule
@@ -893,19 +858,15 @@ impl Detector {
             best.rule,
             operation,
             &best.excerpt,
-            matched.iter().any(|m| m.rule.sensitive),
         );
         observation.raw_evidence["choices"] = if conflict {
             Value::Null
         } else {
             json!(best.choices)
         };
-        observation.raw_evidence["native_request_id"] = json!(observation.native_correlation);
         if matches!(
             observation.kind,
-            ObservationKind::Interaction(_)
-                | ObservationKind::PermissionDenied
-                | ObservationKind::PermissionContinuation
+            ObservationKind::Interaction(_) | ObservationKind::PermissionContinuation
         ) {
             observation.fingerprint = Some(SemanticFingerprint { parts });
         }
@@ -924,13 +885,22 @@ pub(crate) mod test_support {
     use crate::runtime::TerminalState;
 
     impl Detector {
-        /// Observes `screen` and matches the one `plan` against it.
+        /// Observes `screen` and matches the one `plan` against it; a plan of another backend,
+        /// version or request rule than the observation, which production never offers, matches
+        /// nothing.
         pub(crate) fn match_answer(
             &self,
             screen: &ScreenSnapshot,
             plan: &AnswerPlan,
         ) -> Result<Option<AnswerMatch>> {
             let observed = self.observe(screen)?;
+            let capability = plan.capability();
+            if capability.backend() != self.backend
+                || self.version.as_deref() != Some(capability.native_version())
+                || observed.rule_id != capability.request_rule_id()
+            {
+                return Ok(None);
+            }
             Ok(self
                 .match_answers(screen, &observed, std::slice::from_ref(plan))?
                 .pop())
@@ -1134,7 +1104,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn observation(definition: &Value, screen: &ScreenSnapshot) -> ScreenObservation {
-        let catalog = ProfileCatalog::from_definitions(definition).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(definition).unwrap();
         Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
             .observe(screen)
             .unwrap()
@@ -1330,7 +1300,9 @@ mod tests {
 
     #[test]
     fn permission_inspection_answer_match_uses_complete_current_rule_choice_and_focus() {
-        let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+        let catalog =
+            crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                .unwrap();
         let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
         let plan = catalog
             .answer_plan(
@@ -1427,7 +1399,6 @@ mod tests {
         assert_eq!(observation.raw_evidence["operation_rows"], 1);
         assert_eq!(observation.raw_evidence["choices"], json!(["Yes", "No"]));
         assert!(!observation.verified_noninteraction);
-        assert!(observation.native_correlation.is_none());
         let region = observation
             .matched_region
             .expect("a permission match locates its live region");
@@ -1542,7 +1513,6 @@ mod tests {
         assert_eq!(observation.raw_evidence["choices"], json!(["Yes", "No"]));
         assert!(observation.fingerprint.is_some());
         assert!(!observation.verified_noninteraction);
-        assert!(observation.native_correlation.is_none());
     }
 
     #[test]
@@ -2062,7 +2032,6 @@ mod tests {
         assert_eq!(observation.raw_evidence["operation_rows"], 1);
         assert_eq!(observation.raw_evidence["choices"], json!(CODEX_CHOICES));
         assert!(!observation.verified_noninteraction);
-        assert!(observation.native_correlation.is_none());
         let region = observation
             .matched_region
             .expect("an approval match locates its live region");
@@ -2526,14 +2495,14 @@ mod tests {
 
     #[test]
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
-        assert_no_debug_or_serialize!(AnswerMatch);
+        assert_not_impl!(AnswerMatch: std::fmt::Debug, serde::Serialize);
     }
 
     #[test]
     fn runtime_profile_private_fingerprint_supports_comparison_without_debug_or_serialization() {
         fn comparable<T: Clone + Eq>() {}
         comparable::<SemanticFingerprint>();
-        assert_no_debug_or_serialize!(SemanticFingerprint);
+        assert_not_impl!(SemanticFingerprint: std::fmt::Debug, serde::Serialize);
     }
     mod claude_2_1_312_guards {
         use crate::coding_agent::detector::tests::*;
@@ -2807,7 +2776,7 @@ mod tests {
             value
         }
         fn observe(definition: &Value, screen: &ScreenSnapshot) -> ScreenObservation {
-            let catalog = ProfileCatalog::from_definitions(definition).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(definition).unwrap();
             Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
                 .observe(screen)
                 .unwrap()
@@ -2854,7 +2823,7 @@ mod tests {
         fn a_clipped_request_answers_through_the_same_plan() {
             let mut value = inspection_fixture_definition();
             value["profiles"][0]["rules"][0]["region"]["panel_separator"] = json!("│");
-            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
             let plan = catalog
                 .answer_plan(
@@ -2999,8 +2968,8 @@ mod tests {
                 "id":id,"priority":100,"observation":"question",
                 "region":{"screen":"either","start_pattern":"^Status idle +│ ready$","end_pattern":"^Status idle +│ ready$","max_rows":1,"cursor":"any"},
                 "matchers":[{"id":"status","scope":"line","pattern":"^Status idle +│ ready$"}],
-                "extract":{"operation":null,"choices":[],"native_request_id":null},
-                "verified_noninteraction":false,"sensitive":false
+                "extract":{"operation":null,"choices":[]},
+                "verified_noninteraction":false
             });
             if separator {
                 rule["region"]["panel_separator"] = json!("│");
@@ -3038,7 +3007,8 @@ mod tests {
         use crate::coding_agent::detector::tests::*;
 
         fn catalog() -> ProfileCatalog {
-            ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap()
+            crate::coding_agent::catalog::test_support::load(&question_fixture_definition())
+                .unwrap()
         }
         fn detector() -> Detector {
             Detector::new(&catalog(), CodingAgent::Codex, Some(VERSION))
@@ -3186,7 +3156,7 @@ mod tests {
             let mut value = question_fixture_definition();
             value["profiles"][0]["rules"][1]["matchers"][4]["pattern"] =
                 json!(" / (?P<label>Ask later)$");
-            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             let plan = catalog
                 .answer_plan(
                     CodingAgent::Codex,
@@ -3241,7 +3211,7 @@ mod tests {
             let mut value = question_fixture_definition();
             value["profiles"][0]["rules"][1]["frame"] =
                 json!({"require_patterns":[],"reject_patterns":["^Live composer$"]});
-            ProfileCatalog::from_definitions(&value).unwrap()
+            crate::coding_agent::catalog::test_support::load(&value).unwrap()
         }
 
         #[test]
@@ -3288,7 +3258,7 @@ mod tests {
             value["profiles"][0]["rules"][1]["frame"] = json!({
                 "require_patterns":["^Footer: question$"],"reject_patterns":["^Live composer$"]
             });
-            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
             let without = detector
                 .observe(&screen_of(&question_fixture_form(&["accept"])))
@@ -3305,7 +3275,7 @@ mod tests {
         use crate::coding_agent::detector::tests::*;
 
         fn gated_catalog() -> ProfileCatalog {
-            ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap()
+            crate::coding_agent::catalog::test_support::load(&gated_fixture_definition()).unwrap()
         }
 
         fn detector() -> Detector {
@@ -3587,16 +3557,12 @@ mod tests {
         assert_eq!(value.rule_id, RULE);
         assert_eq!(value.output_seq, screen.screen_seq);
         let region = value.matched_region.unwrap();
-        assert_eq!(
-            (region.top, region.left, region.bottom, region.right),
-            (18, 0, 24, 80)
-        );
+        assert_eq!((region.top, region.bottom), (18, 24));
         assert_eq!(value.raw_evidence["operation"], "write disposable.txt");
         assert_eq!(
             value.raw_evidence["choices"],
             json!(["Allow once", "Deny once"])
         );
-        assert!(value.raw_evidence["native_request_id"].is_null());
         assert!(value.raw_evidence.get("cwd").is_none_or(Value::is_null));
         assert!(!value.verified_noninteraction);
     }
@@ -3681,8 +3647,6 @@ mod tests {
         terminal.feed(b"\x1b[1;1H").unwrap();
         assert_incomplete(&observation(&definitions(), &terminal.snapshot()));
         definition = definitions();
-        definition["profiles"][0]["rules"][0]["region"]["cursor"] = json!("outside");
-        assert_permission(&observation(&definition, &terminal.snapshot()));
         definition["profiles"][0]["rules"][0]["region"]["cursor"] = json!("inside");
         assert_incomplete(&observation(&definition, &terminal.snapshot()));
     }
@@ -3744,7 +3708,7 @@ mod tests {
 
     #[test]
     fn runtime_detector_fingerprints_carry_no_profile_element_across_profile_boundaries() {
-        let catalog = ProfileCatalog::from_definitions(&thresholds(&[
+        let catalog = crate::coding_agent::catalog::test_support::load(&thresholds(&[
             ("first", "1.0.0"),
             ("second", "2.0.0"),
         ]))
@@ -3781,7 +3745,7 @@ mod tests {
 
     #[test]
     fn runtime_detector_raw_evidence_names_the_backend_and_native_version_only() {
-        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
         let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
         for version in [Some(VERSION), None] {
             let observed = Detector::new(&catalog, CodingAgent::Codex, version)
@@ -3800,13 +3764,11 @@ mod tests {
                     "backend",
                     "choices",
                     "excerpt",
-                    "native_request_id",
                     "native_version",
                     "operation",
                     "operation_rows",
                     "rule_id",
                     "screen_seq",
-                    "sensitive",
                     "truncated",
                 ]),
                 "{version:?}"
@@ -3898,8 +3860,19 @@ mod tests {
             assert_eq!(result.match_evidence, evidence, "{case}");
             assert!(result.raw_evidence.is_object(), "{case}");
         }
+        let mut conflicting = definition(None, None);
+        let mut twin = conflicting["profiles"][0]["rules"][0].clone();
+        twin["id"] = json!("synthetic-unknown-twin");
+        twin["observation"] = json!("unknown");
+        twin["verified_noninteraction"] = json!(false);
+        conflicting["profiles"][0]["rules"]
+            .as_array_mut()
+            .unwrap()
+            .push(twin);
+        conflicting["profiles"][0]["capabilities"]["detection"] =
+            json!({"rule_ids":["synthetic-unknown-twin"],"fixture_ids":[FIXTURE]});
         let composers = observation(
-            &definition(None, None),
+            &conflicting,
             &terminal(&["Synthetic state".into(), "State end".into()], 80, false).snapshot(),
         );
         assert_eq!(
@@ -3934,8 +3907,6 @@ mod tests {
     fn runtime_detector_other_interaction_classes_remain_distinct() {
         for (kind, class) in [
             ("question", InteractionClass::Question),
-            ("trust", InteractionClass::Trust),
-            ("update", InteractionClass::Update),
             ("unknown_interaction", InteractionClass::UnknownInteraction),
         ] {
             let value = state_observation(kind, false);
@@ -3945,22 +3916,10 @@ mod tests {
     }
 
     #[test]
-    fn runtime_detector_activity_refusal_and_composer_require_their_own_positive_evidence() {
-        assert!(matches!(
-            state_observation("working", true).kind,
-            ObservationKind::Working
-        ));
-        assert!(matches!(
-            state_observation("permission_denied", true).kind,
-            ObservationKind::PermissionDenied
-        ));
+    fn runtime_detector_composer_requires_its_own_positive_evidence() {
         assert!(matches!(
             state_observation("composer_empty", true).kind,
             ObservationKind::ComposerEmpty
-        ));
-        assert!(matches!(
-            state_observation("composer_draft", true).kind,
-            ObservationKind::ComposerDraft
         ));
         let empty = terminal(&[], 80, false).snapshot();
         let unknown = observation(&definitions(), &empty);
@@ -3971,7 +3930,7 @@ mod tests {
 
     #[test]
     fn runtime_detector_unsupported_version_reports_absent_evidence_without_nearby_profile() {
-        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
         let value = Detector::new(&catalog, CodingAgent::Claude, Some(VERSION))
             .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
             .unwrap();
@@ -5219,11 +5178,6 @@ mod tests {
             );
             assert_eq!(
                 observation.raw_evidence["native_version"], VERSION,
-                "{case}"
-            );
-            assert_eq!(
-                observation.raw_evidence["native_request_id"],
-                Value::Null,
                 "{case}"
             );
             assert!(!observation.verified_noninteraction, "{case}");

@@ -53,7 +53,6 @@ pub(crate) struct WriterStatus {
     pub(crate) pending_count: u64,
     pub(crate) pending_evidence: bool,
     pub(crate) gap_count: u64,
-    pub(crate) degraded: bool,
     pub(crate) diagnostic: Option<String>,
     #[cfg(test)]
     pub(crate) policy_diagnostic: Option<String>,
@@ -119,7 +118,7 @@ impl Mailbox {
     }
 }
 pub(crate) struct EventWriter {
-    sender: Option<mpsc::SyncSender<Work>>,
+    sender: mpsc::SyncSender<Work>,
     mailbox: Arc<Mutex<Mailbox>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -143,17 +142,11 @@ impl Pending {
     }
 }
 impl EventWriter {
-    pub(crate) fn start(
-        database_url: String,
-        run: RunRecord,
-        lock: Arc<RunLock>,
-        outbox: PathBuf,
-    ) -> Result<Self> {
+    pub(crate) fn start(database_url: String, run: RunRecord, lock: Arc<RunLock>) -> Result<Self> {
         Self::start_worker(
             database_url,
             run,
             lock,
-            outbox,
             #[cfg(test)]
             crate::runtime::writer::test_support::default_writer_hooks(),
         )
@@ -164,25 +157,18 @@ impl EventWriter {
         database_url: String,
         run: RunRecord,
         lock: Arc<RunLock>,
-        outbox: PathBuf,
         hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
-        Self::start_worker(database_url, run, lock, outbox, hooks)
+        Self::start_worker(database_url, run, lock, hooks)
     }
 
     fn start_worker(
         database_url: String,
         run: RunRecord,
         lock: Arc<RunLock>,
-        outbox: PathBuf,
         #[cfg(test)] hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
         let mut conn = crate::db::connect(&database_url)?;
-        let paths = validate_run_paths(&conn, &run)?;
-        ensure(
-            outbox == paths.outbox,
-            "writer outbox path differs from recorded path",
-        )?;
         let spool = Outbox::open_owned(
             &mut conn,
             &run,
@@ -190,7 +176,7 @@ impl EventWriter {
             Instant::now() + Duration::from_secs(1),
         )?;
         ensure(
-            std::fs::metadata(&outbox).map_err(io_error)?.len() == 0,
+            spool.io.byte_len().map_err(io_error)? == 0,
             "new runner outbox must start empty",
         )?;
         #[cfg(test)]
@@ -223,15 +209,13 @@ impl EventWriter {
             .spawn(move || worker.serve())
             .map_err(io_error)?;
         Ok(Self {
-            sender: Some(sender),
+            sender,
             mailbox,
             thread: Some(thread),
         })
     }
     fn send(&self, work: Work) -> Result<()> {
         self.sender
-            .as_ref()
-            .ok_or_else(|| error("event writer is stopped"))?
             .try_send(work)
             .map_err(|_| error("runtime observation channel is full or unavailable"))
     }
@@ -383,7 +367,6 @@ impl EventWriter {
             pending_count: state.pending,
             pending_evidence: state.refresh.is_some(),
             gap_count: state.gaps,
-            degraded: state.diagnostic.is_some(),
             diagnostic: state.diagnostic.clone(),
             #[cfg(test)]
             policy_diagnostic: state.policy_diagnostic.clone(),
@@ -399,7 +382,6 @@ impl EventWriter {
     pub(crate) fn begin_shutdown(&mut self, until: Instant) {
         self.set_deadline(until);
         self.mailbox.lock().expect("writer mailbox").stop = true;
-        self.sender.take();
     }
     pub(crate) fn finish(&mut self, until: Instant) -> (u64, u64) {
         self.begin_shutdown(until);
@@ -790,7 +772,6 @@ fn parse_frame_body(
 pub(crate) struct OutboxScan {
     pub(crate) frames: Vec<OutboxFrame>,
     pub(crate) incomplete_tail: Option<String>,
-    pub(crate) maximum_event_seq: Option<i64>,
 }
 pub(crate) struct Outbox<S: OutboxIo> {
     io: S,
@@ -799,45 +780,56 @@ pub(crate) struct Outbox<S: OutboxIo> {
     known: BTreeMap<i64, [u8; 32]>,
     end: u64,
     dirty: bool,
-    path_identity: Option<(u64, u64)>,
+    path_identity: Option<OutboxIdentity>,
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
+}
+/// The validated outbox path and the inode it named when opened.
+struct OutboxIdentity {
+    path: PathBuf,
+    dev: u64,
+    ino: u64,
 }
 fn open_outbox(
     conn: &Connection,
     run: &RunRecord,
     lock: &RunLock,
     until: Instant,
-) -> Result<(File, (u64, u64))> {
+) -> Result<(File, OutboxIdentity)> {
     check_deadline(Instant::now(), until)?;
     lock.validate(conn, &run.owner())?;
     let paths = validate_run_paths(conn, run)?;
     let file = crate::runtime::artifacts::open_private(&paths.outbox, false)?;
     let meta = file.metadata().map_err(io_error)?;
-    Ok((file, (meta.dev(), meta.ino())))
+    Ok((
+        file,
+        OutboxIdentity {
+            path: paths.outbox,
+            dev: meta.dev(),
+            ino: meta.ino(),
+        },
+    ))
 }
 fn validate_with(
     conn: &mut Connection,
     lock: &RunLock,
     current: &RunRecord,
-    path_identity: Option<(u64, u64)>,
+    path_identity: Option<&OutboxIdentity>,
     until: Instant,
 ) -> Result<RunRecord> {
     let run = with_database_deadline(conn, until, |conn| {
         lock.validate(conn, &current.owner())?;
         storage::get_run(conn, current.run_id)
     })?;
-    if let Some((dev, ino)) = path_identity {
-        let meta =
-            std::fs::symlink_metadata(PathBuf::from(&run.runtime_path).join("events.outbox"))
-                .map_err(io_error)?;
+    if let Some(identity) = path_identity {
+        let meta = std::fs::symlink_metadata(&identity.path).map_err(io_error)?;
         ensure(
             meta.is_file()
                 && !meta.file_type().is_symlink()
                 && meta.uid() == nix::unistd::geteuid().as_raw()
                 && meta.mode() & 0o777 == 0o600
-                && meta.dev() == dev
-                && meta.ino() == ino,
+                && meta.dev() == identity.dev
+                && meta.ino() == identity.ino,
             "owned outbox inode changed",
         )?;
     }
@@ -889,8 +881,6 @@ impl<S: OutboxIo> Outbox<S> {
         io: S,
         until: Instant,
     ) -> Result<Self> {
-        check_deadline(Instant::now(), until)?;
-        lock.validate(conn, &run.owner())?;
         let mut value = Self::state(run, lock, io);
         value.scan(conn, until)?;
         Ok(value)
@@ -902,7 +892,13 @@ impl<S: OutboxIo> Outbox<S> {
 
     fn validate(&self, conn: &mut Connection, until: Instant) -> Result<RunRecord> {
         check_deadline(Instant::now(), until)?;
-        validate_with(conn, &self.lock, &self.run, self.path_identity, until)
+        validate_with(
+            conn,
+            &self.lock,
+            &self.run,
+            self.path_identity.as_ref(),
+            until,
+        )
     }
     pub(crate) fn scan(&mut self, conn: &mut Connection, until: Instant) -> Result<OutboxScan> {
         let run = self.validate(conn, until)?;
@@ -941,7 +937,7 @@ impl<S: OutboxIo> Outbox<S> {
             let digest: [u8; 32] = Sha256::digest(&body).into();
             ensure(digest == checksum, "outbox frame checksum mismatch")?;
             let (transition, effective_policy) = parse_frame_body(&body)?;
-            storage::validate_observed_transition(&run, &transition)?;
+            storage::validate_transition(&run, &transition)?;
             ensure(
                 transition.event_seq >= previous,
                 "outbox sequences regressed",
@@ -963,7 +959,6 @@ impl<S: OutboxIo> Outbox<S> {
         self.dirty = tail.is_some();
         self.known = known;
         Ok(OutboxScan {
-            maximum_event_seq: frames.last().map(|frame| frame.transition.event_seq),
             frames,
             incomplete_tail: tail,
         })
@@ -976,7 +971,7 @@ impl<S: OutboxIo> Outbox<S> {
         until: Instant,
     ) -> Result<()> {
         let run = self.validate(conn, until)?;
-        storage::validate_observed_transition(&run, value)?;
+        storage::validate_transition(&run, value)?;
         if self.dirty || self.io.byte_len().map_err(io_error)? != self.end {
             let scan = self.scan_validated(run.clone(), until)?;
             if scan.incomplete_tail.is_some() {
@@ -1042,7 +1037,7 @@ impl<S: OutboxIo> Outbox<S> {
         ensure(*owner == self.run.owner(), "compaction owner mismatch")?;
         let length = self.io.byte_len().map_err(io_error)?;
         let scan = self.scan_validated(run, until)?;
-        let all = if scan.maximum_event_seq.is_some() {
+        let all = if !scan.frames.is_empty() {
             with_database_deadline(conn, until, |conn| {
                 self.lock.validate(conn, owner)?;
                 let mut all = true;
@@ -1058,7 +1053,7 @@ impl<S: OutboxIo> Outbox<S> {
                     if let Some(id) = id {
                         let view = storage::get_event(conn, id)?;
                         ensure(
-                            storage::original_transition(&view)? == frame.transition,
+                            storage::original(&view)? == frame.transition,
                             &format!(
                                 "committed outbox frame {}..{} original mismatch",
                                 frame.start, frame.end
@@ -1662,7 +1657,10 @@ mod tests {
         assert_eq!(scan.frames[0].start, 0);
         assert_eq!(scan.frames[0].end, io.snapshot_bytes().len() as u64);
         assert!(scan.incomplete_tail.is_none());
-        assert_eq!(scan.maximum_event_seq, Some(1));
+        assert_eq!(
+            scan.frames.last().map(|frame| frame.transition.event_seq),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1710,10 +1708,9 @@ mod tests {
         let large = |sequence| {
             let mut value = run_transition(&run, sequence);
             let mut raw = value.evidence_json.clone();
-            raw["sensitive"] = serde_json::json!(false);
             raw["excerpt"] = serde_json::json!("x".repeat(6000));
             value.evidence_json = policy.apply(&raw).unwrap();
-            value.kind = RuntimeEventKind::PermissionDeniedObserved;
+            value.kind = RuntimeEventKind::AutomaticRefusalObserved;
             value.cause_json = None;
             let bytes = frame(&value);
             (value, bytes)
@@ -1797,7 +1794,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             values
         );
-        assert_eq!(scan.maximum_event_seq, Some(3));
+        assert_eq!(
+            scan.frames.last().map(|frame| frame.transition.event_seq),
+            Some(3)
+        );
         assert!(scan.incomplete_tail.is_none());
         assert_eq!(independent_frames(&io.snapshot_bytes()), values);
     }
@@ -2096,7 +2096,6 @@ mod tests {
                 }
                 if field == "conflict" {
                     let mut raw = invalid.evidence_json.clone();
-                    raw["sensitive"] = serde_json::json!(false);
                     raw["truncated"] = serde_json::json!(true);
                     invalid.evidence_json = storage::evidence::EvidencePolicy::metadata()
                         .apply(&raw)
@@ -2109,7 +2108,7 @@ mod tests {
                     returned.update.output_seq,
                     if field == "regression" { 2 } else { 3 }
                 );
-                assert!(writer.status().degraded);
+                assert!(writer.status().diagnostic.is_some());
                 drop(release);
                 wait_until(|| !writer.status().pending_evidence);
                 assert_eq!(latest(&fixture)["screen_seq"], 3);
@@ -2211,7 +2210,7 @@ mod tests {
             assert_eq!(rejected.transition, original);
             let status = writer.status();
             assert_eq!(status.pending_count, 64);
-            assert!(status.degraded);
+            assert!(status.diagnostic.is_some());
             assert!(status.gap_count > 0);
             assert_eq!(committed(&fixture), 0);
             drop(release);
@@ -2310,7 +2309,7 @@ mod tests {
             }
             assert!((64..=128).contains(&accepted));
             assert_eq!(writer.status().pending_count, accepted);
-            assert!(writer.status().degraded);
+            assert!(writer.status().diagnostic.is_some());
             drop(release);
             wait_until(|| writer.status().pending_count == 0);
             assert_eq!(committed(&fixture), i64::try_from(accepted).unwrap());
@@ -2411,7 +2410,6 @@ mod tests {
                 format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
                 fixture.fixture.run.clone(),
                 fixture.lock.clone(),
-                fixture.artifacts.paths.outbox.clone(),
                 hooks.clone(),
             )
             .unwrap();
@@ -2539,7 +2537,7 @@ mod tests {
             assert_eq!(stored(&fixture), Some(record(&shown, None)));
             let status = writer.status();
             assert_eq!(status.policy_diagnostic, None);
-            assert!(!status.degraded);
+            assert!(status.diagnostic.is_none());
             assert_eq!(writer.finish(deadline()).0, 0);
         }
 
@@ -2547,7 +2545,7 @@ mod tests {
         fn runner_policy_available_update_on_a_non_live_run_is_dropped_once_and_the_worker_continues()
          {
             let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "stopping");
+            set_status(&mut fixture, "prepared");
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks.clone());
             let _release = Release(hooks.clone());
@@ -2562,7 +2560,7 @@ mod tests {
             );
             assert_eq!(stored(&fixture), None);
             let status = writer.status();
-            assert!(!status.degraded, "{status:?}");
+            assert!(status.diagnostic.is_none(), "{status:?}");
             assert_eq!(status.gap_count, 0);
             assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
             wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
@@ -2603,8 +2601,8 @@ mod tests {
             writer.finish(deadline());
         }
     }
-    fn assert_start_rejected(fixture: &WriterFixture, path: PathBuf) {
-        let result = fixture.start(path);
+    fn assert_start_rejected(fixture: &WriterFixture) {
+        let result = fixture.start();
         let rejected = result.is_err();
         if let Ok(mut writer) = result {
             writer.finish(Instant::now() + Duration::from_millis(100));
@@ -2613,15 +2611,6 @@ mod tests {
             rejected,
             "writer startup validates the recorded owned outbox before accepting work"
         );
-    }
-
-    #[test]
-    fn writer_foreign_outbox_path_fails_before_worker_start() {
-        let fixture = WriterFixture::new();
-        let foreign = fixture.fixture._dir.path().join("foreign-outbox");
-        std::fs::write(&foreign, []).unwrap();
-        assert_start_rejected(&fixture, foreign.clone());
-        assert_eq!(std::fs::read(foreign).unwrap(), b"");
     }
 
     #[test]
@@ -2635,7 +2624,7 @@ mod tests {
             if symlink {
                 std::os::unix::fs::symlink(&target, path).unwrap();
             }
-            assert_start_rejected(&fixture, path.clone());
+            assert_start_rejected(&fixture);
             assert_eq!(std::fs::read(target).unwrap(), b"original target");
         }
     }
@@ -2644,7 +2633,7 @@ mod tests {
     fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
         fixture.fixture.run.owner_epoch += 1;
-        assert_start_rejected(&fixture, fixture.artifacts.paths.outbox.clone());
+        assert_start_rejected(&fixture);
     }
 
     #[test]
@@ -2657,9 +2646,7 @@ mod tests {
         .unwrap();
         blocking.execute_batch("BEGIN IMMEDIATE").unwrap();
         let value = transition(&fixture, 1);
-        let mut writer = fixture
-            .start(fixture.artifacts.paths.outbox.clone())
-            .unwrap();
+        let mut writer = fixture.start().unwrap();
         writer.submit(value.clone()).unwrap();
         wait_until(|| {
             std::fs::read(&fixture.artifacts.paths.outbox)
@@ -2805,7 +2792,6 @@ pub(crate) mod test_support {
             format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
             fixture.fixture.run.clone(),
             fixture.lock.clone(),
-            fixture.artifacts.paths.outbox.clone(),
             hooks,
         )
         .unwrap()
@@ -2868,7 +2854,6 @@ pub(crate) mod test_support {
 
     pub(crate) fn record(observation: &EffectivePolicyObservation, event_id: Option<i64>) -> Value {
         serde_json::json!({
-            "schema_version":1,
             "automatic_review":observation.automatic_review.as_str(),
             "observed_mode":observation.observed_mode,
             "rule_id":observation.rule_id,
@@ -2918,12 +2903,11 @@ pub(crate) mod test_support {
                 lock,
             }
         }
-        pub(crate) fn start(&self, path: PathBuf) -> Result<EventWriter> {
+        pub(crate) fn start(&self) -> Result<EventWriter> {
             EventWriter::start(
                 format!("sqlite:///{}", self.fixture.conn.path().unwrap()),
                 self.fixture.run.clone(),
                 self.lock.clone(),
-                path,
             )
         }
     }

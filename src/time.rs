@@ -18,12 +18,11 @@ pub(crate) fn format_utc(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%.6f+00:00").to_string()
 }
 
-/// Lenient reader for externally supplied values: accepts a missing fractional
-/// part and any UTC offset spelling. Production always uses [`format_utc`].
-pub(crate) fn parse_lenient(value: &str) -> Result<DateTime<Utc>, CafleetError> {
+/// Parses a stored canonical timestamp.
+pub(crate) fn parse_lenient(value: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
+        .ok()
         .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| CafleetError::Usage(format!("invalid timestamp '{value}': {e}")))
 }
 
 /// Blocks SIGINT, SIGTERM and SIGHUP for the calling thread until dropped;
@@ -199,8 +198,8 @@ mod tests {
 
     #[test]
     fn parse_rejects_garbage() {
-        assert!(parse_lenient("yesterday at noon").is_err());
-        assert!(parse_lenient("").is_err());
+        assert!(parse_lenient("yesterday at noon").is_none());
+        assert!(parse_lenient("").is_none());
     }
 
     #[test]

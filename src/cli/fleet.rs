@@ -10,7 +10,6 @@ use crate::broker::members::active_member;
 use crate::cli::emit;
 use crate::coding_agent::CodingAgent;
 use crate::config::Settings;
-use crate::db::finalize_deletion;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
@@ -179,7 +178,7 @@ pub(crate) fn create_with(
     })?;
     broker::create_fleet(
         conn,
-        Some(request.name),
+        request.name,
         &NewPlacement {
             backend: target.backend.name().into(),
             mux_session: context.session,
@@ -209,7 +208,7 @@ fn verified_env_pane(
         caller::env_pane(backend, env).ok_or_else(|| refusal(caller::unset_message(backend)))?;
     let mux = caller::resolve_env_mux(env, runner)?;
     match caller::verify_pane(mux.mux.as_ref(), table, &ancestry, &pane.pane)? {
-        Verification::Verified { .. } => Ok((mux, pane.pane)),
+        Verification::Verified => Ok((mux, pane.pane)),
         Verification::Refused(refused) => {
             Err(refusal(caller::unverified_message(&pane, &refused, &mux)))
         }
@@ -257,18 +256,12 @@ pub(crate) fn deletion_placements(
 }
 
 pub(crate) const PENDING_PANE_STATUS: &str = "(pending — no pane)";
-pub(crate) const NO_PLACEMENT_STATUS: &str = "(no placement)";
 
 pub(crate) trait DeletionHost {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "deletion forwards the validated caller identity and actual retained guard"
-    )]
     fn recover(
         &mut self,
         conn: &mut Connection,
         settings: &Settings,
-        member_id: i64,
         expected_run: &crate::broker::runtime::RunRecord,
         expected_placement: &Placement,
         held: &PaneLock,
@@ -277,7 +270,6 @@ pub(crate) trait DeletionHost {
         crate::runtime::recover_member_under_pane_lock(
             conn,
             settings,
-            member_id,
             expected_run,
             expected_placement,
             deadline.instant(),
@@ -294,16 +286,11 @@ pub(crate) trait DeletionHost {
     }
     fn settle_hermes(
         &mut self,
-        _conn: &Connection,
+        conn: &Connection,
         run: &crate::broker::runtime::RunRecord,
-        _pane_id: &str,
-        _deadline: Deadline,
-    ) -> Result<(), CafleetError> {
-        Err(CafleetError::App(format!(
-            "hermes settlement of run {} requires the member's multiplexer",
-            run.run_id
-        )))
-    }
+        pane_id: &str,
+        deadline: Deadline,
+    ) -> Result<(), CafleetError>;
     fn close_pane(&mut self, placement: &Placement, deadline: Deadline)
     -> Result<(), CafleetError>;
     /// Restores the layout after the preceding `close_pane`.
@@ -348,7 +335,7 @@ impl<M: std::ops::Deref<Target: Multiplexer>> DeletionHost for MultiplexerDeleti
         Ok(self
             .closing
             .insert(self.mux.bounded(deadline))
-            .close_pane(pane, true)?)
+            .close_pane(pane)?)
     }
 
     fn restore_layout(&mut self) -> Result<(), CafleetError> {
@@ -464,10 +451,7 @@ pub(crate) fn end_member(
 ) -> Result<String, CafleetError> {
     use crate::broker::runtime::CleanupState;
     let member_id = snapshot.member_id;
-    let placement = snapshot
-        .placement
-        .clone()
-        .expect("an ended member holds its concrete placement");
+    let placement = snapshot.placement.clone();
     let pane_id = placement
         .mux_pane_id
         .clone()
@@ -517,9 +501,7 @@ pub(crate) fn end_member(
                 ));
             }
             deadline.remaining()?;
-            let completion = host.recover(
-                conn, settings, member_id, &current, &placement, held, deadline,
-            )?;
+            let completion = host.recover(conn, settings, &current, &placement, held, deadline)?;
             crate::runtime::validate_recovery_completion(&expected, &completion)?;
             if !matches!(
                 completion.report.outcome,
@@ -541,7 +523,7 @@ pub(crate) fn end_member(
             error.message()
         ))
     })?;
-    finalize_deletion(conn, deadline, snapshot.runtime.is_some(), |conn| {
+    crate::db::complete_database_budget(conn, deadline, |conn| {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         revalidate_member(&tx, snapshot, "after pane close")?;
         let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
@@ -636,10 +618,7 @@ pub(crate) fn delete_fleet_with_host(
     let mut ended = Vec::new();
     for member in &mut members {
         let member_id = member.member_id;
-        let placement = member
-            .placement
-            .clone()
-            .expect("a locked deletion target has a concrete placement");
+        let placement = member.placement.clone();
         let held = locked.pane_lock(&settings.database_url, &placement)?;
         let mut scope_changed = false;
         let mut scope = |conn: &Connection| {
@@ -725,20 +704,15 @@ fn unplaced_member_outcomes(
     fleet_id: i64,
 ) -> Result<Vec<DeletedMember>, CafleetError> {
     let mut statement = conn.prepare(
-        "SELECT m.member_id, p.member_id IS NOT NULL
-             FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id
+        "SELECT m.member_id
+             FROM members m JOIN member_placements p ON p.member_id=m.member_id
              WHERE m.fleet_id=?1 AND m.status='active' AND p.mux_pane_id IS NULL
                AND m.member_id IS NOT (SELECT director_member_id FROM fleets WHERE fleet_id=?1)",
     )?;
     let rows = statement.query_map([fleet_id], |row| {
         Ok(DeletedMember {
             member_id: row.get(0)?,
-            pane_status: if row.get(1)? {
-                PENDING_PANE_STATUS
-            } else {
-                NO_PLACEMENT_STATUS
-            }
-            .to_owned(),
+            pane_status: PENDING_PANE_STATUS.to_owned(),
         })
     })?;
     rows.collect::<Result<_, _>>()
@@ -915,8 +889,7 @@ pub(crate) mod test_support {
             let placement = crate::broker::get_member(conn, run.member_id, run.fleet_id)
                 .unwrap()
                 .unwrap()
-                .placement
-                .unwrap();
+                .placement;
             assert_eq!(placement.mux_pane_id.as_deref(), Some(pane_id));
             self.assert_pane_owned(&placement);
             self.calls.push("settle");
@@ -939,8 +912,7 @@ pub(crate) mod test_support {
             let placement = crate::broker::get_member(conn, run.member_id, run.fleet_id)
                 .unwrap()
                 .unwrap()
-                .placement
-                .unwrap();
+                .placement;
             self.assert_pane_owned(&placement);
             self.calls.push("shutdown");
             if self.runner_gone {
@@ -952,7 +924,7 @@ pub(crate) mod test_support {
                 Mode::Fleet => {
                     self.owners.push((run.run_id, run.owner_epoch));
                     self.run_id = run.run_id;
-                    conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0,ended_at='2026-10-26T13:00:00Z',reachability='reachable',last_health_at='2026-10-26T13:00:00Z' WHERE run_id=?1", [run.run_id]).unwrap();
+                    conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0,ended_at='2026-10-26T13:00:00Z',last_health_at='2026-10-26T13:00:00Z' WHERE run_id=?1", [run.run_id]).unwrap();
                     Some(ChildExit::Code(0))
                 }
                 Mode::Recovery { .. } => {
@@ -974,7 +946,6 @@ pub(crate) mod test_support {
             &mut self,
             conn: &mut Connection,
             settings: &Settings,
-            member_id: i64,
             expected_run: &RunRecord,
             expected_placement: &Placement,
             held: &PaneLock,
@@ -984,7 +955,6 @@ pub(crate) mod test_support {
                 return crate::runtime::recover_member_under_pane_lock(
                     conn,
                     settings,
-                    member_id,
                     expected_run,
                     expected_placement,
                     deadline.instant(),
@@ -993,7 +963,6 @@ pub(crate) mod test_support {
             }
             self.assert_connection(conn);
             self.assert_deadline(deadline.instant());
-            assert_eq!(expected_run.member_id, member_id);
             self.assert_pane_owned(expected_placement);
             held.validate_binding(&settings.database_url, expected_placement)
                 .unwrap();
@@ -1004,7 +973,6 @@ pub(crate) mod test_support {
             let completion = recover_member_with_held_pane_lock(
                 conn,
                 settings,
-                member_id,
                 expected_run,
                 expected_placement,
                 None,
@@ -1093,6 +1061,16 @@ pub(crate) mod test_support {
             _: &RunRecord,
             _: crate::cli::fleet::Deadline,
         ) -> Result<ShutdownOutcome, CafleetError> {
+            unreachable!("broker fixtures register no member runs")
+        }
+
+        fn settle_hermes(
+            &mut self,
+            _: &Connection,
+            _: &RunRecord,
+            _: &str,
+            _: crate::cli::fleet::Deadline,
+        ) -> Result<(), CafleetError> {
             unreachable!("broker fixtures register no member runs")
         }
 
@@ -1189,12 +1167,12 @@ mod tests {
                 assert_eq!(broker::get_member(&conn, id, fleet).unwrap(), member);
                 assert_eq!(
                     conn.query_row(
-                        "SELECT deregistered_at FROM members WHERE member_id=?1",
+                        "SELECT status FROM members WHERE member_id=?1",
                         [id],
-                        |row| row.get::<_, Option<String>>(0)
+                        |row| row.get::<_, String>(0)
                     )
                     .unwrap(),
-                    None
+                    "active"
                 );
             }
             conn.execute_batch("DROP TRIGGER fail_deletion").unwrap();
@@ -1263,7 +1241,7 @@ mod tests {
             let mut placements = crate::broker::list_members(&fixture.conn, fixture.run.fleet_id)
                 .unwrap()
                 .into_iter()
-                .filter_map(|activity| activity.member.placement)
+                .map(|activity| activity.member.placement)
                 .filter(|placement| placement.mux_pane_id.is_some())
                 .collect::<Vec<_>>();
             placements.sort_by_key(|placement| {
@@ -1331,8 +1309,7 @@ mod tests {
                 )
                 .unwrap()
                 .unwrap()
-                .placement
-                .unwrap();
+                .placement;
                 Some(
                     PaneLock::try_acquire(&settings.database_url, &placement)
                         .unwrap()
@@ -1519,15 +1496,12 @@ mod tests {
             let director = crate::broker::get_fleet(&fixture.conn, fixture.run.fleet_id)
                 .unwrap()
                 .unwrap()
-                .director_member_id
-                .unwrap();
+                .director_member_id;
             let mut placements = crate::broker::list_members(&fixture.conn, fixture.run.fleet_id)
                 .unwrap()
                 .into_iter()
                 .filter(|activity| activity.member.member_id != director)
-                .filter_map(|activity| {
-                    Some((activity.member.member_id, activity.member.placement?))
-                })
+                .map(|activity| (activity.member.member_id, activity.member.placement))
                 .filter(|(_, placement)| placement.mux_pane_id.is_some())
                 .collect::<Vec<_>>();
             placements.sort_by_key(|(_, placement)| {
@@ -1540,17 +1514,7 @@ mod tests {
         fn fleet_deletion_ends_every_ordinary_member_and_keeps_the_director_pane() {
             let mut fixture = Fixture::new();
             let fleet = fixture.run.fleet_id;
-            let run_less = register(&mut fixture.conn, fleet, "run-less", Some("%5"));
             let pending = register(&mut fixture.conn, fleet, "pending", None);
-            let placementless = crate::broker::members::test_support::register_member(
-                &mut fixture.conn,
-                fleet,
-                "bare",
-                "assignment",
-                None,
-            )
-            .unwrap()
-            .member_id;
             let settings = settings(&fixture);
             let deadline = Deadline::new();
             let mut host = Host::fleet(settings.clone(), fixture.run.run_id, deadline);
@@ -1558,12 +1522,10 @@ mod tests {
                 delete_fleet_with_host(&mut fixture.conn, &settings, fleet, deadline, &mut host)
                     .unwrap();
             assert_eq!(deleted.fleet_id, fleet);
-            assert_eq!(deleted.deregistered_count, 5);
+            assert_eq!(deleted.deregistered_count, 3);
             let mut expected = vec![
                 (fixture.run.member_id, "%2 (killed)".to_owned()),
-                (run_less, "%5 (killed)".to_owned()),
                 (pending, "(pending — no pane)".to_owned()),
-                (placementless, "(no placement)".to_owned()),
             ];
             expected.sort();
             assert_eq!(outcomes(&deleted), expected);
@@ -1573,8 +1535,8 @@ mod tests {
                 .map(|placement| placement.mux_pane_id.clone().unwrap())
                 .collect::<Vec<_>>();
             closed.sort();
-            assert_eq!(closed, ["%2", "%5"]);
-            assert_eq!(host.restored, 2);
+            assert_eq!(closed, ["%2"]);
+            assert_eq!(host.restored, 1);
             assert!(fleet_deleted(&fixture));
             assert_eq!(
                 fixture
@@ -1637,7 +1599,7 @@ mod tests {
                 let current = crate::broker::get_member(&fixture.conn, *member, fleet)
                     .unwrap()
                     .unwrap();
-                assert_eq!(current.placement.as_ref(), Some(placement));
+                assert_eq!(&current.placement, placement);
                 assert!(
                     PaneLock::try_acquire(&settings.database_url, placement)
                         .unwrap()
@@ -1724,17 +1686,16 @@ mod tests {
                     .deleted_at
                     .is_some()
             );
-            let (status, deregistered_at): (String, Option<String>) = case
+            let status: String = case
                 .fixture
                 .conn
                 .query_row(
-                    "SELECT status,deregistered_at FROM members WHERE member_id=?1 AND fleet_id=?2",
+                    "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
                     rusqlite::params![original.member_id, original.fleet_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .unwrap();
             assert_eq!(status, "deregistered");
-            assert!(deregistered_at.is_some());
             assert_eq!(
                 case.fixture
                     .conn
@@ -1879,7 +1840,6 @@ mod tests {
                     .unwrap()
                     .unwrap()
                     .placement
-                    .unwrap()
                     .mux_pane_id
                     .as_deref(),
                 Some("%foreign")
@@ -2031,8 +1991,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_deletion_actual_replay_sql_is_cancelled_within_the_supplied_remaining_budget()
-         {
+        fn runner_recovery_deletion_actual_replay_sql_is_cancelled_within_the_supplied_budget() {
             let mut case = Case::new();
             case.seed(&[opening(&case.fixture.run, 1, 1)]);
             case.fixture.conn.execute_batch(&format!("CREATE TABLE recovery_sql_probe (entered INTEGER NOT NULL); CREATE TRIGGER slow_replay BEFORE INSERT ON member_runtime_events BEGIN INSERT INTO recovery_sql_probe VALUES (1); SELECT ({SLOW_SUM}); END")).unwrap();
@@ -2219,8 +2178,7 @@ mod tests {
             let added_placement = crate::broker::get_member(&fixture.conn, added, fleet)
                 .unwrap()
                 .unwrap()
-                .placement
-                .unwrap();
+                .placement;
             let added_guard =
                 PaneLock::try_acquire(&fixture.settings.database_url, &added_placement)
                     .unwrap()
@@ -2427,11 +2385,7 @@ mod tests {
         }
 
         fn director_placement(fleet: &CreatedFleet) -> &Placement {
-            fleet
-                .director
-                .placement
-                .as_ref()
-                .expect("the created Director records its placement")
+            &fleet.director.placement
         }
 
         /// `30 → 20 → 10 → 1`; pid 20 is the Director pane's process.
@@ -2642,7 +2596,7 @@ mod tests {
                 error.to_string(),
                 format!(
                     "cafleet fleet create {}",
-                    shared_server_message(&Refusal::SharedServer {
+                    shared_server_message(&crate::multiplexer::caller::SharedServer {
                         label: "codex app-server".to_string(),
                         pid: 407596,
                     })
@@ -2762,7 +2716,6 @@ mod tests {
                         .unreadable(412, unreadable),
                     Some(99),
                     Refusal::ProcessUnreadable {
-                        pid: 412,
                         cause: unreadable.to_string(),
                     },
                 ),
@@ -2939,7 +2892,7 @@ mod tests {
                 &UnreadTable,
             )
             .unwrap();
-            assert_eq!(fleet.name.as_deref(), Some("alpha"));
+            assert_eq!(fleet.name, "alpha");
             assert_eq!(director_placement(&fleet).coding_agent, "hermes");
         }
     }

@@ -283,9 +283,8 @@ pub(crate) fn nonblank(
 pub(crate) fn resolve_body(
     inline: Option<&str>,
     file: Option<&str>,
-    flag: &str,
 ) -> Result<String, CafleetError> {
-    let body = read_body(inline, file, flag)?;
+    let body = read_body(inline, file)?;
     if !body
         .chars()
         .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
@@ -294,8 +293,8 @@ pub(crate) fn resolve_body(
     }
     Err(match file {
         None => CafleetError::Usage("text may not be empty.".to_string()),
-        Some("-") => CafleetError::App(format!("{flag} -: stdin is empty.")),
-        Some(path) => CafleetError::App(format!("{flag} {path}: file is empty.")),
+        Some("-") => CafleetError::App("--file -: stdin is empty.".to_owned()),
+        Some(path) => CafleetError::App(format!("--file {path}: file is empty.")),
     })
 }
 
@@ -303,7 +302,7 @@ pub(crate) fn resolve_command_body(
     inline: Option<&str>,
     file: Option<&str>,
 ) -> Result<String, CafleetError> {
-    let mut body = read_body(inline, file, "--file")?;
+    let mut body = read_body(inline, file)?;
     if file.is_some() {
         if body.ends_with("\r\n") {
             body.truncate(body.len() - 2);
@@ -319,26 +318,26 @@ pub(crate) fn resolve_command_body(
     Ok(body)
 }
 
-fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<String, CafleetError> {
+fn read_body(inline: Option<&str>, file: Option<&str>) -> Result<String, CafleetError> {
     match (inline, file) {
         (Some(text), None) => Ok(text.to_string()),
         (None, Some("-")) => {
-            let bytes = read_stdin().map_err(|e| CafleetError::App(format!("{flag} -: {e}")))?;
+            let bytes = read_stdin().map_err(|e| CafleetError::App(format!("--file -: {e}")))?;
             String::from_utf8(bytes)
-                .map_err(|_| CafleetError::App(format!("{flag} -: file is not valid UTF-8.")))
+                .map_err(|_| CafleetError::App("--file -: file is not valid UTF-8.".to_owned()))
         }
         (None, Some(path)) => {
             let bytes = std::fs::read(path).map_err(|e| {
                 let message = match e.kind() {
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::IsADirectory => {
-                        format!("{flag} {path}: file does not exist or is not a regular file.")
+                        format!("--file {path}: file does not exist or is not a regular file.")
                     }
-                    _ => format!("{flag} {path}: file is not readable."),
+                    _ => format!("--file {path}: file is not readable."),
                 };
                 CafleetError::App(format!("{message} ({e})"))
             })?;
             String::from_utf8(bytes)
-                .map_err(|_| CafleetError::App(format!("{flag} {path}: file is not valid UTF-8.")))
+                .map_err(|_| CafleetError::App(format!("--file {path}: file is not valid UTF-8.")))
         }
         (Some(_), Some(_)) | (None, None) => {
             unreachable!("clap's required argument group supplies exactly one body source")
@@ -409,21 +408,6 @@ pub(crate) mod test_support {
         let error = usage_error(args);
         assert_eq!(error.kind(), kind, "{args:?}: {error}");
         assert!(error.to_string().contains(input), "{args:?}: {error}");
-    }
-
-    pub(super) fn isolated_cli(
-        settings: &crate::config::Settings,
-        args: &[&str],
-    ) -> (std::process::Output, String) {
-        isolated_cli_with(
-            settings,
-            args,
-            &[(
-                "tmux",
-                "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"",
-            )],
-            &[],
-        )
     }
 
     /// Runs the CLI with only `executables` (name, shell body) on PATH and `environment` added.
@@ -1042,38 +1026,28 @@ mod tests {
         let name = path.to_str().unwrap();
         for text in ["界🙂\nnext\r\n", "{literal}\ttext", " padded "] {
             std::fs::write(&path, text).unwrap();
-            assert_eq!(resolve_body(None, Some(name), "--file").unwrap(), text);
+            assert_eq!(resolve_body(None, Some(name)).unwrap(), text);
         }
         for text in ["", " \t\n", "\u{1c}\u{1f}", "\u{2003}"] {
             std::fs::write(&path, text).unwrap();
-            assert_eq!(
-                resolve_body(Some(text), None, "--file")
-                    .unwrap_err()
-                    .exit_code(),
-                2
-            );
-            assert_eq!(
-                resolve_body(None, Some(name), "--file")
-                    .unwrap_err()
-                    .exit_code(),
-                1
-            );
+            assert_eq!(resolve_body(Some(text), None).unwrap_err().exit_code(), 2);
+            assert_eq!(resolve_body(None, Some(name)).unwrap_err().exit_code(), 1);
         }
         std::fs::write(&path, [0xff]).unwrap();
         assert!(
-            resolve_body(None, Some(name), "--file")
+            resolve_body(None, Some(name))
                 .unwrap_err()
                 .to_string()
                 .contains("UTF-8")
         );
         std::fs::remove_file(&path).unwrap();
         assert!(
-            resolve_body(None, Some(name), "--file")
+            resolve_body(None, Some(name))
                 .unwrap_err()
                 .to_string()
                 .contains(name)
         );
-        assert!(resolve_body(None, Some(dir.path().to_str().unwrap()), "--file").is_err());
+        assert!(resolve_body(None, Some(dir.path().to_str().unwrap())).is_err());
     }
 
     #[test]

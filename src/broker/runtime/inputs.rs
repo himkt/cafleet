@@ -68,7 +68,6 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
         {
             Ok(input.delivery_reason.clone())
         }
-        None if input.delivery_reason.is_none() => Ok(Some("method_unrecorded".to_owned())),
         _ => Err(unknown()),
     };
     let (status, reason) = match (input.state, input.disposition) {
@@ -120,26 +119,6 @@ fn validate_input(
     conn: &Connection,
     mut input: InputOperation,
 ) -> Result<InputOperation, CafleetError> {
-    nonblank(
-        &input.operation_key,
-        "member_input_operations.operation_key",
-    )?;
-    hex(
-        &input.payload_digest,
-        64,
-        "member_input_operations.payload_digest",
-    )?;
-    require(
-        (input.state == InputState::Settled) == input.disposition.is_some(),
-        "member_input_operations.disposition",
-        "settlement requires exactly one disposition",
-    )?;
-    require(
-        input.uncertain_cause.is_none()
-            || matches!(input.state, InputState::Uncertain | InputState::Settled),
-        "member_input_operations.uncertain_cause",
-        "an uncertain cause requires an uncertain or settled receipt",
-    )?;
     let run = get_run(conn, input.run_id)?;
     if input.kind == InputKind::Preview {
         let message_id = input.message_id.ok_or_else(|| {
@@ -184,7 +163,7 @@ pub(crate) struct NewReservation<'a> {
 #[cfg(test)]
 impl NewReservation<'_> {
     pub(crate) const PLAIN: Self = Self {
-        selection: None,
+        selection: Some((DeliveryMethod::Profile, None)),
         defer_reason: None,
     };
 }
@@ -416,7 +395,6 @@ pub(crate) fn reserve_input_with_provenance(
             let message = crate::broker::messaging::get_message(conn, message_id)?;
             require(
                 message.to_member_id == run.member_id
-                    && message.from_member_id != run.member_id
                     && new.operation_key == format!("preview:{}:{message_id}", run.run_id),
                 "message_id",
                 "preview must address its run member",
@@ -475,22 +453,16 @@ pub(crate) fn record_input_state(
     require(
         matches!(
             (expected, next),
-            (InputState::Ready, InputState::InProgress)
-                | (
-                    InputState::InProgress,
-                    InputState::Ready | InputState::Accepted
-                )
+            (
+                InputState::InProgress,
+                InputState::Ready | InputState::Accepted
+            )
         ),
         "member_input_operations.state",
         "invalid input transition",
     )?;
     owned_transaction(conn, owner, |conn, run| {
         let input = owned_input(conn, run, input_id)?;
-        require(
-            input.kind != InputKind::PermissionResponse || expected != InputState::Ready,
-            "state",
-            "permission response rearming requires serialized live validation",
-        )?;
         require(
             input.state == expected,
             "member_input_operations.state",
@@ -673,7 +645,7 @@ pub(crate) struct ZeroByteRetirement<'guard> {
     owner: RunOwner,
     input_id: i64,
     interaction_id: i64,
-    input: Option<InputOperation>,
+    input: InputOperation,
     rearm: Option<(NewPermissionResponse, AnswerCapability)>,
     guard: PhantomData<(&'guard mut (), Rc<()>)>,
 }
@@ -689,7 +661,7 @@ impl<'guard> ZeroByteRetirement<'guard> {
             owner: owner.clone(),
             input_id,
             interaction_id,
-            input: Some(receipt.input.clone()),
+            input: receipt.input.clone(),
             rearm: capability.map(|cap| {
                 (
                     NewPermissionResponse {
@@ -703,43 +675,20 @@ impl<'guard> ZeroByteRetirement<'guard> {
         })
     }
 
-    pub(crate) fn from_exclusive_guard(
-        guard: &'guard crate::runtime::ExclusiveReceiptGuard<'_>,
-        owner: &RunOwner,
-        input_id: i64,
-        interaction_id: i64,
-    ) -> Result<Self, CafleetError> {
-        let input = guard.retirement_binding(owner, input_id, interaction_id)?;
-        Ok(Self {
-            owner: owner.clone(),
-            input_id,
-            interaction_id,
-            input: Some(input.clone()),
-            rearm: None,
-            guard: PhantomData,
-        })
-    }
-
     #[cfg(test)]
     pub(crate) fn fixture(
         owner: &RunOwner,
-        input_id: i64,
-        interaction_id: i64,
+        receipt: &PermissionReceipt,
         _: &'guard mut (),
-    ) -> Result<Self, CafleetError> {
-        require(
-            input_id > 0 && interaction_id > 0,
-            "retirement",
-            "positive identities required",
-        )?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             owner: owner.clone(),
-            input_id,
-            interaction_id,
-            input: None,
+            input_id: receipt.input.input_id,
+            interaction_id: receipt.response.metadata.interaction_id,
+            input: receipt.input.clone(),
             rearm: None,
             guard: PhantomData,
-        })
+        }
     }
 }
 
@@ -1062,14 +1011,11 @@ fn validate_proof(
         "retirement",
         "retirement proof does not match current owner/input/interaction",
     )?;
-    if let Some(input) = &proof.input {
-        require(
-            input.same_identity(&receipt.input),
-            "retirement",
-            "retirement immutable receipt changed",
-        )?;
-    }
-    Ok(())
+    require(
+        proof.input.same_identity(&receipt.input),
+        "retirement",
+        "retirement immutable receipt changed",
+    )
 }
 
 fn validate_current_capability(
@@ -1099,8 +1045,7 @@ fn validate_current_capability(
                 == event.event.payload_json["evidence"]["rule_id"]
                     .as_str()
                     .ok_or_else(|| invalid("rule_id", "event request rule required"))?
-            && cap.key() == &metadata.key
-            && !cap.fixture_ids().is_empty(),
+            && cap.key() == &metadata.key,
         "answer_capability",
         "answer capability does not match this request",
     )?;
@@ -1910,31 +1855,6 @@ mod tests {
         }
 
         #[test]
-        fn stored_cause_on_a_state_without_uncertainty_is_rejected_on_read() {
-            let state = "in_progress";
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let input = fixture.input(&owner, "prompt:corrupt", InputKind::Prompt, None);
-            fixture
-                .conn
-                .execute_batch("PRAGMA ignore_check_constraints=ON")
-                .unwrap();
-            fixture
-                .conn
-                .execute(
-                    "UPDATE member_input_operations SET uncertain_cause='manual_input' WHERE input_id=?1",
-                    [input.input_id],
-                )
-                .unwrap();
-            let error = storage::get_input(&fixture.conn, input.input_id).unwrap_err();
-            assert!(
-                error.message().contains("uncertain_cause"),
-                "{state}: {}",
-                error.message()
-            );
-        }
-
-        #[test]
         fn unpublished_delivery_results_return_the_receipt_cause() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
@@ -2537,13 +2457,7 @@ mod tests {
         .unwrap();
         let recovery = fixture.base.recoverer();
         let mut guard = ();
-        let proof = ZeroByteRetirement::fixture(
-            &recovery,
-            receipt.input.input_id,
-            fixture.request.metadata.interaction_id,
-            &mut guard,
-        )
-        .unwrap();
+        let proof = ZeroByteRetirement::fixture(&recovery, &receipt, &mut guard);
         let released = crate::broker::runtime::test_support::release_permission_claim(
             &mut fixture.base.conn,
             &recovery,
@@ -2876,15 +2790,9 @@ mod tests {
                     PermissionDecision::Allow
                 },
             );
-            let capability = AnswerCapability::fixture(
-                backend,
-                version,
-                request_rule,
-                answer_rule,
-                decision,
-                &["synthetic-fixture".into()],
-            )
-            .unwrap();
+            let capability =
+                AnswerCapability::fixture(backend, version, request_rule, answer_rule, decision)
+                    .unwrap();
             let before = state(&fixture.base.conn);
             assert!(
                 storage::reserve_permission_response(
@@ -2984,8 +2892,8 @@ mod tests {
             .base
             .conn
             .execute(
-                "UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",
-                params![NOW, fixture.base.director],
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                [fixture.base.director],
             )
             .unwrap();
         fixture
@@ -3294,13 +3202,7 @@ mod tests {
             }
             let audit = rows(&fixture.base.conn, "member_permission_responses");
             let mut guard = ();
-            let proof = ZeroByteRetirement::fixture(
-                &fixture.owner,
-                receipt.input.input_id,
-                fixture.request.metadata.interaction_id,
-                &mut guard,
-            )
-            .unwrap();
+            let proof = ZeroByteRetirement::fixture(&fixture.owner, &receipt, &mut guard);
             let released = crate::broker::runtime::test_support::release_permission_claim(
                 &mut fixture.base.conn,
                 &fixture.owner,
@@ -3361,13 +3263,7 @@ mod tests {
                 .unwrap();
             }
             let mut guard = ();
-            let proof = ZeroByteRetirement::fixture(
-                &fixture.owner,
-                receipt.input.input_id,
-                fixture.request.metadata.interaction_id,
-                &mut guard,
-            )
-            .unwrap();
+            let proof = ZeroByteRetirement::fixture(&fixture.owner, &receipt, &mut guard);
             let before = state(&fixture.base.conn);
             assert!(
                 crate::broker::runtime::test_support::release_permission_claim(
@@ -3398,17 +3294,15 @@ mod tests {
         .unwrap();
         for changed in ["input", "interaction", "epoch"] {
             let mut owner = fixture.owner.clone();
-            let mut input = receipt.input.input_id;
-            let mut interaction = fixture.request.metadata.interaction_id;
+            let mut bound = receipt.clone();
             match changed {
-                "input" => input += 1,
-                "interaction" => interaction += 1,
+                "input" => bound.input.input_id += 1,
+                "interaction" => bound.response.metadata.interaction_id += 1,
                 "epoch" => owner.owner_epoch += 1,
                 _ => unreachable!(),
             }
             let mut guard = ();
-            let proof =
-                ZeroByteRetirement::fixture(&owner, input, interaction, &mut guard).unwrap();
+            let proof = ZeroByteRetirement::fixture(&owner, &bound, &mut guard);
             let before = state(&fixture.base.conn);
             assert!(
                 crate::broker::runtime::test_support::release_permission_claim(
@@ -3439,13 +3333,7 @@ mod tests {
         .unwrap();
         fixture.base.conn.execute_batch("CREATE TRIGGER reject_claim_release BEFORE DELETE ON member_permission_response_claims BEGIN SELECT RAISE(ABORT,'fixture release failure'); END").unwrap();
         let mut guard = ();
-        let proof = ZeroByteRetirement::fixture(
-            &fixture.owner,
-            receipt.input.input_id,
-            fixture.request.metadata.interaction_id,
-            &mut guard,
-        )
-        .unwrap();
+        let proof = ZeroByteRetirement::fixture(&fixture.owner, &receipt, &mut guard);
         let before = state(&fixture.base.conn);
         assert!(
             crate::broker::runtime::test_support::release_permission_claim(
@@ -3578,12 +3466,12 @@ mod tests {
         let owner = fixture.activate();
         for (index, (assignment, delivery, deferred)) in [
             (
-                format!("state='ready',deferred_at='{NOW}',defer_reason='interaction_open'"),
+                format!("state='ready',delivery_method=NULL,deferred_at='{NOW}',defer_reason='interaction_open'"),
                 serde_json::json!({"status":"queued","method":null,"reason":"interaction_open"}),
                 true,
             ),
             (
-                "state='ready'".to_owned(),
+                "state='ready',delivery_method=NULL".to_owned(),
                 serde_json::json!({"status":"held","method":null,"reason":"zero_bytes_ready"}),
                 false,
             ),
@@ -3603,7 +3491,7 @@ mod tests {
                 false,
             ),
             (
-                "state='settled',disposition='not_submitted',delivery_reason='runner_stopped'".to_owned(),
+                "state='settled',disposition='not_submitted',delivery_method=NULL,delivery_reason='runner_stopped'".to_owned(),
                 serde_json::json!({"status":"not_submitted","method":null,"reason":"runner_stopped"}),
                 false,
             ),
@@ -3615,16 +3503,6 @@ mod tests {
             (
                 "state='settled',disposition='abandoned_uncertain',delivery_method='profile'".to_owned(),
                 serde_json::json!({"status":"uncertain","method":"profile","reason":null}),
-                false,
-            ),
-            (
-                "state='accepted'".to_owned(),
-                serde_json::json!({"status":"submitted","method":null,"reason":"method_unrecorded"}),
-                false,
-            ),
-            (
-                "state='uncertain'".to_owned(),
-                serde_json::json!({"status":"uncertain","method":null,"reason":"method_unrecorded"}),
                 false,
             ),
         ]

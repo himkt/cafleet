@@ -37,7 +37,7 @@ use std::time::Instant;
 pub(crate) const CONTROL_PROTOCOL_VERSION: u32 = 1;
 pub(crate) const MAX_CONTROL_FRAME: usize = 65536;
 
-pub(super) fn validate_version(frame: &Value) -> Result<()> {
+fn validate_version(frame: &Value) -> Result<()> {
     ensure(
         frame.is_object()
             && frame.get("protocol_version").and_then(Value::as_u64)
@@ -52,7 +52,7 @@ pub(crate) fn encode_control_frame(frame: &Value) -> Result<Vec<u8>> {
     frame_control_body(&body)
 }
 
-pub(super) fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
+fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
     ensure(
         body.len() <= MAX_CONTROL_FRAME,
         "control frame exceeds size limit",
@@ -660,7 +660,7 @@ pub(crate) enum LifecycleRequest {
     Start {
         protocol_version: u32,
         identity: ControlIdentity,
-        pane_id: Option<String>,
+        pane_id: String,
     },
     Health {
         protocol_version: u32,
@@ -1045,7 +1045,7 @@ pub(super) fn pause(deadline: Instant) -> Result<()> {
     Ok(())
 }
 pub(super) struct ControlClient {
-    pub(crate) stream: UnixStream,
+    stream: UnixStream,
     decoder: ControlDecoder,
 }
 
@@ -1056,6 +1056,10 @@ enum EndpointPhase {
 }
 
 impl ControlClient {
+    #[cfg(test)]
+    pub(crate) fn stream_mut(&mut self) -> &mut UnixStream {
+        &mut self.stream
+    }
     pub(super) fn connect(path: &Path, deadline: Instant) -> Result<Self> {
         Self::connect_in_phase(path, deadline, EndpointPhase::Ready)
     }
@@ -1232,7 +1236,7 @@ impl HealthSnapshot {
         result.validate(run)?;
         Ok(result)
     }
-    pub(crate) fn validate(&self, run: &RunRecord) -> Result<()> {
+    fn validate(&self, run: &RunRecord) -> Result<()> {
         self.identity.validate(run)?;
         if let Some(observation) = &self.observation {
             observation.validate()?;
@@ -1369,20 +1373,20 @@ impl MemberState {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum OwnerLockProbe {
+enum OwnerLockProbe {
     Held,
     Free,
     Failed(String),
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum HealthProbe {
+enum HealthProbe {
     Answered,
     Skipped,
     Failed(String),
 }
 
-pub(crate) enum RuntimeProbes {
+enum RuntimeProbes {
     InvalidPaths(String),
     Observed {
         descriptor_leftover: bool,
@@ -2992,7 +2996,7 @@ mod tests {
             let run = &self.fixture.run;
             let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({
                 "backend":"codex","native_version":run.native_version,"rule_id":"fixture-wire-evidence","screen_seq":2,
-                "operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                "operation":null,"choices":null,"excerpt":null,"truncated":false
             })).unwrap();
             json!({"event_id":11,"message_id":14,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,
                 "run_id":run.run_id,"owner_epoch":run.owner_epoch,"interaction_id":12,"episode_seq":1,
@@ -3015,7 +3019,7 @@ mod tests {
                 value["answer_rule_id"] = json!("fixture-question-decline");
                 value["supported_choices"] = json!([
                     {"choice_id":"decline","label":"No, keep manual mode","scope":"persistent"},
-                    {"choice_id":"later","label":"Ask later","scope":"session"}
+                    {"choice_id":"later","label":"Ask later","scope":"persistent"}
                 ]);
             } else {
                 value["capability_reason"] = json!("question has no tested answer");
@@ -4050,7 +4054,7 @@ mod tests {
         }
         for (field, value) in [
             ("visibility", json!("missing")),
-            ("classification", json!("working")),
+            ("classification", json!("composer_empty")),
             ("answer_capability", json!("guessed")),
             ("supported_decisions", json!(["permit"])),
             ("missing_evidence", json!(["invented"])),

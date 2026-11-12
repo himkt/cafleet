@@ -24,7 +24,10 @@ pub(crate) fn get_fleet(
         [fleet_id],
         |row| Ok(FleetRecord {
             fleet_id: row.get(0)?, name: row.get(1)?, created_at: row.get(2)?,
-            deleted_at: row.get(3)?, director_member_id: row.get(4)?,
+            deleted_at: row.get(3)?,
+            director_member_id: row
+                .get::<_, Option<i64>>(4)?
+                .expect("a committed fleet records its root Director"),
         }),
     ).optional().map_err(crate::error::CafleetError::from)
 }
@@ -37,7 +40,7 @@ pub(crate) fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<FleetRec
 /// Creates a fleet whose root Director occupies `director`, whose pane is required.
 pub(crate) fn create_fleet(
     conn: &mut Connection,
-    name: Option<&str>,
+    name: &str,
     director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
     assert!(
@@ -62,7 +65,7 @@ pub(crate) fn create_fleet(
         .expect("the created root Director is active");
     Ok(CreatedFleet {
         fleet_id,
-        name: name.map(str::to_owned),
+        name: name.to_owned(),
         created_at: now,
         director,
     })
@@ -98,21 +101,16 @@ pub(crate) fn require_live_fleet(
     if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
     }
-    let director = fleet.director_member_id.ok_or_else(|| CafleetError::App(format!(
-        "fleet {fleet_id} has no root Director recorded; re-create the fleet with 'cafleet fleet create'."
-    )))?;
-    let director_state: Option<(MemberStatus, Option<String>)> = conn
+    let director = fleet.director_member_id;
+    let director_status: Option<MemberStatus> = conn
         .query_row(
-            "SELECT m.status, p.mux_pane_id FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id WHERE m.member_id=?1 AND m.fleet_id=?2",
+            "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
             params![director, fleet_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .optional()?;
-    match director_state {
-        Some((MemberStatus::Active, Some(pane))) if !pane.is_empty() => Ok(fleet),
-        Some((MemberStatus::Active, _)) => Err(CafleetError::App(format!(
-            "fleet {fleet_id}'s root Director (member {director}) has no concrete placement."
-        ))),
+    match director_status {
+        Some(MemberStatus::Active) => Ok(fleet),
         _ => Err(CafleetError::App(format!(
             "fleet {fleet_id}'s root Director (member {director}) is not active."
         ))),
@@ -130,7 +128,9 @@ pub(crate) fn list_fleets(conn: &Connection) -> Result<Vec<FleetSummary>, Caflee
             fleet_id: row.get(0)?,
             name: row.get(1)?,
             created_at: row.get(2)?,
-            director_member_id: row.get(3)?,
+            director_member_id: row
+                .get::<_, Option<i64>>(3)?
+                .expect("a committed fleet records its root Director"),
             member_count: row.get(4)?,
         })
     })?
@@ -146,8 +146,8 @@ pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usiz
         params![now, fleet_id],
     )?;
     let deregistered_count = conn.execute(
-        "UPDATE members SET status='deregistered', deregistered_at=?1 WHERE fleet_id=?2 AND status='active'",
-        params![now, fleet_id],
+        "UPDATE members SET status='deregistered' WHERE fleet_id=?1 AND status='active'",
+        [fleet_id],
     )?;
     conn.execute("DELETE FROM member_placements WHERE member_id IN (SELECT member_id FROM members WHERE fleet_id=?1)", [fleet_id])?;
     Ok(deregistered_count)
@@ -159,7 +159,7 @@ pub(crate) struct MemberRunRegistry {
     pub(crate) run_status: crate::broker::runtime::RunStatus,
     pub(crate) cleanup_state: crate::broker::runtime::CleanupState,
     pub(crate) member_status: String,
-    pub(crate) director_member_id: Option<i64>,
+    pub(crate) director_member_id: i64,
 }
 
 impl MemberRunRegistry {
@@ -196,27 +196,26 @@ pub(crate) fn recorded_asset_install(
     conn: &Connection,
     coding_agent: &str,
     path: &str,
-) -> rusqlite::Result<Option<(String, String)>> {
+) -> rusqlite::Result<Option<String>> {
     conn.query_row(
-        "SELECT cafleet_version, installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
+        "SELECT installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
         params![coding_agent, path],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ).optional()
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 pub(crate) fn record_asset_install(
     conn: &mut Connection,
     coding_agent: &str,
     path: &str,
-    cafleet_version: &str,
 ) -> Result<(), CafleetError> {
     let now = now_stamp();
     conn.execute(
-        "INSERT INTO asset_installs (coding_agent, path, cafleet_version, installed_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(coding_agent, path) DO UPDATE SET
-             cafleet_version=excluded.cafleet_version, installed_at=excluded.installed_at",
-        params![coding_agent, path, cafleet_version, now],
+        "INSERT INTO asset_installs (coding_agent, path, installed_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(coding_agent, path) DO UPDATE SET installed_at=excluded.installed_at",
+        params![coding_agent, path, now],
     )?;
     Ok(())
 }
@@ -228,7 +227,7 @@ pub(crate) mod test_support {
     pub(crate) fn create_fleet_fixture(conn: &mut Connection, name: &str) -> (i64, i64) {
         let fleet = crate::broker::fleets::create_fleet(
             conn,
-            Some(name),
+            name,
             &crate::broker::members::test_support::placement(Some("%0")),
         )
         .unwrap();
@@ -258,8 +257,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
-        let error =
-            broker::create_fleet(&mut conn, Some("alpha"), &placement(Some("%0"))).unwrap_err();
+        let error = broker::create_fleet(&mut conn, "alpha", &placement(Some("%0"))).unwrap_err();
         assert!(error.message().contains("registration failure"));
         for table in ["fleets", "members", "member_placements"] {
             assert_eq!(row_count(&conn, table), 0);
@@ -269,10 +267,10 @@ mod tests {
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         assert_eq!((fleet, director), (1, 1));
         let stored = get_fleet(&conn, fleet).unwrap().unwrap();
-        assert_eq!(stored.director_member_id, Some(director));
+        assert_eq!(stored.director_member_id, director);
         let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
         assert_eq!(member.kind, crate::broker::MemberKind::Director);
-        assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%0"));
+        assert_eq!(member.placement.mux_pane_id.as_deref(), Some("%0"));
     }
 
     #[test]
@@ -315,33 +313,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&dir);
         for (agent, path) in [("codex", "/a"), ("codex", "/b"), ("claude", "/a")] {
-            record_asset_install(&mut conn, agent, path, "old").unwrap();
+            record_asset_install(&mut conn, agent, path).unwrap();
         }
         conn.execute("UPDATE asset_installs SET installed_at='old-time'", [])
             .unwrap();
-        record_asset_install(&mut conn, "codex", "/a", "new").unwrap();
-        let rows = conn.prepare("SELECT coding_agent, path, cafleet_version, installed_at FROM asset_installs ORDER BY coding_agent, path")
-            .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
+        record_asset_install(&mut conn, "codex", "/a").unwrap();
+        let rows = conn.prepare("SELECT coding_agent, path, installed_at FROM asset_installs ORDER BY coding_agent, path")
+            .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
             .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(rows.len(), 3);
-        assert_eq!(
-            rows[0],
-            (
-                "claude".into(),
-                "/a".into(),
-                "old".into(),
-                "old-time".into()
-            )
-        );
-        assert_eq!(
-            (&rows[1].0, &rows[1].1, &rows[1].2),
-            (&"codex".into(), &"/a".into(), &"new".into())
-        );
-        assert!(crate::time::parse_lenient(&rows[1].3).is_ok());
-        assert_eq!(
-            rows[2],
-            ("codex".into(), "/b".into(), "old".into(), "old-time".into())
-        );
+        assert_eq!(rows[0], ("claude".into(), "/a".into(), "old-time".into()));
+        assert_eq!((&rows[1].0, &rows[1].1), (&"codex".into(), &"/a".into()));
+        assert!(crate::time::parse_lenient(&rows[1].2).is_some());
+        assert_eq!(rows[2], ("codex".into(), "/b".into(), "old-time".into()));
     }
 
     #[test]
@@ -383,15 +367,12 @@ mod tests {
         assert_eq!(rows[1].run_status, RunStatus::Starting);
         assert_eq!(rows[1].cleanup_state, CleanupState::Incomplete);
         assert_eq!(rows[1].member_status, "deregistered");
-        assert!(
-            rows.iter()
-                .all(|row| row.director_member_id == Some(director))
-        );
+        assert!(rows.iter().all(|row| row.director_member_id == director));
         let (other_fleet, other_director) = create_fleet_fixture(&mut conn, "other");
         let third = register_member_run(&mut conn, other_fleet, other_director, "third");
         let rows = member_run_registry(&conn).unwrap();
         assert_eq!(rows[2].run_id, third.run_id);
-        assert_eq!(rows[2].director_member_id, Some(other_director));
+        assert_eq!(rows[2].director_member_id, other_director);
         assert!(
             member_run_registry(&Connection::open_in_memory().unwrap()).is_err(),
             "a registry without member runs surfaces the query error"
@@ -399,33 +380,15 @@ mod tests {
     }
 
     #[test]
-    fn require_live_fleet_refuses_a_deleted_fleet_or_a_damaged_root_director() {
+    fn require_live_fleet_refuses_a_deleted_fleet_or_an_inactive_root_director() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         assert_eq!(require_live_fleet(&conn, fleet).unwrap().fleet_id, fleet);
         for (damage, expected) in [
             (
-                "UPDATE fleets SET director_member_id=NULL".to_owned(),
-                format!(
-                    "fleet {fleet} has no root Director recorded; re-create the fleet with 'cafleet fleet create'."
-                ),
-            ),
-            (
                 format!("UPDATE members SET status='deregistered' WHERE member_id={director}"),
                 format!("fleet {fleet}'s root Director (member {director}) is not active."),
-            ),
-            (
-                format!("DELETE FROM member_placements WHERE member_id={director}"),
-                format!(
-                    "fleet {fleet}'s root Director (member {director}) has no concrete placement."
-                ),
-            ),
-            (
-                format!("UPDATE member_placements SET mux_pane_id=NULL WHERE member_id={director}"),
-                format!(
-                    "fleet {fleet}'s root Director (member {director}) has no concrete placement."
-                ),
             ),
             (
                 "UPDATE fleets SET deleted_at='2026-01-01T00:00:00Z'".to_owned(),
