@@ -2232,7 +2232,10 @@ mod tests {
         let placement = crate::broker::Placement {
             backend: "tmux".into(),
             mux_session: "s".into(),
-            mux_window_id: "@1".into(),
+            mux_window_id: Some("@1".into()),
+            mux_window_name: Some("main".into()),
+            window_ordinal: 0,
+            column_side: crate::multiplexer::layout::ColumnSide::Right,
             mux_pane_id: Some("%9".into()),
             coding_agent: "hermes".into(),
             created_at: "2026-11-07T00:00:00Z".into(),
@@ -2325,6 +2328,7 @@ mod tests {
         use crate::multiplexer::caller::shared_server_message;
         use crate::multiplexer::caller::unset_message;
         use crate::multiplexer::caller::unverified_message;
+        use crate::multiplexer::layout::ColumnSide;
         use crate::multiplexer::test_support::FakeRunner;
         use crate::multiplexer::test_support::argv;
         use crate::multiplexer::test_support::env;
@@ -2341,6 +2345,11 @@ mod tests {
         ];
         const CONTEXT_FORMAT: &str = "#{session_name}|#{window_id}|#{pane_id}";
         const PROCESS_FORMAT: &str = "#{pane_id}|#{pane_pid}";
+        const WINDOW_NAME_FORMAT: &str = "#{window_id}|#{window_name}";
+
+        fn tab_label(tab: &str, label: &str) -> String {
+            herdr_envelope(serde_json::json!({"tab": {"tab_id": tab, "label": label}}))
+        }
 
         /// A process table that fails the test on any read, for paths that must not walk.
         struct UnreadTable;
@@ -2466,6 +2475,7 @@ mod tests {
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("main|@1|%5\n".to_string()));
+            runner.respond(Ok("@1|main\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request(Some("%5"), Some(RERUN_SOCKET)),
@@ -2484,18 +2494,37 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
+                    placement.window_ordinal,
+                    placement.column_side,
                     placement.mux_pane_id.as_deref(),
                     placement.coding_agent.as_str(),
                 ),
-                ("tmux", RERUN_SOCKET, "main", "@1", Some("%5"), "codex")
+                (
+                    "tmux",
+                    RERUN_SOCKET,
+                    "main",
+                    Some("@1"),
+                    Some("main"),
+                    0,
+                    ColumnSide::Left,
+                    Some("%5"),
+                    "codex"
+                )
             );
             assert_eq!(
                 runner.run_argvs(),
-                vec![tmux(
-                    &["display-message", "-p", "-t", "%5", CONTEXT_FORMAT],
-                    RERUN_SOCKET
-                )]
+                vec![
+                    tmux(
+                        &["display-message", "-p", "-t", "%5", CONTEXT_FORMAT],
+                        RERUN_SOCKET
+                    ),
+                    tmux(
+                        &["display-message", "-p", "-t", "@1", WINDOW_NAME_FORMAT],
+                        RERUN_SOCKET
+                    ),
+                ]
             );
             assert_eq!(fleet_rows(&conn), (1, 1));
         }
@@ -2507,6 +2536,7 @@ mod tests {
             runner.respond(Ok(herdr_envelope(serde_json::json!({
                 "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
             }))));
+            runner.respond(Ok(tab_label("w4:t1", "agents")));
             let fleet = create_with(
                 &mut conn,
                 request(Some("w4:p3N"), Some("default")),
@@ -2521,22 +2551,33 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
                     placement.mux_pane_id.as_deref(),
                 ),
-                ("herdr", "default", "w4", "w4:t1", Some("w4:p3N"))
+                (
+                    "herdr",
+                    "default",
+                    "w4",
+                    Some("w4:t1"),
+                    Some("agents"),
+                    Some("w4:p3N")
+                )
             );
             assert_eq!(
                 runner.run_argvs(),
-                vec![argv(&[
-                    "herdr",
-                    "--session",
-                    "default",
-                    "pane",
-                    "current",
-                    "--pane",
-                    "w4:p3N",
-                ])]
+                vec![
+                    argv(&[
+                        "herdr",
+                        "--session",
+                        "default",
+                        "pane",
+                        "current",
+                        "--pane",
+                        "w4:p3N",
+                    ]),
+                    argv(&["herdr", "--session", "default", "tab", "get", "w4:t1"]),
+                ]
             );
         }
 
@@ -2606,6 +2647,7 @@ mod tests {
 
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("main|@2|%5\n".to_string()));
+            runner.respond(Ok("@2|main\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request(Some("%5"), Some(RERUN_SOCKET)),
@@ -2768,6 +2810,7 @@ mod tests {
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("%3|20\n".to_string()));
             runner.respond(Ok("main|@1|%3\n".to_string()));
+            runner.respond(Ok("@1|work window\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request(None, None),
@@ -2782,11 +2825,20 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
                     placement.mux_pane_id.as_deref(),
                     placement.coding_agent.as_str(),
                 ),
-                ("tmux", TMUX_SOCKET, "main", "@1", Some("%3"), "codex")
+                (
+                    "tmux",
+                    TMUX_SOCKET,
+                    "main",
+                    Some("@1"),
+                    Some("work window"),
+                    Some("%3"),
+                    "codex"
+                )
             );
             assert_eq!(
                 runner.run_argvs(),
@@ -2797,6 +2849,10 @@ mod tests {
                     ),
                     tmux(
                         &["display-message", "-p", "-t", "%3", CONTEXT_FORMAT],
+                        TMUX_SOCKET
+                    ),
+                    tmux(
+                        &["display-message", "-p", "-t", "@1", WINDOW_NAME_FORMAT],
                         TMUX_SOCKET
                     ),
                 ]
@@ -2814,6 +2870,7 @@ mod tests {
             runner.respond(Ok(herdr_envelope(serde_json::json!({
                 "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
             }))));
+            runner.respond(Ok(tab_label("w4:t1", "")));
             let fleet = create_with(
                 &mut conn,
                 request(None, None),
@@ -2832,18 +2889,89 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
                     placement.mux_pane_id.as_deref(),
                 ),
-                ("herdr", "work", "w4", "w4:t1", Some("w4:p3N"))
+                (
+                    "herdr",
+                    "work",
+                    "w4",
+                    Some("w4:t1"),
+                    Some(""),
+                    Some("w4:p3N")
+                )
             );
             let selector = argv(&["herdr", "--session", "work", "pane"]);
             let calls = runner.run_argvs();
-            assert_eq!(calls.len(), 2);
+            assert_eq!(calls.len(), 3);
             assert_eq!(calls[0][..4], selector);
             assert_eq!(calls[0][4], "process-info");
             assert_eq!(calls[1][..4], selector);
             assert_eq!(calls[1][4], "current");
+            assert_eq!(
+                calls[2],
+                argv(&["herdr", "--session", "work", "tab", "get", "w4:t1"])
+            );
+        }
+
+        #[test]
+        fn a_failed_tmux_window_name_read_registers_nothing() {
+            for reply in ["\n", "@1\n", "@2|main\n"] {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::with_binary("tmux");
+                runner.respond(Ok("main|@1|%5\n".to_string()));
+                runner.respond(Ok(reply.to_string()));
+                let error = refused(
+                    &mut conn,
+                    request(Some("%5"), Some(RERUN_SOCKET)),
+                    &[],
+                    &runner,
+                    &UnreadTable,
+                );
+                assert!(
+                    error
+                        .to_string()
+                        .contains("unexpected tmux display-message output: "),
+                    "{reply:?}: {error}"
+                );
+                assert_eq!(runner.run_argvs().len(), 2, "{reply:?}");
+            }
+        }
+
+        #[test]
+        fn a_failed_herdr_window_name_read_registers_nothing() {
+            for (reply, expected) in [
+                (
+                    Err(crate::multiplexer::RunError::Failed {
+                        stderr: crate::multiplexer::test_support::herdr_error_stderr(
+                            "tab_not_found",
+                        ),
+                    }),
+                    "tab_not_found",
+                ),
+                (
+                    Ok(herdr_envelope(
+                        serde_json::json!({"tab": {"tab_id": "w4:t1"}}),
+                    )),
+                    "herdr tab get missing 'label' field",
+                ),
+            ] {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(Ok(herdr_envelope(serde_json::json!({
+                    "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
+                }))));
+                runner.respond(reply);
+                let error = refused(
+                    &mut conn,
+                    request(Some("w4:p3N"), Some("default")),
+                    &[],
+                    &runner,
+                    &UnreadTable,
+                );
+                assert!(error.to_string().contains(expected), "{error}");
+            }
         }
 
         #[test]
@@ -2884,6 +3012,7 @@ mod tests {
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("main|@1|%5\n".to_string()));
+            runner.respond(Ok("@1|main\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request,

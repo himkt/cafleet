@@ -986,7 +986,10 @@ mod tests {
         Placement {
             backend: backend.into(),
             mux_session: "main".into(),
-            mux_window_id: "@1".into(),
+            mux_window_id: Some("@1".into()),
+            mux_window_name: Some("main".into()),
+            window_ordinal: 0,
+            column_side: crate::multiplexer::layout::ColumnSide::Right,
             mux_pane_id: Some(if backend == "tmux" { "%2" } else { "w1:p2" }.into()),
             coding_agent: "codex".into(),
             created_at: "2026-10-27T10:33:00+00:00".into(),

@@ -283,15 +283,24 @@ pub(crate) mod test_support {
         tx.commit()?;
         Ok(changed)
     }
-    pub(crate) fn update_placement_pane_id(
+    pub(crate) fn publish_placement_pane(
         conn: &mut Connection,
         member_id: i64,
         pane_id: &str,
     ) -> Result<Option<Placement>, CafleetError> {
+        conn.execute(
+            "UPDATE member_placements SET mux_pane_id=?1,
+                mux_window_id=COALESCE(mux_window_id, ?3),
+                mux_window_name=COALESCE(mux_window_name, ?4)
+             WHERE member_id=?2",
+            params![pane_id, member_id, TEST_WINDOW_ID, TEST_WINDOW_NAME],
+        )?;
         conn.query_row(
-            "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2
-         RETURNING backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at, mux_server",
-            params![pane_id, member_id],
+            &format!(
+                "SELECT {} FROM member_placements p WHERE p.member_id=?1",
+                crate::broker::PLACEMENT_COLUMNS
+            ),
+            [member_id],
             |row| Placement::from_row(row, 0),
         )
         .optional()
@@ -300,16 +309,85 @@ pub(crate) mod test_support {
     use rusqlite::Connection;
 
     use crate::broker::members::NewPlacement;
+    use crate::broker::members::PlacementPane;
+    use crate::multiplexer::layout::ColumnSide;
 
+    pub(crate) const TEST_WINDOW_ID: &str = "@1";
+    pub(crate) const TEST_WINDOW_NAME: &str = "main";
+    const TEST_SESSION: &str = "main";
+    const TEST_SERVER: &str = "/nonexistent/cafleet-test/tmux.sock";
+
+    fn test_pane(pane: &str) -> PlacementPane {
+        PlacementPane {
+            mux_window_id: TEST_WINDOW_ID.into(),
+            mux_window_name: TEST_WINDOW_NAME.into(),
+            mux_pane_id: pane.into(),
+        }
+    }
+
+    /// A Director-window member placement, concrete in window `@1` when `pane` is given.
     pub(crate) fn placement(pane: Option<&str>) -> NewPlacement {
         NewPlacement {
             backend: "tmux".into(),
-            mux_session: "main".into(),
-            mux_window_id: "@1".into(),
-            mux_pane_id: pane.map(str::to_owned),
+            mux_session: TEST_SESSION.into(),
+            window_ordinal: 0,
+            column_side: ColumnSide::Right,
             coding_agent: "claude".into(),
-            mux_server: "/nonexistent/cafleet-test/tmux.sock".into(),
+            mux_server: TEST_SERVER.into(),
+            pane: pane.map(test_pane),
         }
+    }
+
+    pub(crate) fn director_new_placement(pane: &str) -> NewPlacement {
+        NewPlacement::director(
+            "tmux".into(),
+            TEST_SESSION.into(),
+            "claude".into(),
+            TEST_SERVER.into(),
+            test_pane(pane),
+        )
+    }
+
+    /// A pending placement in the given slot.
+    pub(crate) fn slot_placement(window_ordinal: i64, column_side: ColumnSide) -> NewPlacement {
+        NewPlacement {
+            window_ordinal,
+            column_side,
+            ..placement(None)
+        }
+    }
+
+    /// Registers a pending member in the given slot and, when `concrete` is given, publishes
+    /// its `(window_id, window_name, pane_id)`.
+    pub(crate) fn register_in_slot(
+        conn: &mut Connection,
+        fleet: i64,
+        name: &str,
+        window_ordinal: i64,
+        column_side: ColumnSide,
+        concrete: Option<(&str, &str, &str)>,
+    ) -> i64 {
+        let member = register_member(
+            conn,
+            fleet,
+            name,
+            "assignment",
+            &slot_placement(window_ordinal, column_side),
+        )
+        .unwrap()
+        .member_id;
+        if let Some((window_id, window_name, pane_id)) = concrete {
+            assert_eq!(
+                conn.execute(
+                    "UPDATE member_placements SET mux_pane_id=?1, mux_window_id=?2, mux_window_name=?3
+                     WHERE member_id=?4 AND mux_pane_id IS NULL",
+                    params![pane_id, window_id, window_name, member],
+                )
+                .unwrap(),
+                1
+            );
+        }
+        member
     }
 
     pub(crate) fn register(
@@ -498,7 +576,10 @@ mod tests {
                 placement: Placement {
                     backend: "tmux".into(),
                     mux_session: "main".into(),
-                    mux_window_id: "@1".into(),
+                    mux_window_id: None,
+                    mux_window_name: None,
+                    window_ordinal: 0,
+                    column_side: crate::multiplexer::layout::ColumnSide::Right,
                     mux_pane_id: None,
                     coding_agent: "claude".into(),
                     created_at: String::new(),
@@ -557,6 +638,240 @@ mod tests {
             None,
         );
         assert_eq!(idle_seconds(&row, now).unwrap(), Some(3600));
+    }
+
+    mod occupancy {
+        use crate::broker::fleets::test_support::create_fleet_fixture;
+        use crate::broker::members::test_support::deregister_member;
+        use crate::broker::members::test_support::register_in_slot;
+        use crate::broker::members::*;
+        use crate::db::test_support::migrated_conn;
+        use crate::multiplexer::layout::ColumnSide;
+
+        fn summary(windows: &[OccupiedWindow]) -> Vec<(i64, &str, &str, Vec<&str>, Vec<&str>)> {
+            windows
+                .iter()
+                .map(|window| {
+                    (
+                        window.window_ordinal,
+                        window.mux_window_id.as_str(),
+                        window.mux_window_name.as_str(),
+                        window.left.iter().map(String::as_str).collect(),
+                        window.right.iter().map(String::as_str).collect(),
+                    )
+                })
+                .collect()
+        }
+
+        #[test]
+        fn occupancy_groups_concrete_placements_by_ordinal_and_side_in_registry_order() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout");
+            for (name, ordinal, side, concrete) in [
+                ("a", 0, ColumnSide::Right, ("@1", "main", "%2")),
+                ("b", 1, ColumnSide::Left, ("@7", "cafleet-1-1", "%10")),
+                ("c", 0, ColumnSide::Right, ("@1", "main", "%3")),
+                ("d", 1, ColumnSide::Right, ("@7", "cafleet-1-1", "%12")),
+                ("e", 1, ColumnSide::Left, ("@7", "cafleet-1-1", "%11")),
+                ("f", 3, ColumnSide::Left, ("@9", "cafleet-1-3", "%20")),
+            ] {
+                register_in_slot(&mut conn, fleet, name, ordinal, side, Some(concrete));
+            }
+            let windows = concrete_occupancy(&conn, fleet).unwrap();
+            assert_eq!(
+                summary(&windows),
+                vec![
+                    (0, "@1", "main", vec![], vec!["%2", "%3"]),
+                    (1, "@7", "cafleet-1-1", vec!["%10", "%11"], vec!["%12"]),
+                    (3, "@9", "cafleet-1-3", vec!["%20"], vec![]),
+                ]
+            );
+        }
+
+        #[test]
+        fn occupancy_excludes_the_director_pending_deregistered_and_other_fleet_rows() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout");
+            let (other, _) = create_fleet_fixture(&mut conn, "other");
+            assert!(concrete_occupancy(&conn, fleet).unwrap().is_empty());
+            register_in_slot(&mut conn, fleet, "pending", 1, ColumnSide::Left, None);
+            let departed = register_in_slot(
+                &mut conn,
+                fleet,
+                "departed",
+                2,
+                ColumnSide::Left,
+                Some(("@8", "cafleet-1-2", "%30")),
+            );
+            deregister_member(&mut conn, departed).unwrap();
+            register_in_slot(
+                &mut conn,
+                other,
+                "foreign",
+                1,
+                ColumnSide::Left,
+                Some(("@5", "cafleet-2-1", "%40")),
+            );
+            assert!(concrete_occupancy(&conn, fleet).unwrap().is_empty());
+            register_in_slot(
+                &mut conn,
+                fleet,
+                "live",
+                0,
+                ColumnSide::Right,
+                Some(("@1", "main", "%2")),
+            );
+            assert_eq!(
+                summary(&concrete_occupancy(&conn, fleet).unwrap()),
+                vec![(0, "@1", "main", vec![], vec!["%2"])]
+            );
+        }
+
+        #[test]
+        fn window_members_lists_every_active_member_of_one_ordinal_ascending() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "layout");
+            let (other, _) = create_fleet_fixture(&mut conn, "other");
+            let window = ("@7", "cafleet-1-1");
+            let first = register_in_slot(
+                &mut conn,
+                fleet,
+                "first",
+                1,
+                ColumnSide::Right,
+                Some((window.0, window.1, "%11")),
+            );
+            register_in_slot(
+                &mut conn,
+                fleet,
+                "director-window",
+                0,
+                ColumnSide::Right,
+                Some(("@1", "main", "%2")),
+            );
+            let second = register_in_slot(
+                &mut conn,
+                fleet,
+                "second",
+                1,
+                ColumnSide::Left,
+                Some((window.0, window.1, "%10")),
+            );
+            let departed = register_in_slot(
+                &mut conn,
+                fleet,
+                "departed",
+                1,
+                ColumnSide::Left,
+                Some((window.0, window.1, "%12")),
+            );
+            deregister_member(&mut conn, departed).unwrap();
+            register_in_slot(
+                &mut conn,
+                other,
+                "foreign",
+                1,
+                ColumnSide::Left,
+                Some(("@5", "cafleet-2-1", "%40")),
+            );
+            assert_eq!(
+                window_member_ids(&conn, fleet, 1).unwrap(),
+                vec![first, second]
+            );
+            assert!(
+                !window_member_ids(&conn, fleet, 0)
+                    .unwrap()
+                    .contains(&director)
+            );
+            assert!(window_member_ids(&conn, fleet, 2).unwrap().is_empty());
+        }
+
+        #[test]
+        fn a_stored_column_side_outside_left_and_right_fails_decoding() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout");
+            let worker = register_in_slot(
+                &mut conn,
+                fleet,
+                "worker",
+                0,
+                ColumnSide::Right,
+                Some(("@1", "main", "%2")),
+            );
+            conn.pragma_update(None, "ignore_check_constraints", true)
+                .unwrap();
+            conn.execute(
+                "UPDATE member_placements SET column_side='middle' WHERE member_id=?1",
+                [worker],
+            )
+            .unwrap();
+            conn.pragma_update(None, "ignore_check_constraints", false)
+                .unwrap();
+            for error in [
+                get_member(&conn, worker, fleet).unwrap_err(),
+                list_members(&conn, fleet).unwrap_err(),
+            ] {
+                assert!(
+                    matches!(
+                        &error,
+                        CafleetError::InvalidStoredValue { field, value }
+                            if field == "member_placements.column_side" && value == "middle"
+                    ),
+                    "{error:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn member_reads_decode_the_recorded_slot_and_window() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "layout");
+            let pending = register_in_slot(&mut conn, fleet, "pending", 2, ColumnSide::Left, None);
+            let placed = register_in_slot(
+                &mut conn,
+                fleet,
+                "placed",
+                1,
+                ColumnSide::Right,
+                Some(("@7", "cafleet-1-1", "%11")),
+            );
+            let slot = |member: i64| {
+                let placement = get_member(&conn, member, fleet).unwrap().unwrap().placement;
+                (
+                    placement.window_ordinal,
+                    placement.column_side,
+                    placement.mux_window_id,
+                    placement.mux_window_name,
+                    placement.mux_pane_id,
+                )
+            };
+            assert_eq!(
+                slot(director),
+                (
+                    0,
+                    ColumnSide::Left,
+                    Some("@1".into()),
+                    Some("main".into()),
+                    Some("%0".into())
+                )
+            );
+            assert_eq!(slot(pending), (2, ColumnSide::Left, None, None, None));
+            assert_eq!(
+                slot(placed),
+                (
+                    1,
+                    ColumnSide::Right,
+                    Some("@7".into()),
+                    Some("cafleet-1-1".into()),
+                    Some("%11".into())
+                )
+            );
+        }
     }
 
     #[test]

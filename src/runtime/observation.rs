@@ -7161,6 +7161,7 @@ pub(crate) mod native_capture {
                 window_id: case.tmux.window_id.clone(),
                 pane_id: case.tmux.pane_id.clone(),
             };
+            let window_name = mux.window_name(&context.window_id).map_err(io_error)?;
             let mut host = CaptureVerificationLaunchHost {
                 inner: NativeLaunchHost::new(&*mux, &context),
                 case,
@@ -7172,14 +7173,17 @@ pub(crate) mod native_capture {
                 let fleet = crate::broker::fleets::create_fleet(
                     conn,
                     format!("native-{}", approved.id).as_str(),
-                    &crate::broker::NewPlacement {
-                        backend: "tmux".into(),
-                        mux_session: context.session.clone(),
-                        mux_window_id: context.window_id.clone(),
-                        mux_pane_id: Some(context.pane_id.clone()),
-                        coding_agent: case.director_backend.clone(),
-                        mux_server: server.clone(),
-                    },
+                    &crate::broker::NewPlacement::director(
+                        "tmux".into(),
+                        context.session.clone(),
+                        case.director_backend.clone(),
+                        server.clone(),
+                        crate::broker::members::PlacementPane {
+                            mux_window_id: context.window_id.clone(),
+                            mux_window_name: window_name.clone(),
+                            mux_pane_id: context.pane_id.clone(),
+                        },
+                    ),
                 )?;
                 let policy = approved.backend.resolve_policy(approved.requested_mode())?;
                 let detection = ProfileCatalog::bundled()
@@ -7203,10 +7207,11 @@ pub(crate) mod native_capture {
                     placement: crate::broker::NewPlacement {
                         backend: "tmux".into(),
                         mux_session: context.session.clone(),
-                        mux_window_id: context.window_id.clone(),
-                        mux_pane_id: None,
+                        window_ordinal: 0,
+                        column_side: crate::multiplexer::layout::ColumnSide::Right,
                         coding_agent: approved.backend.name().into(),
                         mux_server: server.clone(),
+                        pane: None,
                     },
                 };
                 let launch_until = work_until.min(Instant::now() + Duration::from_secs(10));

@@ -1030,7 +1030,7 @@ mod tests {
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "hermes-busy");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
-            crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
+            crate::broker::members::test_support::publish_placement_pane(&mut conn, worker, "%9")
                 .unwrap();
             let identity = storage::database_identity(&conn).unwrap();
             let process = ProcessIdentity::current().unwrap();
@@ -1142,7 +1142,7 @@ mod tests {
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "member-recovery");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
-            crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
+            crate::broker::members::test_support::publish_placement_pane(&mut conn, worker, "%9")
                 .unwrap();
             let identity = storage::database_identity(&conn).unwrap();
             let process = ProcessIdentity::current().unwrap();
@@ -2032,7 +2032,7 @@ mod tests {
                     Connection::open(&path)
                         .unwrap()
                         .execute(
-                            "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                            "UPDATE member_placements SET mux_pane_id='%9', mux_window_id=COALESCE(mux_window_id, '@1'), mux_window_name=COALESCE(mux_window_name, 'main') WHERE member_id=?1",
                             [worker],
                         )
                         .unwrap();
@@ -2089,7 +2089,7 @@ mod tests {
     #[test]
     fn irreversible_close_preserves_the_registry_error_and_releases_ownership_on_return() {
         let (_dir, mut conn, settings, fleet, _, worker) = fixture();
-        crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
+        crate::broker::members::test_support::publish_placement_pane(&mut conn, worker, "%9")
             .unwrap();
         conn.execute_batch(
             "CREATE TRIGGER reject_deregister BEFORE UPDATE OF status ON members

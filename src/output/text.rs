@@ -549,7 +549,10 @@ mod tests {
             placement: Placement {
                 backend: "tmux".into(),
                 mux_session: "s".into(),
-                mux_window_id: "@1".into(),
+                mux_window_id: None,
+                mux_window_name: None,
+                window_ordinal: 0,
+                column_side: crate::multiplexer::layout::ColumnSide::Right,
                 mux_pane_id: None,
                 coding_agent: "codex".into(),
                 created_at: "created".into(),
