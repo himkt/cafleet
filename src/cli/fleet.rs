@@ -444,12 +444,15 @@ fn await_runner_exit(
 }
 
 /// `scope` revalidates the caller's wider deletion state, such as a fleet's
-/// placement set, before each irreversible step up to the pane close.
+/// placement set, before each irreversible step up to the pane close. The caller holds the
+/// fleet layout lock for the whole call.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn end_member(
     conn: &mut Connection,
     settings: &Settings,
     snapshot: &mut MemberRecord,
     held: &PaneLock,
+    _layout: &crate::pane_lock::LayoutLock,
     host: &mut impl DeletionHost,
     deadline: &mut Deadline,
     scope: &mut dyn FnMut(&Connection) -> Result<(), CafleetError>,
@@ -553,6 +556,32 @@ pub(crate) fn end_member(
     Ok(format!("{pane_id} (killed)"))
 }
 
+/// Acquires the fleet layout lock for a deletion of `subject` ("member" or "fleet"), moving the
+/// deletion deadline later by the wait.
+pub(crate) fn acquire_deletion_layout(
+    settings: &Settings,
+    fleet_id: i64,
+    deadline: Deadline,
+    layout_wait: std::time::Duration,
+    subject: &str,
+) -> Result<(crate::pane_lock::LayoutLock, Deadline), CafleetError> {
+    let started = std::time::Instant::now();
+    let lock = crate::pane_lock::LayoutLock::acquire_within(
+        &settings.database_url,
+        fleet_id,
+        Deadline::until(started + layout_wait),
+    )?
+    .ok_or_else(|| {
+        CafleetError::App(format!(
+            "fleet {fleet_id} pane layout remained busy for 60 seconds; {subject} was not deleted."
+        ))
+    })?;
+    Ok((
+        lock,
+        Deadline::until(deadline.instant() + started.elapsed()),
+    ))
+}
+
 pub(crate) fn delete_fleet(
     conn: &mut Connection,
     settings: &Settings,
@@ -575,7 +604,25 @@ pub(crate) fn delete_fleet_with_host(
     conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
-    mut deadline: Deadline,
+    deadline: Deadline,
+    host: &mut impl DeletionHost,
+) -> Result<DeletedFleet, CafleetError> {
+    delete_fleet_with_layout_wait(
+        conn,
+        settings,
+        fleet_id,
+        deadline,
+        crate::pane_lock::LAYOUT_LOCK_WAIT,
+        host,
+    )
+}
+
+pub(crate) fn delete_fleet_with_layout_wait(
+    conn: &mut Connection,
+    settings: &Settings,
+    fleet_id: i64,
+    deadline: Deadline,
+    layout_wait: std::time::Duration,
     host: &mut impl DeletionHost,
 ) -> Result<DeletedFleet, CafleetError> {
     with_database_budget(conn, deadline, |conn| {
@@ -618,6 +665,8 @@ pub(crate) fn delete_fleet_with_host(
             ))
         },
     )?;
+    let (layout, mut deadline) =
+        acquire_deletion_layout(settings, fleet_id, deadline, layout_wait, "fleet")?;
     let mut remaining = locked.snapshot.clone();
     let mut members = std::mem::take(&mut locked.value);
     let mut ended = Vec::new();
@@ -639,6 +688,7 @@ pub(crate) fn delete_fleet_with_host(
             settings,
             member,
             held,
+            &layout,
             host,
             &mut deadline,
             &mut scope,
@@ -665,6 +715,7 @@ pub(crate) fn delete_fleet_with_host(
         tx.commit()?;
         Ok((deregistered_count, unplaced))
     })?;
+    drop(layout);
     drop(locked);
     let deregistered_count = deregistered_count + ended.len();
     ended.extend(unplaced);
@@ -782,6 +833,7 @@ pub(crate) mod test_support {
         pub(crate) runner_gone: bool,
         pub(crate) hermes_failure: Option<String>,
         settled: Option<Duration>,
+        layout_waited: bool,
     }
 
     const SETTLEMENT_TIME: Duration = Duration::from_millis(30);
@@ -836,19 +888,26 @@ pub(crate) mod test_support {
                 runner_gone: false,
                 hermes_failure: None,
                 settled: None,
+                layout_waited: false,
             }
         }
 
-        /// Every cleanup step shares the deletion deadline, which a settlement extends by the
-        /// time it took.
+        /// Every cleanup step shares the deletion deadline, which the fleet layout lock wait
+        /// before the first step and a settlement each extend by the time they took.
         fn assert_deadline(&mut self, deadline: Instant) {
-            if let Some(settlement) = self.settled.take() {
+            let settlement = self.settled.take();
+            let first_step = !std::mem::replace(&mut self.layout_waited, true);
+            if settlement.is_some() || first_step {
+                let floor = settlement.unwrap_or_default();
                 let extension = deadline.saturating_duration_since(self.deadline);
                 assert!(
-                    extension >= settlement && extension < settlement + Duration::from_secs(1),
+                    extension >= floor && extension < floor + Duration::from_secs(1),
                     "{extension:?}"
                 );
                 self.deadline = deadline;
+                if let Mode::Recovery { host, .. } = &mut self.mode {
+                    host.deadline = deadline;
+                }
             }
             assert_eq!(deadline, self.deadline);
         }

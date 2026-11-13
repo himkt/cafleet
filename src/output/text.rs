@@ -155,12 +155,20 @@ pub(crate) fn format_member_press(value: &crate::runtime::KeyAcknowledgment) -> 
     )
 }
 
+/// The placement's window name, or `(pending)` while creation has not published it.
+fn window_label(placement: &Placement) -> &str {
+    placement.mux_window_name.as_deref().unwrap_or(PENDING)
+}
+
+const PENDING: &str = "(pending)";
+
 pub(crate) fn format_member_detail(member: &MemberRecord) -> String {
     let mut text = format!(
-        "{} {} {}",
+        "{} {} {} window={}",
         member.member_id,
         member.name,
-        member.status.as_str()
+        member.status.as_str(),
+        window_label(&member.placement)
     );
     if let Some(runtime) = &member.runtime {
         text.push('\n');
@@ -188,10 +196,13 @@ pub(crate) fn format_fleet_delete(deleted: &DeletedFleet) -> String {
 }
 
 pub(crate) fn format_member(member: &RegisteredMember, placement: &Placement) -> String {
-    let pane = placement.mux_pane_id.as_deref().unwrap_or("(pending)");
+    let pane = placement.mux_pane_id.as_deref().unwrap_or(PENDING);
     format!(
-        "{} {} backend={} pane={pane}",
-        member.member_id, member.name, placement.coding_agent
+        "{} {} backend={} pane={pane} window={}",
+        member.member_id,
+        member.name,
+        placement.coding_agent,
+        window_label(placement)
     )
 }
 
@@ -215,18 +226,15 @@ pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     let plural = if members.len() > 1 { "s" } else { "" };
     let mut lines = vec![
         format!("{} member{plural}:", members.len()),
-        "  member_id  name           kind      backend   pane_id  idle".into(),
+        "  member_id  name           kind      backend   window         pane_id  idle".into(),
     ];
     for row in members {
         let member = &row.member;
         let backend = member.placement.coding_agent.as_str();
-        let pane = member
-            .placement
-            .mux_pane_id
-            .as_deref()
-            .unwrap_or("(pending)");
+        let window = window_label(&member.placement);
+        let pane = member.placement.mux_pane_id.as_deref().unwrap_or(PENDING);
         lines.push(format!(
-            "  {:<9}  {:<13}  {:<8}  {backend:<8}  {pane:<7}  {}",
+            "  {:<9}  {:<13}  {:<8}  {backend:<8}  {window:<13}  {pane:<7}  {}",
             member.member_id,
             member.name,
             member.kind.as_str(),

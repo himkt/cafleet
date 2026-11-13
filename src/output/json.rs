@@ -15,7 +15,9 @@ pub(crate) fn runtime_recovery(report: &crate::runtime::RecoveryReport) -> Value
 
 pub(crate) fn placement(row: &Placement) -> Value {
     json!({"backend":row.backend,"mux_session":row.mux_session,
-        "mux_window_id":row.mux_window_id,"mux_pane_id":row.mux_pane_id,
+        "mux_window_id":row.mux_window_id,"mux_window_name":row.mux_window_name,
+        "window_ordinal":row.window_ordinal,"column_side":row.column_side.as_str(),
+        "mux_pane_id":row.mux_pane_id,
         "coding_agent":row.coding_agent,"created_at":row.created_at})
 }
 

@@ -236,6 +236,10 @@ pub(crate) struct PendingMemberSpec {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) placement: NewPlacement,
+    /// The chosen slot's window name, published with the pane.
+    pub(crate) window_name: String,
+    /// The fleet's `last_window_ordinal` as read under the layout lock, for a new-window slot.
+    pub(crate) advances_window_ordinal_from: Option<i64>,
 }
 pub(crate) struct RunSettings {
     pub(crate) database_identity_json: Value,
@@ -273,6 +277,18 @@ pub(super) fn register_pending_run(
             &member.description,
             &member.placement,
         )?;
+        if let Some(read) = member.advances_window_ordinal_from {
+            let changed = tx.execute(
+                "UPDATE fleets SET last_window_ordinal=?1 WHERE fleet_id=?2 AND last_window_ordinal=?3",
+                params![member.placement.window_ordinal, member.fleet_id, read],
+            )?;
+            if changed != 1 {
+                return Err(error(format!(
+                    "fleet {} window ordinal changed under the layout lock",
+                    member.fleet_id
+                )));
+            }
+        }
         let next: i64 = tx.query_row(
             "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
             [],
@@ -468,12 +484,21 @@ pub(crate) fn create_registered(
             return Err(guard.rollback(cause, ShutdownClock::new(host.now()), Vec::new()));
         }
     };
-    launch_registered(&mut guard, pending, &mut artifacts, &spawn, host, deadline)
+    launch_registered(
+        &mut guard,
+        pending,
+        &member.window_name,
+        &mut artifacts,
+        &spawn,
+        host,
+        deadline,
+    )
 }
 
 fn launch_registered(
     guard: &mut PendingGuard<'_>,
     pending: PendingRegistration,
+    window_name: &str,
     artifacts: &mut RunArtifacts,
     spawn: &SpawnSpec,
     host: &mut impl LaunchHost,
@@ -555,9 +580,16 @@ fn launch_registered(
             let changed=tx.execute("UPDATE member_runs SET status='prepared',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='starting'",params![crate::time::now_stamp(),run.run_id,current.owner_epoch])?;
             ensure(changed == 1, "prepared publication lost run ownership")?;
             let spawned = pane.as_ref().expect("created pane");
-            let changed=tx.execute("UPDATE member_placements SET mux_pane_id=?1, mux_window_id=?4,
-                    mux_window_name=(SELECT d.mux_window_name FROM fleets f JOIN member_placements d ON d.member_id=f.director_member_id WHERE f.fleet_id=?3)
-                 WHERE member_id=?2 AND mux_pane_id IS NULL",params![spawned.pane_id,run.member_id,run.fleet_id,spawned.window_id])?;
+            let changed = tx.execute(
+                "UPDATE member_placements SET mux_pane_id=?1, mux_window_id=?2, mux_window_name=?3
+                 WHERE member_id=?4 AND mux_pane_id IS NULL",
+                params![
+                    spawned.pane_id,
+                    spawned.window_id,
+                    window_name,
+                    run.member_id
+                ],
+            )?;
             ensure(
                 changed == 1,
                 "pending placement vanished or changed before start",

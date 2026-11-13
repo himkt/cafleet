@@ -63,6 +63,17 @@ pub(crate) struct OccupiedWindow {
     pub(crate) mux_window_name: String,
     pub(crate) left: Vec<String>,
     pub(crate) right: Vec<String>,
+    /// Every pane of the window, both columns, in registry order.
+    pub(crate) panes: Vec<String>,
+}
+
+pub(crate) fn last_window_ordinal(conn: &Connection, fleet_id: i64) -> Result<i64, CafleetError> {
+    conn.query_row(
+        "SELECT last_window_ordinal FROM fleets WHERE fleet_id=?1",
+        [fleet_id],
+        |row| row.get(0),
+    )
+    .map_err(CafleetError::from)
 }
 
 pub(crate) fn concrete_occupancy(
@@ -96,11 +107,13 @@ pub(crate) fn concrete_occupancy(
                 mux_window_name,
                 left: Vec::new(),
                 right: Vec::new(),
+                panes: Vec::new(),
             });
         }
         let window = windows
             .last_mut()
             .expect("the row's window was just pushed");
+        window.panes.push(pane.clone());
         match side {
             ColumnSide::Left => window.left.push(pane),
             ColumnSide::Right => window.right.push(pane),

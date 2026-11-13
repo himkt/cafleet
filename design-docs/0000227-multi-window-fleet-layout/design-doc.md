@@ -1,7 +1,7 @@
 # Multi-window fleet layout
 
 **Status**: Approved
-**Progress**: 37/58 tasks complete
+**Progress**: 42/58 tasks complete
 **Last Updated**: 2026-11-13
 
 ## Overview
@@ -475,23 +475,21 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 ### Step 10: `member create` wiring
 
-- [ ] Acquire the layout lock before resolving the Director placement and capture the creation deadline after it; read occupancy and heights; call `choose_slot`; register with ordinal/side and the ordinal update in `src/cli/member.rs` and `src/runtime/lifecycle.rs` <!-- completed: -->
-- [ ] Publish pane ID, window ID and window name together; release the lock when creation returns <!-- completed: -->
+- [x] Acquire the layout lock before resolving the Director placement and capture the creation deadline after it; read occupancy and heights; call `choose_slot`; register with ordinal/side and the ordinal update in `src/cli/member.rs` and `src/runtime/lifecycle.rs` <!-- completed: 2026-11-13T14:59 -->
+- [x] Publish pane ID, window ID and window name together; release the lock when creation returns <!-- completed: 2026-11-13T14:59 -->
 - [ ] Unit tests in `src/runtime/lifecycle.rs`: publication updates all three fields; compensation passes the spawned window ID to `close_pane`; compensation after a new-window spawn failure leaves the ordinal consumed <!-- completed: -->
 - [ ] Unit tests in `src/cli/member.rs`: a busy layout lock fails with the create busy string and registers nothing; an unreadable overflow window fails with the unreadable-window string listing its members and registers nothing; a changed `last_window_ordinal` rolls back with the invariant message <!-- completed: -->
 
-COMMENT(tester): The Step 10–11 tests fix these interfaces; confirm or redirect. (1) Each layout-locked command has a variant that takes the layout wait, so a test can observe the busy outcome without a 60-second wait. The CLI path passes `LAYOUT_LOCK_WAIT`, and the busy message always reads "60 seconds", as the pane-lock busy messages read "5 seconds". The variants are `create_with_layout_wait(conn, &CreateArgs, layout_wait: Duration)` and `delete_with_layout_wait(conn, settings, member_id, json, deadline, layout_wait)` in `src/cli/member.rs`, and `delete_fleet_with_layout_wait(conn, settings, fleet_id, deadline, layout_wait, host)` in `src/cli/fleet.rs`; `create`, `delete` and `delete_fleet_with_host` keep their signatures and call these variants. (2) `PendingMemberSpec` gains `window_name: String` (the chosen slot's window name, published with the pane) and `advances_window_ordinal_from: Option<i64>`. That field is `Some(read last_window_ordinal)` only for a new-window slot; `register_pending_run` then runs the conditional ordinal update to `placement.window_ordinal`. (3) The ordinal-invariant test lives in `src/runtime/lifecycle.rs`, beside `register_pending_run`, which owns that transaction. (4) The unreadable-window CLI test makes the Director window full (height 50, one member), so it holds whether heights are read eagerly or only for the windows scanned.
-
 ### Step 11: Deletion
 
-- [ ] Acquire the layout lock in `member delete` after the pane lock and before cleanup, extending the deletion deadline by the wait, in `src/cli/member.rs` <!-- completed: -->
-- [ ] Acquire the layout lock once in `fleet delete` after its pane locks; pass it to `end_member`; pass `placement.mux_window_id` to `close_pane` in `src/cli/fleet.rs` <!-- completed: -->
+- [x] Acquire the layout lock in `member delete` after the pane lock and before cleanup, extending the deletion deadline by the wait, in `src/cli/member.rs` <!-- completed: 2026-11-13T14:59 -->
+- [x] Acquire the layout lock once in `fleet delete` after its pane locks; pass it to `end_member`; pass `placement.mux_window_id` to `close_pane` in `src/cli/fleet.rs` <!-- completed: 2026-11-13T14:59 -->
 - [ ] Unit tests in `src/cli/member.rs`: a busy layout lock fails `member delete` with its busy string and leaves the run, pane and row unchanged <!-- completed: -->
 - [ ] Unit tests in `src/cli/fleet.rs`: a busy layout lock fails `fleet delete` with its busy string and leaves every member unchanged; `close_pane` receives the recorded window ID <!-- completed: -->
 
 ### Step 12: Output
 
-- [ ] Update `format_member`, `format_member_list`, `format_member_detail` in `src/output/text.rs` and `placement` in `src/output/json.rs` <!-- completed: -->
+- [x] Update `format_member`, `format_member_list`, `format_member_detail` in `src/output/text.rs` and `placement` in `src/output/json.rs` <!-- completed: 2026-11-13T14:59 -->
 - [ ] Unit tests in `src/output/text.rs`: the example `member list` rows above and a `(pending)` window <!-- completed: -->
 - [ ] Unit tests in `src/output/json.rs`: placement key order and nulls <!-- completed: -->
 
