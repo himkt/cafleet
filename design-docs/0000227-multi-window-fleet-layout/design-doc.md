@@ -1,7 +1,7 @@
 # Multi-window fleet layout
 
 **Status**: Approved
-**Progress**: 57/64 tasks complete
+**Progress**: 59/64 tasks complete
 **Last Updated**: 2026-11-13
 
 ## Overview
@@ -510,14 +510,16 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 ### Step 15: Deleting a member whose herdr pane was closed by hand
 
-The unreadable-window remedy (`cafleet member delete MEMBER_ID`) must work on both backends. On herdr, closing a tab by hand leaves the member's runner with a vanished outer terminal; its raw-terminal restoration then fails with `EIO`, the run's cleanup stays incomplete, and `member delete` / `fleet delete` exit 1 with `member recovery remains incomplete; inspect with cafleet doctor` on every retry. Deletion of such a member succeeds once the pane is confirmed absent on the multiplexer: a terminal-restoration failure for a vanished outer terminal is not a reason to keep the member.
+The unreadable-window remedy (`cafleet member delete MEMBER_ID`) works on both backends. Closing a herdr tab by hand kills the pane shell; the runner is reparented, shuts down and exits, and stays an unreaped zombie when the reparenting process never reaps. A recorded process that has exited but is not yet reaped (state `Z`; macOS `SZOMB`) is terminated evidence wherever recovery or deletion judges liveness: the run owner's process evidence, the Hermes runner-exit wait, and recovery's descendant-group checks, which count only non-zombie group members. `member delete` and `fleet delete` then complete as for any exited runner; their command facts are unchanged.
 
-- [ ] Diagnose the deletion/recovery path that records `terminal restoration requires host recovery: EIO` and propose the exact rule in `COMMENT(programmer)` at this step before changing code <!-- completed: -->
-- [ ] Update `SPEC.md` (recovery/deletion contract) and, if it changes a command fact, `assets/skills/cafleet/reference/cli.md` <!-- completed: -->
+- [x] Diagnose the deletion/recovery path that records `terminal restoration requires host recovery: EIO` and propose the exact rule in `COMMENT(programmer)` at this step before changing code <!-- completed: 2026-11-13T23:40 -->
+- [x] Update `SPEC.md` (recovery/deletion contract) and, if it changes a command fact, `assets/skills/cafleet/reference/cli.md` <!-- completed: 2026-11-13T23:41 -->
 - [ ] Implement the rule so `member delete` and `fleet delete` complete for a member whose herdr pane is gone <!-- completed: -->
 - [ ] Render the unreadable-window `<cause>` on one line (herdr's `\nstderr:` separator) <!-- completed: -->
 - [ ] Unit tests for the rule in the file that owns it, and for the one-line cause in `src/cli/member.rs` <!-- completed: -->
 - [ ] herdr 0.9.5 live: close an overflow tab by hand, then `member delete` each listed member and confirm the next `member create` succeeds <!-- completed: -->
+
+COMMENT(programmer): Diagnosis. The `EIO` diagnostic is not what blocks deletion: recovery's `perform` (`src/runtime/recovery.rs`) rewrites `cleanup_state='complete'` over any runner diagnostic once it reaches its end. The block is upstream, in liveness. herdr runs the runner as a child of the pane's `/bin/sh`. Closing the tab kills that shell, so the runner is reparented to PID 1, receives SIGHUP, shuts down (recording the `EIO` restoration failure) and exits. On this host PID 1 is `jupyter-lab`, which never reaps, so the runner stays a zombie: `ps` shows `[cafleet] <defunct>` entries with PPID 1 at the Step 13 live-check times. A zombie has released its run lock, but `NativeRecoveryHost::process_evidence` compares only `/proc/<pid>/stat` identity (`ProcessIdentity::read`), so it reports the zombie owner `Alive`, `recover` returns `LiveOrUnreachable`, and `end_member` fails with `member recovery remains incomplete; inspect with cafleet doctor`. No owner transfer happens, so every retry sees the same zombie. tmux reaps its pane processes, which is why only herdr failed. A second instance of the gap: `recover_descendants` (`src/runtime/process.rs`) fails with `descendant ownership cannot be anchored to the recorded child generation` whenever any process remains in the child's group, including unreaped zombies. The runner's own `survivors_with` already ignores those. Proposed rule (SPEC §6.9 Member PTY runtime, recovery liveness): "A recorded process that has exited but is not yet reaped (state `Z`; macOS `SZOMB`) is terminated evidence wherever recovery or deletion judges liveness: the run owner's process evidence, the Hermes runner-exit wait (`await_runner_exit` in `src/cli/fleet.rs`), and recovery's descendant-group checks, which count only non-zombie group members." Implementation: `ProcessIdentity::is_alive()` (identity match and not stopped, the existing private `running`) used by `process_evidence` and `await_runner_exit`, plus a zombie filter on the two `group_members(group)?.is_empty()` checks in `recover_descendants`. No pane-absence probe and no special case for the restoration diagnostic are needed: herdr `close_pane` already tolerates `pane_not_found`, and the closed tab's restoration is best-effort. `member delete` / `fleet delete` then complete as for any exited runner, and their command facts and `cli.md` do not change. Please confirm the rule, or ask instead for the pane-absence rule the step text describes.
 
 
 ---

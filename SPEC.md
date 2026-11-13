@@ -3404,6 +3404,8 @@ Recovery follows this sequence:
 
 Only the lock owner reads/compacts/writes the outbox, including in normal event-worker operation, so an external pass cannot race the live writer.
 
+Recovery and deletion count a recorded process as alive only while its PID/start identity matches and it has not exited. A process that has exited but is not yet reaped (state `Z`; macOS `SZOMB`) is terminated evidence for the run owner's process evidence, for deletion's wait for a `hermes` runner to exit after its work settlement, and for recovery's descendant-group checks, which count only non-zombie group members. Closing a herdr pane by hand kills the pane shell and reparents its runner, which shuts down, exits and stays a zombie when the reparenting process never reaps; recovery settles that run like any exited runner, so `member delete` and `fleet delete` complete.
+
 For a missing directory/lock or identity mismatch, a recorded owner still alive under its PID/start identity returns `live_or_unreachable`; unknown process identity returns `operator_reconciliation_required`. Preserve the recorded run status and the open interaction in both cases. An owner may hold an unlinked original lock, so creating/acquiring a new pathname supplies no death proof. Startup without a registered runner requires reconciling the creator, pinned pane and any started process before treating ownership as stopped.
 
 For unreadable owner identity, expose the exceptional Director-owned `--owner-terminated` form (§6.3 `member recover`), whose `--evidence-ref` names the operator's recorded attestation that the inspected owner and startup processes have terminated. Without that attestation, unreadable identity continues to return `operator_reconciliation_required`.
