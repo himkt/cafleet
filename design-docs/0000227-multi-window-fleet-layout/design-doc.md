@@ -1,7 +1,7 @@
 # Multi-window fleet layout
 
 **Status**: Approved
-**Progress**: 42/58 tasks complete
+**Progress**: 57/64 tasks complete
 **Last Updated**: 2026-11-13
 
 ## Overview
@@ -461,7 +461,7 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 - [x] Implement the four creation argvs, `new-window` reply parsing, `select-pane -T`, and remove `main-vertical` in `src/multiplexer/tmux.rs` <!-- completed: 2026-11-13T14:40 -->
 - [x] Implement `window_name` (`#{window_id}|#{window_name}`, first field must match) and `window_height` <!-- completed: 2026-11-13T14:40 -->
-- [ ] Implement equalize-every-column (`list-panes` + `select-layout -E` per column) after creation and in `restore_after_close`, tolerating `can't find window` <!-- completed: -->
+- [x] Implement equalize-every-column (`list-panes` + `select-layout -E` per column) after creation and in `restore_after_close`, tolerating `can't find window` <!-- completed: 2026-11-13T15:08 -->
 - [x] Unit tests in `src/multiplexer/tmux.rs` (FakeRunner argv): each creation target; naming and equalization errors ignored; malformed `new-window` reply is `PaneCleanup::Unknown`; empty and non-integer height replies fail; `window_name` rejects an empty or other-window reply and keeps a name containing `|`; restoration of a closed window does nothing; compensation `kill_pane("%7", "@1")` runs exactly `kill-pane -t %7`, `list-panes -t @1 -F "#{pane_id}|#{pane_left}"`, then `select-layout -E -t <first pane>` per column of 2 or more panes <!-- completed: 2026-11-13T14:40 -->
 
 ### Step 9: herdr backend
@@ -477,36 +477,48 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 - [x] Acquire the layout lock before resolving the Director placement and capture the creation deadline after it; read occupancy and heights; call `choose_slot`; register with ordinal/side and the ordinal update in `src/cli/member.rs` and `src/runtime/lifecycle.rs` <!-- completed: 2026-11-13T14:59 -->
 - [x] Publish pane ID, window ID and window name together; release the lock when creation returns <!-- completed: 2026-11-13T14:59 -->
-- [ ] Unit tests in `src/runtime/lifecycle.rs`: publication updates all three fields; compensation passes the spawned window ID to `close_pane`; compensation after a new-window spawn failure leaves the ordinal consumed <!-- completed: -->
-- [ ] Unit tests in `src/cli/member.rs`: a busy layout lock fails with the create busy string and registers nothing; an unreadable overflow window fails with the unreadable-window string listing its members and registers nothing; a changed `last_window_ordinal` rolls back with the invariant message <!-- completed: -->
+- [x] Unit tests in `src/runtime/lifecycle.rs`: publication updates all three fields; compensation passes the spawned window ID to `close_pane`; compensation after a new-window spawn failure leaves the ordinal consumed <!-- completed: 2026-11-13T15:08 -->
+- [x] Unit tests in `src/cli/member.rs`: a busy layout lock fails with the create busy string and registers nothing; an unreadable overflow window fails with the unreadable-window string listing its members and registers nothing; a changed `last_window_ordinal` rolls back with the invariant message <!-- completed: 2026-11-13T15:08 -->
 
 ### Step 11: Deletion
 
 - [x] Acquire the layout lock in `member delete` after the pane lock and before cleanup, extending the deletion deadline by the wait, in `src/cli/member.rs` <!-- completed: 2026-11-13T14:59 -->
 - [x] Acquire the layout lock once in `fleet delete` after its pane locks; pass it to `end_member`; pass `placement.mux_window_id` to `close_pane` in `src/cli/fleet.rs` <!-- completed: 2026-11-13T14:59 -->
-- [ ] Unit tests in `src/cli/member.rs`: a busy layout lock fails `member delete` with its busy string and leaves the run, pane and row unchanged <!-- completed: -->
-- [ ] Unit tests in `src/cli/fleet.rs`: a busy layout lock fails `fleet delete` with its busy string and leaves every member unchanged; `close_pane` receives the recorded window ID <!-- completed: -->
+- [x] Unit tests in `src/cli/member.rs`: a busy layout lock fails `member delete` with its busy string and leaves the run, pane and row unchanged <!-- completed: 2026-11-13T15:08 -->
+- [x] Unit tests in `src/cli/fleet.rs`: a busy layout lock fails `fleet delete` with its busy string and leaves every member unchanged; `close_pane` receives the recorded window ID <!-- completed: 2026-11-13T15:08 -->
 
 ### Step 12: Output
 
 - [x] Update `format_member`, `format_member_list`, `format_member_detail` in `src/output/text.rs` and `placement` in `src/output/json.rs` <!-- completed: 2026-11-13T14:59 -->
-- [ ] Unit tests in `src/output/text.rs`: the example `member list` rows above and a `(pending)` window <!-- completed: -->
-- [ ] Unit tests in `src/output/json.rs`: placement key order and nulls <!-- completed: -->
+- [x] Unit tests in `src/output/text.rs`: the example `member list` rows above and a `(pending)` window <!-- completed: 2026-11-13T15:08 -->
+- [x] Unit tests in `src/output/json.rs`: placement key order and nulls <!-- completed: 2026-11-13T15:08 -->
 
 ### Step 13: Live verification
 
-- [ ] tmux 3.6a: create a fleet in a ≥ 120-row window and spawn enough members to open two overflow windows; confirm names, focus, per-column equal heights, `member list` windows <!-- completed: -->
-- [ ] tmux: delete members to empty an overflow left column, then create one member and confirm the left column is recreated; delete the rest and confirm the window closes and the next window takes a higher ordinal <!-- completed: -->
-- [ ] herdr 0.9.5: repeat the two tmux checks, confirming re-parenting keeps pane IDs and the focused tab <!-- completed: -->
-- [ ] Close an overflow window by hand and confirm the next `member create` reports the unreadable-window error naming its members <!-- completed: -->
-- [ ] Run three `member create` calls concurrently, then one `member delete` concurrently with a `member create`, on each backend; confirm distinct slots, no busy error and an intact layout <!-- completed: -->
+- [x] tmux 3.6a: create a fleet in a ≥ 120-row window and spawn enough members to open two overflow windows; confirm names, focus, per-column equal heights, `member list` windows <!-- completed: 2026-11-13T15:19 -->
+- [x] tmux: delete members to empty an overflow left column, then create one member and confirm the left column is recreated; delete the rest and confirm the window closes and the next window takes a higher ordinal <!-- completed: 2026-11-13T15:19 -->
+- [x] herdr 0.9.5: repeat the two tmux checks, confirming re-parenting keeps pane IDs and the focused tab <!-- completed: 2026-11-13T15:19 -->
+- [x] Close an overflow window by hand and confirm the next `member create` reports the unreadable-window error naming its members <!-- completed: 2026-11-13T15:19 -->
+- [x] Run three `member create` calls concurrently, then one `member delete` concurrently with a `member create`, on each backend; confirm distinct slots, no busy error and an intact layout <!-- completed: 2026-11-13T15:19 -->
 
 ### Step 14: Validation
 
-- [ ] `mise //:test` <!-- completed: -->
-- [ ] `mise //:lint` <!-- completed: -->
-- [ ] `mise //docs:build` and inspect any changed table with a literal pipe in the rendered HTML <!-- completed: -->
+- [x] `mise //:test` <!-- completed: 2026-11-13T15:15 -->
+- [x] `mise //:lint` <!-- completed: 2026-11-13T15:13 -->
+- [x] `mise //docs:build` and inspect any changed table with a literal pipe in the rendered HTML <!-- completed: 2026-11-13T15:13 -->
 - [ ] Reinstall the CLI through its mise task <!-- completed: -->
+
+### Step 15: Deleting a member whose herdr pane was closed by hand
+
+The unreadable-window remedy (`cafleet member delete MEMBER_ID`) must work on both backends. On herdr, closing a tab by hand leaves the member's runner with a vanished outer terminal; its raw-terminal restoration then fails with `EIO`, the run's cleanup stays incomplete, and `member delete` / `fleet delete` exit 1 with `member recovery remains incomplete; inspect with cafleet doctor` on every retry. Deletion of such a member succeeds once the pane is confirmed absent on the multiplexer: a terminal-restoration failure for a vanished outer terminal is not a reason to keep the member.
+
+- [ ] Diagnose the deletion/recovery path that records `terminal restoration requires host recovery: EIO` and propose the exact rule in `COMMENT(programmer)` at this step before changing code <!-- completed: -->
+- [ ] Update `SPEC.md` (recovery/deletion contract) and, if it changes a command fact, `assets/skills/cafleet/reference/cli.md` <!-- completed: -->
+- [ ] Implement the rule so `member delete` and `fleet delete` complete for a member whose herdr pane is gone <!-- completed: -->
+- [ ] Render the unreadable-window `<cause>` on one line (herdr's `\nstderr:` separator) <!-- completed: -->
+- [ ] Unit tests for the rule in the file that owns it, and for the one-line cause in `src/cli/member.rs` <!-- completed: -->
+- [ ] herdr 0.9.5 live: close an overflow tab by hand, then `member delete` each listed member and confirm the next `member create` succeeds <!-- completed: -->
+
 
 ---
 
@@ -517,3 +529,4 @@ A user-configurable column bound or minimum height, a `member create --window` t
 | 2026-11-13 | Initial draft |
 | 2026-11-13 | Review round 1: unreadable-window error; layout lock spans deletion and the whole creation with its own 60-second wait; restoration interface; Director window name read with the pane context; one-tab Left re-parenting; herdr step ordering and live column order; verified herdr tab closure; complete documentation surfaces |
 | 2026-11-13 | Review round 2: herdr height read tries every member anchor; window name read only by `fleet create` (doctor unchanged); every close receives its window ID, including creation compensation |
+| 2026-11-13 | Execution: Step 15 added after live verification showed the unreadable-window remedy failing on herdr (user-approved scope extension) |
