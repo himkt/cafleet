@@ -458,9 +458,9 @@ impl RecoveryHost for NativeRecoveryHost {
         until: Instant,
     ) -> Result<ProcessEvidence> {
         check_deadline(Instant::now(), until)?;
-        match ProcessIdentity::read(process.pid) {
-            Ok(Some(current)) if current == *process => Ok(ProcessEvidence::Alive),
-            Ok(_) => Ok(ProcessEvidence::Terminated),
+        match process.is_alive() {
+            Ok(true) => Ok(ProcessEvidence::Alive),
+            Ok(false) => Ok(ProcessEvidence::Terminated),
             Err(cause) => Ok(ProcessEvidence::Unknown(cause.message().into_owned())),
         }
     }

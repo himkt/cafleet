@@ -433,6 +433,7 @@ fn unreadable_window(
             .join(", "),
         Err(error) => return error,
     };
+    let cause = cause.to_string().lines().collect::<Vec<_>>().join("; ");
     CafleetError::App(format!(
         "window {} (ordinal {}) of fleet {fleet_id} cannot be read: {cause}. Its active members {members} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.",
         window.mux_window_name, window.window_ordinal

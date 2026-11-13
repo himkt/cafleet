@@ -56,6 +56,10 @@ impl ProcessIdentity {
     pub(crate) fn matches(&self) -> Result<bool> {
         Ok(Self::read(self.pid)?.as_ref() == Some(self))
     }
+    /// An unreaped zombie keeps its identity but is not alive.
+    pub(crate) fn is_alive(&self) -> Result<bool> {
+        Ok(self.matches()? && !stopped(self.pid)?)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -218,8 +222,15 @@ fn signal_pid(pid: i64, signal: nix::sys::signal::Signal) -> Result<()> {
     }
 }
 
-fn running(process: &ProcessIdentity) -> Result<bool> {
-    Ok(process.matches()? && !stopped(process.pid)?)
+/// The members of `group` that have not exited; an unreaped zombie member counts as exited.
+fn live_group_members(group: i32) -> Result<Vec<i64>> {
+    let mut live = Vec::new();
+    for pid in group_members(group)? {
+        if !stopped(pid)? {
+            live.push(pid);
+        }
+    }
+    Ok(live)
 }
 
 pub(super) fn recover_descendants(
@@ -231,8 +242,8 @@ pub(super) fn recover_descendants(
         return Ok(outcome);
     };
     let group = i32::try_from(child.pid).map_err(io_error)?;
-    if !running(&child)? {
-        if !group_members(group)?.is_empty() {
+    if !child.is_alive()? {
+        if !live_group_members(group)?.is_empty() {
             outcome
                 .fail("descendant ownership cannot be anchored to the recorded child generation");
         }
@@ -250,7 +261,7 @@ pub(super) fn recover_descendants(
                 Ok(found || process.matches()?)
             })?;
         if !anchored {
-            if !group_members(group)?.is_empty() {
+            if !live_group_members(group)?.is_empty() {
                 outcome.fail("descendant ownership lost its recorded process generation");
             }
             break;
@@ -268,7 +279,7 @@ pub(super) fn recover_descendants(
             }
         }
         for process in owned.values() {
-            if running(process)? {
+            if process.is_alive()? {
                 signal_pid(process.pid, signal)?;
             }
         }
@@ -279,7 +290,7 @@ pub(super) fn recover_descendants(
         };
         while Instant::now() < until {
             let alive = owned.values().try_fold(false, |alive, process| {
-                Ok::<_, CafleetError>(alive || running(process)?)
+                Ok::<_, CafleetError>(alive || process.is_alive()?)
             })?;
             if !alive {
                 break;
@@ -288,7 +299,7 @@ pub(super) fn recover_descendants(
         }
     }
     for process in owned.values() {
-        if running(process)? {
+        if process.is_alive()? {
             outcome.fail("verified descendants remain after the original cleanup deadline");
             break;
         }

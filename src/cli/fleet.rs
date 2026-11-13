@@ -436,7 +436,7 @@ fn await_runner_exit(
         let run = with_database_budget(conn, deadline, |conn| {
             crate::broker::runtime::get_run(conn, run_id)
         })?;
-        if !run.status.terminal() || run.is_settled() || !run.owner_process().matches()? {
+        if !run.status.terminal() || run.is_settled() || !run.owner_process().is_alive()? {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
