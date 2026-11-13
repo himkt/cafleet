@@ -1,7 +1,7 @@
 # Multi-window fleet layout
 
 **Status**: Approved
-**Progress**: 13/58 tasks complete
+**Progress**: 37/58 tasks complete
 **Last Updated**: 2026-11-13
 
 ## Overview
@@ -432,46 +432,46 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 ### Step 4: Schema and registry
 
-- [ ] Edit `assets/migrations/V1__baseline.sql`: `fleets.last_window_ordinal`, nullable `mux_window_id`, `mux_window_name`, `window_ordinal`, `column_side`, the nullability CHECK <!-- completed: -->
-- [ ] Update `Placement`, `PLACEMENT_COLUMNS`, row decoding (typed `ColumnSide`, `InvalidStoredValue` on a bad value) in `src/broker/mod.rs`, and every `PLACEMENT_COLUMNS` consumer <!-- completed: -->
-- [ ] Update `NewPlacement`, `insert_placement_row` and `RETURNING` lists in `src/broker/members.rs`; add an occupancy query returning concrete placements by ordinal and side, and the active members of one ordinal <!-- completed: -->
-- [ ] Update every `Placement` / `NewPlacement` construction, production and test alike, to the new fields <!-- completed: -->
-- [ ] Record the Director row as ordinal 0, `left`, with its window ID and the name from `window_name` in `fleet create` (`src/cli/fleet.rs`, `src/broker/fleets.rs`), with a unit test in `src/cli/fleet.rs` that a failed window-name read registers nothing <!-- completed: -->
-- [ ] Adapt `mux_window_id` consumers (both backends' `check_key_target`, fleet-delete revalidation) to `Option<String>` with `.expect` after the concrete-pane check <!-- completed: -->
-- [ ] Unit tests in `src/db.rs`: the baseline CHECK rejects a placement whose pane, window ID and window name are not all null or all set <!-- completed: -->
-- [ ] Unit tests in `src/broker/members.rs`: the occupancy query groups concrete placements by ordinal and side and excludes the Director and pending rows; a bad stored `column_side` fails with `InvalidStoredValue` <!-- completed: -->
+- [x] Edit `assets/migrations/V1__baseline.sql`: `fleets.last_window_ordinal`, nullable `mux_window_id`, `mux_window_name`, `window_ordinal`, `column_side`, the nullability CHECK <!-- completed: 2026-11-13T14:30 -->
+- [x] Update `Placement`, `PLACEMENT_COLUMNS`, row decoding (typed `ColumnSide`, `InvalidStoredValue` on a bad value) in `src/broker/mod.rs`, and every `PLACEMENT_COLUMNS` consumer <!-- completed: 2026-11-13T14:30 -->
+- [x] Update `NewPlacement`, `insert_placement_row` and `RETURNING` lists in `src/broker/members.rs`; add an occupancy query returning concrete placements by ordinal and side, and the active members of one ordinal <!-- completed: 2026-11-13T14:30 -->
+- [x] Update every `Placement` / `NewPlacement` construction, production and test alike, to the new fields <!-- completed: 2026-11-13T14:40 -->
+- [x] Record the Director row as ordinal 0, `left`, with its window ID and the name from `window_name` in `fleet create` (`src/cli/fleet.rs`, `src/broker/fleets.rs`), with a unit test in `src/cli/fleet.rs` that a failed window-name read registers nothing <!-- completed: 2026-11-13T14:30 -->
+- [x] Adapt `mux_window_id` consumers (both backends' `check_key_target`, fleet-delete revalidation) to `Option<String>` with `.expect` after the concrete-pane check <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/db.rs`: the baseline CHECK rejects a placement whose pane, window ID and window name are not all null or all set <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/broker/members.rs`: the occupancy query groups concrete placements by ordinal and side and excludes the Director and pending rows; a bad stored `column_side` fails with `InvalidStoredValue` <!-- completed: 2026-11-13T14:30 -->
 
 ### Step 5: Slot selection
 
-- [ ] Create `src/multiplexer/layout.rs` with `MIN_PANE_HEIGHT`, `MAX_PANES_PER_COLUMN`, `ColumnSide`, `capacity`, `WindowOccupancy`, `SlotChoice`, `choose_slot` <!-- completed: -->
-- [ ] Unit tests in `src/multiplexer/layout.rs`: capacity table rows; Director window fill; Director right capacity 0 skipped; overflow left-then-right; new window ordinal = last + 1 with `cafleet-<fleet>-<n>` name; freed Director slot reused before overflow; emptied left column refilled first; invariant panics <!-- completed: -->
+- [x] Create `src/multiplexer/layout.rs` with `MIN_PANE_HEIGHT`, `MAX_PANES_PER_COLUMN`, `ColumnSide`, `capacity`, `WindowOccupancy`, `SlotChoice`, `choose_slot` <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/multiplexer/layout.rs`: capacity table rows; Director window fill; Director right capacity 0 skipped; overflow left-then-right; new window ordinal = last + 1 with `cafleet-<fleet>-<n>` name; freed Director slot reused before overflow; emptied left column refilled first; invariant panics <!-- completed: 2026-11-13T14:30 -->
 
 ### Step 6: Fleet layout lock
 
-- [ ] Add the fleet layout lock (path, `0600`, `LAYOUT_LOCK_WAIT`, retry every 50 ms) beside the pane lock in `src/pane_lock.rs` <!-- completed: -->
-- [ ] Unit tests in `src/pane_lock.rs`: a second acquisition blocks until release; expiry reports busy; distinct fleets do not contend <!-- completed: -->
+- [x] Add the fleet layout lock (path, `0600`, `LAYOUT_LOCK_WAIT`, retry every 50 ms) beside the pane lock in `src/pane_lock.rs` <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/pane_lock.rs`: a second acquisition blocks until release; expiry reports busy; distinct fleets do not contend <!-- completed: 2026-11-13T14:30 -->
 
 ### Step 7: Multiplexer interface
 
-- [ ] Replace `split_window` with `spawn_member_pane`; add `window_height`, `window_name`, `PaneTarget`, `ColumnTarget`, `SpawnedPane`; change `kill_pane` and `close_pane` to take the window ID in `src/multiplexer/mod.rs` <!-- completed: -->
-- [ ] Update every `LaunchHost` implementation, production and test alike, so `split_runner` returns `SpawnedPane` <!-- completed: -->
-- [ ] Update every `LaunchHost::close_pane` implementation, production and test alike, to take the `SpawnedPane` and pass its window ID to `kill_pane` <!-- completed: -->
+- [x] Replace `split_window` with `spawn_member_pane`; add `window_height`, `window_name`, `PaneTarget`, `ColumnTarget`, `SpawnedPane`; change `kill_pane` and `close_pane` to take the window ID in `src/multiplexer/mod.rs` <!-- completed: 2026-11-13T14:40 -->
+- [x] Update every `LaunchHost` implementation, production and test alike, so `split_runner` returns `SpawnedPane` <!-- completed: 2026-11-13T14:40 -->
+- [x] Update every `LaunchHost::close_pane` implementation, production and test alike, to take the `SpawnedPane` and pass its window ID to `kill_pane` <!-- completed: 2026-11-13T14:40 -->
 
 ### Step 8: tmux backend
 
-- [ ] Implement the four creation argvs, `new-window` reply parsing, `select-pane -T`, and remove `main-vertical` in `src/multiplexer/tmux.rs` <!-- completed: -->
-- [ ] Implement `window_name` (`#{window_id}|#{window_name}`, first field must match) and `window_height` <!-- completed: -->
+- [x] Implement the four creation argvs, `new-window` reply parsing, `select-pane -T`, and remove `main-vertical` in `src/multiplexer/tmux.rs` <!-- completed: 2026-11-13T14:40 -->
+- [x] Implement `window_name` (`#{window_id}|#{window_name}`, first field must match) and `window_height` <!-- completed: 2026-11-13T14:40 -->
 - [ ] Implement equalize-every-column (`list-panes` + `select-layout -E` per column) after creation and in `restore_after_close`, tolerating `can't find window` <!-- completed: -->
-- [ ] Unit tests in `src/multiplexer/tmux.rs` (FakeRunner argv): each creation target; naming and equalization errors ignored; malformed `new-window` reply is `PaneCleanup::Unknown`; empty and non-integer height replies fail; `window_name` rejects an empty or other-window reply and keeps a name containing `|`; restoration of a closed window does nothing; compensation `kill_pane("%7", "@1")` runs exactly `kill-pane -t %7`, `list-panes -t @1 -F "#{pane_id}|#{pane_left}"`, then `select-layout -E -t <first pane>` per column of 2 or more panes <!-- completed: -->
+- [x] Unit tests in `src/multiplexer/tmux.rs` (FakeRunner argv): each creation target; naming and equalization errors ignored; malformed `new-window` reply is `PaneCleanup::Unknown`; empty and non-integer height replies fail; `window_name` rejects an empty or other-window reply and keeps a name containing `|`; restoration of a closed window does nothing; compensation `kill_pane("%7", "@1")` runs exactly `kill-pane -t %7`, `list-panes -t @1 -F "#{pane_id}|#{pane_left}"`, then `select-layout -E -t <first pane>` per column of 2 or more panes <!-- completed: 2026-11-13T14:40 -->
 
 ### Step 9: herdr backend
 
-- [ ] Implement column append (bottom pane from the live layout), first-right split, `tab create` new window, then `pane run`, `pane rename` in that order in `src/multiplexer/herdr.rs` <!-- completed: -->
-- [ ] Implement Right and Left re-parenting, each through one temporary tab with `--no-focus` moves, after `pane run` and `pane rename` <!-- completed: -->
-- [ ] Generalize `right_column` / `equalize_column` to every column (group by `rect.x`, match split `rect.x` and `rect.width`) <!-- completed: -->
-- [ ] Replace the `closed_tab` pre-close `pane get` read with the window ID passed to `close_pane`; implement the three-row delete-time restoration <!-- completed: -->
-- [ ] Implement `window_name` (`tab get` label) and `window_height` (`layout.area.height`, trying each anchor in order) <!-- completed: -->
-- [ ] Unit tests in `src/multiplexer/herdr.rs`: each creation target argv; re-parenting argv for k = 2 and k = 4 and for m = 1 and m = 3; a `pane run` failure closes only the new pane and runs no move; a failed move emits the diagnostic and keeps the spawn; two-column equalization; restoration per tab state; `tab create` missing fields are `PaneCleanup::Unknown`; `window_height` with a first anchor failing `pane_not_found` and a second answering returns the second's height, and fails with the last error only when every anchor fails; `window_name` reads the `tab get` label and rejects a reply without one <!-- completed: -->
+- [x] Implement column append (bottom pane from the live layout), first-right split, `tab create` new window, then `pane run`, `pane rename` in that order in `src/multiplexer/herdr.rs` <!-- completed: 2026-11-13T14:40 -->
+- [x] Implement Right and Left re-parenting, each through one temporary tab with `--no-focus` moves, after `pane run` and `pane rename` <!-- completed: 2026-11-13T14:40 -->
+- [x] Generalize `right_column` / `equalize_column` to every column (group by `rect.x`, match split `rect.x` and `rect.width`) <!-- completed: 2026-11-13T14:40 -->
+- [x] Replace the `closed_tab` pre-close `pane get` read with the window ID passed to `close_pane`; implement the three-row delete-time restoration <!-- completed: 2026-11-13T14:40 -->
+- [x] Implement `window_name` (`tab get` label) and `window_height` (`layout.area.height`, trying each anchor in order) <!-- completed: 2026-11-13T14:40 -->
+- [x] Unit tests in `src/multiplexer/herdr.rs`: each creation target argv; re-parenting argv for k = 2 and k = 4 and for m = 1 and m = 3; a `pane run` failure closes only the new pane and runs no move; a failed move emits the diagnostic and keeps the spawn; two-column equalization; restoration per tab state; `tab create` missing fields are `PaneCleanup::Unknown`; `window_height` with a first anchor failing `pane_not_found` and a second answering returns the second's height, and fails with the last error only when every anchor fails; `window_name` reads the `tab get` label and rejects a reply without one <!-- completed: 2026-11-13T14:40 -->
 
 ### Step 10: `member create` wiring
 

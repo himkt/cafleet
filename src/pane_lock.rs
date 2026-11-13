@@ -31,6 +31,55 @@ pub(crate) struct PaneLock {
     path: PathBuf,
 }
 
+pub(crate) const LAYOUT_LOCK_WAIT: Duration = Duration::from_secs(60);
+
+/// `<canonical database file><suffix>/<sha256 hex of key>.lock`.
+fn database_lock_path(
+    database_url: &str,
+    suffix: &str,
+    purpose: &str,
+    key: &[u8],
+) -> Result<PathBuf, CafleetError> {
+    let database =
+        std::fs::canonicalize(crate::db::database_path(database_url)?).map_err(|error| {
+            CafleetError::App(format!(
+                "cannot resolve database {purpose}-lock identity: {error}"
+            ))
+        })?;
+    let mut directory = database.into_os_string();
+    directory.push(suffix);
+    let key = crate::digest::sha256_hex(key);
+    Ok(PathBuf::from(directory).join(format!("{key}.lock")))
+}
+
+/// Opens (creating `0600` and its directory on demand) and tries the lock at `path`; `None`
+/// means another holder has it.
+fn open_and_try_lock(path: &Path, label: &str) -> Result<Option<File>, CafleetError> {
+    let directory = path
+        .parent()
+        .expect("a database lock has its database-adjacent directory");
+    std::fs::create_dir_all(directory).map_err(|error| {
+        CafleetError::App(format!(
+            "cannot create {label}-lock directory {}: {error}",
+            directory.display()
+        ))
+    })?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .map_err(|error| {
+            CafleetError::App(format!(
+                "cannot open {label} lock {}: {error}",
+                path.display()
+            ))
+        })?;
+    Ok(try_lock(&file, path, label)?.then_some(file))
+}
+
 pub(crate) fn lock_path(
     database_url: &str,
     placement: &Placement,
@@ -39,17 +88,42 @@ pub(crate) fn lock_path(
         .mux_pane_id
         .as_deref()
         .ok_or_else(|| CafleetError::App("pane input requires a concrete placement".into()))?;
-    let database =
-        std::fs::canonicalize(crate::db::database_path(database_url)?).map_err(|error| {
-            CafleetError::App(format!(
-                "cannot resolve database input-lock identity: {error}"
-            ))
-        })?;
-    let mut directory = database.into_os_string();
-    directory.push(".pane-locks");
     let key = format!("{}\0{}\0{pane}", placement.backend, placement.mux_session);
-    let key = crate::digest::sha256_hex(key.as_bytes());
-    Ok(PathBuf::from(directory).join(format!("{key}.lock")))
+    database_lock_path(database_url, ".pane-locks", "input", key.as_bytes())
+}
+
+pub(crate) fn layout_lock_path(database_url: &str, fleet_id: i64) -> Result<PathBuf, CafleetError> {
+    database_lock_path(
+        database_url,
+        ".layout-locks",
+        "layout",
+        fleet_id.to_string().as_bytes(),
+    )
+}
+
+/// The fleet-scoped lock serializing every member pane creation and close; dropping it releases
+/// the lock.
+pub(crate) struct LayoutLock {
+    _file: File,
+}
+
+impl LayoutLock {
+    pub(crate) fn try_acquire(
+        database_url: &str,
+        fleet_id: i64,
+    ) -> Result<Option<Self>, CafleetError> {
+        let path = layout_lock_path(database_url, fleet_id)?;
+        Ok(open_and_try_lock(&path, "pane layout")?.map(|file| Self { _file: file }))
+    }
+
+    /// Retry every 50 ms until `lock_deadline`; `None` means the lock stayed busy.
+    pub(crate) fn acquire_within(
+        database_url: &str,
+        fleet_id: i64,
+        lock_deadline: Deadline,
+    ) -> Result<Option<Self>, CafleetError> {
+        retry_until(lock_deadline, || Self::try_acquire(database_url, fleet_id))
+    }
 }
 
 impl PaneLock {
@@ -84,29 +158,7 @@ impl PaneLock {
         placement: &Placement,
     ) -> Result<Option<Self>, CafleetError> {
         let path = lock_path(database_url, placement)?;
-        let directory = path
-            .parent()
-            .expect("a pane lock has its database-adjacent directory");
-        std::fs::create_dir_all(directory).map_err(|error| {
-            CafleetError::App(format!(
-                "cannot create pane input-lock directory {}: {error}",
-                directory.display()
-            ))
-        })?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|error| {
-                CafleetError::App(format!(
-                    "cannot open pane input lock {}: {error}",
-                    path.display()
-                ))
-            })?;
-        Ok(try_lock(&file, &path)?.then_some(Self { file, path }))
+        Ok(open_and_try_lock(&path, PANE_INPUT)?.map(|file| Self { file, path }))
     }
 
     /// Releases this held lock so the member's runner can write its staged input.
@@ -123,7 +175,7 @@ impl PaneLock {
     /// stayed busy.
     pub(crate) fn reacquire_within(&self, lock_deadline: Deadline) -> Result<bool, CafleetError> {
         let reacquired = retry_until(lock_deadline, || {
-            Ok(try_lock(&self.file, &self.path)?.then_some(()))
+            Ok(try_lock(&self.file, &self.path, PANE_INPUT)?.then_some(()))
         })?;
         Ok(reacquired.is_some())
     }
@@ -138,13 +190,15 @@ impl PaneLock {
     }
 }
 
+const PANE_INPUT: &str = "pane input";
+
 /// `false` means another holder has the lock.
-fn try_lock(file: &File, path: &Path) -> Result<bool, CafleetError> {
+fn try_lock(file: &File, path: &Path, label: &str) -> Result<bool, CafleetError> {
     match file.try_lock() {
         Ok(()) => Ok(true),
         Err(TryLockError::WouldBlock) => Ok(false),
         Err(TryLockError::Error(error)) => Err(CafleetError::App(format!(
-            "cannot lock pane input {}: {error}",
+            "cannot lock {label} {}: {error}",
             path.display()
         ))),
     }

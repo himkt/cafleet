@@ -374,7 +374,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
     let executable = backend.ensure_available(&SystemProbe, policy.resolved_mode())?;
     let context = crate::multiplexer::MultiplexerContext {
         session: director.mux_session.clone(),
-        window_id: director.mux_window_id.clone(),
+        window_id: director.concrete_window_id().to_owned(),
         pane_id: director
             .mux_pane_id
             .clone()
@@ -425,7 +425,11 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         |row| row.get(0),
     )?;
     runner::RuntimePaths::for_run(&identity, next_run)?;
-    let cwd = std::env::current_dir().map_err(|cause| CafleetError::App(cause.to_string()))?;
+    let cwd = std::env::current_dir().map_err(|cause| {
+        CafleetError::App(format!(
+            "cannot resolve the working directory for pane spawn: {cause}"
+        ))
+    })?;
     let size = if std::io::stdin().is_terminal() {
         runner::terminal_size(&std::io::stdin())?
     } else {
@@ -440,10 +444,11 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         placement: NewPlacement {
             backend: mux.name().into(),
             mux_session: context.session.clone(),
-            mux_window_id: context.window_id.clone(),
-            mux_pane_id: None,
+            window_ordinal: 0,
+            column_side: crate::multiplexer::layout::ColumnSide::Right,
             coding_agent: agent_name.into(),
             mux_server: director.mux_server.clone(),
+            pane: None,
         },
     };
     let run_settings = runner::RunSettings {
@@ -459,7 +464,25 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         native_version: native.native_version,
         coverage: native.coverage,
     };
-    let mut host = runner::NativeLaunchHost::new(&*mux, &context);
+    let director_window = broker::members::concrete_occupancy(conn, fleet_id)?
+        .into_iter()
+        .find(|window| window.window_ordinal == 0);
+    let target = crate::multiplexer::PaneTarget::Column(crate::multiplexer::ColumnTarget {
+        window_id: context.window_id.clone(),
+        side: crate::multiplexer::layout::ColumnSide::Right,
+        column_panes: director_window.map_or_else(Vec::new, |window| window.right),
+        other_panes: vec![context.pane_id.clone()],
+    });
+    let cwd_text = cwd
+        .to_str()
+        .ok_or_else(|| {
+            CafleetError::App(format!(
+                "cannot resolve the working directory for pane spawn: {} is not valid UTF-8",
+                cwd.display()
+            ))
+        })?
+        .to_owned();
+    let mut host = runner::NativeLaunchHost::new(&*mux, &target, name, &cwd_text);
     let created = runner::create_registered(
         conn,
         &pending,
@@ -1996,7 +2019,22 @@ mod tests {
             crate::multiplexer::test_support::run_until_through_run_for(self, argv, deadline)
         }
 
+        /// Counts and checks the pane close; the window restoration that follows it lists a
+        /// single-column window, which needs no equalization.
         fn run(&self, argv: &[String]) -> Result<String, RunError> {
+            let restoration = [
+                "tmux",
+                "-S",
+                CLOSE_SOCKET,
+                "list-panes",
+                "-t",
+                "@1",
+                "-F",
+                "#{pane_id}|#{pane_left}",
+            ];
+            if argv == restoration {
+                return Ok("%0|0\n".into());
+            }
             assert_eq!(argv, &["tmux", "-S", CLOSE_SOCKET, "kill-pane", "-t", "%9"]);
             self.calls.set(self.calls.get() + 1);
             (self.check)();

@@ -7,7 +7,8 @@ use crate::broker::runtime::CleanupState;
 use crate::broker::runtime::RunRecord;
 use crate::broker::runtime::*;
 use crate::multiplexer::Multiplexer;
-use crate::multiplexer::MultiplexerContext;
+use crate::multiplexer::PaneTarget;
+use crate::multiplexer::SpawnedPane;
 use crate::runtime::control::ControlClient;
 use crate::runtime::control::pause;
 use crate::runtime::control::request;
@@ -356,7 +357,7 @@ pub(crate) struct Started {
 pub(crate) trait LaunchHost {
     fn now(&self) -> Instant;
     fn current_executable(&self) -> Result<PathBuf>;
-    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<String>;
+    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<SpawnedPane>;
     fn wait_prepared(
         &mut self,
         descriptor: &LaunchDescriptor,
@@ -369,7 +370,7 @@ pub(crate) trait LaunchHost {
         deadline: Instant,
     ) -> Result<Started>;
     fn shutdown_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome>;
-    fn close_pane(&mut self, pane_id: &str, deadline: Instant) -> Result<()>;
+    fn close_pane(&mut self, pane: &SpawnedPane, deadline: Instant) -> Result<()>;
     fn settle_hermes(
         &mut self,
         conn: &Connection,
@@ -553,7 +554,10 @@ fn launch_registered(
             )?;
             let changed=tx.execute("UPDATE member_runs SET status='prepared',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='starting'",params![crate::time::now_stamp(),run.run_id,current.owner_epoch])?;
             ensure(changed == 1, "prepared publication lost run ownership")?;
-            let changed=tx.execute("UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2 AND mux_pane_id IS NULL",params![pane.as_ref().expect("created pane"),run.member_id])?;
+            let spawned = pane.as_ref().expect("created pane");
+            let changed=tx.execute("UPDATE member_placements SET mux_pane_id=?1, mux_window_id=?4,
+                    mux_window_name=(SELECT d.mux_window_name FROM fleets f JOIN member_placements d ON d.member_id=f.director_member_id WHERE f.fleet_id=?3)
+                 WHERE member_id=?2 AND mux_pane_id IS NULL",params![spawned.pane_id,run.member_id,run.fleet_id,spawned.window_id])?;
             ensure(
                 changed == 1,
                 "pending placement vanished or changed before start",
@@ -609,7 +613,7 @@ fn launch_registered(
         Ok(current) if current.owner_kind == OwnerKind::Runner => {
             if current.backend == crate::coding_agent::CodingAgent::Hermes.name()
                 && current.child_pid.is_some()
-                && let Some(pane_id) = pane.as_deref()
+                && let Some(pane_id) = pane.as_ref().map(|spawned| spawned.pane_id.as_str())
             {
                 let until = crate::coding_agent::hermes::settlement_deadline().instant();
                 note(
@@ -644,17 +648,27 @@ fn launch_registered(
     Err(failure)
 }
 
+/// Spawns the runner pane at `target`, named `pane_name`, starting in `cwd`.
 pub(crate) struct NativeLaunchHost<'a> {
     mux: &'a dyn Multiplexer,
-    context: &'a MultiplexerContext,
+    target: &'a PaneTarget,
+    pane_name: &'a str,
+    cwd: &'a str,
     client: Option<ControlClient>,
 }
 
 impl<'a> NativeLaunchHost<'a> {
-    pub(crate) fn new(mux: &'a dyn Multiplexer, context: &'a MultiplexerContext) -> Self {
+    pub(crate) fn new(
+        mux: &'a dyn Multiplexer,
+        target: &'a PaneTarget,
+        pane_name: &'a str,
+        cwd: &'a str,
+    ) -> Self {
         Self {
             mux,
-            context,
+            target,
+            pane_name,
+            cwd,
             client: None,
         }
     }
@@ -667,10 +681,10 @@ impl LaunchHost for NativeLaunchHost<'_> {
     fn current_executable(&self) -> Result<std::path::PathBuf> {
         std::env::current_exe().map_err(io_error)
     }
-    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<String> {
+    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<SpawnedPane> {
         self.mux
             .bounded(crate::time::Deadline::until(deadline))
-            .split_window(self.context, argv)
+            .spawn_member_pane(self.target, self.pane_name, self.cwd, argv)
             .map_err(|cause| error(format!("runner pane spawn failed: {cause}")))
     }
     fn wait_prepared(
@@ -757,10 +771,10 @@ impl LaunchHost for NativeLaunchHost<'_> {
         }
         Ok(ShutdownOutcome::new(None, notes))
     }
-    fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<()> {
+    fn close_pane(&mut self, pane: &SpawnedPane, deadline: Instant) -> Result<()> {
         self.mux
             .bounded(crate::time::Deadline::until(deadline))
-            .kill_pane(pane)
+            .kill_pane(&pane.pane_id, &pane.window_id)
             .map_err(|cause| error(format!("runner pane cleanup failed: {cause}")))
     }
 }
@@ -785,7 +799,6 @@ mod tests {
         use nix::sys::socket::listen;
 
         use crate::error::CafleetError;
-        use crate::multiplexer::MultiplexerContext;
         use crate::multiplexer::TmuxMultiplexer;
         use crate::multiplexer::test_support;
         use crate::runtime::control::test_support::Endpoint;
@@ -801,12 +814,18 @@ mod tests {
         fn with_native_host<T>(operation: impl FnOnce(&mut NativeLaunchHost<'_>) -> T) -> T {
             let runner = test_support::FakeRunner::without_binaries();
             let mux = TmuxMultiplexer::for_server(runner.clone(), "/tmp/tmux-1000/default");
-            let context = MultiplexerContext {
-                session: "readiness-fixture".into(),
+            let target = PaneTarget::Column(crate::multiplexer::ColumnTarget {
                 window_id: "@1".into(),
-                pane_id: "%1".into(),
-            };
-            let result = operation(&mut NativeLaunchHost::new(&mux, &context));
+                side: crate::multiplexer::layout::ColumnSide::Right,
+                column_panes: Vec::new(),
+                other_panes: vec!["%1".into()],
+            });
+            let result = operation(&mut NativeLaunchHost::new(
+                &mux,
+                &target,
+                "readiness-fixture",
+                "/readiness-fixture",
+            ));
             assert!(runner.events().is_empty(), "{:?}", runner.events());
             result
         }
@@ -1048,6 +1067,7 @@ mod tests {
     use crate::broker::members::test_support::placement;
     use crate::broker::runtime as storage;
     use crate::error::CafleetError;
+    use crate::multiplexer::SpawnedPane;
     use crate::runtime::lifecycle::*;
     use rusqlite::hooks::AuthAction;
     use rusqlite::hooks::AuthContext;
@@ -1128,6 +1148,15 @@ mod tests {
         }
     }
 
+    const FIXTURE_WINDOW: &str = "@4";
+
+    fn fixture_pane() -> SpawnedPane {
+        SpawnedPane {
+            pane_id: "%9".into(),
+            window_id: FIXTURE_WINDOW.into(),
+        }
+    }
+
     impl LaunchHost for LaunchFixtureHost {
         fn now(&self) -> Instant {
             self.now
@@ -1139,7 +1168,7 @@ mod tests {
             &mut self,
             argv: &[String],
             deadline: Instant,
-        ) -> Result<String, CafleetError> {
+        ) -> Result<SpawnedPane, CafleetError> {
             self.phase("split", deadline)?;
             self.argv = argv.to_vec();
             assert_eq!(argv[0], "/absolute/cafleet");
@@ -1157,7 +1186,7 @@ mod tests {
             assert_eq!(argv[4], "--descriptor");
             assert!(std::path::Path::new(&argv[5]).is_absolute());
             assert_eq!(argv.len(), 6);
-            Ok("%9".into())
+            Ok(fixture_pane())
         }
         fn wait_prepared(
             &mut self,
@@ -1312,10 +1341,14 @@ mod tests {
                 None => Ok(()),
             }
         }
-        fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<(), CafleetError> {
+        fn close_pane(
+            &mut self,
+            pane: &SpawnedPane,
+            deadline: Instant,
+        ) -> Result<(), CafleetError> {
             self.calls.push("close");
             self.deadlines.push(("close", deadline));
-            assert_eq!(pane, "%9");
+            assert_eq!(pane, &fixture_pane());
             if self.cleanup_failure {
                 Err(CafleetError::App("fixture pane cleanup failed".into()))
             } else {

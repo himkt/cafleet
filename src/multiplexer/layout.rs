@@ -1,3 +1,87 @@
+use crate::broker::stored_enum;
+
+pub(crate) const MIN_PANE_HEIGHT: i64 = 30;
+pub(crate) const MAX_PANES_PER_COLUMN: i64 = 8;
+
+stored_enum!(ColumnSide, "member_placements.column_side", { Left => "left", Right => "right" });
+
+pub(crate) fn capacity(height: i64) -> i64 {
+    MAX_PANES_PER_COLUMN.min(height.div_euclid(MIN_PANE_HEIGHT))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WindowOccupancy {
+    pub(crate) ordinal: i64,
+    pub(crate) window_id: String,
+    pub(crate) window_name: String,
+    pub(crate) height: i64,
+    pub(crate) left: Vec<String>,
+    pub(crate) right: Vec<String>,
+    pub(crate) director_pane: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlotChoice {
+    Existing {
+        ordinal: i64,
+        window_id: String,
+        window_name: String,
+        side: ColumnSide,
+    },
+    NewWindow {
+        ordinal: i64,
+        window_name: String,
+    },
+}
+
+pub(crate) fn overflow_window_name(fleet_id: i64, ordinal: i64) -> String {
+    format!("cafleet-{fleet_id}-{ordinal}")
+}
+
+pub(crate) fn choose_slot(
+    fleet_id: i64,
+    windows: &[WindowOccupancy],
+    last_window_ordinal: i64,
+) -> SlotChoice {
+    assert_eq!(
+        windows.first().map(|window| window.ordinal),
+        Some(0),
+        "slot selection starts at the Director window"
+    );
+    assert!(
+        windows
+            .windows(2)
+            .all(|pair| pair[0].ordinal < pair[1].ordinal),
+        "window ordinals are strictly ascending"
+    );
+    for window in windows {
+        let columns: &[(ColumnSide, &Vec<String>, i64)] = if window.ordinal == 0 {
+            &[(ColumnSide::Right, &window.right, capacity(window.height))]
+        } else {
+            let overflow = capacity(window.height).max(1);
+            &[
+                (ColumnSide::Left, &window.left, overflow),
+                (ColumnSide::Right, &window.right, overflow),
+            ]
+        };
+        for (side, members, limit) in columns {
+            if i64::try_from(members.len()).expect("a column's member count fits i64") < *limit {
+                return SlotChoice::Existing {
+                    ordinal: window.ordinal,
+                    window_id: window.window_id.clone(),
+                    window_name: window.window_name.clone(),
+                    side: *side,
+                };
+            }
+        }
+    }
+    let ordinal = last_window_ordinal + 1;
+    SlotChoice::NewWindow {
+        ordinal,
+        window_name: overflow_window_name(fleet_id, ordinal),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::multiplexer::layout::*;

@@ -6046,7 +6046,11 @@ pub(crate) mod native_capture {
             fn current_executable(&self) -> Result<PathBuf> {
                 self.inner.current_executable()
             }
-            fn split_runner(&mut self, argv: &[String], until: Instant) -> Result<String> {
+            fn split_runner(
+                &mut self,
+                argv: &[String],
+                until: Instant,
+            ) -> Result<crate::multiplexer::SpawnedPane> {
                 let config = read_native_capture_config(
                     &self.case.config_path,
                     &NativeCaptureLimits::default(),
@@ -6125,7 +6129,11 @@ pub(crate) mod native_capture {
                 self.inner
                     .shutdown_owned(run, clock.clipped(self.case_until))
             }
-            fn close_pane(&mut self, pane: &str, until: Instant) -> Result<()> {
+            fn close_pane(
+                &mut self,
+                pane: &crate::multiplexer::SpawnedPane,
+                until: Instant,
+            ) -> Result<()> {
                 self.inner.close_pane(pane, until.min(self.case_until))
             }
             fn settle_hermes(
@@ -7162,8 +7170,18 @@ pub(crate) mod native_capture {
                 pane_id: case.tmux.pane_id.clone(),
             };
             let window_name = mux.window_name(&context.window_id).map_err(io_error)?;
+            let target = crate::multiplexer::PaneTarget::Column(crate::multiplexer::ColumnTarget {
+                window_id: context.window_id.clone(),
+                side: crate::multiplexer::layout::ColumnSide::Right,
+                column_panes: Vec::new(),
+                other_panes: vec![context.pane_id.clone()],
+            });
+            let cwd = std::env::current_dir()
+                .map_err(io_error)?
+                .to_string_lossy()
+                .into_owned();
             let mut host = CaptureVerificationLaunchHost {
-                inner: NativeLaunchHost::new(&*mux, &context),
+                inner: NativeLaunchHost::new(&*mux, &target, "native-capture", &cwd),
                 case,
                 case_until,
             };
@@ -7308,7 +7326,19 @@ pub(crate) mod native_capture {
                             });
                     let close =
                         driver_validate_pane(case, &ownership, &launched, clock.storage_deadline())
-                            .and_then(|()| host.close_pane(pane, clock.storage_deadline()));
+                            .and_then(|()| {
+                                host.close_pane(
+                                    &crate::multiplexer::SpawnedPane {
+                                        pane_id: pane.to_owned(),
+                                        window_id: launched
+                                            .placement
+                                            .mux_window_id
+                                            .clone()
+                                            .expect("a launched placement records its window"),
+                                    },
+                                    clock.storage_deadline(),
+                                )
+                            });
                     let runner_absent = launched.started.runner.matches().map(|exists| !exists);
                     let native_absent = launched.started.child.matches().map(|exists| !exists);
                     let summary = json!({"schema_version":1,"case_manifest_sha256":ownership.case_manifest_sha256,"work_error":work_error,

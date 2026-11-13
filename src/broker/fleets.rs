@@ -44,8 +44,10 @@ pub(crate) fn create_fleet(
     director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
     assert!(
-        director.mux_pane_id.is_some(),
-        "the Director placement records its pane"
+        director.pane.is_some()
+            && director.window_ordinal == 0
+            && director.column_side == crate::multiplexer::layout::ColumnSide::Left,
+        "the Director placement records its pane in the Director window's left column"
     );
     let now = now_stamp();
     let tx = conn.transaction()?;

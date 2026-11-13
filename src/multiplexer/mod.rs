@@ -8,6 +8,7 @@ use std::time::Instant;
 
 pub(crate) mod caller;
 pub(crate) mod herdr;
+pub(crate) mod layout;
 pub(crate) mod tmux;
 
 /// The concrete session, window and pane returned by context discovery.
@@ -16,6 +17,31 @@ pub(crate) struct MultiplexerContext {
     pub(crate) session: String,
     pub(crate) window_id: String,
     pub(crate) pane_id: String,
+}
+
+/// An existing column of a window; `other_panes` holds the opposite column (the Director pane
+/// for the Director window).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ColumnTarget {
+    pub(crate) window_id: String,
+    pub(crate) side: crate::multiplexer::layout::ColumnSide,
+    pub(crate) column_panes: Vec<String>,
+    pub(crate) other_panes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PaneTarget {
+    Column(ColumnTarget),
+    NewWindow {
+        session: String,
+        window_name: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpawnedPane {
+    pub(crate) pane_id: String,
+    pub(crate) window_id: String,
 }
 
 /// The outcome of backend-owned pane compensation.
@@ -371,8 +397,6 @@ pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
     parts[start..].join("\n")
 }
 
-/// A multiplexer backend. The provided pane close and layout restoration are tmux's; herdr
-/// overrides them to rebalance the closed pane's tab after deregistration.
 pub(crate) trait Multiplexer {
     fn core(&self) -> &BackendCore;
 
@@ -401,15 +425,29 @@ pub(crate) trait Multiplexer {
     /// pane.
     fn pane_process(&self, pane: &str) -> Result<Option<i64>, MultiplexerError>;
 
-    fn split_window(
+    /// The current name of `window_id` on the targeted server; an empty name is valid.
+    fn window_name(&self, window_id: &str) -> Result<String, MultiplexerError>;
+
+    /// The live height of `window_id` in rows; herdr reads it through the first answering anchor.
+    fn window_height(&self, window_id: &str, anchors: &[String]) -> Result<i64, MultiplexerError>;
+
+    /// Creates the member pane for `target`, named `pane_name`. Naming, equalization and herdr
+    /// re-parenting are best effort; a failure after the pane ID is known closes that pane.
+    fn spawn_member_pane(
         &self,
-        reference: &MultiplexerContext,
+        target: &PaneTarget,
+        pane_name: &str,
+        cwd: &str,
         command: &[String],
-    ) -> Result<String, MultiplexerError>;
+    ) -> Result<SpawnedPane, MultiplexerError>;
 
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
 
-    fn kill_pane(&self, target_pane_id: &str) -> Result<(), MultiplexerError>;
+    /// Closes the pane and records `window_id` for the next [`Multiplexer::restore_after_close`].
+    fn close_pane(&self, target_pane_id: &str, window_id: &str) -> Result<(), MultiplexerError>;
+
+    /// Equalizes every column of the window the most recent `close_pane` recorded.
+    fn restore_after_close(&self) -> Result<(), MultiplexerError>;
 
     fn name(&self) -> &'static str {
         self.core().name
@@ -432,12 +470,10 @@ pub(crate) trait Multiplexer {
         self.check_key_target(pane, placement, deadline)
     }
 
-    fn close_pane(&self, target_pane_id: &str) -> Result<(), MultiplexerError> {
-        self.kill_pane(target_pane_id)
-    }
-
-    /// Restores the layout after the most recent `close_pane`.
-    fn restore_after_close(&self) -> Result<(), MultiplexerError> {
+    /// Closes the pane, then restores `window_id` best effort.
+    fn kill_pane(&self, target_pane_id: &str, window_id: &str) -> Result<(), MultiplexerError> {
+        self.close_pane(target_pane_id, window_id)?;
+        let _ = self.restore_after_close();
         Ok(())
     }
 }
@@ -1328,7 +1364,7 @@ mod tests {
         let runner = test_support::FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::for_server(runner.clone(), HERDR_SESSION)
             .bounded(crate::time::Deadline::until(std::time::Instant::now()));
-        assert!(mux.close_pane("w1:p2").is_err());
+        assert!(mux.close_pane("w1:p2", "w1:t1").is_err());
         mux.restore_after_close().unwrap();
         assert!(runner.events().is_empty());
     }

@@ -6,6 +6,7 @@ use crate::broker::MemberRecord;
 use crate::broker::PLACEMENT_COLUMNS;
 use crate::broker::Placement;
 use crate::broker::members::NewPlacement;
+use crate::broker::members::PlacementPane;
 use crate::broker::members::active_member;
 use crate::cli::emit;
 use crate::coding_agent::CodingAgent;
@@ -176,17 +177,21 @@ pub(crate) fn create_with(
             target.server
         ))
     })?;
+    let window_name = target.mux.window_name(&context.window_id)?;
     broker::create_fleet(
         conn,
         request.name,
-        &NewPlacement {
-            backend: target.backend.name().into(),
-            mux_session: context.session,
-            mux_window_id: context.window_id,
-            mux_pane_id: Some(context.pane_id),
-            coding_agent: request.agent.name().into(),
-            mux_server: target.server,
-        },
+        &NewPlacement::director(
+            target.backend.name().into(),
+            context.session,
+            request.agent.name().into(),
+            target.server,
+            PlacementPane {
+                mux_window_id: context.window_id,
+                mux_window_name: window_name,
+                mux_pane_id: context.pane_id,
+            },
+        ),
     )
 }
 
@@ -301,8 +306,8 @@ pub(crate) trait DeletionHost {
 /// settlement's budget never shortens the pane close that follows it.
 pub(crate) struct MultiplexerDeletionHost<M> {
     mux: M,
-    /// The bounded multiplexer of the last pane close; herdr's layout restoration reads the
-    /// closed tab it recorded.
+    /// The bounded multiplexer of the last pane close; layout restoration reads the window it
+    /// recorded.
     closing: Option<Box<dyn Multiplexer>>,
 }
 
@@ -335,7 +340,7 @@ impl<M: std::ops::Deref<Target: Multiplexer>> DeletionHost for MultiplexerDeleti
         Ok(self
             .closing
             .insert(self.mux.bounded(deadline))
-            .close_pane(pane)?)
+            .close_pane(pane, placement.concrete_window_id())?)
     }
 
     fn restore_layout(&mut self) -> Result<(), CafleetError> {
@@ -989,7 +994,7 @@ pub(crate) mod test_support {
                 Mutation::AfterRecovery => Self::bump_epoch(conn, expected_run.run_id),
                 Mutation::OtherPlacement(member) => {
                     conn.execute(
-                        "UPDATE member_placements SET mux_pane_id='%foreign' WHERE member_id=?1",
+                        "UPDATE member_placements SET mux_pane_id='%foreign', mux_window_id=COALESCE(mux_window_id, '@1'), mux_window_name=COALESCE(mux_window_name, 'main') WHERE member_id=?1",
                         [member],
                     )
                     .unwrap();
@@ -2248,8 +2253,22 @@ mod tests {
             std::time::Instant::now() + std::time::Duration::from_secs(5),
         );
         host.close_pane(&placement, fresh).unwrap();
+        runner.respond(Ok("%0|0
+"
+        .into()));
         host.restore_layout().unwrap();
-        assert_eq!(runner.run_argvs().len(), 1, "{:?}", runner.run_argvs());
+        let tmux = |parts: &[&str]| {
+            let mut call = crate::multiplexer::argv(&["tmux", "-S", "/tmp/tmux-1000/default"]);
+            call.extend(crate::multiplexer::argv(parts));
+            call
+        };
+        assert_eq!(
+            runner.run_argvs(),
+            vec![
+                tmux(&["kill-pane", "-t", "%9"]),
+                tmux(&["list-panes", "-t", "@1", "-F", "#{pane_id}|#{pane_left}"]),
+            ]
+        );
     }
 
     #[test]
