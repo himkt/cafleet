@@ -4024,6 +4024,48 @@ mod tests {
             assert_eq!(results(&case), 1, "the result is published once");
         }
     }
+
+    mod native_process_evidence {
+        use crate::runtime::recovery::NativeRecoveryHost;
+        use crate::runtime::recovery::ProcessEvidence;
+        use crate::runtime::recovery::RecoveryHost;
+        use crate::runtime::recovery::tests::*;
+        use crate::runtime::test_support::zombie;
+
+        fn evidence(process: &ProcessIdentity) -> ProcessEvidence {
+            NativeRecoveryHost
+                .process_evidence(process, Instant::now() + Duration::from_secs(5))
+                .unwrap()
+        }
+
+        #[test]
+        fn a_running_owner_with_its_recorded_identity_is_alive() {
+            let observed = evidence(&ProcessIdentity::current().unwrap());
+            assert!(matches!(observed, ProcessEvidence::Alive), "{observed:?}");
+        }
+
+        #[test]
+        fn an_unreaped_zombie_owner_is_terminated() {
+            let (mut child, identity) = zombie();
+            let observed = evidence(&identity);
+            child.wait().unwrap();
+            assert!(
+                matches!(observed, ProcessEvidence::Terminated),
+                "{observed:?}"
+            );
+        }
+
+        #[test]
+        fn a_reaped_owner_is_terminated() {
+            let (mut child, identity) = zombie();
+            child.wait().unwrap();
+            let observed = evidence(&identity);
+            assert!(
+                matches!(observed, ProcessEvidence::Terminated),
+                "{observed:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

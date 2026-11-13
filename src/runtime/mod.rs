@@ -185,6 +185,7 @@ pub(crate) mod test_support {
     pub(crate) use crate::runtime::artifacts::test_support::short_tempdir;
     pub(crate) use crate::runtime::lifecycle::test_support::SLOW_SUM;
     pub(crate) use crate::runtime::process::test_support::FixtureProcessTable;
+    pub(crate) use crate::runtime::process::test_support::zombie;
     use rusqlite::Connection;
     use serde_json::json;
     use tempfile::TempDir;

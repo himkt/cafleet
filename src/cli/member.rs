@@ -3081,6 +3081,50 @@ mod tests {
         }
 
         #[test]
+        fn the_unreadable_window_error_renders_a_multi_line_cause_on_one_line() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout-one-line");
+            let window = format!("cafleet-{fleet}-1");
+            let first = register_in_slot(
+                &mut conn,
+                fleet,
+                "first",
+                1,
+                ColumnSide::Left,
+                Some(("w1:t3", &window, "w1:p5")),
+            );
+            let occupied = crate::broker::members::OccupiedWindow {
+                window_ordinal: 1,
+                mux_window_id: "w1:t3".into(),
+                mux_window_name: window.clone(),
+                left: vec!["w1:p5".into()],
+                right: Vec::new(),
+                panes: vec!["w1:p5".into()],
+            };
+            let stderr = r#"{"error":{"code":"pane_not_found","message":"boom"},"id":1}"#;
+            let cause = crate::multiplexer::MultiplexerError::new(format!(
+                "herdr command failed: herdr pane layout --pane w1:p5\nstderr: {stderr}"
+            ));
+            let error = crate::cli::member::unreadable_window(&conn, fleet, &occupied, &cause);
+            assert_eq!(
+                error.message(),
+                format!(
+                    "window {window} (ordinal 1) of fleet {fleet} cannot be read: herdr command failed: herdr pane layout --pane w1:p5; stderr: {stderr}. Its active members {first} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry."
+                )
+            );
+            let single = crate::multiplexer::MultiplexerError::new(
+                "unexpected tmux display-message output: ''",
+            );
+            assert_eq!(
+                crate::cli::member::unreadable_window(&conn, fleet, &occupied, &single).message(),
+                format!(
+                    "window {window} (ordinal 1) of fleet {fleet} cannot be read: unexpected tmux display-message output: ''. Its active members {first} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry."
+                )
+            );
+        }
+
+        #[test]
         fn an_unreadable_overflow_window_fails_member_create_naming_its_members() {
             let dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);

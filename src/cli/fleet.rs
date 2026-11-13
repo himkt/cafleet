@@ -2500,6 +2500,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn deletion_treats_an_unreaped_zombie_runner_as_exited() {
+        let mut fixture = Fixture::new();
+        let (mut runner, identity) = crate::runtime::test_support::zombie();
+        fixture
+            .conn
+            .execute(
+                "UPDATE member_runs SET status='exited', cleanup_state='incomplete', owner_pid=?1, owner_start_identity=?2 WHERE run_id=?3",
+                rusqlite::params![identity.pid, identity.start_identity, fixture.run.run_id],
+            )
+            .unwrap();
+        let started = Instant::now();
+        let waited = crate::cli::fleet::await_runner_exit(
+            &mut fixture.conn,
+            fixture.run.run_id,
+            crate::time::Deadline::until(started + Duration::from_secs(2)),
+        );
+        let elapsed = started.elapsed();
+        runner.wait().unwrap();
+        waited.unwrap();
+        assert!(elapsed < Duration::from_secs(1), "{elapsed:?}");
+    }
+
     mod create {
         use std::collections::HashMap;
         use std::rc::Rc;
