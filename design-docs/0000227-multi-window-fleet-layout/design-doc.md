@@ -1,7 +1,7 @@
 # Multi-window fleet layout
 
 **Status**: Approved
-**Progress**: 0/58 tasks complete
+**Progress**: 7/58 tasks complete
 **Last Updated**: 2026-11-13
 
 ## Overview
@@ -410,13 +410,13 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 ### Step 1: SPEC.md
 
-- [ ] Add `#### Fleet window layout` to §6.5 with terms, constants, capacity formula and table, slot selection, the unreadable-window error, policy decisions, naming and the fleet layout lock with its hold rationale <!-- completed: -->
-- [ ] Update §6.5 Backend matrix, Multiplexer context, Backend operations rows, Delete-time pane layout, and generalize herdr column equalization to every column with the re-parenting procedures <!-- completed: -->
-- [ ] Update §6.5 Termination during pane input spans for the layout lock <!-- completed: -->
-- [ ] Update §5.5, §6.2 Members and §6.9 Runner boundary and creation transaction for nullable window fields, occupancy and publication <!-- completed: -->
-- [ ] Update §6.3 `fleet create`, Output shapes, Member list output, `member create`, `member show`, `member delete`, `fleet delete` and Error Messages <!-- completed: -->
-- [ ] Update §6.7 Backend capabilities for multiplexer pane naming <!-- completed: -->
-- [ ] Update §8 DDL and the `member_placements` / `fleets` semantics rows <!-- completed: -->
+- [x] Add `#### Fleet window layout` to §6.5 with terms, constants, capacity formula and table, slot selection, the unreadable-window error, policy decisions, naming and the fleet layout lock with its hold rationale <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.5 Backend matrix, Multiplexer context, Backend operations rows, Delete-time pane layout, and generalize herdr column equalization to every column with the re-parenting procedures <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.5 Termination during pane input spans for the layout lock <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §5.5, §6.2 Members and §6.9 Runner boundary and creation transaction for nullable window fields, occupancy and publication <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.3 `fleet create`, Output shapes, Member list output, `member create`, `member show`, `member delete`, `fleet delete` and Error Messages <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.7 Backend capabilities for multiplexer pane naming <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §8 DDL and the `member_placements` / `fleets` semantics rows <!-- completed: 2026-11-13T14:07 -->
 
 ### Step 2: User documentation
 
