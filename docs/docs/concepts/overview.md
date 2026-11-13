@@ -9,7 +9,8 @@ CAFleet coordinates independent coding-agent sessions in tmux or herdr through d
 | fleet | A namespace identified by a non-secret integer `fleet_id` | [Fleet isolation](#fleet-isolation) |
 | root Director | The current session registered by fleet creation; owns assignments and team lifecycle | [Members](members.md) |
 | member | An independent coding-agent session registered in a fleet | [Members](members.md) |
-| placement | The association between a member and its multiplexer session, window, pane and backend | [Database schema](https://github.com/himkt/cafleet/blob/main/SPEC.md#8-database-schema) |
+| placement | The association between a member and its multiplexer session, window, column, pane and backend | [Database schema](https://github.com/himkt/cafleet/blob/main/SPEC.md#8-database-schema) |
+| window | A tmux window or herdr tab holding fleet panes: the Director window, or an overflow window named `cafleet-<fleet_id>-<ordinal>` | [Pane layout](members.md#pane-layout) |
 | broker | The CLI's synchronous SQLite data-access layer | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
 | inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
@@ -32,7 +33,7 @@ Fleet creation atomically registers the calling Director and its current pane, a
 | Host | Continue its task and own native shell/background results |
 | Director | Assign work, receive replies, inspect evidence, resolve blockers and close the team |
 | CLI | Register sessions, persist messages, stream inbox records, preview ordinary-member messages and submit authorized pane input |
-| Multiplexer | Split, read, type into and close panes while preserving layout ownership |
+| Multiplexer | Create, read, type into and close panes and overflow windows while preserving layout ownership |
 | Member | Perform its assignment, report through the broker and route required unavailable commands |
 
 The [subcommand summary](https://github.com/himkt/cafleet/blob/main/SPEC.md#subcommand-summary) owns the command registry. The product ships as a CLI with embedded skills/presets and this documentation site.

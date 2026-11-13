@@ -21,6 +21,22 @@ The Director then asks you to run that command and reply with the pane ID and se
 
 The pane ID's form names its multiplexer (`%N` for tmux, `<workspace>:<pane>` for herdr), so the rerun works even when the Director's environment names the other multiplexer. If the rerun reports that the pane was not found, the Director asks you once more. `cafleet doctor` reports the same check on its `multiplexer` line as `warn`, which leaves its exit status unchanged. The [caller pane verification contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#caller-pane-verification) lists every refusal and its exact message.
 
+## Pane layout
+
+A fleet spreads its member panes across several windows, a tmux window or a herdr tab. The Director keeps the left half of its own window alone, and members stack in that window's right column. When that column is full, `member create` opens an overflow window named `cafleet-<fleet_id>-<ordinal>`, such as `cafleet-3-1`, in the background without taking focus. An overflow window fills its left column top to bottom, then its right column. After every member creation and deletion, the panes of each column in that window have equal heights.
+
+| Rule | Effect |
+|---|---|
+| Column capacity | A column holds one member for every 30 rows of window height, up to 8. The capacity is read when a member is created, so resizing your terminal affects only later members |
+| Small terminals | A Director window shorter than 30 rows holds no members, so every member opens in an overflow window. An overflow window always takes at least one member per column |
+| Free slots | A slot freed by `member delete` is reused first, so a newer member can land in the Director window while older members sit in overflow windows |
+| Existing members | A member never moves to another window or column after creation |
+| Window numbers | Overflow numbers only increase within a fleet, and a failed creation can skip one. An overflow window closes when its last member leaves; the Director window stays open |
+
+Each member's pane carries the member name: herdr labels the pane, and tmux sets its pane title, which shows when `pane-border-status` is on and which a coding agent may retitle. `member list` shows each member's `window` and `pane_id`, and `member create` and `member show` print `window=<name>`. The Director window's name is the one it had when `fleet create` ran.
+
+Member creations and deletions in one fleet wait for each other, up to 60 seconds, so concurrent calls never pick the same slot. If you close an overflow window by hand while its members stay registered, the next `member create` fails and names the window and its members; run `cafleet member delete MEMBER_ID` for each, then retry. The [fleet window layout contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#fleet-window-layout) defines capacity, slot selection, naming and the layout lock.
+
 ## Assignment and receiving
 
 Messages are point-to-point: send one to each selected recipient. Runner-managed members receive previews through their runner, which delivers, queues or holds each one as [Deliver generated input](#deliver-generated-input) describes. The root Director receives replies through its listener; [run a fleet](../mixed-backend-team.md#manual-lifecycle) explains reception and consumption.
@@ -43,7 +59,7 @@ Check roster and pane evidence with `member list` and `member capture`, which re
 
 ## Teardown
 
-Runner-managed deletion coordinates shutdown and event recovery under each member's pane-input lock, explicitly retaining unconfirmed child cleanup and recoverable artifacts. Member deletion kills the owned pane and deregisters the member. Fleet deletion ends every remaining ordinary member the same way, reporting each pane outcome, then deregisters the root Director and the fleet, leaving the Director's pane open; a member that cannot be ended stops it with the fleet still registered, and a rerun resumes. Both serialize placement changes with pane input and fail without registry changes when lock contention lasts five seconds. Member deletion refuses the root Director.
+Runner-managed deletion coordinates shutdown and event recovery under each member's pane-input lock, explicitly retaining unconfirmed child cleanup and recoverable artifacts. Member deletion kills the owned pane and deregisters the member. Fleet deletion ends every remaining ordinary member the same way, reporting each pane outcome, then deregisters the root Director and the fleet, leaving the Director's pane open; a member that cannot be ended stops it with the fleet still registered, and a rerun resumes. Both serialize placement changes with pane input and with the fleet's other creations and deletions, and fail without registry changes when pane input stays busy for five seconds or the fleet's pane layout for 60 seconds. Member deletion refuses the root Director.
 
 ## Member permission events
 

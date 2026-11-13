@@ -1,7 +1,7 @@
 # Multi-window fleet layout
 
 **Status**: Approved
-**Progress**: 7/58 tasks complete
+**Progress**: 13/58 tasks complete
 **Last Updated**: 2026-11-13
 
 ## Overview
@@ -420,15 +420,15 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 ### Step 2: User documentation
 
-- [ ] Add the "Pane layout" section to `docs/docs/concepts/members.md` <!-- completed: -->
-- [ ] Update the Core terms table in `docs/docs/concepts/overview.md` <!-- completed: -->
-- [ ] Update the pane-name sentence in `docs/docs/concepts/coding-agents.md` <!-- completed: -->
-- [ ] Confirm `README.md` needs no change <!-- completed: -->
+- [x] Add the "Pane layout" section to `docs/docs/concepts/members.md` <!-- completed: 2026-11-13T14:09 -->
+- [x] Update the Core terms table in `docs/docs/concepts/overview.md` <!-- completed: 2026-11-13T14:09 -->
+- [x] Update the pane-name sentence in `docs/docs/concepts/coding-agents.md` <!-- completed: 2026-11-13T14:09 -->
+- [x] Confirm `README.md` needs no change <!-- completed: 2026-11-13T14:09 -->
 
 ### Step 3: Skills
 
-- [ ] Update `assets/skills/cafleet/reference/cli.md` (`fleet create`, `member create` output, `member list` / `member show`, `member delete` / `fleet delete` busy outcomes, split reference, error rows) <!-- completed: -->
-- [ ] Update the pane-discovery sentence in `assets/skills/cafleet/roles/director.md` <!-- completed: -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` (`fleet create`, `member create` output, `member list` / `member show`, `member delete` / `fleet delete` busy outcomes, split reference, error rows) <!-- completed: 2026-11-13T14:09 -->
+- [x] Update the pane-discovery sentence in `assets/skills/cafleet/roles/director.md` <!-- completed: 2026-11-13T14:09 -->
 
 ### Step 4: Schema and registry
 
