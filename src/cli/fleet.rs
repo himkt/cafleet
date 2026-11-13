@@ -2237,10 +2237,10 @@ mod tests {
         let placement = crate::broker::Placement {
             backend: "tmux".into(),
             mux_session: "s".into(),
-            mux_window_id: Some("@1".into()),
-            mux_window_name: Some("main".into()),
-            window_ordinal: 0,
-            column_side: crate::multiplexer::layout::ColumnSide::Right,
+            mux_window_id: Some("@5".into()),
+            mux_window_name: Some("cafleet-1-2".into()),
+            window_ordinal: 2,
+            column_side: crate::multiplexer::layout::ColumnSide::Left,
             mux_pane_id: Some("%9".into()),
             coding_agent: "hermes".into(),
             created_at: "2026-11-07T00:00:00Z".into(),
@@ -2266,9 +2266,124 @@ mod tests {
             runner.run_argvs(),
             vec![
                 tmux(&["kill-pane", "-t", "%9"]),
-                tmux(&["list-panes", "-t", "@1", "-F", "#{pane_id}|#{pane_left}"]),
-            ]
+                tmux(&["list-panes", "-t", "@5", "-F", "#{pane_id}|#{pane_left}"]),
+            ],
+            "the close and its restoration target the recorded window"
         );
+    }
+
+    mod layout_lock {
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use rusqlite::Connection;
+
+        use crate::broker::Placement;
+        use crate::broker::fleets::test_support::create_fleet_fixture;
+        use crate::broker::members::test_support::register;
+        use crate::broker::runtime::RunRecord;
+        use crate::cli::fleet::DeletionHost;
+        use crate::cli::fleet::delete_fleet_with_layout_wait;
+        use crate::db::test_support::migrated_conn;
+        use crate::error::CafleetError;
+        use crate::pane_lock::LayoutLock;
+        use crate::pane_lock::PaneLock;
+        use crate::runtime::ShutdownOutcome;
+        use crate::time::Deadline;
+
+        struct UntouchedHost;
+
+        impl DeletionHost for UntouchedHost {
+            fn shutdown(
+                &mut self,
+                _: &mut Connection,
+                _: &RunRecord,
+                _: Deadline,
+            ) -> Result<ShutdownOutcome, CafleetError> {
+                panic!("a refused fleet deletion shuts no runner down")
+            }
+
+            fn settle_hermes(
+                &mut self,
+                _: &Connection,
+                _: &RunRecord,
+                _: &str,
+                _: Deadline,
+            ) -> Result<(), CafleetError> {
+                panic!("a refused fleet deletion settles nothing")
+            }
+
+            fn close_pane(&mut self, _: &Placement, _: Deadline) -> Result<(), CafleetError> {
+                panic!("a refused fleet deletion closes no pane")
+            }
+
+            fn restore_layout(&mut self) -> Result<(), CafleetError> {
+                panic!("a refused fleet deletion restores no layout")
+            }
+        }
+
+        #[test]
+        fn a_busy_layout_lock_fails_fleet_delete_and_leaves_every_member_unchanged() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let settings =
+                crate::config::Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            let (fleet, director) = create_fleet_fixture(&mut conn, "layout-fleet-busy");
+            let worker = register(&mut conn, fleet, "worker", Some("%5"));
+            let pending = register(&mut conn, fleet, "pending", None);
+            let before = crate::broker::list_members(&conn, fleet).unwrap();
+            let _held = LayoutLock::try_acquire(&settings.database_url, fleet)
+                .unwrap()
+                .expect("the test holds the fleet layout");
+            let started = Instant::now();
+            let error = delete_fleet_with_layout_wait(
+                &mut conn,
+                &settings,
+                fleet,
+                Deadline::until(started + Duration::from_secs(5)),
+                Duration::from_millis(300),
+                &mut UntouchedHost,
+            )
+            .unwrap_err();
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_millis(300), "{waited:?}");
+            assert!(waited < Duration::from_secs(3), "{waited:?}");
+            assert_eq!(
+                error.message(),
+                format!(
+                    "fleet {fleet} pane layout remained busy for 60 seconds; fleet was not deleted."
+                )
+            );
+            assert_eq!(error.exit_code(), 1);
+            assert!(
+                crate::broker::get_fleet(&conn, fleet)
+                    .unwrap()
+                    .unwrap()
+                    .deleted_at
+                    .is_none()
+            );
+            let after = crate::broker::list_members(&conn, fleet).unwrap();
+            let identities = |rows: &[crate::broker::MemberActivity]| {
+                rows.iter()
+                    .map(|row| (row.member.member_id, row.member.placement.clone()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(identities(&after), identities(&before));
+            assert_eq!(
+                after
+                    .iter()
+                    .map(|row| row.member.member_id)
+                    .collect::<Vec<_>>(),
+                [director, worker, pending]
+            );
+            let worker_placement = &after[1].member.placement;
+            assert!(
+                PaneLock::acquire_released(&settings.database_url, worker_placement)
+                    .unwrap()
+                    .is_some(),
+                "the refused deletion releases its pane locks"
+            );
+        }
     }
 
     #[test]

@@ -569,10 +569,21 @@ mod tests {
         };
         assert_eq!(format_member_list(&[]), "0 members.");
         row.idle = Some(60);
-        assert!(format_member_list(&[row.clone()]).contains("codex     (pending)  1m"));
+        assert!(
+            format_member_list(&[row.clone()]).contains("codex     (pending)      (pending)  1m")
+        );
+        assert_eq!(
+            format_member_detail(&row.member),
+            "7 worker active window=(pending)"
+        );
         row.member.placement.mux_pane_id = Some("%9".into());
-        assert!(format_member_list(&[row.clone()]).contains("codex     %9"));
-        assert_eq!(format_member_detail(&row.member), "7 worker active");
+        row.member.placement.mux_window_id = Some("@1".into());
+        row.member.placement.mux_window_name = Some("main".into());
+        assert!(format_member_list(&[row.clone()]).contains("codex     main           %9"));
+        assert_eq!(
+            format_member_detail(&row.member),
+            "7 worker active window=main"
+        );
         for (idle, expected) in [
             (None, "-"),
             (Some(0), "0s"),
@@ -582,6 +593,140 @@ mod tests {
             (Some(3600), "1h"),
         ] {
             assert_eq!(format_idle(idle), expected);
+        }
+    }
+
+    mod window_text {
+        use crate::multiplexer::layout::ColumnSide;
+        use crate::output::text::tests::*;
+
+        fn placement(window: Option<(&str, &str)>, pane: Option<&str>) -> Placement {
+            Placement {
+                backend: "tmux".into(),
+                mux_session: "main".into(),
+                mux_window_id: window.map(|(id, _)| id.into()),
+                mux_window_name: window.map(|(_, name)| name.into()),
+                window_ordinal: 0,
+                column_side: ColumnSide::Right,
+                mux_pane_id: pane.map(str::to_owned),
+                coding_agent: "claude".into(),
+                created_at: "created".into(),
+                mux_server: "/tmp/tmux-1000/default".into(),
+            }
+        }
+
+        fn row(
+            member_id: i64,
+            name: &str,
+            kind: MemberKind,
+            placement: Placement,
+            idle: i64,
+        ) -> MemberActivity {
+            MemberActivity {
+                member: MemberRecord {
+                    member_id,
+                    fleet_id: 3,
+                    name: name.into(),
+                    description: "assignment".into(),
+                    status: MemberStatus::Active,
+                    kind,
+                    registered_at: "registered".into(),
+                    placement,
+                    runtime: None,
+                },
+                last_sent: None,
+                last_recv: None,
+                last_ack: None,
+                idle: Some(idle),
+            }
+        }
+
+        #[test]
+        fn member_list_shows_each_members_window_between_backend_and_pane() {
+            let rows = [
+                row(
+                    8,
+                    "director",
+                    MemberKind::Director,
+                    placement(Some(("@1", "main")), Some("%3")),
+                    12,
+                ),
+                row(
+                    9,
+                    "drafter",
+                    MemberKind::Member,
+                    placement(Some(("@6", "cafleet-3-1")), Some("%12")),
+                    5,
+                ),
+            ];
+            assert_eq!(
+                format_member_list(&rows),
+                [
+                    "2 members:",
+                    "  member_id  name           kind      backend   window         pane_id  idle",
+                    "  8          director       director  claude    main           %3       12s",
+                    "  9          drafter        member    claude    cafleet-3-1    %12      5s",
+                ]
+                .join(
+                    "
+"
+                )
+            );
+        }
+
+        #[test]
+        fn member_list_shows_a_pending_window_and_pane() {
+            let rows = [row(
+                10,
+                "tester",
+                MemberKind::Member,
+                placement(None, None),
+                0,
+            )];
+            assert_eq!(
+                format_member_list(&rows).lines().nth(2).unwrap(),
+                "  10         tester         member    claude    (pending)      (pending)  0s"
+            );
+        }
+
+        #[test]
+        fn member_create_text_appends_the_window_after_the_pane() {
+            let registered = RegisteredMember {
+                member_id: 9,
+                name: "drafter".into(),
+                registered_at: "registered".into(),
+            };
+            assert_eq!(
+                format_member(
+                    &registered,
+                    &placement(Some(("@6", "cafleet-3-1")), Some("%12"))
+                ),
+                "9 drafter backend=claude pane=%12 window=cafleet-3-1"
+            );
+            assert_eq!(
+                format_member(&registered, &placement(None, None)),
+                "9 drafter backend=claude pane=(pending) window=(pending)"
+            );
+        }
+
+        #[test]
+        fn member_show_text_appends_the_window_after_the_status() {
+            let concrete = row(
+                9,
+                "drafter",
+                MemberKind::Member,
+                placement(Some(("@6", "cafleet-3-1")), Some("%12")),
+                5,
+            );
+            assert_eq!(
+                format_member_detail(&concrete.member),
+                "9 drafter active window=cafleet-3-1"
+            );
+            let pending = row(10, "tester", MemberKind::Member, placement(None, None), 0);
+            assert_eq!(
+                format_member_detail(&pending.member),
+                "10 tester active window=(pending)"
+            );
         }
     }
 

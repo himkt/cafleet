@@ -1311,7 +1311,7 @@ mod tests {
             let hermes = format!(
                 "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config path')\n    {config_path} ;;\n  *) exit 3 ;;\nesac"
             );
-            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' #{window_height} '*) printf '120\\n' ;; *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
             let fleet = fleet.to_string();
             let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
                 &settings,
@@ -1354,7 +1354,7 @@ mod tests {
         let config = dir.path().join("claude config");
         std::fs::create_dir(&config).unwrap();
         let descriptor_copy = dir.path().join("descriptor-copy.json");
-        let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' display-message '*) printf 'main|@1|%%1\\n' ;;\n  *' split-window '*)\n    while [ $# -gt 0 ]; do\n      if [ \"$1\" = --descriptor ]; then\n        IFS= read -r line < \"$2\" || true\n        printf '%s' \"$line\" > \"$CAFLEET_TEST_DESCRIPTOR_COPY\"\n      fi\n      shift\n    done\n    exit 1 ;;\nesac";
+        let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' #{window_height} '*) printf '120\\n' ;;\n  *' display-message '*) printf 'main|@1|%%1\\n' ;;\n  *' split-window '*)\n    while [ $# -gt 0 ]; do\n      if [ \"$1\" = --descriptor ]; then\n        IFS= read -r line < \"$2\" || true\n        printf '%s' \"$line\" > \"$CAFLEET_TEST_DESCRIPTOR_COPY\"\n      fi\n      shift\n    done\n    exit 1 ;;\nesac";
         let claude = "printf '2.1.302 (Claude Code)\\n'";
         let fleet = fleet.to_string();
         let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
@@ -2785,6 +2785,202 @@ mod tests {
                     .unwrap_err()
                     .to_string()
                     .contains("output unavailable")
+            );
+        }
+    }
+
+    mod window_layout {
+        use crate::broker::members::test_support::register_in_slot;
+        use crate::cli::CliArgs;
+        use crate::cli::Command;
+        use crate::cli::member::tests::*;
+        use crate::multiplexer::layout::ColumnSide;
+        use crate::pane_lock::LayoutLock;
+
+        fn member_rows(conn: &Connection) -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
+                .unwrap()
+        }
+
+        fn create_arguments(fleet: &str) -> Vec<&str> {
+            vec![
+                "member",
+                "create",
+                "--fleet-id",
+                fleet,
+                "--name",
+                "worker",
+                "--description",
+                "window layout fixture",
+                "--coding-agent",
+                "claude",
+                "literal assignment on {database_url}",
+            ]
+        }
+
+        fn create_args(fleet: i64) -> CreateArgs {
+            let fleet = fleet.to_string();
+            let mut arguments = vec!["cafleet"];
+            arguments.extend(create_arguments(&fleet));
+            let Command::Member(MemberCommand::Create(args)) =
+                CliArgs::try_parse_from(arguments).unwrap().command
+            else {
+                panic!("member create expected")
+            };
+            args
+        }
+
+        #[test]
+        fn a_busy_layout_lock_fails_member_create_and_registers_nothing() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout-busy");
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            let _held = LayoutLock::try_acquire(&settings.database_url, fleet)
+                .unwrap()
+                .expect("the test holds the fleet layout");
+            let before = member_rows(&conn);
+            let started = Instant::now();
+            let error =
+                create_with_layout_wait(&mut conn, &create_args(fleet), Duration::from_millis(300))
+                    .unwrap_err();
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_millis(300), "{waited:?}");
+            assert!(waited < Duration::from_secs(3), "{waited:?}");
+            assert_eq!(
+                error.message(),
+                format!(
+                    "fleet {fleet} pane layout remained busy for 60 seconds; member was not created."
+                )
+            );
+            assert_eq!(error.exit_code(), 1);
+            assert_eq!(member_rows(&conn), before);
+        }
+
+        #[test]
+        fn an_unreadable_overflow_window_fails_member_create_naming_its_members() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout-unreadable");
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            conn.execute(
+                "UPDATE fleets SET last_window_ordinal=1 WHERE fleet_id=?1",
+                [fleet],
+            )
+            .unwrap();
+            let window = format!("cafleet-{fleet}-1");
+            register_in_slot(
+                &mut conn,
+                fleet,
+                "director-window",
+                0,
+                ColumnSide::Right,
+                Some(("@1", "main", "%2")),
+            );
+            let first = register_in_slot(
+                &mut conn,
+                fleet,
+                "first",
+                1,
+                ColumnSide::Left,
+                Some(("@7", &window, "%10")),
+            );
+            let second = register_in_slot(
+                &mut conn,
+                fleet,
+                "second",
+                1,
+                ColumnSide::Right,
+                Some(("@7", &window, "%11")),
+            );
+            let before = member_rows(&conn);
+            let config = dir.path().join("claude config");
+            std::fs::create_dir(&config).unwrap();
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' -t @1 #{window_height} '*) printf '50\\n' ;;\n  *' #{window_height} '*) printf '\\n' ;;\n  *) exit 1 ;;\nesac";
+            let claude = "printf '2.1.302 (Claude Code)\\n'";
+            let fleet_arg = fleet.to_string();
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                &settings,
+                &create_arguments(&fleet_arg),
+                &[("tmux", tmux), ("claude", claude)],
+                &[
+                    ("TMUX_PANE", "%0"),
+                    ("CLAUDE_CONFIG_DIR", config.to_str().unwrap()),
+                ],
+            );
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(output.status.code(), Some(1), "{stderr}");
+            assert!(
+                stderr.starts_with(&format!(
+                    "Error: window {window} (ordinal 1) of fleet {fleet} cannot be read: unexpected tmux display-message output: "
+                )),
+                "{stderr}"
+            );
+            assert!(
+                stderr.ends_with(&format!(
+                    ". Its active members {first}, {second} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.\n"
+                )),
+                "{stderr}"
+            );
+            assert!(
+                pane_calls.contains(" -t @7 #{window_height}"),
+                "{pane_calls}"
+            );
+            assert!(!pane_calls.contains("split-window"), "{pane_calls}");
+            assert!(!pane_calls.contains("new-window"), "{pane_calls}");
+            assert_eq!(member_rows(&conn), before);
+        }
+
+        #[test]
+        fn a_busy_layout_lock_fails_member_delete_and_leaves_run_pane_and_row_unchanged() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            let (fleet, director) = create_fleet_fixture(&mut conn, "layout-delete-busy");
+            let worker = register(&mut conn, fleet, "worker", Some("%9"));
+            let run = crate::broker::runtime::test_support::create_run(
+                &mut conn,
+                &crate::broker::runtime::test_support::Fixture::spec(
+                    &conn, fleet, director, worker,
+                ),
+            )
+            .unwrap();
+            let before = crate::broker::members::active_member(&conn, worker).unwrap();
+            let _held = LayoutLock::try_acquire(&settings.database_url, fleet)
+                .unwrap()
+                .expect("the test holds the fleet layout");
+            let started = Instant::now();
+            let error = delete_with_layout_wait(
+                &mut conn,
+                &settings,
+                worker,
+                false,
+                Deadline::until(started + Duration::from_secs(5)),
+                Duration::from_millis(300),
+            )
+            .unwrap_err();
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_millis(300), "{waited:?}");
+            assert!(waited < Duration::from_secs(3), "{waited:?}");
+            assert_eq!(
+                error.message(),
+                format!(
+                    "fleet {fleet} pane layout remained busy for 60 seconds; member was not deleted."
+                )
+            );
+            assert_eq!(error.exit_code(), 1);
+            let after = crate::broker::members::active_member(&conn, worker).unwrap();
+            assert_eq!(after.placement, before.placement);
+            let current = crate::broker::runtime::get_run(&conn, run.run_id).unwrap();
+            assert_eq!(
+                (current.status, current.owner_epoch, current.cleanup_state),
+                (run.status, run.owner_epoch, run.cleanup_state)
+            );
+            assert!(
+                PaneLock::acquire_released(&settings.database_url, &after.placement)
+                    .unwrap()
+                    .is_some(),
+                "the refused deletion releases its pane lock"
             );
         }
     }

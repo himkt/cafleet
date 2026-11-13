@@ -7231,6 +7231,8 @@ pub(crate) mod native_capture {
                         mux_server: server.clone(),
                         pane: None,
                     },
+                    window_name: window_name.clone(),
+                    advances_window_ordinal_from: None,
                 };
                 let launch_until = work_until.min(Instant::now() + Duration::from_secs(10));
                 let launched = create_registered(
