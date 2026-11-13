@@ -1,7 +1,7 @@
 # Multi-window fleet layout
 
 **Status**: Approved
-**Progress**: 62/64 tasks complete
+**Progress**: 63/64 tasks complete
 **Last Updated**: 2026-11-13
 
 ## Overview
@@ -10,16 +10,16 @@ A fleet spreads its member panes across several multiplexer windows (a tmux wind
 
 ## Success Criteria
 
-- [ ] With the Director window full, the next `member create` opens a detached overflow window named `cafleet-<fleet_id>-<ordinal>` without stealing focus, on both tmux and herdr.
-- [ ] Column capacity is `min(8, floor(window_height / 30))` and is evaluated at spawn time; existing members never move to another window.
-- [ ] The Director window keeps the Director alone in its left half and stacks members in the right column; overflow windows fill the left column top to bottom, then the right column.
-- [ ] After every member create and member delete, each column of the affected window has equal pane heights (tmux `select-layout -E`, herdr arithmetic equalization per column), best effort.
-- [ ] Overflow-window ordinals only increase within a fleet; an overflow window closes when its last member leaves.
-- [ ] Member panes carry the member name as their pane title (tmux) / pane label (herdr), best effort.
-- [ ] `member list` text shows a `window` column; `member create` and `member show` text append `window=<name>`; the JSON `placement` object carries `mux_window_name`, `window_ordinal` and `column_side`.
-- [ ] Concurrent `member create` and `member delete` calls in one fleet never choose the same slot, open two windows for one ordinal, or target a pane another operation is closing.
-- [ ] An overflow window that can no longer be read fails `member create` with an error naming the window, its active members and the remedy.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass; the manual live checks in Step 13 pass on tmux 3.6a and herdr 0.9.5.
+- [x] With the Director window full, the next `member create` opens a detached overflow window named `cafleet-<fleet_id>-<ordinal>` without stealing focus, on both tmux and herdr.
+- [x] Column capacity is `min(8, floor(window_height / 30))` and is evaluated at spawn time; existing members never move to another window.
+- [x] The Director window keeps the Director alone in its left half and stacks members in the right column; overflow windows fill the left column top to bottom, then the right column.
+- [x] After every member create and member delete, each column of the affected window has equal pane heights (tmux `select-layout -E`, herdr arithmetic equalization per column), best effort.
+- [x] Overflow-window ordinals only increase within a fleet; an overflow window closes when its last member leaves.
+- [x] Member panes carry the member name as their pane title (tmux) / pane label (herdr), best effort.
+- [x] `member list` text shows a `window` column; `member create` and `member show` text append `window=<name>`; the JSON `placement` object carries `mux_window_name`, `window_ordinal` and `column_side`.
+- [x] Concurrent `member create` and `member delete` calls in one fleet never choose the same slot, open two windows for one ordinal, or target a pane another operation is closing.
+- [x] An overflow window that can no longer be read fails `member create` with an error naming the window, its active members and the remedy.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass; the manual live checks in Step 13 pass on tmux 3.6a and herdr 0.9.5.
 
 ---
 
@@ -517,7 +517,7 @@ The unreadable-window remedy (`cafleet member delete MEMBER_ID`) works on both b
 - [x] Implement the rule so `member delete` and `fleet delete` complete for a member whose herdr pane is gone <!-- completed: 2026-11-13T23:49 -->
 - [x] Render the unreadable-window `<cause>` on one line (herdr's `\nstderr:` separator) <!-- completed: 2026-11-13T23:49 -->
 - [x] Unit tests for the rule in the file that owns it, and for the one-line cause in `src/cli/member.rs` <!-- completed: 2026-11-13T23:49 -->
-- [ ] herdr 0.9.5 live: close an overflow tab by hand, then `member delete` each listed member and confirm the next `member create` succeeds <!-- completed: -->
+- [x] herdr 0.9.5 live: close an overflow tab by hand, then `member delete` each listed member and confirm the next `member create` succeeds <!-- completed: 2026-11-13T23:52 -->
 
 
 ---
