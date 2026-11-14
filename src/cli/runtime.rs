@@ -385,7 +385,7 @@ mod tests {
                     &mut fixture.fixture.conn,
                     &run.owner(),
                     original.input_id,
-                    storage::UncertainCause::WriteFailed,
+                    storage::StopCause::WriteFailed,
                 )
                 .unwrap();
                 let until = outer.min(Instant::now() + Duration::from_secs(2));
@@ -484,8 +484,8 @@ mod tests {
         };
         let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
         assert_eq!(
-            receipt.input.uncertain_cause,
-            Some(storage::UncertainCause::WriteFailed)
+            receipt.input.stop_cause,
+            Some(storage::StopCause::WriteFailed)
         );
         let error = permission(
             &mut case.fixture.conn,

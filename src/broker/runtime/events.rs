@@ -3521,7 +3521,7 @@ mod tests {
             fixture
                 .conn
                 .execute(
-                    "UPDATE member_input_operations SET state='uncertain',disposition=NULL,uncertain_cause=?1 WHERE input_id=?2",
+                    "UPDATE member_input_operations SET state='uncertain',disposition=NULL,stop_cause=?1 WHERE input_id=?2",
                     params![cause, input_id],
                 )
                 .unwrap();
@@ -3542,11 +3542,7 @@ mod tests {
         #[test]
         fn input_delivery_result_cause_carries_the_receipt_cause_only_when_recorded() {
             assert_eq!(
-                storage::input_delivery_result_cause(
-                    7,
-                    "unknown",
-                    Some(UncertainCause::WriteFailed)
-                ),
+                storage::input_delivery_result_cause(7, "unknown", Some(StopCause::WriteFailed)),
                 json!({"kind":"input_delivery_result","input_id":7,"stage":"unknown","cause":{"kind":"write_failed"}})
             );
             let plain = storage::input_delivery_result_cause(7, "submitted", None);
@@ -3565,11 +3561,7 @@ mod tests {
                 ..native_exit(1, 1)
             };
             for cause in [
-                storage::input_delivery_result_cause(
-                    3,
-                    "unknown",
-                    Some(UncertainCause::RunnerStopped),
-                ),
+                storage::input_delivery_result_cause(3, "unknown", Some(StopCause::RunnerStopped)),
                 storage::input_delivery_result_cause(3, "submitted", None),
             ] {
                 crate::broker::runtime::events::validate_delivery_cause(&transition(cause.clone()))

@@ -979,10 +979,10 @@ mod tests {
         fixture
             .conn
             .execute(
-                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,message_id,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'preview',?3,'ready',?4,?5,?5,?5,'interaction_open')",
+                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,message_id,preview_attempt,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'preview',?3,'ready',?4,1,?5,?5,?5,'interaction_open')",
                 rusqlite::params![
                     run.run_id,
-                    format!("preview:{}:{}", run.run_id, message.message_id),
+                    crate::broker::runtime::preview_operation_key(run.run_id, message.message_id, 1).unwrap(),
                     "d".repeat(64),
                     message.message_id,
                     "2026-10-30T10:00:00Z",

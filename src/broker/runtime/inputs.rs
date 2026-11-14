@@ -1231,12 +1231,794 @@ mod tests {
     use crate::broker::runtime::test_support::*;
     use crate::broker::runtime::*;
 
+    mod composer_receipts {
+        use crate::broker::runtime::inputs::tests::*;
+
+        fn message(fixture: &mut Fixture) -> i64 {
+            crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.director,
+                fixture.member,
+                "composer receipt contract",
+            )
+            .unwrap()
+            .message_id
+        }
+
+        fn preview(
+            fixture: &mut Fixture,
+            owner: &RunOwner,
+            message_id: i64,
+            attempt: i64,
+        ) -> InputOperation {
+            fixture.input(
+                owner,
+                &storage::preview_operation_key(owner.run_id, message_id, attempt).unwrap(),
+                InputKind::Preview,
+                Some(message_id),
+            )
+        }
+
+        fn assert_left(input: &InputOperation, cause: StopCause, stage: LeftStage) {
+            assert_eq!(input.state, InputState::Settled);
+            assert_eq!(input.disposition, Some(InputDisposition::LeftInComposer));
+            assert_eq!(input.stop_cause, Some(cause));
+            assert_eq!(input.left_stage, Some(stage));
+            assert_eq!(
+                input.delivery().unwrap().status,
+                DeliveryStatus::LeftInComposer
+            );
+        }
+
+        #[test]
+        fn preview_operation_keys_encode_positive_run_message_and_attempt() {
+            assert_eq!(
+                storage::preview_operation_key(7, 9, 1).unwrap(),
+                "preview:7:9:1"
+            );
+            assert_eq!(
+                storage::preview_operation_key(i64::MAX, i64::MAX, i64::MAX).unwrap(),
+                format!("preview:{0}:{0}:{0}", i64::MAX)
+            );
+        }
+
+        #[test]
+        fn preview_operation_keys_require_positive_identity_components() {
+            for identity in [
+                (0, 9, 1),
+                (-1, 9, 1),
+                (7, 0, 1),
+                (7, -1, 1),
+                (7, 9, 0),
+                (7, 9, -1),
+            ] {
+                assert!(
+                    storage::preview_operation_key(identity.0, identity.1, identity.2).is_err()
+                );
+            }
+        }
+
+        #[test]
+        fn preview_reservation_derives_and_persists_the_attempt_from_its_key() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let input = preview(&mut fixture, &owner, message_id, 17);
+            assert_eq!(input.preview_attempt, Some(17));
+            assert_eq!(
+                storage::get_input(&fixture.reopen(), input.input_id).unwrap(),
+                input
+            );
+            assert_eq!(
+                storage::find_input(&fixture.conn, owner.run_id, &input.operation_key).unwrap(),
+                Some(input)
+            );
+        }
+
+        #[test]
+        fn preview_reservation_requires_a_canonical_key_matching_its_message_and_run() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            for key in [
+                format!("preview:{}:{message_id}", owner.run_id),
+                format!("preview:{}:{message_id}:0", owner.run_id),
+                format!("preview:{}:{message_id}:-1", owner.run_id),
+                format!("preview:{}:{message_id}:01", owner.run_id),
+                format!("preview:{}:{message_id}:+1", owner.run_id),
+                format!("preview:{}:{message_id}:1:extra", owner.run_id),
+                format!("preview:{}:{message_id}:9223372036854775808", owner.run_id),
+                format!("preview:0{}:{message_id}:1", owner.run_id),
+                storage::preview_operation_key(owner.run_id + 1, message_id, 1).unwrap(),
+                storage::preview_operation_key(owner.run_id, message_id + 1, 1).unwrap(),
+            ] {
+                let before = state(&fixture.conn);
+                let result = reserve_input(
+                    &mut fixture.conn,
+                    &owner,
+                    &NewInput {
+                        operation_key: key.clone(),
+                        kind: InputKind::Preview,
+                        payload_digest: "d".repeat(64),
+                        message_id: Some(message_id),
+                    },
+                );
+                assert!(result.is_err(), "{key}");
+                assert_eq!(state(&fixture.conn), before, "{key}");
+            }
+        }
+
+        #[test]
+        fn explicit_inputs_have_no_preview_attempt() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for kind in [InputKind::Prompt, InputKind::Exec] {
+                let input = fixture.input(&owner, kind.as_str(), kind, None);
+                assert_eq!(input.preview_attempt, None);
+                assert_eq!(
+                    storage::get_input(&fixture.reopen(), input.input_id)
+                        .unwrap()
+                        .preview_attempt,
+                    None
+                );
+            }
+        }
+
+        #[test]
+        fn preview_attempt_identity_keeps_the_payload_digest_unchanged() {
+            let mut input = crate::runtime::SubmitInput {
+                operation_key: storage::preview_operation_key(7, 9, 1).unwrap(),
+                input_kind: InputKind::Preview,
+                message_id: Some(9),
+                literal: "same preview λ".into(),
+            };
+            let digest = storage::input_payload_digest(7, &input);
+            input.operation_key = storage::preview_operation_key(7, 9, 2).unwrap();
+            assert_eq!(storage::input_payload_digest(7, &input), digest);
+        }
+
+        #[test]
+        fn latest_preview_lookup_orders_by_attempt_instead_of_insertion() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            assert_eq!(
+                storage::find_latest_preview_input(&fixture.conn, owner.run_id, message_id)
+                    .unwrap(),
+                None
+            );
+            let latest = preview(&mut fixture, &owner, message_id, 9);
+            let inserted_last = preview(&mut fixture, &owner, message_id, 2);
+            assert!(inserted_last.input_id > latest.input_id);
+            assert_eq!(
+                storage::find_latest_preview_input(&fixture.reopen(), owner.run_id, message_id)
+                    .unwrap(),
+                Some(latest)
+            );
+            let other_message = message(&mut fixture);
+            let other = preview(&mut fixture, &owner, other_message, 12);
+            assert_eq!(
+                storage::find_latest_preview_input(&fixture.conn, owner.run_id, other_message)
+                    .unwrap(),
+                Some(other)
+            );
+            let sibling = fixture.running_sibling("preview-lookup-sibling");
+            assert_eq!(
+                storage::find_latest_preview_input(&fixture.conn, sibling.run_id, message_id)
+                    .unwrap(),
+                None
+            );
+        }
+
+        #[test]
+        fn left_explicit_inputs_persist_each_qualifying_stop_cause() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for kind in [InputKind::Prompt, InputKind::Exec] {
+                for (cause, stage) in [
+                    (StopCause::ManualInput, LeftStage::LiteralComplete),
+                    (
+                        StopCause::ManualAccountingFailed,
+                        LeftStage::LiteralComplete,
+                    ),
+                    (StopCause::PointerInput, LeftStage::Partial),
+                    (StopCause::InteractionCandidate, LeftStage::LiteralComplete),
+                    (StopCause::InteractionOpen, LeftStage::LiteralComplete),
+                    (StopCause::ObserverUnavailable, LeftStage::LiteralComplete),
+                    (StopCause::DeadlineExpired, LeftStage::LiteralComplete),
+                    (StopCause::SubmitUnconfirmed, LeftStage::Submitted),
+                ] {
+                    let key = format!("{}:{}", kind.as_str(), cause.as_str());
+                    let input = fixture.input(&owner, &key, kind, None);
+                    let settled = storage::record_input_left_in_composer(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        cause,
+                        stage,
+                    )
+                    .unwrap();
+                    assert_left(&settled, cause, stage);
+                    assert_eq!(settled.delivery_method, input.delivery_method);
+                    assert_eq!(settled.delivery_reason, input.delivery_reason);
+                    assert_eq!(
+                        storage::get_input(&fixture.reopen(), input.input_id).unwrap(),
+                        settled
+                    );
+                    assert_eq!(
+                        storage::find_input(&fixture.conn, owner.run_id, &key).unwrap(),
+                        Some(settled)
+                    );
+                }
+            }
+            assert_eq!(rows(&fixture.conn, "member_input_operations").len(), 16);
+        }
+
+        #[test]
+        fn left_stage_persists_escape_partial_complete_and_unconfirmed_submit() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for (stage, cause) in [
+                (LeftStage::EscapeOnly, StopCause::ManualInput),
+                (LeftStage::Partial, StopCause::DeadlineExpired),
+                (LeftStage::LiteralComplete, StopCause::DeadlineExpired),
+                (LeftStage::Submitted, StopCause::SubmitUnconfirmed),
+            ] {
+                let input = fixture.input(&owner, stage.as_str(), InputKind::Prompt, None);
+                if stage == LeftStage::EscapeOnly {
+                    storage::requeue_zero_byte_immediate(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        "interaction_open",
+                    )
+                    .unwrap();
+                    storage::begin_deferred_attempt(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        DeliveryMethod::Fallback,
+                        Some("submission_plan_unavailable"),
+                    )
+                    .unwrap();
+                }
+                let settled = storage::record_input_left_in_composer(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    cause,
+                    stage,
+                )
+                .unwrap();
+                assert_left(&settled, cause, stage);
+                assert_eq!(
+                    storage::get_input(&fixture.reopen(), input.input_id)
+                        .unwrap()
+                        .left_stage,
+                    Some(stage)
+                );
+            }
+        }
+
+        #[test]
+        fn uncertain_only_causes_preserve_the_in_progress_receipt_on_left_settlement() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:uncertain-only", InputKind::Prompt, None);
+            for cause in [
+                StopCause::ShortWrite,
+                StopCause::WriteFailed,
+                StopCause::RunnerStopped,
+            ] {
+                let before = state(&fixture.conn);
+                assert!(
+                    storage::record_input_left_in_composer(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        cause,
+                        LeftStage::Partial
+                    )
+                    .is_err()
+                );
+                assert_eq!(state(&fixture.conn), before, "{cause:?}");
+            }
+        }
+
+        #[test]
+        fn left_settlement_requires_the_exact_in_progress_state() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for target in [
+                InputState::Ready,
+                InputState::Accepted,
+                InputState::Uncertain,
+                InputState::Settled,
+            ] {
+                let input = fixture.input(&owner, target.as_str(), InputKind::Prompt, None);
+                match target {
+                    InputState::Ready => {
+                        storage::requeue_zero_byte_immediate(
+                            &mut fixture.conn,
+                            &owner,
+                            input.input_id,
+                            "earlier_input",
+                        )
+                        .unwrap();
+                    }
+                    InputState::Accepted => {
+                        storage::record_input_state(
+                            &mut fixture.conn,
+                            &owner,
+                            input.input_id,
+                            InputState::InProgress,
+                            InputState::Accepted,
+                        )
+                        .unwrap();
+                    }
+                    InputState::Uncertain => {
+                        storage::record_input_uncertain(
+                            &mut fixture.conn,
+                            &owner,
+                            input.input_id,
+                            StopCause::WriteFailed,
+                        )
+                        .unwrap();
+                    }
+                    InputState::Settled => {
+                        settle_input(
+                            &mut fixture.conn,
+                            &owner,
+                            input.input_id,
+                            InputState::InProgress,
+                            InputDisposition::NotSubmitted,
+                            "fixture:zero-byte",
+                        )
+                        .unwrap();
+                    }
+                    InputState::InProgress => unreachable!(),
+                }
+                let before = state(&fixture.conn);
+                assert!(
+                    storage::record_input_left_in_composer(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        StopCause::ManualInput,
+                        LeftStage::LiteralComplete
+                    )
+                    .is_err()
+                );
+                assert_eq!(state(&fixture.conn), before, "{target:?}");
+            }
+        }
+
+        #[test]
+        fn left_settlement_checks_the_owner_and_input_run() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:owned-left", InputKind::Prompt, None);
+            let sibling = fixture.running_sibling("left-owner-sibling");
+            let before = state(&fixture.conn);
+            assert!(
+                storage::record_input_left_in_composer(
+                    &mut fixture.conn,
+                    &sibling,
+                    input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+            fixture.activate_next_epoch();
+            let before = state(&fixture.conn);
+            assert!(
+                storage::record_input_left_in_composer(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn preview_left_settlement_creates_one_durable_redelivery_successor() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let original = preview(&mut fixture, &owner, message_id, 1);
+            let (left, next) = storage::settle_left_and_queue_redelivery(
+                &mut fixture.conn,
+                &owner,
+                original.input_id,
+                StopCause::ManualInput,
+                LeftStage::LiteralComplete,
+            )
+            .unwrap();
+            assert_left(&left, StopCause::ManualInput, LeftStage::LiteralComplete);
+            assert_eq!(left.preview_attempt, Some(1));
+            assert_eq!(next.preview_attempt, Some(2));
+            assert_eq!(
+                next.operation_key,
+                storage::preview_operation_key(owner.run_id, message_id, 2).unwrap()
+            );
+            assert_eq!(next.run_id, original.run_id);
+            assert_eq!(next.kind, InputKind::Preview);
+            assert_eq!(next.message_id, original.message_id);
+            assert_eq!(next.payload_digest, original.payload_digest);
+            assert_eq!(next.state, InputState::Ready);
+            assert_eq!(next.disposition, None);
+            assert_eq!(next.stop_cause, None);
+            assert_eq!(next.left_stage, None);
+            assert_eq!(next.delivery_method, None);
+            assert_eq!(next.delivery_reason, None);
+            assert!(next.deferred_at.is_some());
+            assert_eq!(next.defer_reason.as_deref(), Some("redelivery"));
+            assert_eq!(next.delivery().unwrap().status, DeliveryStatus::Queued);
+            assert_eq!(
+                storage::get_input(&fixture.reopen(), left.input_id).unwrap(),
+                left
+            );
+            assert_eq!(
+                storage::find_latest_preview_input(&fixture.reopen(), owner.run_id, message_id)
+                    .unwrap(),
+                Some(next.clone())
+            );
+            let stamp: Option<String> = fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stamp, None);
+            assert_eq!(
+                storage::runtime_snapshot(&fixture.conn, owner.run_id)
+                    .unwrap()
+                    .unresolved_input_ids,
+                vec![next.input_id]
+            );
+            assert_eq!(rows(&fixture.conn, "member_input_operations").len(), 2);
+        }
+
+        #[test]
+        fn preview_left_settlement_rolls_back_update_successor_insert_and_commit_failures() {
+            for target in [
+                "BEFORE UPDATE ON member_input_operations",
+                "BEFORE INSERT ON member_input_operations",
+                "commit",
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let message_id = message(&mut fixture);
+                let input = preview(&mut fixture, &owner, message_id, 1);
+                if target == "commit" {
+                    fixture
+                        .conn
+                        .authorizer(Some(|context: AuthContext<'_>| {
+                            if matches!(
+                                context.action,
+                                AuthAction::Transaction {
+                                    operation: TransactionOperation::Unknown
+                                }
+                            ) {
+                                Authorization::Deny
+                            } else {
+                                Authorization::Allow
+                            }
+                        }))
+                        .unwrap();
+                } else {
+                    fixture.conn.execute_batch(&format!("CREATE TRIGGER left_failure {target} BEGIN SELECT RAISE(ABORT,'fixture left settlement failure'); END")).unwrap();
+                }
+                let before = state(&fixture.conn);
+                assert!(
+                    storage::settle_left_and_queue_redelivery(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        StopCause::ManualInput,
+                        LeftStage::LiteralComplete
+                    )
+                    .is_err(),
+                    "{target}"
+                );
+                assert_eq!(state(&fixture.conn), before, "{target}");
+                assert_eq!(
+                    storage::get_input(&fixture.reopen(), input.input_id).unwrap(),
+                    input
+                );
+            }
+        }
+
+        #[test]
+        fn preview_left_settlement_preserves_both_rows_when_the_successor_exists() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let first = preview(&mut fixture, &owner, message_id, 1);
+            preview(&mut fixture, &owner, message_id, 2);
+            let before = state(&fixture.conn);
+            assert!(
+                storage::settle_left_and_queue_redelivery(
+                    &mut fixture.conn,
+                    &owner,
+                    first.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn preview_left_settlement_requires_a_representable_successor_attempt() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let input = preview(&mut fixture, &owner, message_id, i64::MAX);
+            let before = state(&fixture.conn);
+            assert!(
+                storage::settle_left_and_queue_redelivery(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn left_settlement_routes_each_ordinary_kind_to_its_atomic_entry_point() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let input = preview(&mut fixture, &owner, message_id, 1);
+            let before = state(&fixture.conn);
+            assert!(
+                storage::record_input_left_in_composer(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+            for kind in [InputKind::Prompt, InputKind::Exec] {
+                let input = fixture.input(&owner, kind.as_str(), kind, None);
+                let before = state(&fixture.conn);
+                assert!(
+                    storage::settle_left_and_queue_redelivery(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        StopCause::ManualInput,
+                        LeftStage::LiteralComplete
+                    )
+                    .is_err()
+                );
+                assert_eq!(state(&fixture.conn), before);
+            }
+        }
+
+        #[test]
+        fn left_settlement_keeps_permission_response_audits_and_claims_unchanged() {
+            let mut fixture = ResponseFixture::new();
+            let receipt = fixture.reserve();
+            let before = state(&fixture.base.conn);
+            assert!(
+                storage::record_input_left_in_composer(
+                    &mut fixture.base.conn,
+                    &fixture.owner,
+                    receipt.input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.base.conn), before);
+            assert!(
+                storage::settle_left_and_queue_redelivery(
+                    &mut fixture.base.conn,
+                    &fixture.owner,
+                    receipt.input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.base.conn), before);
+        }
+
+        #[test]
+        fn preview_left_settlement_rejects_a_stale_owner_without_a_successor() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let input = preview(&mut fixture, &owner, message_id, 1);
+            fixture.activate_next_epoch();
+            let before = state(&fixture.conn);
+            assert!(
+                storage::settle_left_and_queue_redelivery(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn preview_left_settlement_consumes_its_original_attempt_once() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let input = preview(&mut fixture, &owner, message_id, 1);
+            storage::settle_left_and_queue_redelivery(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                StopCause::ManualInput,
+                LeftStage::LiteralComplete,
+            )
+            .unwrap();
+            let before = state(&fixture.conn);
+            assert!(
+                storage::settle_left_and_queue_redelivery(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn left_receipt_schema_requires_a_qualifying_cause_and_stage_together() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:left-checks", InputKind::Prompt, None);
+            for fields in [
+                "stop_cause=NULL,left_stage='literal_complete'",
+                "stop_cause='manual_input',left_stage=NULL",
+                "stop_cause='short_write',left_stage='partial'",
+                "stop_cause='write_failed',left_stage='partial'",
+                "stop_cause='runner_stopped',left_stage='partial'",
+                "stop_cause='manual_input',left_stage='unknown'",
+            ] {
+                let before = state(&fixture.conn);
+                assert!(fixture.conn.execute(&format!("UPDATE member_input_operations SET state='settled',disposition='left_in_composer',{fields} WHERE input_id=?1"), [input.input_id]).is_err(), "{fields}");
+                assert_eq!(state(&fixture.conn), before);
+            }
+        }
+
+        #[test]
+        fn receipt_schema_keeps_left_stage_exclusive_to_left_in_composer() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:stage-checks", InputKind::Prompt, None);
+            for fields in [
+                "left_stage='partial'",
+                "state='uncertain',stop_cause='manual_input',left_stage='literal_complete'",
+                "state='settled',disposition='not_submitted',left_stage='literal_complete'",
+                "state='settled',disposition='submitted',left_stage='submitted'",
+                "state='settled',disposition='abandoned_uncertain',left_stage='partial'",
+                "state='uncertain',stop_cause='submit_unconfirmed'",
+            ] {
+                let before = state(&fixture.conn);
+                assert!(
+                    fixture
+                        .conn
+                        .execute(
+                            &format!(
+                                "UPDATE member_input_operations SET {fields} WHERE input_id=?1"
+                            ),
+                            [input.input_id]
+                        )
+                        .is_err(),
+                    "{fields}"
+                );
+                assert_eq!(state(&fixture.conn), before);
+            }
+        }
+
+        #[test]
+        fn preview_attempt_schema_requires_positive_unique_preview_only_attempts() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let input = preview(&mut fixture, &owner, message_id, 1);
+            for attempt in [None, Some(0), Some(-1)] {
+                assert!(fixture.conn.execute("UPDATE member_input_operations SET preview_attempt=?1 WHERE input_id=?2", params![attempt,input.input_id]).is_err());
+            }
+            let prompt = fixture.input(&owner, "prompt:attempt-check", InputKind::Prompt, None);
+            assert!(
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET preview_attempt=1 WHERE input_id=?1",
+                        [prompt.input_id]
+                    )
+                    .is_err()
+            );
+            let before = state(&fixture.conn);
+            assert!(fixture.conn.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,preview_attempt,delivery_method) SELECT run_id,'duplicate-attempt',kind,payload_digest,state,created_at,updated_at,message_id,preview_attempt,delivery_method FROM member_input_operations WHERE input_id=?1", [input.input_id]).is_err());
+            assert_eq!(state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn permission_response_schema_keeps_left_in_composer_for_ordinary_inputs() {
+            let mut fixture = ResponseFixture::new();
+            let receipt = fixture.reserve();
+            let before = state(&fixture.base.conn);
+            assert!(fixture.base.conn.execute("UPDATE member_input_operations SET state='settled',disposition='left_in_composer',stop_cause='manual_input',left_stage='literal_complete' WHERE input_id=?1", [receipt.input.input_id]).is_err());
+            assert_eq!(state(&fixture.base.conn), before);
+        }
+
+        #[test]
+        fn receipt_readers_reject_corrupt_cause_stage_and_attempt_associations() {
+            for fields in [
+                "preview_attempt=1",
+                "state='settled',disposition='left_in_composer',stop_cause=NULL,left_stage='literal_complete'",
+                "state='settled',disposition='left_in_composer',stop_cause='manual_input',left_stage=NULL",
+                "state='settled',disposition='not_submitted',left_stage='partial'",
+                "state='uncertain',stop_cause='submit_unconfirmed'",
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let input = fixture.input(
+                    &owner,
+                    "prompt:corrupt-association",
+                    InputKind::Prompt,
+                    None,
+                );
+                fixture
+                    .conn
+                    .execute_batch("PRAGMA ignore_check_constraints=ON")
+                    .unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        &format!("UPDATE member_input_operations SET {fields} WHERE input_id=?1"),
+                        [input.input_id],
+                    )
+                    .unwrap();
+                assert!(
+                    storage::get_input(&fixture.conn, input.input_id).is_err(),
+                    "{fields}"
+                );
+                assert!(
+                    storage::find_input(&fixture.conn, owner.run_id, &input.operation_key).is_err(),
+                    "{fields}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn input_payload_digest_hashes_the_key_sorted_payload() {
         use crate::runtime::SubmitInput;
         let literal = "say \"hi\" λ";
         let preview = SubmitInput {
-            operation_key: "preview:7:9".into(),
+            operation_key: crate::broker::runtime::preview_operation_key(7, 9, 1).unwrap(),
             input_kind: InputKind::Preview,
             message_id: Some(9),
             literal: literal.into(),
@@ -1368,7 +2150,12 @@ mod tests {
             )
             .unwrap();
             let request = NewInput {
-                operation_key: format!("preview:{}:{}", owner.run_id, message.message_id),
+                operation_key: crate::broker::runtime::preview_operation_key(
+                    owner.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap(),
                 kind: InputKind::Preview,
                 payload_digest: "d".repeat(64),
                 message_id: if destination == "missing" {
@@ -1404,7 +2191,8 @@ mod tests {
             .unwrap();
             let input = fixture.input(
                 &owner,
-                &format!("preview:{}:{}", owner.run_id, message.message_id),
+                &crate::broker::runtime::preview_operation_key(owner.run_id, message.message_id, 1)
+                    .unwrap(),
                 InputKind::Preview,
                 Some(message.message_id),
             );
@@ -1448,7 +2236,8 @@ mod tests {
         .unwrap();
         let input = fixture.input(
             &owner,
-            &format!("preview:{}:{}", owner.run_id, message.message_id),
+            &crate::broker::runtime::preview_operation_key(owner.run_id, message.message_id, 1)
+                .unwrap(),
             InputKind::Preview,
             Some(message.message_id),
         );
@@ -1491,7 +2280,7 @@ mod tests {
             &mut fixture.conn,
             &owner,
             input.input_id,
-            UncertainCause::WriteFailed,
+            StopCause::WriteFailed,
         )
         .unwrap();
         assert!(
@@ -1573,7 +2362,7 @@ mod tests {
             &mut fixture.conn,
             &owner,
             input.input_id,
-            UncertainCause::ShortWrite,
+            StopCause::ShortWrite,
         )
         .unwrap();
         let settled = crate::broker::runtime::test_support::settle_input(
@@ -1659,7 +2448,7 @@ mod tests {
         assert!(error.message().contains("corrupt"));
     }
 
-    mod uncertain_cause {
+    mod stop_cause {
         use crate::broker::runtime::inputs::tests::*;
 
         fn deferred_attempt(fixture: &mut Fixture, owner: &RunOwner, key: &str) -> InputOperation {
@@ -1686,16 +2475,16 @@ mod tests {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let input = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
-            assert_eq!(input.uncertain_cause, None);
+            assert_eq!(input.stop_cause, None);
             let uncertain = storage::record_input_uncertain(
                 &mut fixture.conn,
                 &owner,
                 input.input_id,
-                UncertainCause::ManualInput,
+                StopCause::ManualInput,
             )
             .unwrap();
             assert_eq!(uncertain.state, InputState::Uncertain);
-            assert_eq!(uncertain.uncertain_cause, Some(UncertainCause::ManualInput));
+            assert_eq!(uncertain.stop_cause, Some(StopCause::ManualInput));
             assert_eq!(
                 uncertain.delivery().unwrap().status,
                 DeliveryStatus::Uncertain
@@ -1705,7 +2494,7 @@ mod tests {
             let found = storage::find_input(&fixture.reopen(), owner.run_id, "prompt:caused")
                 .unwrap()
                 .unwrap();
-            assert_eq!(found.uncertain_cause, Some(UncertainCause::ManualInput));
+            assert_eq!(found.stop_cause, Some(StopCause::ManualInput));
         }
 
         #[test]
@@ -1713,14 +2502,16 @@ mod tests {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             for (index, cause) in [
-                UncertainCause::ManualInput,
-                UncertainCause::ManualAccountingFailed,
-                UncertainCause::InteractionCandidate,
-                UncertainCause::InteractionOpen,
-                UncertainCause::ObserverUnavailable,
-                UncertainCause::ShortWrite,
-                UncertainCause::WriteFailed,
-                UncertainCause::RunnerStopped,
+                StopCause::ManualInput,
+                StopCause::ManualAccountingFailed,
+                StopCause::PointerInput,
+                StopCause::InteractionCandidate,
+                StopCause::InteractionOpen,
+                StopCause::ObserverUnavailable,
+                StopCause::DeadlineExpired,
+                StopCause::ShortWrite,
+                StopCause::WriteFailed,
+                StopCause::RunnerStopped,
             ]
             .into_iter()
             .enumerate()
@@ -1738,11 +2529,11 @@ mod tests {
                     cause,
                 )
                 .unwrap_or_else(|error| panic!("{cause:?}: {error}"));
-                assert_eq!(uncertain.uncertain_cause, Some(cause));
+                assert_eq!(uncertain.stop_cause, Some(cause));
                 assert_eq!(
                     storage::get_input(&fixture.reopen(), input.input_id)
                         .unwrap()
-                        .uncertain_cause,
+                        .stop_cause,
                     Some(cause)
                 );
             }
@@ -1802,7 +2593,7 @@ mod tests {
                 &mut fixture.conn,
                 &owner,
                 uncertain.input_id,
-                UncertainCause::WriteFailed,
+                StopCause::WriteFailed,
             )
             .unwrap();
             for (input, state) in [
@@ -1815,7 +2606,7 @@ mod tests {
                     &mut fixture.conn,
                     &owner,
                     input,
-                    UncertainCause::ManualInput,
+                    StopCause::ManualInput,
                 )
                 .unwrap_err();
                 assert!(
@@ -1828,8 +2619,8 @@ mod tests {
             assert_eq!(
                 storage::get_input(&fixture.conn, uncertain.input_id)
                     .unwrap()
-                    .uncertain_cause,
-                Some(UncertainCause::WriteFailed),
+                    .stop_cause,
+                Some(StopCause::WriteFailed),
                 "a repeated transition keeps the first recorded cause"
             );
         }
@@ -1846,7 +2637,7 @@ mod tests {
                     &mut fixture.conn,
                     &owner,
                     input.input_id,
-                    UncertainCause::ManualInput,
+                    StopCause::ManualInput,
                 )
                 .is_err(),
                 "a superseded owner records no cause"
@@ -1863,7 +2654,7 @@ mod tests {
                 &mut fixture.conn,
                 &owner,
                 uncertain.input_id,
-                UncertainCause::WriteFailed,
+                StopCause::WriteFailed,
             )
             .unwrap();
             let submitted = deferred_attempt(&mut fixture, &owner, "prompt:deferred-submitted");
@@ -1880,7 +2671,7 @@ mod tests {
                 &mut fixture.conn,
                 &owner,
                 abandoned.input_id,
-                UncertainCause::RunnerStopped,
+                StopCause::RunnerStopped,
             )
             .unwrap();
             crate::broker::runtime::test_support::settle_input(
@@ -1893,16 +2684,12 @@ mod tests {
             )
             .unwrap();
             let mut expected = vec![
-                (
-                    uncertain.input_id,
-                    "unknown",
-                    Some(UncertainCause::WriteFailed),
-                ),
+                (uncertain.input_id, "unknown", Some(StopCause::WriteFailed)),
                 (submitted.input_id, "submitted", None),
                 (
                     abandoned.input_id,
                     "unknown",
-                    Some(UncertainCause::RunnerStopped),
+                    Some(StopCause::RunnerStopped),
                 ),
             ];
             for (key, disposition, stage) in [
@@ -1922,7 +2709,7 @@ mod tests {
                     &mut fixture.conn,
                     &owner,
                     input.input_id,
-                    UncertainCause::WriteFailed,
+                    StopCause::WriteFailed,
                 )
                 .unwrap();
                 let settled = crate::broker::runtime::test_support::settle_input(
@@ -1934,7 +2721,7 @@ mod tests {
                     "audit:inspected",
                 )
                 .unwrap();
-                assert_eq!(settled.uncertain_cause, Some(UncertainCause::WriteFailed));
+                assert_eq!(settled.stop_cause, Some(StopCause::WriteFailed));
                 expected.push((input.input_id, stage, None));
             }
             let lost = deferred_attempt(&mut fixture, &owner, "prompt:deferred-lost");

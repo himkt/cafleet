@@ -3411,10 +3411,12 @@ mod tests {
                     "disconnected preview λ",
                 )
                 .unwrap();
-                let key = format!(
-                    "preview:{}:{}",
-                    fixture.fixture.run.run_id, message.message_id
-                );
+                let key = crate::broker::runtime::preview_operation_key(
+                    fixture.fixture.run.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap();
                 let accepted_until = until.min(Instant::now() + Duration::from_secs(3));
                 let literal = crate::delivery::canonical_preview_line(&message);
                 let value = request(
@@ -3724,7 +3726,7 @@ mod tests {
             let input = storage::get_input(&fixture.fixture.conn, input_id).unwrap();
             assert_eq!(input.disposition, Some(InputDisposition::NotSubmitted));
             assert_eq!(input.delivery_reason.as_deref(), Some("runner_stopped"));
-            assert_eq!(input.uncertain_cause, None);
+            assert_eq!(input.stop_cause, None);
             let published_cause: Option<String> = fixture
                 .fixture
                 .conn

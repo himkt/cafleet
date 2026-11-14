@@ -1488,7 +1488,7 @@ pub(crate) mod test_support {
                         &mut fixture.conn,
                         &owner,
                         input_id,
-                        storage::UncertainCause::WriteFailed,
+                        storage::StopCause::WriteFailed,
                     )
                     .unwrap();
                 }
@@ -3312,7 +3312,7 @@ mod tests {
                     &mut fixture.conn,
                     &owner,
                     row.input_id,
-                    storage::UncertainCause::WriteFailed,
+                    storage::StopCause::WriteFailed,
                 )
                 .unwrap();
             } else if state != InputState::InProgress {
@@ -5268,7 +5268,7 @@ mod tests {
 
         const MESSAGES: [&str; 4] = ["identity", "contradiction", "missing", "unmatched"];
 
-        fn uncertain(cause: Option<storage::UncertainCause>) -> storage::InputOperation {
+        fn uncertain(cause: Option<storage::StopCause>) -> storage::InputOperation {
             let mut fixture = StorageFixture::new();
             let owner = fixture.activate();
             let input = fixture.input(&owner, "prompt:reason", InputKind::Prompt, None);
@@ -5297,7 +5297,7 @@ mod tests {
 
         #[test]
         fn durable_outcome_reports_the_recorded_cause_as_the_uncertain_reason() {
-            let cause = storage::UncertainCause::ShortWrite;
+            let cause = storage::StopCause::ShortWrite;
             let input = uncertain(Some(cause));
             assert_eq!(
                 durable_outcome(&input),
@@ -5321,7 +5321,7 @@ mod tests {
 
         #[test]
         fn uncertain_reply_must_carry_the_receipt_cause() {
-            let input = uncertain(Some(storage::UncertainCause::ManualInput));
+            let input = uncertain(Some(storage::StopCause::ManualInput));
             validate_reply_against_durable(
                 &reply(&input, Some("manual_input")),
                 Some(&input),

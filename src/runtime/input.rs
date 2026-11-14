@@ -4419,10 +4419,7 @@ mod tests {
                 assert_eq!(point.written_bytes, 3);
                 let stored = storage::get_input(&h.fixture.conn, id).unwrap();
                 assert!(matches!(stored.state, storage::InputState::Uncertain));
-                assert_eq!(
-                    stored.uncertain_cause,
-                    Some(storage::UncertainCause::ShortWrite)
-                );
+                assert_eq!(stored.stop_cause, Some(storage::StopCause::ShortWrite));
                 assert_eq!(reply.reason.as_deref(), Some("short_write"));
                 h.drain();
                 assert!(h.advance().is_none());
@@ -4465,10 +4462,7 @@ mod tests {
                 );
                 let stored = storage::get_input(&h.fixture.conn, id).unwrap();
                 assert_eq!(stored.state, storage::InputState::Uncertain);
-                assert_eq!(
-                    stored.uncertain_cause,
-                    Some(storage::UncertainCause::WriteFailed)
-                );
+                assert_eq!(stored.stop_cause, Some(storage::StopCause::WriteFailed));
                 h.pty.failure = None;
                 let repeat = h.request("prompt:fixture-failed");
                 let replay = submitted(h.handle(repeat).unwrap().expect("retained key lookup"));
@@ -4758,7 +4752,12 @@ mod tests {
             fn operations_preview_binds_the_exact_run_message_key_and_durable_recipient() {
                 with_host(|host| {
                     let message = host.message(LITERAL);
-                    let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
+                    let key = crate::broker::runtime::preview_operation_key(
+                        host.fixture.run.run_id,
+                        message.message_id,
+                        1,
+                    )
+                    .unwrap();
                     let canonical = canonical_preview(&message);
                     let mut program = canonical.as_bytes().to_vec();
                     program.push(b'~');
@@ -4809,7 +4808,12 @@ mod tests {
                         let key_run = run.run_id + i64::from(!wrong_recipient);
                         let input = request(
                             host,
-                            format!("preview:{key_run}:{}", message.message_id),
+                            crate::broker::runtime::preview_operation_key(
+                                key_run,
+                                message.message_id,
+                                1,
+                            )
+                            .unwrap(),
                             storage::InputKind::Preview,
                             Some(message.message_id),
                         );
@@ -4981,10 +4985,7 @@ mod tests {
                     let id = reply.input_id.unwrap();
                     let stored = storage::get_input(&host.fixture.conn, id).unwrap();
                     assert_eq!(stored.state, storage::InputState::Uncertain);
-                    assert_eq!(
-                        stored.uncertain_cause,
-                        Some(storage::UncertainCause::ManualInput)
-                    );
+                    assert_eq!(stored.stop_cause, Some(storage::StopCause::ManualInput));
                     assert_eq!(reply.reason.as_deref(), Some("manual_input"));
                     assert_eq!(
                         delivery_selection(host, id),
@@ -5045,7 +5046,7 @@ mod tests {
                 });
             }
 
-            mod uncertain_cause {
+            mod stop_cause {
                 use crate::runtime::input::tests::ordinary_prompt::staged_delivery::*;
 
                 const FOCUS_REPLY: &[u8] = b"\x1b[I";
@@ -5063,14 +5064,14 @@ mod tests {
                 fn assert_stopped_with(
                     host: &Host,
                     reply: &SubmissionResult,
-                    cause: storage::UncertainCause,
+                    cause: storage::StopCause,
                 ) {
                     assert_eq!(reply.status, SubmissionStatus::Uncertain, "{cause:?}");
                     assert_eq!(reply.stage, SubmissionStage::Partial, "{cause:?}");
                     assert_eq!(reply.reason.as_deref(), Some(cause.as_str()));
                     let row = stored(host, reply);
                     assert_eq!(row.state, storage::InputState::Uncertain);
-                    assert_eq!(row.uncertain_cause, Some(cause));
+                    assert_eq!(row.stop_cause, Some(cause));
                     assert_eq!(
                         host.pty.stage_bytes(),
                         vec![LITERAL.as_bytes().to_vec()],
@@ -5100,13 +5101,13 @@ mod tests {
                             )));
                             let reply = finish_after_interruption(host);
                             let cause = stored(host, &reply)
-                                .uncertain_cause
+                                .stop_cause
                                 .expect("a stopped stage records its cause");
                             assert!(
                                 matches!(
                                     cause,
-                                    storage::UncertainCause::InteractionCandidate
-                                        | storage::UncertainCause::InteractionOpen
+                                    storage::StopCause::InteractionCandidate
+                                        | storage::StopCause::InteractionOpen
                                 ),
                                 "{cause:?}"
                             );
@@ -5195,7 +5196,7 @@ mod tests {
                             assert!(forwarded < submit, "the reply precedes the submit key");
                             let row = stored(host, &reply);
                             assert_eq!(row.state, storage::InputState::Accepted);
-                            assert_eq!(row.uncertain_cause, None);
+                            assert_eq!(row.stop_cause, None);
                         });
                     }
                 }
@@ -5218,7 +5219,7 @@ mod tests {
                         host.drain();
                         assert_eq!(host.transport.human_generation(), generation + 1);
                         let reply = finish_after_interruption(host);
-                        assert_stopped_with(host, &reply, storage::UncertainCause::ManualInput);
+                        assert_stopped_with(host, &reply, storage::StopCause::ManualInput);
                         assert_eq!(host.pty.manual, b"\x1b");
                     });
                 }
@@ -5237,7 +5238,7 @@ mod tests {
                         assert_stopped_with(
                             host,
                             &reply,
-                            storage::UncertainCause::ManualAccountingFailed,
+                            storage::StopCause::ManualAccountingFailed,
                         );
                     });
                 }
@@ -5252,7 +5253,7 @@ mod tests {
                             host.advance()
                                 .expect("the settle check stops the remaining stages"),
                         );
-                        assert_stopped_with(host, &reply, storage::UncertainCause::ManualInput);
+                        assert_stopped_with(host, &reply, storage::StopCause::ManualInput);
                     });
                 }
 
@@ -5265,11 +5266,7 @@ mod tests {
                             host.advance()
                                 .expect("the settle check stops the remaining stages"),
                         );
-                        assert_stopped_with(
-                            host,
-                            &reply,
-                            storage::UncertainCause::InteractionCandidate,
-                        );
+                        assert_stopped_with(host, &reply, storage::StopCause::InteractionCandidate);
                     });
                 }
 
@@ -5284,7 +5281,7 @@ mod tests {
                             host.advance()
                                 .expect("the settle check stops the remaining stages"),
                         );
-                        assert_stopped_with(host, &reply, storage::UncertainCause::InteractionOpen);
+                        assert_stopped_with(host, &reply, storage::StopCause::InteractionOpen);
                     });
                 }
 
@@ -5305,11 +5302,7 @@ mod tests {
                             }
                             std::thread::sleep(Duration::from_millis(5));
                         };
-                        assert_stopped_with(
-                            host,
-                            &reply,
-                            storage::UncertainCause::ObserverUnavailable,
-                        );
+                        assert_stopped_with(host, &reply, storage::StopCause::ObserverUnavailable);
                     });
                 }
 
@@ -5325,7 +5318,7 @@ mod tests {
                             host.advance()
                                 .expect("the armed stage stops on the interaction"),
                         );
-                        assert_stopped_with(host, &reply, storage::UncertainCause::InteractionOpen);
+                        assert_stopped_with(host, &reply, storage::StopCause::InteractionOpen);
                         host.show(SCREEN.to_vec());
                         crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(
                             host,
@@ -5348,11 +5341,7 @@ mod tests {
                             host.advance()
                                 .expect("the armed stage stops on the interaction"),
                         );
-                        assert_stopped_with(
-                            host,
-                            &reply,
-                            storage::UncertainCause::InteractionCandidate,
-                        );
+                        assert_stopped_with(host, &reply, storage::StopCause::InteractionCandidate);
                     });
                 }
             }
@@ -5851,8 +5840,8 @@ mod tests {
                         }
                         if case == "write_failure" {
                             assert_eq!(
-                                row(host, first).uncertain_cause,
-                                Some(storage::UncertainCause::WriteFailed),
+                                row(host, first).stop_cause,
+                                Some(storage::StopCause::WriteFailed),
                                 "a failed deferred attempt records write_failed"
                             );
                         }
@@ -5863,7 +5852,7 @@ mod tests {
                         );
                         assert_eq!(result_events(host, first), 1, "{case}");
                         let recorded = row(host, first)
-                            .uncertain_cause
+                            .stop_cause
                             .expect("a live uncertain result records its cause");
                         assert_eq!(
                             result_cause(host, first),
@@ -6194,8 +6183,8 @@ mod tests {
                         if written {
                             assert_eq!(input.state, storage::InputState::Uncertain);
                             assert_eq!(
-                                input.uncertain_cause,
-                                Some(storage::UncertainCause::RunnerStopped),
+                                input.stop_cause,
+                                Some(storage::StopCause::RunnerStopped),
                                 "fence records runner_stopped for a written deferred attempt"
                             );
                             assert_eq!(
@@ -6465,7 +6454,12 @@ mod tests {
                 storage::input_payload_digest(
                     host.fixture.run.run_id,
                     &SubmitInput {
-                        operation_key: format!("preview:{}:{message}", host.fixture.run.run_id),
+                        operation_key: crate::broker::runtime::preview_operation_key(
+                            host.fixture.run.run_id,
+                            message,
+                            1,
+                        )
+                        .unwrap(),
                         input_kind: storage::InputKind::Preview,
                         message_id: Some(message),
                         literal: canonical.into(),
@@ -7345,7 +7339,12 @@ mod tests {
                 message: &crate::broker::MessageRecord,
                 literal: &str,
             ) -> InputControlRequest {
-                let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
+                let key = crate::broker::runtime::preview_operation_key(
+                    host.fixture.run.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap();
                 let mut request = host.request(&key);
                 request.operation = InputControlOperation::SubmitPrompt(SubmitInput {
                     operation_key: key,
@@ -9118,7 +9117,12 @@ mod tests {
                         "preview during a permission form",
                     )
                     .unwrap();
-                    let key = format!("preview:{}:{}", run.run_id, message.message_id);
+                    let key = crate::broker::runtime::preview_operation_key(
+                        run.run_id,
+                        message.message_id,
+                        1,
+                    )
+                    .unwrap();
                     let mut request = h.request(&key);
                     request.operation =
                         InputControlOperation::SubmitPrompt(crate::runtime::SubmitInput {
@@ -11021,8 +11025,8 @@ mod tests {
                 let receipt = audit(h, id, &input, "inspection-allow-plan");
                 assert_eq!(receipt.input.state, storage::InputState::Uncertain);
                 assert_eq!(
-                    receipt.input.uncertain_cause,
-                    Some(storage::UncertainCause::WriteFailed)
+                    receipt.input.stop_cause,
+                    Some(storage::StopCause::WriteFailed)
                 );
                 assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
             });
@@ -11049,8 +11053,8 @@ mod tests {
                 let receipt = audit(h, id, &input, "inspection-allow-plan");
                 assert_eq!(receipt.input.state, storage::InputState::Uncertain);
                 assert_eq!(
-                    receipt.input.uncertain_cause,
-                    Some(storage::UncertainCause::WriteFailed)
+                    receipt.input.stop_cause,
+                    Some(storage::StopCause::WriteFailed)
                 );
             });
         }

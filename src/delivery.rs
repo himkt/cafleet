@@ -1145,7 +1145,12 @@ mod tests {
             &mut fixture.conn,
             &run.owner(),
             &storage::NewInput {
-                operation_key: format!("preview:{}:{}", run.run_id, message.message_id),
+                operation_key: crate::broker::runtime::preview_operation_key(
+                    run.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap(),
                 kind: InputKind::Preview,
                 payload_digest: preview_digest(run.run_id, message.message_id, &literal),
                 message_id: Some(message.message_id),
@@ -1165,7 +1170,7 @@ mod tests {
                     &mut fixture.conn,
                     &run.owner(),
                     original.input_id,
-                    storage::UncertainCause::WriteFailed,
+                    storage::StopCause::WriteFailed,
                 )
                 .unwrap();
             } else if state == InputState::Settled {
@@ -1305,8 +1310,12 @@ mod tests {
         run_id: i64,
         message_id: i64,
     ) -> Option<broker::runtime::InputOperation> {
-        broker::runtime::find_input(conn, run_id, &format!("preview:{run_id}:{message_id}"))
-            .unwrap()
+        broker::runtime::find_input(
+            conn,
+            run_id,
+            &crate::broker::runtime::preview_operation_key(run_id, message_id, 1).unwrap(),
+        )
+        .unwrap()
     }
 
     fn preview_stamp(conn: &Connection, message_id: i64) -> Option<String> {
@@ -1322,7 +1331,8 @@ mod tests {
         storage::input_payload_digest(
             run_id,
             &crate::runtime::SubmitInput {
-                operation_key: format!("preview:{run_id}:{message_id}"),
+                operation_key: crate::broker::runtime::preview_operation_key(run_id, message_id, 1)
+                    .unwrap(),
                 input_kind: InputKind::Preview,
                 message_id: Some(message_id),
                 literal: literal.into(),
@@ -1760,7 +1770,12 @@ mod tests {
                     )
                     .unwrap();
                     assert!(outcome.sent.is_empty(), "{body}: {outcome:?}");
-                    let key = format!("preview:{}:{}", run.run_id, message.message_id);
+                    let key = crate::broker::runtime::preview_operation_key(
+                        run.run_id,
+                        message.message_id,
+                        1,
+                    )
+                    .unwrap();
                     let queued = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
                         .unwrap()
                         .unwrap_or_else(|| panic!("{body}: a durable queued receipt"));

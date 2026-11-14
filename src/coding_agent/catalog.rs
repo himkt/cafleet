@@ -2289,6 +2289,107 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeSet;
 
+    mod verified_composer {
+        use crate::coding_agent::catalog::tests::*;
+
+        #[test]
+        fn verified_composer_requires_an_executable_plan_for_the_selected_operation() {
+            for (prompt, exec) in [(true, true), (true, false), (false, true), (false, false)] {
+                let catalog = composer_catalog(prompt.then_some("0d"), exec.then_some("0d"));
+                assert_eq!(
+                    catalog.verified_composer(
+                        CodingAgent::Codex,
+                        Some(VERSION),
+                        ComposerOperation::Prompt
+                    ),
+                    prompt
+                );
+                assert_eq!(
+                    catalog.verified_composer(
+                        CodingAgent::Codex,
+                        Some(VERSION),
+                        ComposerOperation::Exec
+                    ),
+                    exec
+                );
+            }
+        }
+
+        #[test]
+        fn verified_composer_requires_a_selected_composer_declaration() {
+            let catalog = load(&definitions()).unwrap();
+            assert!(
+                catalog
+                    .composer_plan(CodingAgent::Codex, VERSION, ComposerOperation::Prompt)
+                    .is_none()
+            );
+            assert!(!catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+            assert!(!catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Exec
+            ));
+        }
+
+        #[test]
+        fn verified_composer_uses_the_recorded_backend_and_native_version() {
+            let catalog = composer_catalog(Some("0d"), Some("0d"));
+            assert!(catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+            for version in [None, Some("not-a-native-version"), Some("0.0.0")] {
+                assert!(
+                    !catalog.verified_composer(
+                        CodingAgent::Codex,
+                        version,
+                        ComposerOperation::Prompt
+                    ),
+                    "{version:?}"
+                );
+            }
+            assert!(!catalog.verified_composer(
+                CodingAgent::Claude,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+            let absent = load(&simple_definition("permission_request", false)).unwrap();
+            assert!(!absent.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+        }
+
+        #[test]
+        fn verified_composer_uses_only_the_profile_selected_for_the_recorded_version() {
+            let mut definition = thresholds(&[("first", VERSION), ("second", VERSION_TWO)]);
+            definition["profiles"][1]["capabilities"]["composer"]["submission"]["exec"] =
+                Value::Null;
+            let catalog = load(&definition).unwrap();
+            assert!(catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Exec
+            ));
+            assert!(!catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION_TWO),
+                ComposerOperation::Exec
+            ));
+            assert!(catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION_TWO),
+                ComposerOperation::Prompt
+            ));
+        }
+    }
+
     mod panel_separator {
         use crate::coding_agent::catalog::tests::*;
 

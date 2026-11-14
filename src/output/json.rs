@@ -500,7 +500,7 @@ mod tests {
             "child_start_identity",
             "effective_policy",
         ];
-        const INPUT_KEYS: [&str; 16] = [
+        const INPUT_KEYS: [&str; 17] = [
             "input_id",
             "run_id",
             "operation_key",
@@ -516,7 +516,8 @@ mod tests {
             "delivery",
             "deferred_at",
             "defer_reason",
-            "uncertain_cause",
+            "stop_cause",
+            "left_stage",
         ];
 
         #[test]
@@ -802,7 +803,7 @@ mod tests {
         }
 
         #[test]
-        fn input_presentation_reports_the_recorded_uncertain_cause_and_keeps_the_text_line() {
+        fn input_presentation_reports_the_recorded_stop_cause_and_keeps_the_text_line() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let caused = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
@@ -810,11 +811,11 @@ mod tests {
                 &mut fixture.conn,
                 &owner,
                 caused.input_id,
-                UncertainCause::ManualInput,
+                StopCause::ManualInput,
             )
             .unwrap();
             let output = crate::output::json::input_operation(&caused);
-            assert_eq!(output["input"]["uncertain_cause"], "manual_input");
+            assert_eq!(output["input"]["stop_cause"], "manual_input");
             assert_eq!(
                 crate::output::format_input_operation(&caused),
                 format!(
@@ -832,13 +833,13 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                crate::output::json::input_operation(&settled)["input"]["uncertain_cause"],
+                crate::output::json::input_operation(&settled)["input"]["stop_cause"],
                 "manual_input",
                 "reconciliation keeps the recorded cause"
             );
             let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt, None);
             assert_eq!(
-                crate::output::json::input_operation(&plain)["input"]["uncertain_cause"],
+                crate::output::json::input_operation(&plain)["input"]["stop_cause"],
                 Value::Null
             );
         }
