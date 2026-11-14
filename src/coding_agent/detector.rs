@@ -5069,6 +5069,113 @@ mod tests {
         }
     }
 
+    mod composer_reliability {
+        use crate::coding_agent::detector::tests::*;
+
+        fn verify(backend: CodingAgent, version: &str, id: &str, expected: bool) {
+            let snapshot = replay_as_captured(id, |_| {}, None);
+            let observed = observe_bundled(backend, version, &snapshot);
+            assert_eq!(
+                observed.kind == ObservationKind::ComposerEmpty,
+                expected,
+                "{id}"
+            );
+            assert_eq!(observed.verified_noninteraction, expected, "{id}");
+        }
+
+        #[test]
+        fn measured_pi_working_editors_are_verified_empty_after_submit() {
+            for id in [
+                "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61",
+                "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61",
+            ] {
+                verify(CodingAgent::Pi, "1.5.0", id, true);
+            }
+        }
+
+        #[test]
+        fn pi_working_editors_with_typed_or_pasted_input_remain_unverified() {
+            let id = "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61";
+            for draft in ["x", "! [paste #1 2047 chars]", "retained input"] {
+                let snapshot = replay_as_captured(
+                    id,
+                    |lines| {
+                        let top = lines
+                            .iter()
+                            .position(|row| row.starts_with("── ") && row.contains(" Working "))
+                            .expect("the measured Working editor border");
+                        lines[top + 1] = draft.into();
+                    },
+                    None,
+                );
+                let observed = observe_bundled(CodingAgent::Pi, "1.5.0", &snapshot);
+                assert_ne!(observed.kind, ObservationKind::ComposerEmpty, "{draft}");
+                assert!(!observed.verified_noninteraction, "{draft}");
+            }
+        }
+
+        #[test]
+        fn pi_working_editor_requires_the_cursor_inside_its_live_region() {
+            let id = "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61";
+            let snapshot = replay_as_captured(id, |_| {}, Some((0, 0)));
+            let observed = observe_bundled(CodingAgent::Pi, "1.5.0", &snapshot);
+            assert_ne!(observed.kind, ObservationKind::ComposerEmpty);
+            assert!(!observed.verified_noninteraction);
+        }
+
+        #[test]
+        fn measured_hermes_working_placeholders_verify_only_the_live_editor() {
+            for id in [
+                "hermes-2026.9.24-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7",
+                "hermes-2026.9.24-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7",
+            ] {
+                verify(CodingAgent::Hermes, "2026.9.24", id, true);
+            }
+        }
+
+        #[test]
+        fn hermes_working_editor_rejects_literal_suffixes_and_nonprefix_cursor_positions() {
+            let id = "hermes-2026.9.24-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7";
+            for draft in ["☤ ❯ x", "☤ ❯ [Pasted 2057 chars]", "☤ ❯ retained literal"] {
+                let snapshot = replay_as_captured(
+                    id,
+                    |lines| {
+                        let editor = lines
+                            .iter_mut()
+                            .find(|row| row.starts_with("☤ ❯ "))
+                            .expect("the measured Hermes working editor");
+                        *editor = draft.into();
+                    },
+                    None,
+                );
+                let observed = observe_bundled(CodingAgent::Hermes, "2026.9.24", &snapshot);
+                assert_ne!(observed.kind, ObservationKind::ComposerEmpty, "{draft}");
+                assert!(!observed.verified_noninteraction);
+            }
+            let snapshot = replay_as_captured(id, |_| {}, Some((0, 0)));
+            assert_ne!(
+                observe_bundled(CodingAgent::Hermes, "2026.9.24", &snapshot).kind,
+                ObservationKind::ComposerEmpty
+            );
+        }
+
+        #[test]
+        fn claude_native_ghost_hint_and_an_actual_typed_character_have_distinct_eligibility() {
+            verify(
+                CodingAgent::Claude,
+                "2.1.319",
+                "claude-2.1.319-composer-prompt-key-probe-before-tapped-v2-tmux-120-1",
+                true,
+            );
+            verify(
+                CodingAgent::Claude,
+                "2.1.319",
+                "claude-2.1.319-composer-prompt-key-probe-after-tapped-v2-tmux-120-2",
+                false,
+            );
+        }
+    }
+
     mod pi_profile {
         use crate::coding_agent::detector::tests::*;
 
@@ -5094,11 +5201,7 @@ mod tests {
             "deny-continuation",
             "exec-post-submit",
         ];
-        const BUSY_OR_DRAFT_SCREENS: [&str; 3] = [
-            "prompt-typed-literal",
-            "exec-typed-literal",
-            "prompt-post-submit",
-        ];
+        const DRAFT_SCREENS: [&str; 2] = ["prompt-typed-literal", "exec-typed-literal"];
 
         fn id(screen: &str, capture: &str) -> String {
             format!("pi-{VERSION}-{screen}-{capture}-1")
@@ -5459,9 +5562,18 @@ mod tests {
         }
 
         #[test]
-        fn pi_draft_working_turn_and_cursor_outside_the_editor_are_not_idle() {
+        fn pi_captured_working_post_submit_editors_are_verified_empty() {
             for capture in CAPTURES {
-                for screen in BUSY_OR_DRAFT_SCREENS {
+                let observed = observed("prompt-post-submit", capture);
+                assert_eq!(observed.kind, ObservationKind::ComposerEmpty, "{capture}");
+                assert!(observed.verified_noninteraction, "{capture}");
+            }
+        }
+
+        #[test]
+        fn pi_retained_drafts_and_cursor_outside_the_editor_remain_unverified() {
+            for capture in CAPTURES {
+                for screen in DRAFT_SCREENS {
                     assert_not_idle(&observed(screen, capture), &id(screen, capture));
                 }
                 for (screen, _, _) in FORMS {

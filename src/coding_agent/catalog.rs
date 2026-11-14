@@ -1725,8 +1725,8 @@ pub(crate) mod test_support {
             capabilities["composer"] = json!({
                 "rule_ids":["synthetic-composer_empty"],"fixture_ids":[id],
                 "submission":{
-                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[id]},
-                    "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[id]}
+                    "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[id]},
+                    "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[id]}
                 }
             });
             capabilities["answers"] = json!([{
@@ -2084,8 +2084,8 @@ pub(crate) mod test_support {
         value["profiles"][0]["capabilities"] = if kind.starts_with("composer_") {
             let mut composer = declaration;
             composer["submission"] = json!({
-                "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
-                "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[FIXTURE]}
+                "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
+                "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[FIXTURE]}
             });
             json!({"detection":null,"composer":composer,"annotations":null,"answers":[]})
         } else {
@@ -2172,8 +2172,8 @@ pub(crate) mod test_support {
             fixture["id"] = json!(id);
             value["fixtures"].as_array_mut().unwrap().push(fixture);
         }
-        let prompt = json!({"prefix_hex":"","submit_hex":prompt.unwrap_or("0d"),"fixture_ids":[PROMPT_FIXTURE]});
-        let exec = json!({"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
+        let prompt = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":prompt.unwrap_or("0d"),"fixture_ids":[PROMPT_FIXTURE]});
+        let exec = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
         value["profiles"][0]["capabilities"]["composer"] = json!({
             "rule_ids":[EMPTY],"fixture_ids":[FIXTURE],
             "submission":{"prompt":prompt,"exec":exec}
@@ -2403,6 +2403,176 @@ mod tests {
                 Some(VERSION_TWO),
                 ComposerOperation::Prompt
             ));
+        }
+    }
+
+    mod composer_reliability {
+        use crate::coding_agent::catalog::tests::*;
+
+        fn framed_definition(framing: &str, limit: Value) -> Value {
+            let mut value = definition(Some("0d"), Some("0d"));
+            for operation in ["prompt", "exec"] {
+                let plan =
+                    &mut value["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                plan["literal_framing"] = json!(framing);
+                plan["plain_literal_limit"] = limit.clone();
+            }
+            value
+        }
+
+        #[test]
+        fn composer_plans_require_explicit_framing_and_plain_limit_declarations() {
+            for operation in ["prompt", "exec"] {
+                for key in ["literal_framing", "plain_literal_limit"] {
+                    let mut value = framed_definition("plain", Value::Null);
+                    value["profiles"][0]["capabilities"]["composer"]["submission"][operation]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(key);
+                    assert!(load(&value).is_err(), "{operation}: {key}");
+                }
+            }
+        }
+
+        #[test]
+        fn composer_plans_accept_plain_or_bracketed_framing_and_positive_byte_or_scalar_limits() {
+            for framing in ["plain", "bracketed_paste"] {
+                for limit in [
+                    Value::Null,
+                    json!({"unit":"bytes","max":1}),
+                    json!({"unit":"scalars","max":1024}),
+                ] {
+                    assert!(
+                        load(&framed_definition(framing, limit.clone())).is_ok(),
+                        "{framing}: {limit}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn composer_plans_reject_unknown_framing_and_malformed_plain_limits() {
+            for framing in [
+                Value::Null,
+                json!(true),
+                json!(1),
+                json!(""),
+                json!("paste"),
+            ] {
+                let mut value = framed_definition("plain", Value::Null);
+                value["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["literal_framing"] =
+                    framing.clone();
+                assert!(load(&value).is_err(), "{framing}");
+            }
+            for limit in [
+                json!({}),
+                json!({"unit":"bytes"}),
+                json!({"max":1}),
+                json!({"unit":"cells","max":1}),
+                json!({"unit":"bytes","max":0}),
+                json!({"unit":"scalars","max":-1}),
+                json!({"unit":"bytes","max":1.5}),
+                json!({"unit":"bytes","max":"1"}),
+                json!({"unit":"bytes","max":true}),
+                json!({"unit":"bytes","max":1,"extra":true}),
+                json!(false),
+                json!([]),
+            ] {
+                assert!(
+                    load(&framed_definition("plain", limit.clone())).is_err(),
+                    "{limit}"
+                );
+            }
+        }
+
+        #[test]
+        fn bracketed_literal_stages_preserve_the_plain_operation_prefix_and_utf8_literal() {
+            let catalog = load(&framed_definition(
+                "bracketed_paste",
+                json!({"unit":"bytes","max":1024}),
+            ))
+            .unwrap();
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                let plan = plan(&catalog, operation);
+                let [literal, submit] = plan
+                    .stages("literal あ", LiteralFraming::BracketedPaste)
+                    .unwrap();
+                let mut expected = operation.prefix().to_vec();
+                expected.extend_from_slice(b"\x1b[200~");
+                expected.extend_from_slice("literal あ".as_bytes());
+                expected.extend_from_slice(b"\x1b[201~");
+                assert_eq!(literal, expected);
+                assert_eq!(submit, b"\r");
+            }
+        }
+
+        #[test]
+        fn plain_literal_stages_omit_framing_and_keep_the_selected_submit_key() {
+            let catalog = load(&framed_definition("bracketed_paste", Value::Null)).unwrap();
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                let plan = plan(&catalog, operation);
+                let [literal, submit] = plan.stages("literal あ", LiteralFraming::Plain).unwrap();
+                let mut expected = operation.prefix().to_vec();
+                expected.extend_from_slice("literal あ".as_bytes());
+                assert_eq!(literal, expected);
+                assert_eq!(submit, b"\r");
+            }
+        }
+
+        #[test]
+        fn bracketed_payload_limit_counts_both_markers_prefix_and_submit_bytes() {
+            let catalog = load(&framed_definition("bracketed_paste", Value::Null)).unwrap();
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                let plan = plan(&catalog, operation);
+                let maximum = 65536 - operation.prefix().len() - 12 - 1;
+                let stages = plan
+                    .stages(&"a".repeat(maximum), LiteralFraming::BracketedPaste)
+                    .unwrap();
+                assert_eq!(stages.iter().map(Vec::len).sum::<usize>(), 65536);
+                assert!(
+                    plan.stages(&"a".repeat(maximum + 1), LiteralFraming::BracketedPaste)
+                        .is_err()
+                );
+            }
+        }
+
+        #[test]
+        fn bundled_guard_requires_an_empty_composer_rule_for_executable_plans() {
+            let mut value = bundled_definitions();
+            let profile = value["profiles"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|profile| !profile["capabilities"]["composer"].is_null())
+                .expect("a bundled executable composer profile");
+            let ids = profile["capabilities"]["composer"]["rule_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect::<Vec<_>>();
+            for rule in profile["rules"].as_array_mut().unwrap() {
+                if ids
+                    .iter()
+                    .any(|id| rule["id"].as_str() == Some(id.as_str()))
+                {
+                    rule["observation"] = json!("composer_visible");
+                }
+            }
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn bundled_guard_requires_plan_fixture_citations_for_measured_delivery() {
+            let mut value = bundled_definitions();
+            let profile = value["profiles"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|profile| !profile["capabilities"]["composer"].is_null())
+                .expect("a bundled executable composer profile");
+            profile["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] = json!([]);
+            assert!(validate_provenance(&value).is_err());
         }
     }
 
@@ -5806,7 +5976,10 @@ mod tests {
                 let plan = bundled
                     .composer_plan(CodingAgent::Hermes, "2026.9.24", operation)
                     .unwrap_or_else(|| panic!("{name} plan"));
-                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
+                assert_eq!(
+                    plan.stages(literal, LiteralFraming::Plain).unwrap(),
+                    [typed, b"\r".to_vec()]
+                );
             }
         }
 
@@ -5830,7 +6003,10 @@ mod tests {
                 let plan = bundled
                     .composer_plan(CodingAgent::Pi, "1.5.0", operation)
                     .unwrap_or_else(|| panic!("{name} plan"));
-                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
+                assert_eq!(
+                    plan.stages(literal, LiteralFraming::Plain).unwrap(),
+                    [typed, b"\r".to_vec()]
+                );
             }
         }
 

@@ -4828,8 +4828,8 @@ mod tests {
                 fixture["id"] = serde_json::json!("synthetic-exec-plan");
                 definition["fixtures"].as_array_mut().unwrap().push(fixture);
                 definition["profiles"][0]["capabilities"]["composer"]["submission"] = serde_json::json!({
-                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-exec-plan"]},
-                    "exec":{"prefix_hex":"2120","submit_hex":"6b6c","fixture_ids":["synthetic-exec-plan"]}
+                    "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-exec-plan"]},
+                    "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"6b6c","fixture_ids":["synthetic-exec-plan"]}
                 });
                 let exec_catalog = crate::coding_agent::catalog::test_support::load(&definition)
                     .unwrap()
@@ -7272,7 +7272,7 @@ mod tests {
                 value["profiles"][0]["capabilities"] = serde_json::json!({
                     "detection":null,"annotations":null,"answers":[],"composer":{
                         "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
-                        "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
+                        "submission":{"prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
                     }
                 });
                 value

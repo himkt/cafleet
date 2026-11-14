@@ -1189,6 +1189,19 @@ mod tests {
     use crate::runtime::transport::*;
 
     #[test]
+    fn runner_transport_bracketed_paste_selection_follows_the_child_mode_2004() {
+        let mut transport = transport();
+        let mut pty = FakePty::new(b"", 1);
+        assert!(!transport.bracketed_paste());
+        pty.output.chunks.push_back(b"\x1b[?2004h".to_vec());
+        one_tick(&mut transport, &mut FakeInput::default(), &mut pty);
+        assert!(transport.bracketed_paste());
+        pty.output.chunks.push_back(b"\x1b[?2004l".to_vec());
+        one_tick(&mut transport, &mut FakeInput::default(), &mut pty);
+        assert!(!transport.bracketed_paste());
+    }
+
+    #[test]
     fn runner_terminal_fragmented_utf8_and_ansi_reconstruct_the_same_live_screen() {
         let bytes = "\u{1b}[2J\u{1b}[H許可しますか？ ✓\r\n> prompt".as_bytes();
         let size = TerminalSize { rows: 24, cols: 80 };
