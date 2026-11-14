@@ -6462,9 +6462,16 @@ mod tests {
                             "interaction_open",
                         );
                         host.show(SCREEN.to_vec());
-                        for _ in 0..64 {
-                            let _ = turn(host);
-                        }
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
+                            host,
+                            |host| row(host, id).state == storage::InputState::Settled,
+                        );
+                        assert_eq!(host.controller.status().visibility, Visibility::NotVisible);
+                        assert_eq!(
+                            host.controller.status().eligibility,
+                            InputEligibility::ComposerEmpty,
+                        );
+                        assert!(host.controller.active_episode_seq().is_none());
                         let input = row(host, id);
                         assert_eq!(
                             input.disposition,
@@ -6475,6 +6482,7 @@ mod tests {
                             Some("plain_limit_exceeded")
                         );
                         assert!(host.pty.offers.is_empty());
+                        assert!(host.coordinator.queue.is_empty());
                     },
                 );
             }
