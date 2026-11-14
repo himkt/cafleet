@@ -3387,9 +3387,9 @@ mod tests {
             let bytes = report.repeat(8);
             let mut human = FakeInput::new(&bytes, bytes.len());
             let mut pty = FakePty::new(b"", 1);
-            for (consumed, pointer) in [(16, 12), (32, 30), (48, 48)] {
+            for (read, consumed, pointer) in [(32, 32, 30), (16, 48, 48)] {
                 let progress = one_tick(&mut transport, &mut human, &mut pty);
-                assert_eq!(progress.human_bytes, 16);
+                assert_eq!(progress.human_bytes, read);
                 assert_eq!(human.consumed.len(), consumed);
                 assert_eq!(pty.written, bytes[..consumed]);
                 assert_eq!(transport.human_generation(), 0);
