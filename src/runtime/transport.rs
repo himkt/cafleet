@@ -21,6 +21,7 @@ pub(super) struct DrainedInput {
     instance: Arc<()>,
     turn: u64,
     human_generation: u64,
+    pointer_generation: u64,
     output_seq: u64,
     health: ObservationHealth,
 }
@@ -28,6 +29,9 @@ pub(super) struct DrainedInput {
 impl DrainedInput {
     pub(super) fn human_generation(&self) -> u64 {
         self.human_generation
+    }
+    pub(super) fn pointer_generation(&self) -> u64 {
+        self.pointer_generation
     }
     pub(super) fn output_seq(&self) -> u64 {
         self.output_seq
@@ -77,6 +81,7 @@ pub(crate) struct Transport {
     outer_eof: bool,
     child_eof: bool,
     human_generation: u64,
+    pointer_generation: u64,
     replies: ReplyClassifier,
     input_turn: u64,
     input_instance: Arc<()>,
@@ -165,6 +170,7 @@ impl Transport {
             outer_eof: false,
             child_eof: false,
             human_generation: 0,
+            pointer_generation: 0,
             replies: ReplyClassifier::default(),
             input_turn: 0,
             input_instance: Arc::new(()),
@@ -299,26 +305,33 @@ impl Transport {
     }
     fn retain_human(&mut self, bytes: Vec<u8>) {
         let classified = self.replies.feed(&bytes, Instant::now());
-        self.count_manual(classified);
+        self.count_input(classified);
         self.input.extend(bytes);
     }
     fn expire_reply_prefix(&mut self) {
         let classified = self.replies.expire(Instant::now());
-        self.count_manual(classified);
+        self.count_input(classified);
     }
     fn close_outer(&mut self) {
         let classified = self.replies.finish();
-        self.count_manual(classified);
+        self.count_input(classified);
         self.outer_eof = true;
     }
-    fn count_manual(&mut self, classified: Classified) {
+    fn count_input(&mut self, classified: Classified) {
         self.human_generation = self
             .human_generation
             .checked_add(u64::try_from(classified.manual).expect("manual byte count fits u64"))
             .expect("human input generation fits u64");
+        self.pointer_generation = self
+            .pointer_generation
+            .checked_add(u64::try_from(classified.pointer).expect("pointer byte count fits u64"))
+            .expect("pointer input generation fits u64");
     }
     pub(super) fn human_generation(&self) -> u64 {
         self.human_generation
+    }
+    pub(super) fn pointer_generation(&self) -> u64 {
+        self.pointer_generation
     }
     #[cfg(test)]
     pub(super) fn backdate_reply_prefix(&mut self, by: std::time::Duration) {
@@ -342,11 +355,27 @@ impl Transport {
         proof: &DrainedInput,
         deadline: Instant,
     ) -> Result<()> {
-        self.validate_observation_drain(proof, deadline)?;
+        self.validate_ordinary(proof, deadline)?;
         ensure(
             proof.health.eligibility == InputEligibility::ComposerEmpty
                 && proof.health.visibility == Visibility::NotVisible,
             "input drain is not eligible for composer input",
+        )
+    }
+
+    pub(super) fn validate_ordinary(&self, proof: &DrainedInput, deadline: Instant) -> Result<()> {
+        self.validate_observation_drain(proof, deadline)
+    }
+
+    pub(super) fn validate_permission(
+        &self,
+        proof: &DrainedInput,
+        deadline: Instant,
+    ) -> Result<()> {
+        self.validate_ordinary(proof, deadline)?;
+        ensure(
+            self.pointer_generation == proof.pointer_generation,
+            "input drain pointer binding changed",
         )
     }
 
@@ -622,6 +651,7 @@ impl Transport {
                     instance: self.input_instance.clone(),
                     turn: self.input_turn,
                     human_generation: self.human_generation,
+                    pointer_generation: self.pointer_generation,
                     output_seq,
                     health,
                 });
@@ -711,6 +741,9 @@ enum State {
         parameters: Vec<u8>,
         intermediate: bool,
     },
+    X10 {
+        remaining: u8,
+    },
     StringBody {
         kind: StringKind,
         length: usize,
@@ -718,8 +751,6 @@ enum State {
     StringEscape,
 }
 
-/// Decides how many forwarded outer-terminal bytes count as manual input.
-/// It never holds bytes: forwarding happens before and independently of it.
 fn flush_nonblocking(display: &mut impl Display) -> Result<()> {
     match display.try_flush() {
         Err(cause) if cause.kind() != ErrorKind::WouldBlock => Err(io_error(cause)),
@@ -735,14 +766,37 @@ pub(super) struct ReplyClassifier {
     paste_end_matched: Option<usize>,
 }
 
+#[derive(Default)]
 pub(super) struct Classified {
     pub(super) manual: usize,
+    pub(super) pointer: usize,
+}
+
+impl Classified {
+    fn manual(count: usize) -> Self {
+        Self {
+            manual: count,
+            pointer: 0,
+        }
+    }
+
+    fn pointer(count: usize) -> Self {
+        Self {
+            manual: 0,
+            pointer: count,
+        }
+    }
 }
 
 impl ReplyClassifier {
     pub(super) fn feed(&mut self, bytes: &[u8], now: Instant) -> Classified {
-        let manual = bytes.iter().map(|&byte| self.classify(byte, now)).sum();
-        Classified { manual }
+        let mut total = Classified::default();
+        for &byte in bytes {
+            let classified = self.classify(byte, now);
+            total.manual += classified.manual;
+            total.pointer += classified.pointer;
+        }
+        total
     }
 
     pub(super) fn expire(&mut self, now: Instant) -> Classified {
@@ -752,29 +806,27 @@ impl ReplyClassifier {
             }
             _ => 0,
         };
-        Classified { manual }
+        Classified::manual(manual)
     }
 
     pub(super) fn finish(&mut self) -> Classified {
-        Classified {
-            manual: self.resolve_manual(),
-        }
+        Classified::manual(self.resolve_manual())
     }
 
     pub(super) fn pending(&self) -> bool {
         self.pending > 0
     }
 
-    fn classify(&mut self, byte: u8, now: Instant) -> usize {
-        let manual = match self.paste_end_matched {
+    fn classify(&mut self, byte: u8, now: Instant) -> Classified {
+        let classified = match self.paste_end_matched {
             Some(matched) => {
                 self.advance_paste(matched, byte);
-                1
+                Classified::manual(1)
             }
             None => self.step(byte),
         };
         self.last_byte = self.pending().then_some(now);
-        manual
+        classified
     }
 
     fn advance_paste(&mut self, matched: usize, byte: u8) {
@@ -788,7 +840,7 @@ impl ReplyClassifier {
         self.paste_end_matched = (matched < PASTE_END.len()).then_some(matched);
     }
 
-    fn step(&mut self, byte: u8) -> usize {
+    fn step(&mut self, byte: u8) -> Classified {
         match std::mem::take(&mut self.state) {
             State::Ground => self.ground(byte),
             State::Escape => match byte {
@@ -823,6 +875,15 @@ impl ReplyClassifier {
                 0x40..=0x7e => self.complete_csi(&parameters, byte),
                 _ => self.invalid(byte),
             },
+            State::X10 { remaining } => match byte {
+                0x20..=0xff if remaining == 1 => {
+                    Classified::pointer(std::mem::take(&mut self.pending) + 1)
+                }
+                0x20..=0xff => self.extend(State::X10 {
+                    remaining: remaining.checked_sub(1).expect("X10 payload remains"),
+                }),
+                _ => self.invalid(byte),
+            },
             State::StringBody { kind, length } => match byte {
                 0x20..=0x7e | 0x80..=0xff if length == STRING_BODY_LIMIT => self.invalid(byte),
                 0x20..=0x7e | 0x80..=0xff => self.extend(State::StringBody {
@@ -840,28 +901,31 @@ impl ReplyClassifier {
         }
     }
 
-    fn ground(&mut self, byte: u8) -> usize {
+    fn ground(&mut self, byte: u8) -> Classified {
         if byte == ESC {
             self.state = State::Escape;
             self.pending = 1;
-            0
+            Classified::default()
         } else {
-            1
+            Classified::manual(1)
         }
     }
 
-    fn open_string(&mut self, kind: StringKind) -> usize {
+    fn open_string(&mut self, kind: StringKind) -> Classified {
         self.extend(State::StringBody { kind, length: 0 })
     }
 
-    fn extend(&mut self, state: State) -> usize {
+    fn extend(&mut self, state: State) -> Classified {
         self.state = state;
         self.pending += 1;
-        0
+        Classified::default()
     }
 
-    fn invalid(&mut self, byte: u8) -> usize {
-        self.resolve_manual() + self.ground(byte)
+    fn invalid(&mut self, byte: u8) -> Classified {
+        let manual = self.resolve_manual();
+        let mut classified = self.ground(byte);
+        classified.manual += manual;
+        classified
     }
 
     fn resolve_manual(&mut self) -> usize {
@@ -870,20 +934,30 @@ impl ReplyClassifier {
         std::mem::take(&mut self.pending)
     }
 
-    fn complete_reply(&mut self) -> usize {
+    fn complete_reply(&mut self) -> Classified {
         self.pending = 0;
-        0
+        Classified::default()
     }
 
-    fn complete_csi(&mut self, parameters: &[u8], final_byte: u8) -> usize {
+    fn complete_csi(&mut self, parameters: &[u8], final_byte: u8) -> Classified {
+        if parameters.is_empty() && final_byte == b'M' {
+            return self.extend(State::X10 { remaining: 3 });
+        }
         let length = std::mem::take(&mut self.pending) + 1;
+        if matches!(final_byte, b'M' | b'm')
+            && parameters
+                .strip_prefix(b"<")
+                .is_some_and(|list| parameter_count(list) == Some(3))
+        {
+            return Classified::pointer(length);
+        }
         if is_csi_reply(parameters, final_byte) {
-            return 0;
+            return Classified::default();
         }
         if parameters == b"200" && final_byte == b'~' {
             self.paste_end_matched = Some(0);
         }
-        length
+        Classified::manual(length)
     }
 }
 
