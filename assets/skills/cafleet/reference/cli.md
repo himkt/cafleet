@@ -141,6 +141,17 @@ Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` 
 
 Receipt retirement failure reports `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining `notification_sent=true`. Pre-commit storage failure exits 1. Consume each committed ID once.
 
+Each attempted message left in the composer or held by its own uncertain/abandoned receipt prints one diagnostic after `Message NEW_ID was persisted. `. Submitted and queued messages print none. `INPUT_ID` is this attempt and `NEXT_ID` its re-delivery successor; JSON `input_id` and `delivery` continue to describe this invocation's attempt of the new message.
+
+| Outcome | Diagnostic |
+|---|---|
+| Left stage `partial` | `message MESSAGE_ID was partly typed into member MEMBER_ID's composer and not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
+| Left stage `literal_complete` | `message MESSAGE_ID was typed into member MEMBER_ID's composer but not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
+| Left stage `submitted` | `message MESSAGE_ID was typed into member MEMBER_ID's composer and its submit key sent, but the submission was not confirmed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
+| Left stage `escape_only` | `message MESSAGE_ID was not typed: Escape was sent to member MEMBER_ID but the input was not typed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
+| Own uncertain receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is uncertain (STOP_CAUSE); inspect it with cafleet input show INPUT_ID --json and reconcile it with cafleet input reconcile.` |
+| Abandoned uncertainty | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID was abandoned as uncertain; send its content again as a new message if it is still needed.` |
+
 ### `message poll`
 
 `cafleet message poll MEMBER_ID [--json]` returns incoming `input_required` records descending by status timestamp/message ID. Unknown/inactive member: `Member ID not found`, exit 1.
@@ -152,6 +163,8 @@ Receipt retirement failure reports `message MESSAGE_ID was notified to member ME
 Timeout is integer `1..=1800`, default `300`. Pending messages return immediately; otherwise poll each second, retrying at most one other ordinary recipient per interval and each pending message once per invocation. It never ACKs.
 
 Result fields are `member_id`, `outcome`, `messages`, `notification_errors`; outcome is `messages` with full records or `timeout` with an empty array. Diagnostics contain `member_id`, `message_id`, `error`, ordered by message ID. Both outcomes exit 0; deleted subject/fleet or corrupt/unreadable state exits 1. Deadline allows one in-flight attempt/finalization of at most six seconds.
+
+`notification_errors` uses the exact scoped left/uncertain/abandoned strings of [Delivery outcome](#delivery-outcome). A per-message hold permits trying later messages on a verified-composer run; a pane/run/observer/ownership/storage hold ends that member's drain.
 
 ### `message listen`
 
@@ -199,23 +212,27 @@ Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C
 
 ### Wrapped delivery methods
 
-Validate identity, ownership, reachability, storage and receipt history first; failure or uncertain prior input sends no fallback bytes. Unknown detection alone permits fallback.
+Validate identity, ownership, reachability, storage and the operation's own receipt first. Its own uncertain attempt requires inspection; another message's uncertainty follows the per-message hold below. Unknown detection alone permits fallback. A verified-composer run has empty-composer observation and the operation's measured plan from its recorded backend/native version.
 
-An open/candidate interaction (`permission_request`, `question`, `unknown_interaction`, including obscured) or earlier queued input defers with zero bytes, including Escape. A verified empty composer with a measured plan receives literal input, 500 ms settle and the measured submit key without Escape. Terminal replies leave submission valid; human input stops it with `uncertain_cause=manual_input`.
+An open/candidate interaction (`permission_request`, `question`, `unknown_interaction`, including obscured) or earlier queued input defers with zero bytes, including Escape. A verified empty composer with a measured plan receives text, a short settle and the measured submit key without Escape. Terminal replies and complete mouse reports during the settle preserve submission; keyboard/paste input stops it as `left_in_composer/manual_input` on a verified-composer run, otherwise uncertain. Pointer input between literal chunks stops continuation as `pointer_input`; permission tokens and gated answers still revoke on pointer input.
 
-A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`. Interaction/earlier-input time is excluded. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
+A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`, except while CAFleet's held composer is set. Every head waits for verified empty while that hold remains; clearing/submitting the retained text and verifying empty clears it. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
 
 Absent plan/profile/version probe uses fallback `submission_plan_unavailable`: Escape, settle, literal (`! ` prefix for exec), settle, Enter. Recheck interactions before each stage; permission answers require their tested plan.
 
+Long input uses a plan's declared bracketed-paste framing when the child has enabled it; otherwise a preview over its measured plain limit uses the short `message show` pointer. Oversized prompt/exec input without safe framing is refused before typing; a queued refusal settles `not_submitted/plain_limit_exceeded`. On verified-composer runs, `submitted` requires confirmation by a verified empty composer or a newly opened interaction; an ineffective submit key produces `left_in_composer/submit_unconfirmed`. Insufficient immediate budget returns zero-byte `queued` with `delivery_budget_exhausted`.
+
 ### Runner queue
 
-Accepted deferred input returns durable `ready`, `deferred_at`, `defer_reason` and its input ID; it outlives the invocation and drains automatically. Inspect `cafleet input show INPUT_ID --json`. The Director receives one `input_delivery_result` for its first submitted/not-submitted/uncertain outcome.
+Accepted deferred input returns durable `ready`, `deferred_at`, `defer_reason` and its input ID; it outlives the invocation and drains automatically. Inspect `cafleet input show INPUT_ID --json`. The Director receives one `input_delivery_result` for its first submitted/not-submitted/uncertain/left-in-composer outcome and for every immediate stopped staged write.
 
-Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `message_consumed`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
+Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `plain_limit_exceeded`, `message_consumed`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
+
+A left-in-composer preview settles its attempt and atomically queues a `redelivery` successor at the head. It waits for verified empty, with later input behind it; prompt/exec is retried deliberately. The runner checks a waiting head's ACK and target each queue turn, cancelling consumed/inactive previews with zero bytes. An uncertain head on a verified-composer run advances the FIFO but sets the held composer; other runs retain their FIFO/member-wide stop. A head stalled solely on that hold generates `input_delivery_stalled`; [Runtime events](#runtime-events) owns the recovery action.
 
 ### Held delivery
 
-Degraded/recovering/lost observation, unavailable ownership/storage or uncertain receipts/reachability hold input without queue acceptance or writing. Pending/changed placements also hold. Held/queued previews leave notification unset and grant no permission.
+Degraded/recovering/lost observation, unavailable ownership/storage, uncertain reachability and pending/changed placement hold input without queue acceptance or writing. On a verified-composer run, a latest uncertain/in-progress/abandoned preview holds only that message and later messages remain eligible; every other hold ends the drain. Other runs retain member-wide holds. Held/queued previews leave notification unset and grant no permission.
 
 ### Accepted trade-offs
 
@@ -312,6 +329,15 @@ Director target, before I/O: `cannot prompt the Director's own pane`, exit 1. Ru
 |---|---|
 | Pre-write error, including a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
 | Partial uncertainty | `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Text left in composer | `prompt delivery to member ID was not submitted: STOP_CAUSE (method=METHOD); the typed text stays in the member's composer. Inspect the pane before retrying.` |
+| Only fallback Escape written | `prompt delivery to member ID was not submitted: STOP_CAUSE (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying.` |
+
+Left-in-composer errors include `input_id=INPUT_ID`; inspect that result and pane before a deliberate retry. Above-limit input with no safe framing uses the pre-write error and the CAUSE strings below, with zero bytes and no reservation at an immediate attempt. UNIT is `bytes` or `characters` for the plan's byte/scalar unit; N includes prefix plus literal.
+
+| Missing delivery mechanism | CAUSE |
+|---|---|
+| Profile declares plain framing | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the BACKEND profile has no bracketed-paste delivery` |
+| Profile declares bracketed paste, child has not enabled it | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the native CLI has not enabled bracketed paste` |
 
 ### `member exec`
 
@@ -324,6 +350,10 @@ The runner submits `! ` plus command through profile/fallback/queue. The host ow
 | Root Director, before I/O | `cannot exec in the Director's own pane` |
 | Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Text left in composer | `native command delivery to member ID was not submitted: STOP_CAUSE (method=METHOD); the typed text stays in the member's composer. Inspect the pane before retrying.` |
+| Only fallback Escape written | `native command delivery to member ID was not submitted: STOP_CAUSE (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying.` |
+
+Left-in-composer errors include `input_id=INPUT_ID`. The pre-write over-limit CAUSE strings are shared with [member prompt](#member-prompt); queued over-limit refusals settle `not_submitted/plain_limit_exceeded` and publish a result. Explicit prompt/exec left in the composer requires a deliberate retry.
 
 A failing first write may partially type; failure after Enter may have executed. Inspect native output and reconcile receipts before a newly authorized retry. Receipts retain operation key/digest/state, without command text. After completion, explicitly prompt continuation if the host has not resumed.
 
@@ -369,21 +399,21 @@ Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, 
 
 Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
 
-Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health. Effective policy contains `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
+Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Settled left-in-composer inputs are absent; their queued successors remain listed. Registry reads establish no live health. Effective policy contains `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
 
-Uncertain errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: manual_input (method=profile)` and `input_id=INPUT_ID`.
+Uncertain and left-in-composer prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write_failed (method=profile)` and `input_id=INPUT_ID`.
 
 ### Delivery reporting
 
-`delivery` contains `status,method,reason`. Method is `profile`, `fallback` or null before selection. Held prompt/exec exits 1; held send retains commit. `uncertain` requires reconciliation; `not_submitted` certifies zero-byte cancellation; `not_applicable` is broker-only.
+`delivery` contains `status,method,reason`. Method is `profile`, `fallback` or null before selection. Held prompt/exec exits 1; held send retains commit. `left_in_composer` is settled and needs no reconciliation; prompt/exec exits 1, while sends retain exit 0. `uncertain` requires reconciliation; `not_submitted` records cancellation or an evidence-based reconciliation; `not_applicable` is broker-only.
 
-Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run/receipt hold), `notification_failed` (lock/transport/storage/submission failure). Queued previews stay unnotified until submission or ACK settlement; later results appear in receipts/events without changing original command output.
+Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,redelivery,delivery_budget_exhausted`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run hold or an earlier receipt on a run without composer verification), `notification_failed` (lock/transport/storage/submission failure). Queued previews stay unnotified until submission or ACK settlement; later results appear in receipts/events without changing original command output.
 
 ### Runtime events
 
-Notifications contain the full event JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,automatic_refusal_observed,automatic_review_unavailable,input_delivery_result,runner_degraded,runner_lost,runner_exited`.
+Notifications contain the full event JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,automatic_refusal_observed,automatic_review_unavailable,input_delivery_result,input_delivery_stalled,runner_degraded,runner_lost,runner_exited`.
 
-Identity fields: `event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Required nullable `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question,review_automatic_refusal,review_automatic_review_unavailable`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv.
+Identity fields: `event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Permission/question/automatic-review `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question,review_automatic_refusal,review_automatic_review_unavailable`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv. Delivery actions have their receipt-derived forms below; other events carry null action.
 
 Evidence contains `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,excerpt,evidence_digest`. Positive `operation_rows` is null exactly with null operation; above one requires confirmation against excerpt. Metadata nulls screen-derived operation/choices/excerpt. Excerpts/payloads are bounded at 8/16 KiB.
 
@@ -396,7 +426,11 @@ Both automatic-review kinds carry `null` `interaction_id` and `classification`, 
 
 Automatic-review events create no interaction/input eligibility; permission commands reject their association before writing.
 
-Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification/action, source `runner_lifecycle`, outcome `unknown` and receipt-derived `cause={"kind":UNCERTAIN_CAUSE}` only when recorded. Stages are `zero_bytes,partial,submitted,unknown`. First outcome publishes once, without literal payload.
+Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification, source `runner_lifecycle`, outcome `unknown` and receipt-derived `cause={"kind":STOP_CAUSE}` whenever recorded. Stages are `zero_bytes,escape_only,partial,literal_complete,submitted,unknown`; an uncertain/in-progress written prefix remains `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload.
+
+`director_action` is `{"kind":"review_left_input","instruction":INSTRUCTION,"press_argv":["cafleet","member","press","MEMBER_ID","--from-member-id","DIRECTOR_ID","Enter"]}` only for `left_in_composer` at `literal_complete`/`submitted` with cause `observer_unavailable`, `deadline_expired` or `submit_unconfirmed`. INSTRUCTION requires capture, `member show` confirmation of no current interaction, and whole-literal confirmation before pressing Enter; otherwise ask the user to clear/submit natively. All other causes/stages, including interaction stops, have null action; the runner supplies no second submit key.
+
+`input_delivery_stalled` reports a head waiting solely on a held composer for 3 minutes, once per head through recovery. It carries ordered `input_id,message_id,blocking_input_id,waiting_since,delivery`, where `waiting_since` is UTC RFC 3339 and delivery is queued; its null interaction/classification, lifecycle source and evidence shape match delivery results. Its action is `{"kind":"review_stalled_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKING_INPUT_ID","--json"],"press_argv":PRESS_ARGV}`. The instruction prescribes capture/inspection, submitting a whole retained literal with no current interaction or asking the user to clear/submit, reconciling an uncertain blocker from evidence, then ACKing a waiting preview whose delivery is unnecessary or whose cleared composer never verifies empty; the runner cancels an ACKed head on its next queue turn. PRESS_ARGV is the left-input action's argv only when the blocker qualifies, otherwise null; argv arrays append `--database-url URL` for a non-default database. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
 
 ### `event show`
 
@@ -404,26 +438,41 @@ Delivery results contain `input_id,message_id,delivery,stage`, null interaction/
 
 ### `input show` and `input reconcile`
 
-`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,uncertain_cause`.
+`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,stop_cause,left_stage`.
 
-Kinds: `preview,prompt,exec,permission_response`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Stored dispositions: `submitted,not_submitted,abandoned_uncertain`; CLI: `submitted,not-submitted,abandoned-uncertain`. Preview keys: `preview:<run_id>:<message_id>`. Receipts hold digests, excluding literals. Stable receipt IDs.
+Kinds: `preview,prompt,exec,permission_response`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Stored dispositions: `submitted,not_submitted,abandoned_uncertain,left_in_composer`; CLI: `submitted,not-submitted,abandoned-uncertain`. Preview keys: `preview:<run_id>:<message_id>:<attempt>`. Receipts hold digests, excluding literals. Attempt starts at 1; each message's attempts share one digest under distinct keys. Stable receipt IDs.
 
-Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. A not-submitted receipt without a recorded method reports a null method with `method_unrecorded`. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
+Read the latest preview attempt in the current run before choosing delivery:
 
-`uncertain_cause` records the transition to uncertainty and survives reconciliation; it is null for input that never became uncertain and for `in_progress` input left by runner loss.
+| Latest attempt | Next action |
+|---|---|
+| None | Start attempt 1 |
+| Deferred `ready` | Leave queued; skip this message for this invocation |
+| Other `ready` | Reuse its key and reevaluate zero-byte eligibility |
+| `accepted` or submitted | Settle/stamp or verify ACK without typing |
+| Not submitted | Next send/wait automatically starts N+1, including after reconciliation |
+| In-progress, uncertain or abandoned uncertain | Per-message hold on a verified-composer run; otherwise end the member's drain |
+| Left in composer | Its successor must already exist; absence fails with `preview input INPUT_ID was left in the composer without a re-delivery attempt` |
+
+Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; left-in-composer → `left_in_composer` with its durable `left_stage`; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. A not-submitted receipt without a recorded method reports a null method with `method_unrecorded`. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
+
+`stop_cause` records a staged stop and survives settlement/reconciliation; it is required for `left_in_composer` and on transition to uncertain, and otherwise nullable. `left_stage` follows it in output, null except for `left_in_composer`: `escape_only` means only fallback Escape, `partial` a complete literal prefix, `literal_complete` the whole literal without a submit key, and `submitted` the whole literal and key with unconfirmed effect.
 
 | Cause | Recorded when |
 |---|---|
 | `manual_accounting_failed` | Manual-input accounting failed when a staged stage stopped |
-| `manual_input` | Human input (terminal replies excluded) arrived after the literal stage, stopping the submit stage |
+| `manual_input` | Keyboard/paste input since literal start or fallback Escape; pointer input also stops permission responses with this cause |
+| `pointer_input` | Pointer input between ordinary literal chunks |
 | `interaction_candidate` | A staged stage stopped on a candidate interaction |
 | `interaction_open` | A staged stage stopped on any other blocking interaction |
 | `observer_unavailable` | A staged stage stopped because the observer was unavailable or reported a gap |
-| `short_write` | A programmatic write accepted fewer bytes than its stage |
-| `write_failed` | The attempt failed after a possible child byte, including a failed deferred attempt or permission response |
-| `runner_stopped` | Runner shutdown ended an active deferred attempt that may have written a child byte |
+| `deadline_expired` | Complete-prefix chunk bound reached or insufficient budget remains before the submit key |
+| `submit_unconfirmed` | Submit effect remained unconfirmed; left-in-composer stage `submitted` |
+| `short_write` | A stopped prefix ends inside a scalar/paste marker, or an answer stage writes short |
+| `write_failed` | PTY/checkpoint error, unrecorded possible I/O, failed/short close, short submit key or failed deferred/permission attempt |
+| `runner_stopped` | Shutdown ended an active attempt that may have written a child byte |
 
-At settle checks the first matching cause among the first five wins. Director reconciliation requires nonempty evidence, synchronization with current owner and proof no active writer remains; an unreachable owner leaves uncertainty. A deregistered member or deleted fleet has no live runner: reconciliation fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`. Repeating a settled ordinary disposition returns original evidence; conflicting disposition fails unchanged. Settlement writes no input and establishes no native result.
+At checks the first matching cause among the first six wins, then an incomplete-prefix stop takes the `short_write` override. Recorded complete prefixes on verified-composer runs settle left in the composer; short/write/shutdown failures, permission answers and other runs retain uncertainty. `left_in_composer` needs no reconciliation and preview re-delivery is automatic. Director reconciliation of uncertainty requires nonempty evidence, owner synchronization and no active writer; an unreachable owner preserves uncertainty. Missing live placement fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`; repeating a settled ordinary disposition returns original evidence and a conflicting disposition fails. Settlement writes no input and establishes no native result.
 
 Nullable `permission_response` audit contains `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,choice_id,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at`; exactly one of `decision` and `choice_id` is null, and the text line `Permission decision: … decision=DECISION choice=CHOICE …` renders it as `-`. Settlement grants no answer and releases no possibly transmitted claim. IDs are positive; malformed input exits 2, absent/corrupt rows fail explicitly.
 
