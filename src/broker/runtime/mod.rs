@@ -469,7 +469,8 @@ stored_enum!(RuntimeEventKind,"member_runtime_events.kind", {
     InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
     AutomaticRefusalObserved => "automatic_refusal_observed",
     AutomaticReviewUnavailable => "automatic_review_unavailable",
-    InputDeliveryResult => "input_delivery_result", RunnerDegraded => "runner_degraded",
+    InputDeliveryResult => "input_delivery_result", InputDeliveryStalled => "input_delivery_stalled",
+    RunnerDegraded => "runner_degraded",
     RunnerLost => "runner_lost", RunnerExited => "runner_exited"
 });
 stored_enum!(RuntimeCauseKind, "cause.kind", {
@@ -488,14 +489,37 @@ stored_enum!(InputState, "member_input_operations.state", {
     Uncertain => "uncertain", Settled => "settled"
 });
 stored_enum!(test_values InputDisposition, "member_input_operations.disposition", {
-    Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain"
+    Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain",
+    LeftInComposer => "left_in_composer"
 });
-stored_enum!(UncertainCause, "member_input_operations.uncertain_cause", {
+stored_enum!(StopCause, "member_input_operations.stop_cause", {
     ManualInput => "manual_input", ManualAccountingFailed => "manual_accounting_failed",
+    PointerInput => "pointer_input",
     InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
-    ObserverUnavailable => "observer_unavailable", ShortWrite => "short_write",
+    ObserverUnavailable => "observer_unavailable", DeadlineExpired => "deadline_expired",
+    SubmitUnconfirmed => "submit_unconfirmed", ShortWrite => "short_write",
     WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
 });
+stored_enum!(LeftStage, "member_input_operations.left_stage", {
+    EscapeOnly => "escape_only", Partial => "partial", LiteralComplete => "literal_complete",
+    Submitted => "submitted"
+});
+
+impl StopCause {
+    pub(crate) fn permits_left_in_composer(self) -> bool {
+        matches!(
+            self,
+            Self::ManualInput
+                | Self::ManualAccountingFailed
+                | Self::PointerInput
+                | Self::InteractionCandidate
+                | Self::InteractionOpen
+                | Self::ObserverUnavailable
+                | Self::DeadlineExpired
+                | Self::SubmitUnconfirmed
+        )
+    }
+}
 
 impl RunStatus {
     pub(crate) fn terminal(self) -> bool {
@@ -697,17 +721,20 @@ pub(crate) struct InputOperation {
     pub(crate) updated_at: String,
     pub(crate) message_id: Option<i64>,
     pub(crate) disposition: Option<InputDisposition>,
+    pub(crate) preview_attempt: Option<i64>,
     pub(crate) evidence_ref: Option<String>,
     pub(crate) permission_response: Option<PermissionResponseRecord>,
     pub(crate) delivery_method: Option<DeliveryMethod>,
     pub(crate) delivery_reason: Option<String>,
     pub(crate) deferred_at: Option<String>,
     pub(crate) defer_reason: Option<String>,
-    pub(crate) uncertain_cause: Option<UncertainCause>,
+    pub(crate) stop_cause: Option<StopCause>,
+    pub(crate) left_stage: Option<LeftStage>,
 }
 
 stored_enum!(DeliveryStatus, "delivery.status", {
     Submitted => "submitted", Queued => "queued", Held => "held", Uncertain => "uncertain",
+    LeftInComposer => "left_in_composer",
     NotSubmitted => "not_submitted", NotApplicable => "not_applicable"
 });
 stored_enum!(DeliveryMethod, "member_input_operations.delivery_method", {

@@ -266,9 +266,11 @@ fn send_delivery(
         ));
     }
     if let Some(runtime) = &recipient.runtime {
-        let key = format!("preview:{}:{}", runtime.run.run_id, message.message_id);
-        if let Some(input) = crate::broker::runtime::find_input(conn, runtime.run.run_id, &key)?
-            && let Some(delivery) = input.delivery()
+        if let Some(input) = crate::broker::runtime::find_latest_preview_input(
+            conn,
+            runtime.run.run_id,
+            message.message_id,
+        )? && let Some(delivery) = input.delivery()
         {
             return Ok((Some(input.input_id), delivery));
         }

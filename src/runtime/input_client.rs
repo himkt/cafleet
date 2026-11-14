@@ -180,7 +180,7 @@ fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()>
     match request.input_kind {
         InputKind::Preview => usage(
             request.message_id.is_some_and(|id| {
-                id > 0 && request.operation_key == format!("preview:{run_id}:{id}")
+                storage::preview_attempt_from_key(run_id, id, &request.operation_key).is_ok()
             }),
             "preview requires its run-bound message key",
         )?,
@@ -258,7 +258,7 @@ pub(super) fn durable_outcome(
 }
 
 fn uncertain_reason(input: &InputOperation) -> Option<String> {
-    input.uncertain_cause.map(|cause| cause.as_str().to_owned())
+    input.stop_cause.map(|cause| cause.as_str().to_owned())
 }
 
 fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
@@ -904,6 +904,9 @@ pub(super) fn projection(
                 SubmissionStage::ZeroBytes,
                 Some("operation key is consumed".into()),
             ),
+            InputDisposition::LeftInComposer => {
+                return Err(error("permission responses require uncertain settlement"));
+            }
         },
         InputState::Ready => (
             SubmissionStatus::Held,

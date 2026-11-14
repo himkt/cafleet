@@ -1230,6 +1230,18 @@ impl ComposerPlan {
 }
 
 impl ProfileCatalog {
+    pub(crate) fn verified_composer(
+        &self,
+        backend: CodingAgent,
+        native_version: Option<&str>,
+        operation: ComposerOperation,
+    ) -> bool {
+        self.matching(backend, native_version)
+            .is_some_and(|profile| {
+                profile.composer.is_some() && profile.submissions[operation.index()].is_some()
+            })
+    }
+
     pub(crate) fn composer_plan(
         &self,
         backend: CodingAgent,

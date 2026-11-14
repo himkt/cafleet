@@ -373,18 +373,18 @@ fn ordinary_blocker(status: &ObservationStatus) -> Option<OrdinaryBlocker> {
     None
 }
 
-fn interaction_cause(status: &ObservationStatus) -> storage::UncertainCause {
+fn interaction_cause(status: &ObservationStatus) -> storage::StopCause {
     if status.eligibility == InputEligibility::Hold(GateReason::Candidate) {
-        storage::UncertainCause::InteractionCandidate
+        storage::StopCause::InteractionCandidate
     } else {
-        storage::UncertainCause::InteractionOpen
+        storage::StopCause::InteractionOpen
     }
 }
 
-fn blocker_cause(status: &ObservationStatus) -> Option<storage::UncertainCause> {
+fn blocker_cause(status: &ObservationStatus) -> Option<storage::StopCause> {
     ordinary_blocker(status).map(|blocker| match blocker {
         OrdinaryBlocker::Interaction => interaction_cause(status),
-        OrdinaryBlocker::ObserverUnavailable => storage::UncertainCause::ObserverUnavailable,
+        OrdinaryBlocker::ObserverUnavailable => storage::StopCause::ObserverUnavailable,
     })
 }
 
@@ -917,7 +917,7 @@ impl InputCoordinator {
                 self.record_deferred_uncertain(
                     &mut conn,
                     id,
-                    storage::UncertainCause::RunnerStopped,
+                    storage::StopCause::RunnerStopped,
                     deadline,
                 )?;
             } else {
@@ -1954,11 +1954,10 @@ impl InputCoordinator {
                 let message_id = input
                     .message_id
                     .ok_or_else(|| error("preview message required"))?;
-                ensure(
-                    message_id > 0
-                        && input.operation_key
-                            == format!("preview:{}:{message_id}", self.run.run_id),
-                    "preview operation key must bind its run and message",
+                storage::preview_attempt_from_key(
+                    self.run.run_id,
+                    message_id,
+                    &input.operation_key,
                 )?;
             } else {
                 ensure(
@@ -2186,21 +2185,21 @@ impl InputCoordinator {
         observation: &ObservationController,
         input_id: i64,
         stage: SubmissionStage,
-        uncertain_cause: Option<storage::UncertainCause>,
+        stop_cause: Option<storage::StopCause>,
     ) {
         observation.publish_delivery_result(storage::input_delivery_result_cause(
             input_id,
             stage.as_str(),
-            uncertain_cause,
+            stop_cause,
         ));
     }
 
-    fn retained_uncertain_cause(&self, input_id: i64) -> Option<storage::UncertainCause> {
+    fn retained_stop_cause(&self, input_id: i64) -> Option<storage::StopCause> {
         self.operations
             .get(&input_id)
             .expect("a published input retains its receipt")
             .operation
-            .uncertain_cause
+            .stop_cause
     }
 
     /// Settles queued or attempted zero-byte work as not submitted and publishes its result. When
@@ -2668,12 +2667,7 @@ impl InputCoordinator {
         {
             return self.settle_accepted_preview(conn, observation, operation.input_id, stage);
         }
-        Self::publish_result(
-            observation,
-            operation.input_id,
-            stage,
-            operation.uncertain_cause,
-        );
+        Self::publish_result(observation, operation.input_id, stage, operation.stop_cause);
         Ok(())
     }
 
@@ -3268,9 +3262,9 @@ impl InputCoordinator {
             && let Some(settle_until) = composer.settle_until
         {
             let interruption = if self.manual_accounting_failed {
-                Some(storage::UncertainCause::ManualAccountingFailed)
+                Some(storage::StopCause::ManualAccountingFailed)
             } else if composer.manual_generation != Some(self.manual_generation) {
-                Some(storage::UncertainCause::ManualInput)
+                Some(storage::StopCause::ManualInput)
             } else {
                 blocker_cause(&observation.status())
             };
@@ -3309,7 +3303,7 @@ impl InputCoordinator {
         id: i64,
         observation: &ObservationController,
         effective: Instant,
-        cause: storage::UncertainCause,
+        cause: storage::StopCause,
     ) -> Result<Option<InputControlReply>> {
         let deferred = self
             .pending
@@ -3321,7 +3315,7 @@ impl InputCoordinator {
                 observation,
                 id,
                 SubmissionStage::Partial,
-                self.retained_uncertain_cause(id),
+                self.retained_stop_cause(id),
             );
             return Ok(None);
         }
@@ -3459,10 +3453,10 @@ impl InputCoordinator {
             .get(&id)
             .expect("actual input outcome retained")
             .stage;
-        let uncertain_cause = if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) {
-            storage::UncertainCause::ShortWrite
+        let stop_cause = if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) {
+            storage::StopCause::ShortWrite
         } else {
-            storage::UncertainCause::WriteFailed
+            storage::StopCause::WriteFailed
         };
         *terminal_bookkeeping = true;
         let persisted = with_database_deadline(conn, effective, |conn| {
@@ -3475,7 +3469,7 @@ impl InputCoordinator {
                         conn,
                         &self.run.owner(),
                         id,
-                        uncertain_cause,
+                        stop_cause,
                     );
                 }
             };
@@ -3547,7 +3541,7 @@ impl InputCoordinator {
         &mut self,
         conn: &mut Connection,
         id: i64,
-        cause: storage::UncertainCause,
+        cause: storage::StopCause,
         deadline: Instant,
     ) -> Result<storage::InputOperation> {
         let current = with_database_deadline(conn, deadline, |conn| storage::get_input(conn, id))?;
@@ -3585,11 +3579,11 @@ impl InputCoordinator {
         match self.record_deferred_uncertain(
             conn,
             id,
-            storage::UncertainCause::WriteFailed,
+            storage::StopCause::WriteFailed,
             Instant::now() + DEFERRED_FINALIZATION,
         ) {
             Ok(operation) if operation.state == storage::InputState::Uncertain => {
-                Self::publish_result(observation, id, stage, operation.uncertain_cause);
+                Self::publish_result(observation, id, stage, operation.stop_cause);
             }
             Ok(operation) => {
                 if let Err(cause) = self.finish_deferred(conn, observation, &operation) {
@@ -3611,7 +3605,7 @@ impl InputCoordinator {
         conn: &mut Connection,
         id: i64,
         effective: Instant,
-        cause: storage::UncertainCause,
+        cause: storage::StopCause,
     ) -> Result<InputControlReply> {
         let pending = self.pending.as_mut().expect("staged composer input");
         pending.phase = InputPhase::Blocked;
@@ -3682,7 +3676,7 @@ impl InputCoordinator {
                     conn,
                     &self.run.owner(),
                     id,
-                    storage::UncertainCause::WriteFailed,
+                    storage::StopCause::WriteFailed,
                 )
             }
         });

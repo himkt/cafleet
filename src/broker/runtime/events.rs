@@ -218,7 +218,7 @@ fn published_delivery(
         input_id,
         message_id: input.message_id,
         cause: input
-            .uncertain_cause
+            .stop_cause
             .filter(|_| published.status == DeliveryStatus::Uncertain),
         delivery: published,
         stage: payload["stage"].clone(),
@@ -274,16 +274,16 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
 pub(crate) fn input_delivery_result_cause(
     input_id: i64,
     stage: &str,
-    uncertain_cause: Option<UncertainCause>,
+    stop_cause: Option<StopCause>,
 ) -> Value {
     let mut cause = json!({"kind":"input_delivery_result","input_id":input_id,"stage":stage});
-    if let Some(uncertain_cause) = uncertain_cause {
-        cause["cause"] = uncertain_cause_payload(uncertain_cause);
+    if let Some(stop_cause) = stop_cause {
+        cause["cause"] = stop_cause_payload(stop_cause);
     }
     cause
 }
 
-fn uncertain_cause_payload(cause: UncertainCause) -> Value {
+fn stop_cause_payload(cause: StopCause) -> Value {
     json!({"kind":cause.as_str()})
 }
 
@@ -391,7 +391,7 @@ fn validate_delivery_cause(transition: &ObservedTransition) -> Result<(), Caflee
             .and_then(|object| object.get("kind"))
             .and_then(Value::as_str);
         require(
-            kind.is_some_and(|kind| UncertainCause::try_from(kind).is_ok()),
+            kind.is_some_and(|kind| StopCause::try_from(kind).is_ok()),
             "cause_json.cause.kind",
             "a delivery result cause is a recorded uncertain cause",
         )?;
@@ -527,7 +527,7 @@ struct DeliveryFields {
     message_id: Option<i64>,
     delivery: DeliveryProjection,
     stage: Value,
-    cause: Option<UncertainCause>,
+    cause: Option<StopCause>,
 }
 
 fn payload(
@@ -555,7 +555,7 @@ fn payload(
     }
     if let Some(fields) = delivery {
         if let Some(cause) = fields.cause {
-            payload["cause"] = uncertain_cause_payload(cause);
+            payload["cause"] = stop_cause_payload(cause);
         }
         payload["input_id"] = json!(fields.input_id);
         payload["message_id"] = json!(fields.message_id);
@@ -655,7 +655,7 @@ pub(crate) fn persist_transition_in_transaction(
             input_id,
             message_id: input.message_id,
             cause: input
-                .uncertain_cause
+                .stop_cause
                 .filter(|_| delivery.status == DeliveryStatus::Uncertain),
             delivery,
             stage: record["stage"].clone(),

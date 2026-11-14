@@ -22,13 +22,15 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         updated_at: row.get("updated_at")?,
         message_id: row.get("message_id")?,
         disposition: row.get("disposition")?,
+        preview_attempt: row.get("preview_attempt")?,
         evidence_ref: row.get("evidence_ref")?,
         permission_response: None,
         delivery_method: row.get("delivery_method")?,
         delivery_reason: row.get("delivery_reason")?,
         deferred_at: row.get("deferred_at")?,
         defer_reason: row.get("defer_reason")?,
-        uncertain_cause: row.get("uncertain_cause")?,
+        stop_cause: row.get("stop_cause")?,
+        left_stage: row.get("left_stage")?,
     })
 }
 
@@ -94,6 +96,9 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
         (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
             (DeliveryStatus::Submitted, recorded()?)
         }
+        (InputState::Settled, Some(InputDisposition::LeftInComposer)) => {
+            (DeliveryStatus::LeftInComposer, recorded()?)
+        }
         (InputState::Settled, Some(InputDisposition::NotSubmitted)) => match method {
             Some(_) => (DeliveryStatus::NotSubmitted, recorded()?),
             None => (
@@ -115,11 +120,68 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
     }))
 }
 
+fn validate_left_outcome(
+    cause: StopCause,
+    stage: LeftStage,
+    method: Option<DeliveryMethod>,
+) -> Result<(), CafleetError> {
+    require(
+        cause.permits_left_in_composer(),
+        "member_input_operations.stop_cause",
+        "the stop cause requires uncertain settlement",
+    )?;
+    require(
+        (stage == LeftStage::Submitted) == (cause == StopCause::SubmitUnconfirmed),
+        "member_input_operations.left_stage",
+        "the submitted stage pairs exactly with an unconfirmed submission",
+    )?;
+    require(
+        stage != LeftStage::EscapeOnly || method == Some(DeliveryMethod::Fallback),
+        "member_input_operations.left_stage",
+        "Escape-only input requires fallback delivery",
+    )
+}
+
 fn validate_input(
     conn: &Connection,
     mut input: InputOperation,
 ) -> Result<InputOperation, CafleetError> {
     let run = get_run(conn, input.run_id)?;
+    require(
+        (input.disposition == Some(InputDisposition::LeftInComposer)) == input.left_stage.is_some(),
+        "member_input_operations.left_stage",
+        "a left stage is required exactly for left-in-composer input",
+    )?;
+    require(
+        input.stop_cause.is_none()
+            || matches!(input.state, InputState::Uncertain | InputState::Settled),
+        "member_input_operations.stop_cause",
+        "a stop cause requires an uncertain or settled input",
+    )?;
+    require(
+        input.state != InputState::Uncertain
+            || input.stop_cause != Some(StopCause::SubmitUnconfirmed),
+        "member_input_operations.stop_cause",
+        "an unconfirmed submission is left in the composer",
+    )?;
+    if input.disposition == Some(InputDisposition::LeftInComposer) {
+        require(
+            input.state == InputState::Settled && input.kind != InputKind::PermissionResponse,
+            "member_input_operations.disposition",
+            "left-in-composer input requires a settled ordinary receipt",
+        )?;
+        let cause = input.stop_cause.ok_or_else(|| {
+            invalid(
+                "member_input_operations.stop_cause",
+                "left stop cause required",
+            )
+        })?;
+        validate_left_outcome(
+            cause,
+            input.left_stage.expect("left disposition requires a stage"),
+            input.delivery_method,
+        )?;
+    }
     if input.kind == InputKind::Preview {
         let message_id = input.message_id.ok_or_else(|| {
             invalid(
@@ -128,17 +190,23 @@ fn validate_input(
             )
         })?;
         let message = crate::broker::messaging::get_message(conn, message_id)?;
+        let attempt = input.preview_attempt.ok_or_else(|| {
+            invalid(
+                "member_input_operations.preview_attempt",
+                "preview attempt required",
+            )
+        })?;
         require(
             message.to_member_id == run.member_id
-                && input.operation_key == format!("preview:{}:{message_id}", run.run_id),
+                && input.operation_key == preview_operation_key(run.run_id, message_id, attempt)?,
             "member_input_operations.message_id",
             "preview does not belong to this run",
         )?;
     } else {
         require(
-            input.message_id.is_none(),
+            input.message_id.is_none() && input.preview_attempt.is_none(),
             "member_input_operations.message_id",
-            "explicit input has no preview message",
+            "explicit input has no preview message or attempt",
         )?;
     }
     input.permission_response = validate_input_response(conn, &run, &input)?;
@@ -150,6 +218,41 @@ pub(crate) fn input_payload_digest(run_id: i64, input: &crate::runtime::SubmitIn
     let payload = json!({"run_id":run_id,"kind":input.input_kind.as_str(),
         "message_id":input.message_id,"literal":input.literal});
     crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
+}
+
+pub(crate) fn preview_operation_key(
+    run_id: i64,
+    message_id: i64,
+    attempt: i64,
+) -> Result<String, CafleetError> {
+    require(
+        run_id > 0 && message_id > 0 && attempt > 0,
+        "operation_key",
+        "preview identity components must be positive",
+    )?;
+    Ok(format!("preview:{run_id}:{message_id}:{attempt}"))
+}
+
+pub(crate) fn preview_attempt_from_key(
+    run_id: i64,
+    message_id: i64,
+    key: &str,
+) -> Result<i64, CafleetError> {
+    let (_, attempt) = key
+        .rsplit_once(':')
+        .ok_or_else(|| invalid("operation_key", "preview attempt required"))?;
+    let attempt = attempt.parse::<i64>().map_err(|_| {
+        invalid(
+            "operation_key",
+            "preview attempt must be a positive integer",
+        )
+    })?;
+    require(
+        key == preview_operation_key(run_id, message_id, attempt)?,
+        "operation_key",
+        "preview key must canonically bind its run, message and attempt",
+    )?;
+    Ok(attempt)
 }
 
 /// How a new ordinary receipt is reserved: the delivery selected before its first byte, or a
@@ -233,7 +336,7 @@ pub(crate) fn requeue_zero_byte_immediate(
     })
 }
 
-pub(crate) type UnpublishedDeliveryResult = (i64, &'static str, Option<UncertainCause>);
+pub(crate) type UnpublishedDeliveryResult = (i64, &'static str, Option<StopCause>);
 
 /// The deferred inputs of a run whose first result is durable but whose result event is not, with
 /// the stage and recorded uncertain cause that event reports. Recovery publishes these after the
@@ -258,14 +361,21 @@ pub(crate) fn unpublished_delivery_results(
             DeliveryStatus::Submitted => "submitted",
             DeliveryStatus::NotSubmitted => "zero_bytes",
             DeliveryStatus::Uncertain => "unknown",
+            DeliveryStatus::LeftInComposer => input
+                .left_stage
+                .expect("validated left-in-composer input has a stage")
+                .as_str(),
             DeliveryStatus::Queued | DeliveryStatus::Held | DeliveryStatus::NotApplicable => {
                 continue;
             }
         };
-        let uncertain_cause = input
-            .uncertain_cause
-            .filter(|_| delivery.status == DeliveryStatus::Uncertain);
-        results.push((input_id, stage, uncertain_cause));
+        let stop_cause = input.stop_cause.filter(|_| {
+            matches!(
+                delivery.status,
+                DeliveryStatus::Uncertain | DeliveryStatus::LeftInComposer
+            )
+        });
+        results.push((input_id, stage, stop_cause));
     }
     Ok(results)
 }
@@ -354,6 +464,26 @@ pub(crate) fn find_input(
     input.map(|input| validate_input(conn, input)).transpose()
 }
 
+pub(crate) fn find_latest_preview_input(
+    conn: &Connection,
+    run_id: i64,
+    message_id: i64,
+) -> Result<Option<InputOperation>, CafleetError> {
+    require(
+        run_id > 0 && message_id > 0,
+        "message_id",
+        "preview lookup requires positive run and message identities",
+    )?;
+    let input = conn
+        .query_row(
+            "SELECT * FROM member_input_operations WHERE run_id=?1 AND message_id=?2 AND kind='preview' ORDER BY preview_attempt DESC LIMIT 1",
+            params![run_id, message_id],
+            map_input,
+        )
+        .optional()?;
+    input.map(|input| validate_input(conn, input)).transpose()
+}
+
 pub(crate) enum InputReservation {
     Inserted(InputOperation),
     Existing(InputOperation),
@@ -388,24 +518,29 @@ pub(crate) fn reserve_input_with_provenance(
             "member_runs.status",
             "new input requires an active running member",
         )?;
-        if new.kind == InputKind::Preview {
+        let preview_attempt = if new.kind == InputKind::Preview {
             let message_id = new
                 .message_id
                 .ok_or_else(|| invalid("message_id", "preview message required"))?;
             let message = crate::broker::messaging::get_message(conn, message_id)?;
             require(
-                message.to_member_id == run.member_id
-                    && new.operation_key == format!("preview:{}:{message_id}", run.run_id),
+                message.to_member_id == run.member_id,
                 "message_id",
                 "preview must address its run member",
             )?;
+            Some(preview_attempt_from_key(
+                run.run_id,
+                message_id,
+                &new.operation_key,
+            )?)
         } else {
             require(
                 new.message_id.is_none(),
                 "message_id",
                 "explicit input has no message",
             )?;
-        }
+            None
+        };
         require_capacity(conn, run.run_id)?;
         let now = now_stamp();
         let selection = reservation.selection;
@@ -418,12 +553,12 @@ pub(crate) fn reserve_input_with_provenance(
             "a queued input selects its method when its attempt starts",
         )?;
         conn.execute(
-            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,delivery_method,delivery_reason,deferred_at,defer_reason)
-             VALUES(?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11)",
+            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,delivery_method,delivery_reason,deferred_at,defer_reason,preview_attempt)
+             VALUES(?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11,?12)",
             params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,
                 if deferred.is_some() { "ready" } else { "in_progress" },now,new.message_id,
                 selection.map(|(method, _)| method.as_str()),selection.and_then(|(_, reason)| reason),
-                deferred.map(|(at, _)| at),deferred.map(|(_, reason)| reason)],
+                deferred.map(|(at, _)| at),deferred.map(|(_, reason)| reason),preview_attempt],
         )?;
         get_input(conn, conn.last_insert_rowid()).map(InputReservation::Inserted)
     })
@@ -502,7 +637,7 @@ pub(crate) fn record_input_uncertain(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
-    cause: UncertainCause,
+    cause: StopCause,
 ) -> Result<InputOperation, CafleetError> {
     owned_transaction(conn, owner, |conn, run| {
         let input = owned_input(conn, run, input_id)?;
@@ -514,10 +649,82 @@ pub(crate) fn record_input_uncertain(
         update_input(
             conn,
             input_id,
-            "UPDATE member_input_operations SET state='uncertain',updated_at=?1,uncertain_cause=?2 WHERE input_id=?3 AND state='in_progress'",
+            "UPDATE member_input_operations SET state='uncertain',updated_at=?1,stop_cause=?2 WHERE input_id=?3 AND state='in_progress'",
             params![now_stamp(), cause.as_str(), input_id],
             CAS_FAILED,
         )
+    })
+}
+
+fn settle_left_in_transaction(
+    conn: &Connection,
+    input: &InputOperation,
+    cause: StopCause,
+    stage: LeftStage,
+) -> Result<InputOperation, CafleetError> {
+    require(
+        input.state == InputState::InProgress,
+        "member_input_operations.state",
+        "left-in-composer settlement requires an in-progress input",
+    )?;
+    validate_left_outcome(cause, stage, input.delivery_method)?;
+    update_input(
+        conn,
+        input.input_id,
+        "UPDATE member_input_operations SET state='settled',disposition='left_in_composer',stop_cause=?1,left_stage=?2,updated_at=?3 WHERE input_id=?4 AND state='in_progress'",
+        params![cause.as_str(), stage.as_str(), now_stamp(), input.input_id],
+        CAS_FAILED,
+    )
+}
+
+pub(crate) fn record_input_left_in_composer(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    cause: StopCause,
+    stage: LeftStage,
+) -> Result<InputOperation, CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            matches!(input.kind, InputKind::Prompt | InputKind::Exec),
+            "member_input_operations.kind",
+            "explicit left settlement requires prompt or exec input",
+        )?;
+        settle_left_in_transaction(conn, &input, cause, stage)
+    })
+}
+
+pub(crate) fn settle_left_and_queue_redelivery(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    cause: StopCause,
+    stage: LeftStage,
+) -> Result<(InputOperation, InputOperation), CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.kind == InputKind::Preview,
+            "member_input_operations.kind",
+            "preview left settlement requires atomic re-delivery",
+        )?;
+        let message_id = input.message_id.expect("validated preview has a message");
+        let attempt = input
+            .preview_attempt
+            .expect("validated preview has an attempt")
+            .checked_add(1)
+            .ok_or_else(|| invalid("preview_attempt", "preview attempt exhausted"))?;
+        let key = preview_operation_key(run.run_id, message_id, attempt)?;
+        let left = settle_left_in_transaction(conn, &input, cause, stage)?;
+        require_capacity(conn, run.run_id)?;
+        let now = now_stamp();
+        conn.execute(
+            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,preview_attempt,deferred_at,defer_reason) VALUES(?1,?2,'preview',?3,'ready',?4,?4,?5,?6,?4,'redelivery')",
+            params![run.run_id, key, input.payload_digest, now, message_id, attempt],
+        )?;
+        let queued = get_input(conn, conn.last_insert_rowid())?;
+        Ok((left, queued))
     })
 }
 

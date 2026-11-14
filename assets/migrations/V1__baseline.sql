@@ -127,7 +127,7 @@ CREATE TABLE member_runtime_events (
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     event_seq INTEGER NOT NULL CHECK(event_seq > 0),
     interaction_id INTEGER REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
-    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','automatic_refusal_observed','automatic_review_unavailable','input_delivery_result','runner_degraded','runner_lost','runner_exited')),
+    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','automatic_refusal_observed','automatic_review_unavailable','input_delivery_result','input_delivery_stalled','runner_degraded','runner_lost','runner_exited')),
     observed_at TEXT NOT NULL,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
     notification_state TEXT NOT NULL CHECK(notification_state IN ('inbox','archived')),
@@ -148,7 +148,9 @@ CREATE TABLE member_input_operations (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     message_id INTEGER REFERENCES messages(message_id) ON DELETE RESTRICT,
-    disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain')),
+    disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain','left_in_composer')),
+    preview_attempt INTEGER CHECK((kind = 'preview') = (preview_attempt IS NOT NULL)
+        AND (preview_attempt IS NULL OR preview_attempt >= 1)),
     evidence_ref TEXT,
     delivery_method TEXT CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback')),
     delivery_reason TEXT CHECK(delivery_reason IS NULL OR length(trim(delivery_reason)) > 0),
@@ -156,12 +158,22 @@ CREATE TABLE member_input_operations (
     defer_reason TEXT CHECK((deferred_at IS NULL AND defer_reason IS NULL)
         OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
             AND kind IN ('preview','prompt','exec'))),
-    uncertain_cause TEXT CHECK(uncertain_cause IS NULL
-        OR (uncertain_cause IN ('manual_input','manual_accounting_failed','interaction_candidate',
-                                'interaction_open','observer_unavailable','short_write','write_failed',
-                                'runner_stopped')
+    stop_cause TEXT CHECK(stop_cause IS NULL
+        OR (stop_cause IN ('manual_input','manual_accounting_failed','pointer_input',
+                          'interaction_candidate','interaction_open','observer_unavailable',
+                          'deadline_expired','submit_unconfirmed','short_write','write_failed',
+                          'runner_stopped')
             AND state IN ('uncertain','settled'))),
+    left_stage TEXT CHECK(left_stage IS NULL
+        OR left_stage IN ('escape_only','partial','literal_complete','submitted')),
+    CHECK(disposition IS NOT 'left_in_composer'
+        OR (kind IN ('preview','prompt','exec') AND stop_cause IS NOT NULL AND stop_cause IN
+            ('manual_input','manual_accounting_failed','pointer_input','interaction_candidate',
+             'interaction_open','observer_unavailable','deadline_expired','submit_unconfirmed'))),
+    CHECK((disposition IS 'left_in_composer') = (left_stage IS NOT NULL)),
+    CHECK(state != 'uncertain' OR stop_cause IS NULL OR stop_cause != 'submit_unconfirmed'),
     UNIQUE(run_id, operation_key),
+    UNIQUE(run_id, message_id, preview_attempt),
     CHECK(kind != 'preview' OR message_id IS NOT NULL),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );

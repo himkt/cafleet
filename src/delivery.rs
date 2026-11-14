@@ -211,7 +211,8 @@ fn deliver_wrapped_pending(
     let mut sent = Vec::new();
     let mut held_reason = None;
     let mut skipped = attempted.clone();
-    let mut operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
+    let mut operation_key =
+        broker::runtime::preview_operation_key(run.run_id, message.message_id, 1)?;
     let mut known_input_id = None;
     let mut stage = Stage::Submission;
     let result = (|| {
@@ -340,7 +341,8 @@ fn deliver_wrapped_pending(
                 break AttemptEnd::Held;
             }
             message = next;
-            operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
+            operation_key =
+                broker::runtime::preview_operation_key(run.run_id, message.message_id, 1)?;
             known_input_id = None;
             stage = Stage::Submission;
         };
