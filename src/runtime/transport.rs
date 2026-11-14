@@ -2957,18 +2957,22 @@ mod tests {
     }
 
     fn assert_reply(bytes: &[u8]) {
+        let mut classifier = classifier();
+        let classified = classifier.feed(bytes, Instant::now());
         assert_eq!(
-            feed_once(bytes),
-            (0, false),
+            (classified.manual, classified.pointer, classifier.pending()),
+            (0, 0, false),
             "{:?} is a complete allowlisted reply",
             String::from_utf8_lossy(bytes)
         );
     }
 
     fn assert_manual(bytes: &[u8]) {
+        let mut classifier = classifier();
+        let classified = classifier.feed(bytes, Instant::now());
         assert_eq!(
-            feed_once(bytes),
-            (bytes.len(), false),
+            (classified.manual, classified.pointer, classifier.pending()),
+            (bytes.len(), 0, false),
             "{:?} counts every byte as manual",
             String::from_utf8_lossy(bytes)
         );
@@ -2976,6 +2980,423 @@ mod tests {
 
     fn joined(params: &[&str]) -> String {
         params.join(";")
+    }
+
+    mod pointer {
+        use crate::runtime::transport::tests::*;
+
+        const REPORTS: &[&[u8]] = &[
+            b"\x1b[<0;10;20M",
+            b"\x1b[<0;10;20m",
+            b"\x1b[<35;120;40M",
+            b"\x1b[<64;5;5M",
+            b"\x1b[<65;5;5M",
+            b"\x1b[M !!",
+            b"\x1b[M\xff\x80\x7f",
+        ];
+
+        #[test]
+        fn pointer_reports_classify_every_byte_as_pointer_input() {
+            for report in REPORTS {
+                let mut classifier = classifier();
+                let classified = classifier.feed(report, Instant::now());
+                assert_eq!(
+                    (classified.manual, classified.pointer, classifier.pending()),
+                    (0, report.len(), false),
+                    "{report:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn pointer_reports_split_at_every_boundary_classify_only_when_complete() {
+            let start = Instant::now();
+            for report in REPORTS {
+                for split in 1..report.len() {
+                    let mut classifier = classifier();
+                    let prefix = classifier.feed(&report[..split], start);
+                    assert_eq!((prefix.manual, prefix.pointer), (0, 0));
+                    assert!(classifier.pending(), "{report:?} split={split}");
+                    let suffix = classifier.feed(&report[split..], start);
+                    assert_eq!(
+                        (suffix.manual, suffix.pointer, classifier.pending()),
+                        (0, report.len(), false),
+                        "{report:?} split={split}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn pointer_x10_accepts_each_payload_byte_from_space_through_ff() {
+            let now = Instant::now();
+            for position in 3..6 {
+                for byte in 0x20..=0xff {
+                    let mut report = *b"\x1b[M !!";
+                    report[position] = byte;
+                    let mut classifier = classifier();
+                    let classified = classifier.feed(&report, now);
+                    assert_eq!(
+                        (classified.manual, classified.pointer, classifier.pending()),
+                        (0, report.len(), false),
+                        "position={position} byte={byte:#04x}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn pointer_x10_consumes_exactly_three_payload_bytes() {
+            let mut classifier = classifier();
+            let classified = classifier.feed(b"\x1b[M !!xy\x1b[I", Instant::now());
+            assert_eq!(
+                (classified.manual, classified.pointer, classifier.pending()),
+                (2, 6, false)
+            );
+        }
+
+        #[test]
+        fn pointer_sgr_requires_exactly_three_numeric_parameters() {
+            for bytes in [
+                b"\x1b[<0;10M".as_slice(),
+                b"\x1b[<0;10;20;30M",
+                b"\x1b[<;10;20M",
+                b"\x1b[<0;;20m",
+                b"\x1b[<0;10;m",
+                b"\x1b[<0:10:20M",
+                b"\x1b[<0;10;20 M",
+                b"\x1b[?0;10;20M",
+                b"\x1b[0;10;20M",
+                b"\x1b[<0;10;20R",
+            ] {
+                assert_manual(bytes);
+            }
+        }
+
+        #[test]
+        fn pointer_x10_requires_a_parameterless_csi_without_intermediates() {
+            for bytes in [
+                b"\x1b[1M !!".as_slice(),
+                b"\x1b[?M !!",
+                b"\x1b[ M !!",
+                b"\x1b[1 M !!",
+            ] {
+                assert_manual(bytes);
+            }
+        }
+
+        #[test]
+        fn pointer_x10_low_payload_bytes_resolve_the_report_as_manual() {
+            let now = Instant::now();
+            for position in 3..6 {
+                for byte in 0..0x20 {
+                    let mut report = *b"\x1b[M !!";
+                    report[position] = byte;
+                    let mut classifier = classifier();
+                    let classified = classifier.feed(&report, now);
+                    let remaining = classifier.finish();
+                    assert_eq!(
+                        (
+                            classified.manual + remaining.manual,
+                            classified.pointer + remaining.pointer,
+                            classifier.pending()
+                        ),
+                        (report.len(), 0, false),
+                        "position={position} byte={byte:#04x}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn pointer_x10_invalid_escape_restarts_the_reply_classifier() {
+            let mut classifier = classifier();
+            let classified = classifier.feed(b"\x1b[M \x1b[I", Instant::now());
+            assert_eq!(
+                (classified.manual, classified.pointer, classifier.pending()),
+                (4, 0, false)
+            );
+        }
+
+        #[test]
+        fn pointer_x10_prefix_expires_as_manual_at_the_bound() {
+            let report = b"\x1b[M !!";
+            let start = Instant::now();
+            for split in 1..report.len() {
+                let mut classifier = classifier();
+                let prefix = classifier.feed(&report[..split], start);
+                assert_eq!((prefix.manual, prefix.pointer), (0, 0));
+                let before =
+                    classifier.expire(start + REPLY_PREFIX_BOUND - Duration::from_nanos(1));
+                assert_eq!((before.manual, before.pointer), (0, 0));
+                assert!(classifier.pending());
+                let expired = classifier.expire(start + REPLY_PREFIX_BOUND);
+                assert_eq!((expired.manual, expired.pointer), (split, 0));
+                assert!(!classifier.pending());
+                let suffix = classifier.feed(&report[split..], start + REPLY_PREFIX_BOUND);
+                assert_eq!((suffix.manual, suffix.pointer), (report.len() - split, 0));
+                assert!(!classifier.pending());
+            }
+        }
+
+        #[test]
+        fn pointer_x10_pending_bound_restarts_at_each_payload_byte() {
+            let start = Instant::now();
+            let mut classifier = classifier();
+            let prefix = classifier.feed(b"\x1b[M", start);
+            assert_eq!((prefix.manual, prefix.pointer), (0, 0));
+            let second = start + Duration::from_millis(60);
+            let first_payload = classifier.feed(b" ", second);
+            assert_eq!((first_payload.manual, first_payload.pointer), (0, 0));
+            let initial_bound = classifier.expire(start + REPLY_PREFIX_BOUND);
+            assert_eq!((initial_bound.manual, initial_bound.pointer), (0, 0));
+            assert!(classifier.pending());
+            let third = start + Duration::from_millis(120);
+            let second_payload = classifier.feed(b"!", third);
+            assert_eq!((second_payload.manual, second_payload.pointer), (0, 0));
+            let previous_bound = classifier.expire(second + REPLY_PREFIX_BOUND);
+            assert_eq!((previous_bound.manual, previous_bound.pointer), (0, 0));
+            assert!(classifier.pending());
+            let expired = classifier.expire(third + REPLY_PREFIX_BOUND);
+            assert_eq!((expired.manual, expired.pointer), (5, 0));
+            assert!(!classifier.pending());
+        }
+
+        #[test]
+        fn pointer_x10_outer_eof_resolves_each_incomplete_prefix_as_manual() {
+            let report = b"\x1b[M !!";
+            for split in 1..report.len() {
+                let mut classifier = classifier();
+                let prefix = classifier.feed(&report[..split], Instant::now());
+                assert_eq!((prefix.manual, prefix.pointer), (0, 0));
+                let finished = classifier.finish();
+                assert_eq!((finished.manual, finished.pointer), (split, 0));
+                assert!(!classifier.pending());
+                let repeated = classifier.finish();
+                assert_eq!((repeated.manual, repeated.pointer), (0, 0));
+            }
+        }
+
+        #[test]
+        fn pointer_reports_inside_a_fragmented_human_paste_remain_manual() {
+            let paste = b"\x1b[200~\x1b[<0;10;20M\x1b[M !!\x1b[<35;10;20m\x1b[201~";
+            let now = Instant::now();
+            for width in 1..=paste.len() {
+                let mut classifier = classifier();
+                let mut manual = 0;
+                for bytes in paste.chunks(width) {
+                    let classified = classifier.feed(bytes, now);
+                    manual += classified.manual;
+                    assert_eq!(classified.pointer, 0, "width={width}");
+                }
+                assert_eq!(manual, paste.len(), "width={width}");
+                assert!(!classifier.pending());
+                let after = classifier.feed(b"\x1b[M !!", now);
+                assert_eq!((after.manual, after.pointer), (0, 6));
+                assert!(!classifier.pending());
+            }
+        }
+
+        #[test]
+        fn pointer_mixed_keyboard_reports_and_replies_keep_independent_counts() {
+            let mut classifier = classifier();
+            let classified = classifier.feed(
+                b"ab\x1b[<0;10;20M\x1b[I\x1b[M !!cd\x1b[24;80R",
+                Instant::now(),
+            );
+            assert_eq!(
+                (classified.manual, classified.pointer, classifier.pending()),
+                (4, b"\x1b[<0;10;20M\x1b[M !!".len(), false)
+            );
+        }
+
+        #[test]
+        fn pointer_drain_forwards_reports_and_seals_both_generations() {
+            with_harness(|h| {
+                for report in REPORTS {
+                    let mut transport = drain_transport(64, 64, 64);
+                    let mut io =
+                        Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, report, 64));
+                    assert_eq!(
+                        h.drain_with(&mut transport, &mut io).unwrap(),
+                        InputDrain::Quiescent
+                    );
+                    assert_eq!(io.pty.bytes, *report);
+                    assert_eq!(io.human.bytes, *report);
+                    assert_eq!(transport.human_generation(), 0);
+                    assert_eq!(transport.pointer_generation(), report.len() as u64);
+                    let proof = transport
+                        .take_input_drain()
+                        .expect("a complete pointer report drains");
+                    assert_eq!(proof.human_generation(), 0);
+                    assert_eq!(proof.pointer_generation(), report.len() as u64);
+                    transport.validate_ordinary(&proof, h.until).unwrap();
+                    transport.validate_permission(&proof, h.until).unwrap();
+                }
+            });
+        }
+
+        #[test]
+        fn pointer_drain_split_x10_waits_for_the_complete_report_before_counting() {
+            with_harness(|h| {
+                let report = b"\x1b[M\xff\x80\x7f";
+                for split in 1..report.len() {
+                    let mut transport = drain_transport(64, 64, 64);
+                    let mut io = Endpoints::new(
+                        &h.trace,
+                        Reader::data(Site::Human, &h.trace, &report[..split], 64),
+                    );
+                    let pending = h.drain_with(&mut transport, &mut io);
+                    assert_pending(pending, &mut transport);
+                    assert_eq!(transport.human_generation(), 0);
+                    assert_eq!(transport.pointer_generation(), 0);
+                    assert_eq!(io.pty.bytes, report[..split]);
+                    io.human
+                        .steps
+                        .push_back(Read::Data(report[split..].to_vec()));
+                    assert_eq!(
+                        h.drain_with(&mut transport, &mut io).unwrap(),
+                        InputDrain::Quiescent
+                    );
+                    assert_eq!(transport.human_generation(), 0);
+                    assert_eq!(transport.pointer_generation(), report.len() as u64);
+                    assert_eq!(io.pty.bytes, report);
+                }
+            });
+        }
+
+        #[test]
+        fn pointer_drain_expired_x10_prefix_counts_manual_bytes_once() {
+            with_harness(|h| {
+                let prefix = b"\x1b[M !";
+                let mut transport = drain_transport(64, 64, 64);
+                let mut io =
+                    Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, prefix, 64));
+                let pending = h.drain_with(&mut transport, &mut io);
+                assert_pending(pending, &mut transport);
+                assert_eq!(transport.human_generation(), 0);
+                assert_eq!(transport.pointer_generation(), 0);
+                transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
+                assert_eq!(
+                    h.drain_with(&mut transport, &mut io).unwrap(),
+                    InputDrain::Quiescent
+                );
+                assert_eq!(transport.human_generation(), prefix.len() as u64);
+                assert_eq!(transport.pointer_generation(), 0);
+                io.human.steps.push_back(Read::Data(b"!".to_vec()));
+                assert_eq!(
+                    h.drain_with(&mut transport, &mut io).unwrap(),
+                    InputDrain::Quiescent
+                );
+                assert_eq!(transport.human_generation(), (prefix.len() + 1) as u64);
+                assert_eq!(transport.pointer_generation(), 0);
+                assert_eq!(io.pty.bytes, b"\x1b[M !!");
+            });
+        }
+
+        #[test]
+        fn pointer_drain_ordinary_proof_ignores_only_a_stale_pointer_generation() {
+            with_harness(|h| {
+                let report = b"\x1b[<0;10;20M";
+                let mut transport = drain_transport(64, 64, 64);
+                let mut io =
+                    Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, report, 64));
+                assert_eq!(
+                    h.drain_with(&mut transport, &mut io).unwrap(),
+                    InputDrain::Quiescent
+                );
+                let mut proof = transport
+                    .take_input_drain()
+                    .expect("the actual drain sealed a proof");
+                assert_eq!(proof.pointer_generation(), report.len() as u64);
+                proof.pointer_generation = 0;
+                transport.validate_ordinary(&proof, h.until).unwrap();
+                assert!(transport.validate_permission(&proof, h.until).is_err());
+            });
+        }
+
+        #[test]
+        fn pointer_drain_both_proofs_reject_a_stale_keyboard_generation() {
+            with_harness(|h| {
+                let mut transport = drain_transport(64, 64, 64);
+                let mut io =
+                    Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"x", 64));
+                assert_eq!(
+                    h.drain_with(&mut transport, &mut io).unwrap(),
+                    InputDrain::Quiescent
+                );
+                let mut proof = transport
+                    .take_input_drain()
+                    .expect("the actual drain sealed a proof");
+                assert_eq!(proof.human_generation(), 1);
+                transport.validate_ordinary(&proof, h.until).unwrap();
+                transport.validate_permission(&proof, h.until).unwrap();
+                proof.human_generation = 0;
+                assert!(transport.validate_ordinary(&proof, h.until).is_err());
+                assert!(transport.validate_permission(&proof, h.until).is_err());
+            });
+        }
+
+        #[test]
+        fn pointer_drain_both_proofs_retain_the_turn_binding() {
+            with_harness(|h| {
+                let mut transport = drain_transport(64, 64, 64);
+                h.seal(&mut transport);
+                let old = transport
+                    .take_input_drain()
+                    .expect("the initial drain sealed a proof");
+                transport.validate_ordinary(&old, h.until).unwrap();
+                transport.validate_permission(&old, h.until).unwrap();
+                let mut io = Endpoints::new(
+                    &h.trace,
+                    Reader::data(Site::Human, &h.trace, b"\x1b[M !!", 64),
+                );
+                assert_eq!(
+                    h.drain_with(&mut transport, &mut io).unwrap(),
+                    InputDrain::Quiescent
+                );
+                assert_eq!(transport.human_generation(), old.human_generation());
+                assert!(transport.validate_ordinary(&old, h.until).is_err());
+                assert!(transport.validate_permission(&old, h.until).is_err());
+                let fresh = transport
+                    .take_input_drain()
+                    .expect("the new turn sealed a fresh proof");
+                transport.validate_ordinary(&fresh, h.until).unwrap();
+                transport.validate_permission(&fresh, h.until).unwrap();
+            });
+        }
+
+        #[test]
+        fn pointer_drain_both_proofs_retain_the_deadline_check() {
+            with_harness(|h| {
+                let mut transport = drain_transport(64, 64, 64);
+                h.seal(&mut transport);
+                let proof = transport
+                    .take_input_drain()
+                    .expect("the actual drain sealed a proof");
+                let expired = Instant::now();
+                assert!(transport.validate_ordinary(&proof, expired).is_err());
+                assert!(transport.validate_permission(&proof, expired).is_err());
+            });
+        }
+
+        #[test]
+        fn pointer_transport_pacing_counts_all_outer_bytes() {
+            let mut transport = transport();
+            let report = b"\x1b[M !!";
+            let bytes = report.repeat(8);
+            let mut human = FakeInput::new(&bytes, bytes.len());
+            let mut pty = FakePty::new(b"", 1);
+            for (consumed, pointer) in [(16, 12), (32, 30), (48, 48)] {
+                let progress = one_tick(&mut transport, &mut human, &mut pty);
+                assert_eq!(progress.human_bytes, 16);
+                assert_eq!(human.consumed.len(), consumed);
+                assert_eq!(pty.written, bytes[..consumed]);
+                assert_eq!(transport.human_generation(), 0);
+                assert_eq!(transport.pointer_generation(), pointer);
+            }
+            assert_eq!(unread(&human), 0);
+        }
     }
 
     mod allowlist {
@@ -3183,14 +3604,6 @@ mod tests {
             assert_manual(b"\x1b[97u");
             assert_manual(b"\x1b[97;5u");
             assert_manual(b"\x1b[97;5;97u");
-        }
-
-        #[test]
-        fn reply_classifier_mouse_reports_are_manual() {
-            assert_manual(b"\x1b[<0;10;20M");
-            assert_manual(b"\x1b[<0;10;20m");
-            assert_manual(b"\x1b[<64;5;5M");
-            assert_manual(b"\x1b[M !!");
         }
 
         #[test]
