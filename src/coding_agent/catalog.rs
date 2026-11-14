@@ -2536,6 +2536,76 @@ mod tests {
         }
 
         #[test]
+        fn byte_plain_limit_diagnostics_include_the_prefix_and_measured_maximum_for_both_refusals()
+        {
+            for (operation, literal, size, maximum) in [
+                (
+                    ComposerOperation::Prompt,
+                    format!("{}é", "あ".repeat(341)),
+                    1025,
+                    1024,
+                ),
+                (ComposerOperation::Exec, "あ".repeat(333), 1001, 1000),
+            ] {
+                for (framing, cause) in [
+                    ("plain", "the codex profile has no bracketed-paste delivery"),
+                    (
+                        "bracketed_paste",
+                        "the native CLI has not enabled bracketed paste",
+                    ),
+                ] {
+                    let catalog = load(&framed_definition(
+                        framing,
+                        json!({"unit":"bytes","max":maximum}),
+                    ))
+                    .unwrap();
+                    let plan = plan(&catalog, operation);
+                    assert!(!plan.plain_literal_allowed(&literal));
+                    assert_eq!(
+                        plan.plain_limit_refusal(&literal, "codex"),
+                        format!(
+                            "the input is {size} bytes, above the codex plain-input limit of {maximum} bytes, and {cause}"
+                        ),
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn scalar_plain_limit_diagnostics_include_the_prefix_and_use_characters_for_both_refusals()
+        {
+            for (operation, literal) in [
+                (ComposerOperation::Prompt, "あ".repeat(1025)),
+                (ComposerOperation::Exec, "あ".repeat(1023)),
+            ] {
+                for (framing, cause) in [
+                    (
+                        "plain",
+                        "the hermes profile has no bracketed-paste delivery",
+                    ),
+                    (
+                        "bracketed_paste",
+                        "the native CLI has not enabled bracketed paste",
+                    ),
+                ] {
+                    let catalog = load(&framed_definition(
+                        framing,
+                        json!({"unit":"scalars","max":1024}),
+                    ))
+                    .unwrap();
+                    let plan = plan(&catalog, operation);
+                    assert!(!plan.plain_literal_allowed(&literal));
+                    assert_eq!(
+                        plan.plain_limit_refusal(&literal, "hermes"),
+                        format!(
+                            "the input is 1025 characters, above the hermes plain-input limit of 1024 characters, and {cause}"
+                        ),
+                    );
+                }
+            }
+        }
+
+        #[test]
         fn composer_plans_require_explicit_framing_and_plain_limit_declarations() {
             for operation in ["prompt", "exec"] {
                 for key in ["literal_framing", "plain_literal_limit"] {
