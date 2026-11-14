@@ -678,7 +678,7 @@ mod tests {
                 &mut self,
                 run: &storage::RunRecord,
                 request: &InputControlRequest,
-                _: Instant,
+                deadline: Instant,
             ) -> Result<InputControlReply, CafleetError> {
                 let InputControlOperation::SubmitPrompt(input) = &request.operation else {
                     let InputControlOperation::Receipt(ReceiptAction::Retire { input_id }) =
@@ -706,121 +706,149 @@ mod tests {
                     }
                     return Ok(InputControlReply::Submission(result));
                 }
-                let mut conn = crate::db::connect(&self.database_url).unwrap();
-                let owner = run.owner();
-                let mut row = storage::test_support::reserve_input(
-                    &mut conn,
-                    &owner,
-                    &storage::NewInput {
-                        operation_key: input.operation_key.clone(),
-                        kind: InputKind::Preview,
-                        payload_digest: storage::input_payload_digest(run.run_id, input),
-                        message_id: input.message_id,
-                    },
-                )
-                .unwrap();
-                if row.state == InputState::Ready {
-                    row = storage::record_input_state(
-                        &mut conn,
-                        &owner,
-                        row.input_id,
-                        InputState::Ready,
-                        InputState::InProgress,
-                    )
-                    .unwrap();
-                }
-                let (row, status, stage, reason) = match reply {
-                    Reply::Accepted => (
-                        storage::record_input_state(
-                            &mut conn,
-                            &owner,
-                            row.input_id,
-                            InputState::InProgress,
-                            InputState::Accepted,
-                        )
-                        .unwrap(),
-                        SubmissionStatus::Accepted,
-                        SubmissionStage::Submitted,
-                        None,
-                    ),
-                    Reply::Queued => (
-                        storage::requeue_zero_byte_immediate(
-                            &mut conn,
-                            &owner,
-                            row.input_id,
-                            "interaction_open",
-                        )
-                        .unwrap(),
-                        SubmissionStatus::Queued,
-                        SubmissionStage::ZeroBytes,
-                        Some("interaction_open".into()),
-                    ),
-                    Reply::Uncertain => (
-                        storage::record_input_uncertain(
-                            &mut conn,
-                            &owner,
-                            row.input_id,
-                            storage::StopCause::WriteFailed,
-                        )
-                        .unwrap(),
-                        SubmissionStatus::Uncertain,
-                        SubmissionStage::Partial,
-                        Some("write_failed".into()),
-                    ),
-                    Reply::Left(stage) => {
-                        if stage == storage::LeftStage::EscapeOnly {
-                            storage::requeue_zero_byte_immediate(
+                let database_url = &self.database_url;
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| {
+                            let mut conn = crate::db::connect(database_url)?;
+                            crate::db::with_database_budget(
                                 &mut conn,
-                                &owner,
-                                row.input_id,
-                                "composer_busy",
+                                Deadline::until(deadline),
+                                |conn| {
+                                    let owner = run.owner();
+                                    let mut row = storage::test_support::reserve_input(
+                                        conn,
+                                        &owner,
+                                        &storage::NewInput {
+                                            operation_key: input.operation_key.clone(),
+                                            kind: InputKind::Preview,
+                                            payload_digest: storage::input_payload_digest(
+                                                run.run_id, input,
+                                            ),
+                                            message_id: input.message_id,
+                                        },
+                                    )
+                                    .unwrap();
+                                    if row.state == InputState::Ready {
+                                        assert!(row.deferred_at.is_none());
+                                        assert_eq!(
+                                            conn.execute(
+                                                "UPDATE member_input_operations SET state='in_progress',delivery_method='profile',updated_at=?1 WHERE input_id=?2 AND state='ready' AND deferred_at IS NULL",
+                                                rusqlite::params![crate::time::now_stamp(), row.input_id],
+                                            ).unwrap(),
+                                            1,
+                                        );
+                                        row = storage::get_input(conn, row.input_id).unwrap();
+                                    }
+                                    let (row, status, stage, reason) = match reply {
+                                        Reply::Accepted => (
+                                            storage::record_input_state(
+                                                conn,
+                                                &owner,
+                                                row.input_id,
+                                                InputState::InProgress,
+                                                InputState::Accepted,
+                                            )
+                                            .unwrap(),
+                                            SubmissionStatus::Accepted,
+                                            SubmissionStage::Submitted,
+                                            None,
+                                        ),
+                                        Reply::Queued => (
+                                            storage::requeue_zero_byte_immediate(
+                                                conn,
+                                                &owner,
+                                                row.input_id,
+                                                "interaction_open",
+                                            )
+                                            .unwrap(),
+                                            SubmissionStatus::Queued,
+                                            SubmissionStage::ZeroBytes,
+                                            Some("interaction_open".into()),
+                                        ),
+                                        Reply::Uncertain => (
+                                            storage::record_input_uncertain(
+                                                conn,
+                                                &owner,
+                                                row.input_id,
+                                                storage::StopCause::WriteFailed,
+                                            )
+                                            .unwrap(),
+                                            SubmissionStatus::Uncertain,
+                                            SubmissionStage::Partial,
+                                            Some("write_failed".into()),
+                                        ),
+                                        Reply::Left(stage) => {
+                                            if stage == storage::LeftStage::EscapeOnly {
+                                                storage::requeue_zero_byte_immediate(
+                                                    conn,
+                                                    &owner,
+                                                    row.input_id,
+                                                    "composer_busy",
+                                                )
+                                                .unwrap();
+                                                storage::begin_deferred_attempt(
+                                                    conn,
+                                                    &owner,
+                                                    row.input_id,
+                                                    storage::DeliveryMethod::Fallback,
+                                                    Some("idle_timeout"),
+                                                )
+                                                .unwrap();
+                                            }
+                                            let cause = if stage == storage::LeftStage::Submitted {
+                                                storage::StopCause::SubmitUnconfirmed
+                                            } else {
+                                                storage::StopCause::ManualInput
+                                            };
+                                            let (row, _) =
+                                                storage::settle_left_and_queue_redelivery(
+                                                    conn,
+                                                    &owner,
+                                                    row.input_id,
+                                                    cause,
+                                                    stage,
+                                                )
+                                                .unwrap();
+                                            let stage = match stage {
+                                                storage::LeftStage::EscapeOnly => {
+                                                    SubmissionStage::EscapeOnly
+                                                }
+                                                storage::LeftStage::Partial => {
+                                                    SubmissionStage::Partial
+                                                }
+                                                storage::LeftStage::LiteralComplete => {
+                                                    SubmissionStage::LiteralComplete
+                                                }
+                                                storage::LeftStage::Submitted => {
+                                                    SubmissionStage::Submitted
+                                                }
+                                            };
+                                            (
+                                                row,
+                                                SubmissionStatus::LeftInComposer,
+                                                stage,
+                                                Some(cause.as_str().into()),
+                                            )
+                                        }
+                                        Reply::Held | Reply::Rejected | Reply::Failed => {
+                                            unreachable!()
+                                        }
+                                    };
+                                    Ok(InputControlReply::Submission(SubmissionResult {
+                                        status,
+                                        input_id: Some(row.input_id),
+                                        stage,
+                                        output_seq: Some(0),
+                                        reason,
+                                        delivery: row.delivery(),
+                                    }))
+                                },
                             )
-                            .unwrap();
-                            storage::begin_deferred_attempt(
-                                &mut conn,
-                                &owner,
-                                row.input_id,
-                                storage::DeliveryMethod::Fallback,
-                                Some("idle_timeout"),
-                            )
-                            .unwrap();
-                        }
-                        let cause = if stage == storage::LeftStage::Submitted {
-                            storage::StopCause::SubmitUnconfirmed
-                        } else {
-                            storage::StopCause::ManualInput
-                        };
-                        let (row, _) = storage::settle_left_and_queue_redelivery(
-                            &mut conn,
-                            &owner,
-                            row.input_id,
-                            cause,
-                            stage,
-                        )
-                        .unwrap();
-                        let stage = match stage {
-                            storage::LeftStage::EscapeOnly => SubmissionStage::EscapeOnly,
-                            storage::LeftStage::Partial => SubmissionStage::Partial,
-                            storage::LeftStage::LiteralComplete => SubmissionStage::LiteralComplete,
-                            storage::LeftStage::Submitted => SubmissionStage::Submitted,
-                        };
-                        (
-                            row,
-                            SubmissionStatus::LeftInComposer,
-                            stage,
-                            Some(cause.as_str().into()),
-                        )
-                    }
-                    Reply::Held | Reply::Rejected | Reply::Failed => unreachable!(),
-                };
-                Ok(InputControlReply::Submission(SubmissionResult {
-                    status,
-                    input_id: Some(row.input_id),
-                    stage,
-                    output_seq: Some(0),
-                    reason,
-                    delivery: row.delivery(),
-                }))
+                        })
+                        .join()
+                        .expect("the simulated runner thread completes")
+                })
             }
         }
 
@@ -1032,7 +1060,16 @@ mod tests {
                             )
                         );
                     } else {
-                        assert_eq!(diagnostic.error, format!("message {} was not notified to member {}: input {} is in progress; inspect it with cafleet input show {} --json.", first.message_id, fixture.run.member_id, input.input_id, input.input_id));
+                        assert_eq!(
+                            diagnostic.error,
+                            format!(
+                                "message {} was not notified to member {}: input {} is in progress; inspect it with cafleet input show {} --json.",
+                                first.message_id,
+                                fixture.run.member_id,
+                                input.input_id,
+                                input.input_id
+                            )
+                        );
                     }
                     assert_eq!(preview_stamp(&fixture.conn, first.message_id), None);
                     assert!(preview_stamp(&fixture.conn, second.message_id).is_some());
@@ -1264,7 +1301,7 @@ mod tests {
             with_target(true, |fixture, host| {
                 let first = message(fixture, "orphaned left attempt");
                 let input = reserve(fixture, &first, 1);
-                storage::record_input_left_in_composer(
+                let (_, successor) = storage::settle_left_and_queue_redelivery(
                     &mut fixture.conn,
                     &fixture.run.owner(),
                     input.input_id,
@@ -1272,6 +1309,16 @@ mod tests {
                     storage::LeftStage::LiteralComplete,
                 )
                 .unwrap();
+                assert_eq!(
+                    fixture
+                        .conn
+                        .execute(
+                            "DELETE FROM member_input_operations WHERE input_id=?1",
+                            [successor.input_id],
+                        )
+                        .unwrap(),
+                    1,
+                );
                 let error = deliver(fixture, host).unwrap_err();
                 assert_eq!(
                     error.message(),

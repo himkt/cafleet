@@ -4415,6 +4415,14 @@ mod tests {
                 let checkpoint = host.coordinator.retained_checkpoint(id).unwrap();
                 assert_eq!(checkpoint.written_bytes, encoded().len() as u64);
                 assert!(host.hooks.count("after") > 1);
+                let points = host.hooks.points.lock().unwrap();
+                let after = points
+                    .iter()
+                    .rev()
+                    .find(|point| point.boundary == "after" && point.id == Some(id))
+                    .expect("the completed short writes retain their final checkpoint");
+                assert_eq!(after.count, checkpoint.written_bytes);
+                assert!(after.seq <= checkpoint.output_seq);
             });
         }
 
@@ -5260,6 +5268,21 @@ mod tests {
                         start(host, "prompt:long-chunks", &literal);
                         until_written(host, 1000);
                         assert_eq!(host.pty.written, literal.as_bytes()[..1000]);
+                        let keyboard = host.transport.human_generation();
+                        let pointer = host.transport.pointer_generation();
+                        let output_seq = host.transport.snapshot().screen_seq;
+                        let visible_prefix =
+                            std::str::from_utf8(&literal.as_bytes()[..999]).unwrap();
+                        host.show(format!("\x1b[2J\x1b[1;1H{visible_prefix}").into_bytes());
+                        assert!(host.transport.snapshot().screen_seq > output_seq);
+                        assert_ne!(
+                            host.controller.health(&host.writer).eligibility,
+                            InputEligibility::ComposerEmpty,
+                        );
+                        assert_eq!(host.transport.human_generation(), keyboard);
+                        assert_eq!(host.transport.pointer_generation(), pointer);
+                        until_written(host, 2000);
+                        assert_eq!(host.pty.written, literal.as_bytes()[..2000]);
                         assert!(
                             host.coordinator
                                 .pending
