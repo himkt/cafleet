@@ -1,8 +1,8 @@
 # Multi-window fleet layout
 
-**Status**: Approved
-**Progress**: 63/64 tasks complete
-**Last Updated**: 2026-11-13
+**Status**: Complete
+**Progress**: 64/64 tasks complete
+**Last Updated**: 2026-11-14
 
 ## Overview
 
@@ -506,7 +506,7 @@ A user-configurable column bound or minimum height, a `member create --window` t
 - [x] `mise //:test` <!-- completed: 2026-11-13T15:15 -->
 - [x] `mise //:lint` <!-- completed: 2026-11-13T15:13 -->
 - [x] `mise //docs:build` and inspect any changed table with a literal pipe in the rendered HTML <!-- completed: 2026-11-13T15:13 -->
-- [ ] Reinstall the CLI through its mise task <!-- completed: -->
+- [x] Reinstall the CLI through its mise task <!-- completed: 2026-11-14T00:03 -->
 
 ### Step 15: Deleting a member whose herdr pane was closed by hand
 
