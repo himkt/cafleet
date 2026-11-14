@@ -909,6 +909,15 @@ fn wrapped_delivery_refusal(
     result: &crate::runtime::SubmissionResult,
 ) -> String {
     use crate::runtime::SubmissionStatus;
+    if result.status == SubmissionStatus::Rejected
+        && result.stage == crate::runtime::SubmissionStage::ZeroBytes
+    {
+        let cause = result
+            .reason
+            .as_deref()
+            .expect("a pre-write rejection has its cause");
+        return format!("{label} was not dispatched to member {member_id}: {cause}");
+    }
     if result.status == SubmissionStatus::LeftInComposer {
         let cause = result
             .reason

@@ -161,16 +161,6 @@ struct ComposerInput<'a> {
     literal: &'a str,
 }
 
-impl DeliveryChoice {
-    fn immediate(self) -> Result<Option<DeliverySelection>> {
-        match self {
-            Self::Ready(selection) => Ok(Some(selection)),
-            Self::Waiting => Ok(None),
-            Self::PlainLimit(cause) => Err(error(cause)),
-        }
-    }
-}
-
 struct DeferredAttempt {
     queued: QueuedInput,
     obstacle: &'static str,
@@ -2166,23 +2156,26 @@ impl InputCoordinator {
                     Some("earlier_input")
                 }
                 None => {
-                    let selection = self
-                        .select_delivery(
-                            conn,
-                            observation,
-                            ComposerInput {
-                                operation: composer_operation,
-                                kind: input.input_kind,
-                                message_id: input.message_id,
-                                literal: &input.literal,
-                            },
-                            false,
-                            deadline,
-                        )?
-                        .immediate()?;
+                    let selection = self.select_delivery(
+                        conn,
+                        observation,
+                        ComposerInput {
+                            operation: composer_operation,
+                            kind: input.input_kind,
+                            message_id: input.message_id,
+                            literal: &input.literal,
+                        },
+                        false,
+                        deadline,
+                    )?;
                     match selection {
-                        None => Some("composer_busy"),
-                        Some(selection)
+                        DeliveryChoice::Waiting => Some("composer_busy"),
+                        DeliveryChoice::PlainLimit(cause) => {
+                            return Ok(Some(InputControlReply::Submission(
+                                SubmissionResult::rejected_before_write(cause),
+                            )));
+                        }
+                        DeliveryChoice::Ready(selection)
                             if self.verified_composer(composer_operation)?
                                 && deadline.saturating_duration_since(Instant::now())
                                     < self.attempt_requirement(
@@ -2192,7 +2185,7 @@ impl InputCoordinator {
                         {
                             Some("delivery_budget_exhausted")
                         }
-                        Some(_) => None,
+                        DeliveryChoice::Ready(_) => None,
                     }
                 }
             };
@@ -2240,21 +2233,28 @@ impl InputCoordinator {
                 "input receipt cache is at capacity",
             )?;
             with_database_deadline(conn, deadline, |conn| self.validate_live(conn))?;
-            let (method, reason, stages) = self
-                .select_delivery(
-                    conn,
-                    observation,
-                    ComposerInput {
-                        operation: composer_operation,
-                        kind: input.input_kind,
-                        message_id: input.message_id,
-                        literal: &input.literal,
-                    },
-                    false,
-                    deadline,
-                )?
-                .immediate()?
-                .expect("a busy composer queues the input before selection");
+            let (method, reason, stages) = match self.select_delivery(
+                conn,
+                observation,
+                ComposerInput {
+                    operation: composer_operation,
+                    kind: input.input_kind,
+                    message_id: input.message_id,
+                    literal: &input.literal,
+                },
+                false,
+                deadline,
+            )? {
+                DeliveryChoice::Ready(selection) => selection,
+                DeliveryChoice::PlainLimit(cause) => {
+                    return Ok(Some(InputControlReply::Submission(
+                        SubmissionResult::rejected_before_write(cause),
+                    )));
+                }
+                DeliveryChoice::Waiting => {
+                    return Err(error("a busy composer queues the input before selection"));
+                }
+            };
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
                 request: new_input,
@@ -3384,7 +3384,10 @@ impl InputCoordinator {
             if let Some(reply) = self.immediate_preflight(conn, observation, deadline)? {
                 return Ok(Some(reply));
             }
-            if self.refresh_zero_delivery(conn, observation)? {
+            if let Some(reply) = self.refresh_zero_delivery(conn, observation)? {
+                return Ok(Some(InputControlReply::Submission(reply)));
+            }
+            if self.pending.is_none() {
                 return Ok(None);
             }
             let deferred = self
@@ -3465,13 +3468,13 @@ impl InputCoordinator {
         &mut self,
         conn: &mut Connection,
         observation: &ObservationController,
-    ) -> Result<bool> {
+    ) -> Result<Option<SubmissionResult>> {
         let pending = self.pending.as_ref().expect("a pending input remains");
         let Some(composer) = pending.composer() else {
-            return Ok(false);
+            return Ok(None);
         };
         if composer.started || pending.phase == InputPhase::Blocked {
-            return Ok(false);
+            return Ok(None);
         }
         let (operation, literal, request, deadline, id, deferred, idle_timeout) = (
             composer.operation,
@@ -3495,9 +3498,20 @@ impl InputCoordinator {
             deadline,
         )?;
         let selection = match choice {
-            DeliveryChoice::Waiting => return Ok(false),
+            DeliveryChoice::Waiting => return Ok(None),
             DeliveryChoice::PlainLimit(cause) => {
+                let mut rejection = SubmissionResult::rejected_before_write(cause);
                 if let Some(id) = id {
+                    let retained = self
+                        .operations
+                        .get(&id)
+                        .expect("a zero-byte input retains its receipt");
+                    ensure(
+                        retained.stage == SubmissionStage::ZeroBytes
+                            && retained.written_bytes == 0
+                            && !retained.leased,
+                        "pre-write rejection requires its recorded writer exclusion",
+                    )?;
                     if deferred {
                         self.cancel_deferred(
                             conn,
@@ -3508,7 +3522,7 @@ impl InputCoordinator {
                         )?;
                         self.pending = None;
                         self.operations.remove(&id);
-                        return Ok(true);
+                        return Ok(None);
                     }
                     let operation = with_database_deadline(conn, deadline, |conn| {
                         storage::record_input_state(
@@ -3525,10 +3539,11 @@ impl InputCoordinator {
                         .expect("a zero-byte input retains its receipt");
                     retained.operation = operation;
                     retained.attempt_available = false;
-                    self.pending.as_mut().expect("refused input remains").phase =
-                        InputPhase::Blocked;
+                    rejection.input_id = Some(id);
+                    rejection.delivery = retained.operation.delivery();
                 }
-                return Err(error(cause));
+                self.pending = None;
+                return Ok(Some(rejection));
             }
             DeliveryChoice::Ready(selection) => selection,
         };
@@ -3588,7 +3603,7 @@ impl InputCoordinator {
         composer.method = method;
         composer.reason = reason;
         composer.stages = stages;
-        Ok(false)
+        Ok(None)
     }
 
     fn reserve_pending(
