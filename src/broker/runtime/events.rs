@@ -3648,6 +3648,212 @@ mod tests {
             }
         }
 
+        fn immediate_uncertain(fixture: &mut Fixture, owner: &RunOwner) -> InputOperation {
+            let input = fixture.input(owner, "prompt:immediate-history", InputKind::Prompt, None);
+            storage::record_input_uncertain(
+                &mut fixture.conn,
+                owner,
+                input.input_id,
+                StopCause::WriteFailed,
+            )
+            .unwrap()
+        }
+
+        fn stopped_result(owner: &RunOwner, input_id: i64) -> ObservedTransition {
+            ObservedTransition {
+                kind: RuntimeEventKind::InputDeliveryResult,
+                cause_json: Some(storage::input_delivery_result_cause(
+                    input_id,
+                    "unknown",
+                    Some(StopCause::WriteFailed),
+                )),
+                ..native_exit(owner.run_id, 1)
+            }
+        }
+
+        #[test]
+        fn immediate_uncertain_result_history_survives_reconciliation_and_deduplicates() {
+            for disposition in [
+                InputDisposition::Submitted,
+                InputDisposition::NotSubmitted,
+                InputDisposition::AbandonedUncertain,
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                fixture.reserve(&owner);
+                let input = immediate_uncertain(&mut fixture, &owner);
+                let transition = stopped_result(&owner, input.input_id);
+                let (event, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(inserted);
+                storage::test_support::settle_input(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    InputState::Uncertain,
+                    disposition,
+                    "fixture:observed-native-result",
+                )
+                .unwrap();
+                let before = durable_state(&fixture.reopen());
+                let historical = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
+                assert_eq!(historical.event.payload_json, event.payload_json);
+                assert_eq!(
+                    historical.event.payload_json["delivery"],
+                    json!({
+                        "status":"uncertain", "method":"profile", "reason":null,
+                    })
+                );
+                assert_eq!(
+                    historical.event.payload_json["cause"],
+                    json!({"kind":"write_failed"})
+                );
+                assert_eq!(historical.event.payload_json["stage"], "unknown");
+                let (same, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(!inserted);
+                assert_eq!(same.event_id, event.event_id);
+                assert_eq!(same.payload_json, event.payload_json);
+                assert_eq!(durable_state(&fixture.reopen()), before);
+            }
+        }
+
+        #[test]
+        fn left_result_publication_requires_its_recorded_left_stage() {
+            for stage in [
+                "zero_bytes",
+                "escape_only",
+                "partial",
+                "submitted",
+                "unknown",
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                fixture.reserve(&owner);
+                let input = fixture.left_input(
+                    &owner,
+                    "prompt:stage-binding",
+                    InputKind::Prompt,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete,
+                );
+                let transition = ObservedTransition {
+                    kind: RuntimeEventKind::InputDeliveryResult,
+                    cause_json: Some(storage::input_delivery_result_cause(
+                        input.input_id,
+                        stage,
+                        Some(StopCause::ManualInput),
+                    )),
+                    ..native_exit(owner.run_id, 1)
+                };
+                let before = durable_state(&fixture.reopen());
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live,
+                    )
+                    .is_err(),
+                    "left stage {stage} contradicts the durable literal_complete stage"
+                );
+                assert_eq!(durable_state(&fixture.reopen()), before);
+            }
+        }
+
+        #[test]
+        fn left_result_readers_reject_a_stage_that_contradicts_the_receipt() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            let input = fixture.left_input(
+                &owner,
+                "prompt:stage-read-binding",
+                InputKind::Prompt,
+                StopCause::ManualInput,
+                LeftStage::LiteralComplete,
+            );
+            let event = result(&mut fixture, &owner, &input, 1);
+            for stage in [
+                "zero_bytes",
+                "escape_only",
+                "partial",
+                "submitted",
+                "unknown",
+            ] {
+                let mut payload = event.payload_json.clone();
+                payload["stage"] = json!(stage);
+                replace_public_payload(&mut fixture.conn, &event, payload);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{stage}"
+                );
+            }
+        }
+
+        #[test]
+        fn immediate_stop_reconciled_before_first_publication_recovers_its_original_uncertainty() {
+            for disposition in [
+                InputDisposition::Submitted,
+                InputDisposition::NotSubmitted,
+                InputDisposition::AbandonedUncertain,
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                fixture.reserve(&owner);
+                let input = immediate_uncertain(&mut fixture, &owner);
+                storage::test_support::settle_input(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    InputState::Uncertain,
+                    disposition,
+                    "fixture:reconciled-before-publication",
+                )
+                .unwrap();
+                assert_eq!(
+                    storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap(),
+                    [(input.input_id, "unknown", Some(StopCause::WriteFailed))],
+                );
+                let transition = stopped_result(&owner, input.input_id);
+                let (event, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(inserted);
+                let payload = storage::get_event(&fixture.reopen(), event.event_id)
+                    .unwrap()
+                    .event
+                    .payload_json;
+                assert_eq!(
+                    payload["delivery"],
+                    json!({
+                        "status":"uncertain", "method":"profile", "reason":null,
+                    })
+                );
+                assert_eq!(payload["cause"], json!({"kind":"write_failed"}));
+                assert_eq!(payload["stage"], "unknown");
+                assert!(
+                    storage::unpublished_delivery_results(&fixture.conn, owner.run_id)
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+
         fn result(
             fixture: &mut Fixture,
             owner: &RunOwner,
