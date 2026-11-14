@@ -1201,9 +1201,6 @@ mod tests {
                     };
                     Ok(format!("{}\n{region}", self.inner.screen.join("\n")))
                 }
-                fn composer_empty(&mut self) -> Result<bool, CafleetError> {
-                    Ok(composer_empty(&self.capture()?))
-                }
                 fn record_session_id(&mut self, id: &str) -> Result<(), CafleetError> {
                     self.inner.record_session_id(id)
                 }
@@ -1500,9 +1497,6 @@ mod tests {
                     self.screen.join("\n"),
                     composer_reliability::frame_draft(&self.composer)
                 ))
-            }
-            fn composer_empty(&mut self) -> Result<bool, CafleetError> {
-                Ok(self.composer.is_empty())
             }
             fn record_session_id(&mut self, session_id: &str) -> Result<(), CafleetError> {
                 self.recorded.push(session_id.to_owned());
