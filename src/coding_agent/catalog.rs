@@ -2368,10 +2368,14 @@ mod tests {
 
         #[test]
         fn verified_composer_uses_only_the_profile_selected_for_the_recorded_version() {
-            let mut definition = thresholds(&[("first", VERSION), ("second", VERSION_TWO)]);
-            definition["profiles"][1]["capabilities"]["composer"]["submission"]["exec"] =
-                Value::Null;
-            let catalog = load(&definition).unwrap();
+            let definition = thresholds(&[("first", VERSION), ("second", VERSION_TWO)]);
+            let mut catalog = load(&definition).unwrap();
+            let later = catalog
+                .profiles
+                .iter_mut()
+                .find(|profile| profile.min_version_text == VERSION_TWO)
+                .expect("the synthetic later profile exists");
+            later.submissions[ComposerOperation::Exec.index()] = None;
             assert!(catalog.verified_composer(
                 CodingAgent::Codex,
                 Some(VERSION),

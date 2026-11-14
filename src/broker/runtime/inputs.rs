@@ -1892,6 +1892,109 @@ mod tests {
         }
 
         #[test]
+        fn left_settlement_pairs_submitted_only_with_submit_unconfirmed() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let preview = preview(&mut fixture, &owner, message_id, 1);
+            let prompt = fixture.input(&owner, "prompt:submitted-pair", InputKind::Prompt, None);
+            for input in [preview, prompt] {
+                for (cause, stage) in [
+                    (StopCause::SubmitUnconfirmed, LeftStage::EscapeOnly),
+                    (StopCause::SubmitUnconfirmed, LeftStage::Partial),
+                    (StopCause::SubmitUnconfirmed, LeftStage::LiteralComplete),
+                    (StopCause::ManualInput, LeftStage::Submitted),
+                ] {
+                    let before = state(&fixture.conn);
+                    if input.kind == InputKind::Preview {
+                        assert!(
+                            storage::settle_left_and_queue_redelivery(
+                                &mut fixture.conn,
+                                &owner,
+                                input.input_id,
+                                cause,
+                                stage
+                            )
+                            .is_err()
+                        );
+                    } else {
+                        assert!(
+                            storage::record_input_left_in_composer(
+                                &mut fixture.conn,
+                                &owner,
+                                input.input_id,
+                                cause,
+                                stage
+                            )
+                            .is_err()
+                        );
+                    }
+                    assert_eq!(state(&fixture.conn), before, "{cause:?} {stage:?}");
+                }
+            }
+        }
+
+        #[test]
+        fn left_settlement_requires_fallback_for_escape_only() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message_id = message(&mut fixture);
+            let preview = preview(&mut fixture, &owner, message_id, 1);
+            let prompt = fixture.input(&owner, "prompt:escape-method", InputKind::Prompt, None);
+            let before = state(&fixture.conn);
+            assert!(
+                storage::settle_left_and_queue_redelivery(
+                    &mut fixture.conn,
+                    &owner,
+                    preview.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::EscapeOnly
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+            assert!(
+                storage::record_input_left_in_composer(
+                    &mut fixture.conn,
+                    &owner,
+                    prompt.input_id,
+                    StopCause::ManualInput,
+                    LeftStage::EscapeOnly
+                )
+                .is_err()
+            );
+            assert_eq!(state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn receipt_readers_reject_domain_valid_stage_cause_and_method_mismatches() {
+            for fields in [
+                "stop_cause='submit_unconfirmed',left_stage='literal_complete'",
+                "stop_cause='manual_input',left_stage='submitted'",
+                "stop_cause='manual_input',left_stage='escape_only'",
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let message_id = message(&mut fixture);
+                let input = preview(&mut fixture, &owner, message_id, 1);
+                fixture.conn.execute(&format!("UPDATE member_input_operations SET state='settled',disposition='left_in_composer',{fields} WHERE input_id=?1"), [input.input_id]).unwrap();
+                assert!(
+                    storage::get_input(&fixture.conn, input.input_id).is_err(),
+                    "{fields}"
+                );
+                assert!(
+                    storage::find_input(&fixture.conn, owner.run_id, &input.operation_key).is_err(),
+                    "{fields}"
+                );
+                assert!(
+                    storage::find_latest_preview_input(&fixture.conn, owner.run_id, message_id)
+                        .is_err(),
+                    "{fields}"
+                );
+            }
+        }
+
+        #[test]
         fn left_receipt_schema_requires_a_qualifying_cause_and_stage_together() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
