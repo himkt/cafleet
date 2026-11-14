@@ -450,6 +450,9 @@ impl Transport {
     pub(crate) fn snapshot(&self) -> ScreenSnapshot {
         self.terminal.snapshot()
     }
+    pub(crate) fn bracketed_paste(&self) -> bool {
+        self.terminal.parser.screen().bracketed_paste()
+    }
     #[cfg(test)]
     pub(super) fn set_observation_hooks(
         &mut self,

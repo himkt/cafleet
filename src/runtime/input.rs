@@ -2135,7 +2135,8 @@ impl InputCoordinator {
         Ok(Some(match composer {
             Some(plan) => {
                 if Self::composer_eligible(observation) {
-                    let [literal, submit] = plan.stages(literal)?;
+                    let [literal, submit] =
+                        plan.stages(literal, crate::coding_agent::catalog::LiteralFraming::Plain)?;
                     let stages: Arc<[Arc<[u8]>]> =
                         Arc::from(vec![Arc::from(literal), Arc::from(submit)]);
                     (storage::DeliveryMethod::Profile, None, stages)

@@ -308,8 +308,32 @@ struct RawSubmissions {
 struct RawSubmission {
     prefix_hex: String,
     submit_hex: String,
+    literal_framing: LiteralFraming,
+    #[serde(deserialize_with = "Option::deserialize")]
+    plain_literal_limit: Option<PlainLiteralLimit>,
     #[serde(rename = "fixture_ids")]
     _fixture_ids: IgnoredAny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LiteralFraming {
+    Plain,
+    BracketedPaste,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LiteralUnit {
+    Bytes,
+    Scalars,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlainLiteralLimit {
+    unit: LiteralUnit,
+    max: std::num::NonZeroU64,
 }
 
 #[derive(Deserialize)]
@@ -876,7 +900,11 @@ fn composer_submission(
     let submit = lower_hex_bytes(&raw.submit_hex, 32)
         .filter(|submit| !submit.is_empty())
         .ok_or_else(|| invalid("composer submit requires 1–32 lowercase hexadecimal bytes"))?;
-    Ok(ComposerSubmission { submit })
+    Ok(ComposerSubmission {
+        submit,
+        literal_framing: raw.literal_framing,
+        plain_literal_limit: raw.plain_literal_limit,
+    })
 }
 
 fn compile_answer(
@@ -1197,14 +1225,36 @@ impl ComposerOperation {
 #[derive(Clone)]
 pub(super) struct ComposerSubmission {
     pub(crate) submit: Vec<u8>,
+    literal_framing: LiteralFraming,
+    plain_literal_limit: Option<PlainLiteralLimit>,
 }
 
 pub(crate) struct ComposerPlan {
     operation: ComposerOperation,
     submit: Vec<u8>,
+    literal_framing: LiteralFraming,
+    plain_literal_limit: Option<PlainLiteralLimit>,
 }
 
 impl ComposerPlan {
+    pub(crate) fn literal_framing(&self) -> LiteralFraming {
+        self.literal_framing
+    }
+
+    pub(crate) fn plain_literal_allowed(&self, literal: &str) -> bool {
+        self.plain_literal_limit.is_none_or(|limit| {
+            let size = match limit.unit {
+                LiteralUnit::Bytes => self.operation.prefix().len().checked_add(literal.len()),
+                LiteralUnit::Scalars => self
+                    .operation
+                    .prefix()
+                    .len()
+                    .checked_add(literal.chars().count()),
+            };
+            size.is_some_and(|size| u64::try_from(size).is_ok_and(|size| size <= limit.max.get()))
+        })
+    }
+
     fn encode(&self, literal: &str) -> std::result::Result<Vec<u8>, CafleetError> {
         let prefix = self.operation.prefix();
         let size = prefix
@@ -1222,8 +1272,32 @@ impl ComposerPlan {
         Ok(bytes)
     }
 
-    pub(crate) fn stages(&self, literal: &str) -> std::result::Result<[Vec<u8>; 2], CafleetError> {
+    pub(crate) fn stages(
+        &self,
+        literal: &str,
+        framing: LiteralFraming,
+    ) -> std::result::Result<[Vec<u8>; 2], CafleetError> {
         let mut encoded = self.encode(literal)?;
+        if framing == LiteralFraming::BracketedPaste {
+            if self.literal_framing() != LiteralFraming::BracketedPaste {
+                return Err(CafleetError::App(
+                    "native composer plan requires plain literal framing".into(),
+                ));
+            }
+            if encoded
+                .len()
+                .checked_add(12)
+                .is_none_or(|size| size > 65536)
+            {
+                return Err(CafleetError::App(
+                    "native composer payload exceeds 65536 bytes".into(),
+                ));
+            }
+            let submit_offset = encoded.len() - self.submit.len();
+            encoded.splice(submit_offset..submit_offset, b"\x1b[201~".iter().copied());
+            let prefix_offset = self.operation.prefix().len();
+            encoded.splice(prefix_offset..prefix_offset, b"\x1b[200~".iter().copied());
+        }
         let submit = encoded.split_off(encoded.len() - self.submit.len());
         Ok([encoded, submit])
     }
@@ -1253,6 +1327,8 @@ impl ProfileCatalog {
         Some(ComposerPlan {
             operation,
             submit: submission.submit.clone(),
+            literal_framing: submission.literal_framing,
+            plain_literal_limit: submission.plain_literal_limit,
         })
     }
 }
@@ -1537,6 +1613,8 @@ pub(crate) mod test_support {
 
     #[derive(Deserialize)]
     struct ProvenanceRule {
+        id: NonBlank,
+        observation: ObservationKind,
         fixture_ids: Option<Ids>,
     }
 
@@ -1550,6 +1628,7 @@ pub(crate) mod test_support {
 
     #[derive(Deserialize)]
     struct ProvenanceCapability {
+        rule_ids: Ids,
         fixture_ids: Ids,
         submission: Option<ProvenanceSubmissions>,
     }
@@ -1642,6 +1721,17 @@ pub(crate) mod test_support {
                 )?;
             }
             let capabilities = &profile.capabilities;
+            if let Some(composer) = &capabilities.composer
+                && composer.submission.is_some()
+            {
+                require(
+                    profile.rules.iter().any(|rule| {
+                        rule.observation == ObservationKind::ComposerEmpty
+                            && composer.rule_ids.0.contains(&rule.id.0)
+                    }),
+                    "executable composer plans require empty-composer observation",
+                )?;
+            }
             for capability in [
                 &capabilities.detection,
                 &capabilities.composer,
