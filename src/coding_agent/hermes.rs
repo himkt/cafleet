@@ -1085,6 +1085,297 @@ mod tests {
         use crate::coding_agent::test_support::run_stub;
         use std::time::Duration;
 
+        mod composer_reliability {
+            use crate::coding_agent::hermes::tests::settlement::*;
+
+            pub(super) fn frame(region: &str) -> String {
+                let border = "─".repeat(80);
+                format!("{border}\n{region}\n{border}")
+            }
+
+            pub(super) fn frame_draft(draft: &str) -> String {
+                if draft.is_empty() {
+                    return frame("❯ \x1b[3mtype a message\x1b[23m");
+                }
+                let mut rows = Vec::new();
+                for line in draft.split('\n') {
+                    let characters = line.chars().collect::<Vec<_>>();
+                    if characters.is_empty() {
+                        rows.push(String::new());
+                    } else {
+                        rows.extend(
+                            characters
+                                .chunks(78)
+                                .map(|chunk| chunk.iter().collect::<String>()),
+                        );
+                    }
+                }
+                rows[0].insert_str(0, "❯ ");
+                frame(&rows.join("\n"))
+            }
+
+            #[derive(Debug)]
+            enum Recorded {
+                Keys(Vec<String>),
+                Pause,
+                Capture,
+            }
+
+            struct ClearingHost {
+                inner: Host,
+                trace: Vec<Recorded>,
+                elapsed: Duration,
+                send_cost: Duration,
+                frozen: bool,
+                changing_colours: bool,
+                captures: usize,
+                first_empty_at: Option<Duration>,
+            }
+
+            impl ClearingHost {
+                fn new(draft: &str) -> Self {
+                    let mut inner = Host::working();
+                    inner.screen = vec![IDLE.into()];
+                    inner.composer = draft.into();
+                    Self {
+                        inner,
+                        trace: Vec::new(),
+                        elapsed: Duration::ZERO,
+                        send_cost: Duration::from_millis(50),
+                        frozen: false,
+                        changing_colours: false,
+                        captures: 0,
+                        first_empty_at: None,
+                    }
+                }
+
+                fn clear_batches(&self) -> Vec<&[String]> {
+                    self.trace
+                        .iter()
+                        .filter_map(|event| match event {
+                            Recorded::Keys(keys) if keys.iter().any(|key| key == "Backspace") => {
+                                Some(keys.as_slice())
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                }
+
+                fn settle(&mut self) -> Result<Settlement, CafleetError> {
+                    let until = self.inner.origin + Duration::from_secs(20);
+                    settle(MEMBER, &session(None), self, until)
+                }
+            }
+
+            impl HermesSettlementHost for ClearingHost {
+                fn client_exited(&mut self) -> Result<bool, CafleetError> {
+                    self.inner.client_exited()
+                }
+                fn send_keys(&mut self, keys: &[&str]) -> Result<(), CafleetError> {
+                    self.trace.push(Recorded::Keys(
+                        keys.iter().map(|key| (*key).to_owned()).collect(),
+                    ));
+                    self.elapsed += self.send_cost;
+                    if self.frozen {
+                        let keys = keys
+                            .iter()
+                            .copied()
+                            .filter(|key| *key != "Backspace")
+                            .collect::<Vec<_>>();
+                        self.inner.send_keys(&keys)
+                    } else {
+                        self.inner.send_keys(keys)
+                    }
+                }
+                fn capture(&mut self) -> Result<String, CafleetError> {
+                    self.trace.push(Recorded::Capture);
+                    self.captures += 1;
+                    if self.inner.composer.is_empty() && self.first_empty_at.is_none() {
+                        self.first_empty_at = Some(self.elapsed);
+                    }
+                    let region = frame_draft(&self.inner.composer);
+                    let region = if self.changing_colours {
+                        format!("\x1b[3{}m{region}\x1b[0m", self.captures % 8)
+                    } else {
+                        region
+                    };
+                    Ok(format!("{}\n{region}", self.inner.screen.join("\n")))
+                }
+                fn composer_empty(&mut self) -> Result<bool, CafleetError> {
+                    Ok(composer_empty(&self.capture()?))
+                }
+                fn record_session_id(&mut self, id: &str) -> Result<(), CafleetError> {
+                    self.inner.record_session_id(id)
+                }
+                fn processes_json(&mut self, home: &Path) -> Result<Option<String>, CafleetError> {
+                    self.inner.processes_json(home)
+                }
+                fn registered_process_running(
+                    &mut self,
+                    pid: u32,
+                    start: u64,
+                ) -> Result<bool, CafleetError> {
+                    self.inner.registered_process_running(pid, start)
+                }
+                fn pause(&mut self) {
+                    self.trace.push(Recorded::Pause);
+                    self.elapsed += Duration::from_millis(200);
+                }
+                fn now(&self) -> Instant {
+                    self.inner.origin + self.elapsed
+                }
+            }
+
+            #[test]
+            fn composer_region_uses_sgr_to_distinguish_placeholders_from_typed_text() {
+                for (row, empty) in [
+                    ("❯ ", true),
+                    ("\x1b[1m❯ \x1b[0m", true),
+                    ("\x1b[1m❯ \x1b[0m\x1b[3;2mhint\x1b[0m", true),
+                    ("❯ \x1b[3mhint\x1b[23m", true),
+                    ("❯ \x1b[3mhint\x1b[23m   ", true),
+                    ("❯ typed", false),
+                    ("❯ \x1b[3mhint\x1b[23mx", false),
+                    ("❯ \x1b[3mhint\x1b[0mx", false),
+                    ("❯ \x1b[38;5;3mtyped\x1b[0m", false),
+                    ("❯ \x1b[38;2;3;3;3mtyped\x1b[0m", false),
+                ] {
+                    assert_eq!(composer_empty(&frame(row)), empty, "{row:?}");
+                }
+            }
+
+            #[test]
+            fn composer_region_with_multiple_rows_including_blank_rows_is_nonempty() {
+                for region in [
+                    "❯ \n",
+                    "❯ \n ",
+                    "❯ wrapped\nliteral",
+                    "❯ \x1b[3mhint\x1b[23m\n",
+                ] {
+                    assert!(!composer_empty(&frame(region)), "{region:?}");
+                }
+                assert!(!composer_empty("❯ \x1b[3mhint\x1b[23m"));
+            }
+
+            #[test]
+            fn composer_region_selects_the_live_borders_instead_of_historical_prompt_rows() {
+                let history = "❯ earlier submitted prompt\n❯ typed history";
+                assert!(composer_empty(&format!(
+                    "{history}\n{}",
+                    frame("❯ \x1b[3mhint\x1b[23m")
+                )));
+                assert!(!composer_empty(&format!(
+                    "{}\n{}",
+                    frame("❯ "),
+                    frame("❯ retained draft")
+                )));
+                let titled = format!(
+                    "─ Composer {}\n❯ \x1b[3mhint\x1b[23m\n{}",
+                    "─".repeat(69),
+                    "─".repeat(80)
+                );
+                assert!(composer_empty(&titled));
+            }
+
+            #[test]
+            fn measured_long_hermes_composers_remain_nonempty() {
+                use crate::coding_agent::detector::test_support::bundled_screen;
+                for id in [
+                    "hermes-2026.9.24-composer-prompt-paste-2057-literal-tapped-v2-tmux-120-15",
+                    "hermes-2026.9.24-composer-prompt-paste-2057-literal-tapped-v2-herdr-119-15",
+                    "hermes-2026.9.24-composer-prompt-clear-backspace-rounds-v3-8192-input-pending-tapped-v2-tmux-120-56",
+                    "hermes-2026.9.24-composer-prompt-clear-backspace-rounds-v3-8192-input-pending-tapped-v2-herdr-119-53",
+                ] {
+                    let document: Value = serde_json::from_str(&bundled_screen(id)).unwrap();
+                    let capture = document["lines"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|row| row.as_str().unwrap())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    assert!(!composer_empty(&capture), "{id}");
+                }
+            }
+
+            #[test]
+            fn hermes_clear_loop_uses_sixteen_key_batches_then_one_pause_per_round() {
+                for (draft, rounds) in [
+                    ("x".repeat(2057), 3),
+                    ("x".repeat(8192), 9),
+                    ("あ".repeat(8192), 9),
+                    (format!("{}\n{}", "x".repeat(4095), "y".repeat(4096)), 9),
+                ] {
+                    let mut host = ClearingHost::new(&draft);
+                    assert_eq!(host.settle().unwrap(), verified());
+                    assert_eq!(host.inner.submitted, ["/stop", "/exit"]);
+                    let batches = host.clear_batches();
+                    assert_eq!(batches.len(), rounds * 16);
+                    for round in batches.chunks(16) {
+                        assert_eq!(round[0].len(), 64);
+                        assert_eq!(round[0][0], "Escape");
+                        assert!(round[0][1..].iter().all(|key| key == "Backspace"));
+                        for batch in &round[1..] {
+                            assert_eq!(batch.len(), 64);
+                            assert!(batch.iter().all(|key| key == "Backspace"));
+                        }
+                    }
+                    for (start, event) in host.trace.iter().enumerate() {
+                        if let Recorded::Keys(keys) = event
+                            && keys.first().is_some_and(|key| key == "Escape")
+                            && keys.iter().any(|key| key == "Backspace")
+                        {
+                            assert!(
+                                host.trace[start..start + 16]
+                                    .iter()
+                                    .all(|event| matches!(event, Recorded::Keys(_)))
+                            );
+                            assert!(matches!(host.trace[start + 16], Recorded::Pause));
+                            assert!(matches!(host.trace[start + 17], Recorded::Capture));
+                        }
+                    }
+                    assert!(
+                        host.first_empty_at
+                            .expect("a clear round observes the empty composer")
+                            <= Duration::from_secs(10)
+                    );
+                }
+            }
+
+            #[test]
+            fn hermes_clear_loop_compares_stripped_region_progress() {
+                let mut host = ClearingHost::new("retained\nmultiline");
+                host.frozen = true;
+                host.changing_colours = true;
+                assert_unverified(
+                    host.settle(),
+                    "the Hermes composer still holds text after clearing",
+                );
+                assert_eq!(host.clear_batches().len(), 16);
+                assert!(host.inner.submitted.is_empty());
+                assert_eq!(host.inner.composer, "retained\nmultiline");
+            }
+
+            #[test]
+            fn hermes_clear_loop_stops_at_the_settlement_budget_before_typing_commands() {
+                let mut host = ClearingHost::new(&"x".repeat(8192));
+                let until = host.inner.origin + Duration::from_secs(1);
+                let result = settle(MEMBER, &session(None), &mut host, until);
+                assert!(result.is_err());
+                assert!(host.now() >= until);
+                assert!(host.inner.submitted.is_empty());
+                assert!(!host.inner.composer.is_empty());
+            }
+
+            #[test]
+            fn hermes_clear_loop_observes_an_empty_composer_without_backspace_batches() {
+                let mut host = ClearingHost::new("");
+                assert_eq!(host.settle().unwrap(), verified());
+                assert!(host.clear_batches().is_empty());
+                assert_eq!(host.inner.submitted, ["/stop", "/exit"]);
+            }
+        }
+
         const MEMBER: i64 = 7;
         const HOME: &str = "/srv/hermes/profiles/work";
         const SESSION: &str = "local-ab12cd34";
@@ -1204,7 +1495,11 @@ mod tests {
                 Ok(())
             }
             fn capture(&mut self) -> Result<String, CafleetError> {
-                Ok(self.screen.join("\n"))
+                Ok(format!(
+                    "{}\n{}",
+                    self.screen.join("\n"),
+                    composer_reliability::frame_draft(&self.composer)
+                ))
             }
             fn composer_empty(&mut self) -> Result<bool, CafleetError> {
                 Ok(self.composer.is_empty())
@@ -1320,47 +1615,6 @@ mod tests {
             host.composer = "a half-typed draft the operator left".into();
             assert_eq!(settled(&mut host, None).unwrap(), verified());
             assert_eq!(host.submitted, ["/stop", "/exit"]);
-        }
-
-        #[test]
-        fn settlement_fails_without_typing_a_command_when_clearing_leaves_text_in_the_composer() {
-            let mut host = Host::working();
-            host.screen = vec![IDLE.into()];
-            let draft = "x".repeat(CLEAR_KEYS.len() + 9);
-            host.composer = draft.clone();
-            assert_unverified(
-                settled(&mut host, None),
-                "the Hermes composer still holds text after clearing",
-            );
-            assert_eq!(host.composer, draft[..draft.len() - (CLEAR_KEYS.len() - 1)]);
-            assert!(host.submitted.is_empty());
-            assert_eq!(host.enters, 0);
-            assert!(host.recorded.is_empty());
-        }
-
-        #[test]
-        fn composer_row_is_empty_only_when_its_bottom_row_shows_the_italic_placeholder_or_nothing()
-        {
-            for (screen, empty) in [
-                ("❯ ", true),
-                ("\x1b[1m❯ \x1b[0m", true),
-                (
-                    "\x1b[1m❯ \x1b[0m\x1b[3;2mTurn these notes into a to-do list\x1b[0m",
-                    true,
-                ),
-                ("❯ \x1b[3mhint\x1b[23m   ", true),
-                ("❯ typed draft", false),
-                ("❯ \x1b[3mhint\x1b[23mx", false),
-                ("❯ \x1b[3mhint\x1b[0mx", false),
-                ("❯ \x1b[38;5;3mcolored draft\x1b[0m", false),
-                ("❯ \x1b[38;2;3;3;3mcolored draft\x1b[0m", false),
-                ("❯ earlier prompt\n❯ \x1b[3mhint\x1b[0m", true),
-                ("❯ \x1b[3mhint\x1b[0m\n❯ typed", false),
-                ("╭──╮\n│ no composer │", false),
-                ("", false),
-            ] {
-                assert_eq!(composer_row_empty(screen), empty, "{screen:?}");
-            }
         }
 
         #[test]
