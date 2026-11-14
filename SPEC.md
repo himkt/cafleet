@@ -785,11 +785,12 @@ A notification failure prints `Message NEW_ID was persisted. ` followed by its d
 message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; the next send to member MEMBER_ID or the next message wait retries it.
 ```
 
-For each attempted message left in the composer or held by its own uncertain/abandoned receipt, print one scoped diagnostic after that same persisted prefix. `INPUT_ID` identifies this invocation's attempt N and `NEXT_ID` its atomic re-delivery successor; the new message's JSON still projects N, not its successor. Submitted and queued messages produce none.
+For each attempted message left in the composer or held by its own in-progress, uncertain or abandoned receipt, print one scoped diagnostic after that same persisted prefix. `INPUT_ID` identifies this invocation's attempt N and `NEXT_ID` its atomic re-delivery successor; the new message's JSON still projects N, not its successor. Submitted and queued messages produce none.
 
 | Outcome | Diagnostic |
 |---|---|
 | Left stage `partial` | `message MESSAGE_ID was partly typed into member MEMBER_ID's composer and not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
+| Held by its own in-progress receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is in progress; inspect it with cafleet input show INPUT_ID --json.` |
 | Left stage `literal_complete` | `message MESSAGE_ID was typed into member MEMBER_ID's composer but not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
 | Left stage `submitted` | `message MESSAGE_ID was typed into member MEMBER_ID's composer and its submit key sent, but the submission was not confirmed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
 | Left stage `escape_only` | `message MESSAGE_ID was not typed: Escape was sent to member MEMBER_ID but the input was not typed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |

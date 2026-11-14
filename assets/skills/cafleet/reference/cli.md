@@ -141,7 +141,7 @@ Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` 
 
 Receipt retirement failure reports `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining `notification_sent=true`. Pre-commit storage failure exits 1. Consume each committed ID once.
 
-Each attempted message left in the composer or held by its own uncertain/abandoned receipt prints one diagnostic after `Message NEW_ID was persisted. `. Submitted and queued messages print none. `INPUT_ID` is this attempt and `NEXT_ID` its re-delivery successor; JSON `input_id` and `delivery` continue to describe this invocation's attempt of the new message.
+Each attempted message left in the composer or held by its own in-progress, uncertain or abandoned receipt prints one diagnostic after `Message NEW_ID was persisted. `. Submitted and queued messages print none. `INPUT_ID` is this attempt and `NEXT_ID` its re-delivery successor; JSON `input_id` and `delivery` continue to describe this invocation's attempt of the new message.
 
 | Outcome | Diagnostic |
 |---|---|
@@ -150,6 +150,7 @@ Each attempted message left in the composer or held by its own uncertain/abandon
 | Left stage `submitted` | `message MESSAGE_ID was typed into member MEMBER_ID's composer and its submit key sent, but the submission was not confirmed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
 | Left stage `escape_only` | `message MESSAGE_ID was not typed: Escape was sent to member MEMBER_ID but the input was not typed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
 | Own uncertain receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is uncertain (STOP_CAUSE); inspect it with cafleet input show INPUT_ID --json and reconcile it with cafleet input reconcile.` |
+| Own in-progress receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is in progress; inspect it with cafleet input show INPUT_ID --json.` |
 | Abandoned uncertainty | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID was abandoned as uncertain; send its content again as a new message if it is still needed.` |
 
 ### `message poll`
@@ -164,7 +165,7 @@ Timeout is integer `1..=1800`, default `300`. Pending messages return immediatel
 
 Result fields are `member_id`, `outcome`, `messages`, `notification_errors`; outcome is `messages` with full records or `timeout` with an empty array. Diagnostics contain `member_id`, `message_id`, `error`, ordered by message ID. Both outcomes exit 0; deleted subject/fleet or corrupt/unreadable state exits 1. Deadline allows one in-flight attempt/finalization of at most six seconds.
 
-`notification_errors` uses the exact scoped left/uncertain/abandoned strings of [Delivery outcome](#delivery-outcome). A per-message hold permits trying later messages on a verified-composer run; a pane/run/observer/ownership/storage hold ends that member's drain.
+`notification_errors` uses the exact scoped strings of [Delivery outcome](#delivery-outcome). A per-message hold permits trying later messages on a verified-composer run; a pane/run/observer/ownership/storage hold ends that member's drain.
 
 ### `message listen`
 
