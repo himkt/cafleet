@@ -2125,7 +2125,7 @@ Each check reads one SGR-preserving capture and indexes its rows identically to 
 2. Send exactly 16 batches back to back: `Escape` plus 63 `Backspace` keys, then 15 batches of 64 `Backspace` keys. Pause once for `POLL_INTERVAL` (200 ms), then capture again.
 3. Fail with `the Hermes composer still holds text after clearing` if stripped region text is unchanged; otherwise repeat until empty or the settlement budget expires.
 
-Each round clears up to 1023 scalars. A draft of 8192 scalars clears within 9 rounds (144 batches) and 10 seconds on tmux and herdr, leaving at least 10 seconds of the 20-second settlement budget for `/stop` and `/exit`; their clear steps complete after one empty capture. Native evidence establishes that Backspace on an empty composer has no effect. A native clear sequence replaces these rounds only when a captured 8192-scalar multi-row composer proves it empties the draft while preserving the client; the measurement records `Ctrl+U` and `Ctrl+A` followed by `Ctrl+K` candidates. Region rules and any replacement sequence follow the measured native fixture layouts (§6.9 Bundled profiles and native screen fixtures).
+Each round sends 1023 Backspace keys. A draft of 8192 scalars clears within 9 rounds (144 batches) and 10 seconds on tmux and herdr, leaving at least 10 seconds of the 20-second settlement budget for `/stop` and `/exit`; their clear steps complete after one empty capture. Complete nine-round native measurements took 2.676 seconds on tmux and 2.782 seconds on herdr, with the composer first observed empty after round 3; the loop stops after its first verified empty capture. Excess Backspace on an empty composer had no effect. `Ctrl+U` and `Ctrl+A` followed by `Ctrl+K` cleared a visually wrapped single logical line, but the latter retained a multi-line draft after an ineffective submit, so the fixed clear rounds cover both layouts. The total measured clear time satisfies the bound independently of any individual batch duration.
 
 Deletion runs settlement for a `hermes` run before the runner shutdown. Each `hermes` member's settlement, in `member delete` and in `fleet delete`, has its own 20-second budget, and the time it takes extends the 5-second deletion deadline for the remaining cleanup and for later fleet members. A step that does not complete within the settlement budget, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
 
@@ -2493,14 +2493,26 @@ The fixture registry uses `assets/profiles/native/<backend>.json` (§6.3 Asset i
 
 Every bundled executable composer plan declares measured `literal_framing` and `plain_literal_limit` (§ Executable native plans) and empty-composer observation. Its fixture citations establish framing, plain boundaries, post-submit verification and retained unsubmitted literals for each operation independently. New composer fixtures use `<backend>-<version>-composer-<op>-<case>-<mux>-<cols>-<n>`; existing fixture IDs retain their patterns. Captures taken inside an existing profile interval extend its declarations without changing `min_version`.
 
+The selected measured plans use these declarations for each backend's existing profile interval. The native version identifies the evidence capture, independently of the profile's minimum:
+
+| Backend | Native evidence version | Prompt framing | Exec framing | Prompt plain limit | Exec plain limit |
+|---|---|---|---|---|---|
+| `claude` | `2.1.319` | `plain` | `plain` | `null` | `null` |
+| `codex` | `0.167.0` | `bracketed_paste` | `bracketed_paste` | `{"unit":"bytes","max":1024}` | `{"unit":"bytes","max":1000}` |
+| `opencode` | `2.2.5` | `plain` | `plain` | `null` | `null` |
+| `pi` | `1.5.0` | `plain` | `plain` | `null` | `null` |
+| `hermes` | `2026.9.24` | `bracketed_paste` | `plain` | `{"unit":"scalars","max":1024}` | `{"unit":"scalars","max":1024}` |
+
+Codex's plain prompt boundary is 1024 submitting bytes and 1025 retained bytes on both multiplexers. Its faithful plain native-exec boundary is 1000 bytes: 1001 bytes enters chat instead of executing the command, while the selected bracketed exec remains faithful through the maximum preview. Hermes's 1024-scalar limit is a conservative tested cap: its Enter guard depends on the 50 ms since the last processed text change, so larger inputs can submit and size alone establishes no adjacent deterministic boundary. Maximum plain Japanese input remains retained or unverified, which rules out a null limit. Bracketed Hermes prompts submit, while large bracketed exec input collapses to a paste placeholder that is dispatched instead of the original command; its exec plan therefore uses plain input within the tested cap. Native command output or independently checked output artifacts establish original-literal execution separately from an empty composer.
+
 | Composer evidence | Required observation on each multiplexer and operation |
 |---|---|
 | Mode 2004 | Child state at an empty composer, idle and working |
-| Plain boundary | Largest submitting literal and smallest nonsubmitting literal, one measured unit apart; up to the maximum preview when plain input submits throughout |
-| Bracketed submission | Below and above the plain boundary and at 4000 Japanese scalars; literal/pre-submit and submitted screens with the measured key after 500 ms |
+| Plain limit | A size-gated backend's adjacent submitting/retained boundary; a timing-gated backend's selected tested cap with processing-guard and actual failure evidence; maximum-preview success for a null limit |
+| Bracketed submission | Below and above the plain limit and at 4000 Japanese scalars, with literal/pre-submit and post-submit screens after the measured settle/key; failed or placeholder-substituting exec framing remains explicit evidence for selecting plain input |
 | Post-submit | Verified empty composer within 2 s, idle and working |
 | Unsubmitted literal | Ineffective-key or over-limit plain input remains distinguishable from a verified empty composer |
-| Long literal | Chunked 4000-scalar Japanese preview, with literal-to-submit and submit-to-empty timings within 5 s |
+| Long literal | Chunked 4000-scalar Japanese body (4085 rendered scalars, 12085 bytes in the maximum measured preview), with literal-to-submit and submit-to-empty timings within 5 s; native exec output independently proves literal fidelity |
 
 Every capture verifies the launched native version from a pane of the capturing server before recording it. Evidence supplies each operation's measured framing/limit values and fixture citations. Hermes additionally records 2057-character and 8192-scalar composers and clear-sequence candidates for §6.7 Hermes work settlement.
 
@@ -3001,7 +3013,7 @@ The composer object at `capabilities.composer` has required `rule_ids,fixture_id
 | Composer field | Required value |
 |---|---|
 | `literal_framing` | `plain` or `bracketed_paste`; the latter requires native evidence that the framed literal and measured submit key submit at every measured size through the maximum preview |
-| `plain_literal_limit` | `null` when the maximum preview submits plainly, otherwise exactly `unit,max`, with unit `bytes` or `scalars` and integer max ≥ 1; the limit measures prefix plus literal |
+| `plain_literal_limit` | `null` when the maximum preview submits plainly, otherwise exactly `unit,max`, with unit `bytes` or `scalars` and integer max ≥ 1; this is the selected tested cap for plain prefix plus literal. A size-gated backend uses its stable measured boundary and a timing-gated backend uses a conservative tested cap |
 
 Bracketed framing writes the operation prefix plainly, then opening marker `1b5b3230307e`, unchanged literal UTF-8 and closing marker `1b5b3230317e` as one literal stage. The transport exposes the child's current DEC private mode 2004 from its parsed screen.
 
