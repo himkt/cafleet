@@ -1261,7 +1261,7 @@ impl ComposerPlan {
             .expect("a refused plain literal has its limit");
         let (size, unit) = match limit.unit {
             LiteralUnit::Bytes => (literal.len(), "bytes"),
-            LiteralUnit::Scalars => (literal.chars().count(), "scalars"),
+            LiteralUnit::Scalars => (literal.chars().count(), "characters"),
         };
         let size = size
             .checked_add(self.operation.prefix().len())
