@@ -3334,6 +3334,199 @@ mod tests {
         assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
     }
 
+    mod composer_reliability {
+        use crate::broker::runtime::events::tests::*;
+
+        fn result(
+            fixture: &mut Fixture,
+            owner: &RunOwner,
+            input: &InputOperation,
+            sequence: i64,
+        ) -> RuntimeEventRecord {
+            let stage = input
+                .left_stage
+                .expect("the result belongs to a durable left receipt");
+            storage::persist_transition(
+                &mut fixture.conn,
+                owner,
+                &ObservedTransition {
+                    kind: RuntimeEventKind::InputDeliveryResult,
+                    cause_json: Some(storage::input_delivery_result_cause(
+                        input.input_id,
+                        stage.as_str(),
+                        input.stop_cause,
+                    )),
+                    ..native_exit(owner.run_id, sequence)
+                },
+                PersistenceMode::Live,
+            )
+            .unwrap()
+            .0
+        }
+
+        #[test]
+        fn immediate_left_result_events_use_the_durable_stage_cause_and_safe_recovery_action() {
+            for (cause, stage, recovery) in [
+                (
+                    StopCause::ObserverUnavailable,
+                    LeftStage::LiteralComplete,
+                    true,
+                ),
+                (StopCause::DeadlineExpired, LeftStage::LiteralComplete, true),
+                (StopCause::SubmitUnconfirmed, LeftStage::Submitted, true),
+                (StopCause::ManualInput, LeftStage::LiteralComplete, false),
+                (
+                    StopCause::ManualAccountingFailed,
+                    LeftStage::LiteralComplete,
+                    false,
+                ),
+                (
+                    StopCause::InteractionCandidate,
+                    LeftStage::LiteralComplete,
+                    false,
+                ),
+                (
+                    StopCause::InteractionOpen,
+                    LeftStage::LiteralComplete,
+                    false,
+                ),
+                (StopCause::DeadlineExpired, LeftStage::Partial, false),
+                (StopCause::ObserverUnavailable, LeftStage::EscapeOnly, false),
+                (StopCause::PointerInput, LeftStage::Partial, false),
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                fixture.reserve(&owner);
+                let input = fixture.left_input(
+                    &owner,
+                    "prompt:immediate-left",
+                    InputKind::Prompt,
+                    cause,
+                    stage,
+                );
+                let event = result(&mut fixture, &owner, &input, 1);
+                let view = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
+                let payload = &view.event.payload_json;
+                assert_eq!(payload["input_id"], input.input_id);
+                assert_eq!(payload["stage"], stage.as_str());
+                assert_eq!(payload["cause"]["kind"], cause.as_str());
+                assert_eq!(payload["delivery"]["status"], "left_in_composer");
+                if recovery {
+                    assert_eq!(payload["director_action"]["kind"], "review_left_input");
+                    assert_eq!(
+                        payload["director_action"]["press_argv"],
+                        json!([
+                            "cafleet",
+                            "member",
+                            "press",
+                            fixture.member.to_string(),
+                            "--from-member-id",
+                            fixture.director.to_string(),
+                            "Enter",
+                            "--database-url",
+                            format!("sqlite:///{}", fixture.conn.path().unwrap())
+                        ])
+                    );
+                } else {
+                    assert_eq!(payload["director_action"], Value::Null);
+                }
+                assert!(view.interaction.is_none());
+            }
+        }
+
+        #[test]
+        fn immediate_submitted_inputs_publish_no_delivery_result() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(
+                &owner,
+                "prompt:immediate-submitted",
+                InputKind::Prompt,
+                None,
+            );
+            storage::record_input_state(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                InputState::InProgress,
+                InputState::Accepted,
+            )
+            .unwrap();
+            assert!(
+                storage::unpublished_delivery_results(&fixture.conn, owner.run_id)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+
+        #[test]
+        fn stalled_delivery_events_round_trip_the_waiting_and_blocking_receipts() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.director,
+                fixture.member,
+                "stalled preview",
+            )
+            .unwrap();
+            let first = fixture.input(
+                &owner,
+                &storage::preview_operation_key(owner.run_id, message.message_id, 1).unwrap(),
+                InputKind::Preview,
+                Some(message.message_id),
+            );
+            let (blocked, waiting) = storage::settle_left_and_queue_redelivery(
+                &mut fixture.conn,
+                &owner,
+                first.input_id,
+                StopCause::SubmitUnconfirmed,
+                LeftStage::Submitted,
+            )
+            .unwrap();
+            let event = storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &ObservedTransition {
+                    kind: RuntimeEventKind::InputDeliveryStalled,
+                    cause_json: Some(
+                        json!({"kind":"input_delivery_stalled","input_id":waiting.input_id,
+                    "blocking_input_id":blocked.input_id,"waiting_since":NOW}),
+                    ),
+                    ..native_exit(owner.run_id, 1)
+                },
+                PersistenceMode::Live,
+            )
+            .unwrap()
+            .0;
+            let view = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
+            let payload = &view.event.payload_json;
+            assert_eq!(payload["kind"], "input_delivery_stalled");
+            assert_eq!(payload["source"], "runner_lifecycle");
+            assert_eq!(payload["interaction_id"], Value::Null);
+            assert_eq!(payload["classification"], Value::Null);
+            assert_eq!(payload["input_id"], waiting.input_id);
+            assert_eq!(payload["message_id"], message.message_id);
+            assert_eq!(payload["blocking_input_id"], blocked.input_id);
+            assert_eq!(payload["waiting_since"], NOW);
+            assert_eq!(payload["delivery"]["status"], "queued");
+            assert_eq!(payload["director_action"]["kind"], "review_stalled_input");
+            assert_eq!(
+                payload["director_action"]["inspect_argv"],
+                json!([
+                    "cafleet",
+                    "input",
+                    "show",
+                    blocked.input_id.to_string(),
+                    "--json"
+                ])
+            );
+            assert!(payload["director_action"]["press_argv"].is_array());
+            assert!(view.interaction.is_none());
+        }
+    }
+
     mod input_delivery_result_events {
         use crate::broker::runtime::events::tests::*;
 

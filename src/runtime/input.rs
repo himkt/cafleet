@@ -4400,42 +4400,21 @@ mod tests {
         }
 
         #[test]
-        fn prompt_positive_short_write_retains_partial_uncertainty_without_a_second_stage() {
-            with_host(|h| {
-                let id = h.arm("prompt:fixture-short");
-                h.pty.short = Some(3);
-                h.drain();
-                let reply = submitted(h.advance().expect("actual short-write outcome"));
-                assert!(matches!(reply.status, SubmissionStatus::Uncertain));
-                assert!(matches!(reply.stage, SubmissionStage::Partial));
+        fn prompt_positive_short_writes_continue_to_one_confirmed_submission() {
+            with_host(|host| {
+                let id = host.arm("prompt:fixture-short");
+                host.pty.short = Some(3);
+                let reply = composer_reliability::finish(host, true);
+                assert_eq!(reply.status, SubmissionStatus::Accepted);
                 assert_eq!(reply.input_id, Some(id));
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert!(matches!(point.stage, SubmissionStage::Partial));
-                assert_eq!(point.written_bytes, 3);
-                let stored = storage::get_input(&h.fixture.conn, id).unwrap();
-                assert!(matches!(stored.state, storage::InputState::Uncertain));
-                assert_eq!(stored.stop_cause, Some(storage::StopCause::ShortWrite));
-                assert_eq!(reply.reason.as_deref(), Some("short_write"));
-                h.drain();
-                assert!(h.advance().is_none());
-                assert!(h.pty.program.is_empty());
+                assert_eq!(host.pty.written, encoded());
                 assert_eq!(
-                    h.pty.stage_bytes(),
-                    vec![LITERAL.as_bytes().to_vec()],
-                    "a short literal stage is never followed by its submit stage"
+                    storage::get_input(&host.fixture.conn, id).unwrap().state,
+                    storage::InputState::Accepted
                 );
-                assert_eq!(h.hooks.count("after"), 1);
-                let after = h
-                    .hooks
-                    .points
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .find(|p| p.boundary == "after")
-                    .unwrap()
-                    .clone();
-                assert_eq!(after.count, 3);
-                assert_eq!(after.seq, point.output_seq);
+                let checkpoint = host.coordinator.retained_checkpoint(id).unwrap();
+                assert_eq!(checkpoint.written_bytes, encoded().len() as u64);
+                assert!(host.hooks.count("after") > 1);
             });
         }
 
@@ -4862,6 +4841,1053 @@ mod tests {
             }
         }
 
+        mod composer_reliability {
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::{
+                form, queued, row,
+            };
+            use crate::runtime::input::tests::ordinary_prompt::*;
+            use serde_json::{Value, json};
+
+            const DRAFT: &[u8] = b"\x1b[2J\x1b[1;1Hretained native composer";
+            const OPEN: &[u8] = b"\x1b[200~";
+            const CLOSE: &[u8] = b"\x1b[201~";
+
+            fn configured(framing: &str, limit: Value) -> ProfileCatalog {
+                let mut value = catalog_definition();
+                for operation in ["prompt", "exec"] {
+                    let plan = &mut value["profiles"][0]["capabilities"]["composer"]["submission"]
+                        [operation];
+                    plan["literal_framing"] = json!(framing);
+                    plan["plain_literal_limit"] = limit.clone();
+                }
+                crate::coding_agent::catalog::test_support::load(&value).unwrap()
+            }
+
+            fn permission_configured(framing: &str, limit: Value) -> ProfileCatalog {
+                let mut definition =
+                    crate::coding_agent::catalog::test_support::inspection_fixture_definition();
+                let composer = catalog_definition();
+                definition["fixtures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["fixtures"][1].clone());
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["profiles"][0]["rules"][0].clone());
+                definition["profiles"][0]["capabilities"]["composer"] =
+                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                for operation in ["prompt", "exec"] {
+                    let plan = &mut definition["profiles"][0]["capabilities"]["composer"]["submission"]
+                        [operation];
+                    plan["literal_framing"] = json!(framing);
+                    plan["plain_literal_limit"] = limit.clone();
+                }
+                crate::coding_agent::catalog::test_support::load(&definition).unwrap()
+            }
+
+            fn program(literal: &str, bracketed: bool) -> Vec<u8> {
+                let mut bytes = Vec::new();
+                if bracketed {
+                    bytes.extend_from_slice(OPEN);
+                }
+                bytes.extend_from_slice(literal.as_bytes());
+                if bracketed {
+                    bytes.extend_from_slice(CLOSE);
+                }
+                bytes.push(b'~');
+                bytes
+            }
+
+            fn request(host: &Host, key: &str, literal: &str) -> InputControlRequest {
+                let mut request = host.request(key);
+                let InputControlOperation::SubmitPrompt(input) = &mut request.operation else {
+                    panic!("the prompt harness creates a prompt request")
+                };
+                input.literal = literal.into();
+                request
+            }
+
+            fn turn(host: &mut Host) -> Option<SubmissionResult> {
+                if let Some(composer) = host
+                    .coordinator
+                    .pending
+                    .as_mut()
+                    .and_then(PendingInput::composer_mut)
+                    && composer.settle_until.is_some()
+                {
+                    composer.settle_until = Some(Instant::now());
+                }
+                host.drain();
+                host.advance().map(submitted)
+            }
+
+            fn until_written(host: &mut Host, bytes: usize) {
+                for _ in 0..256 {
+                    if host.pty.written.len() >= bytes {
+                        return;
+                    }
+                    assert!(
+                        turn(host).is_none(),
+                        "the literal reaches its checkpoint before replying"
+                    );
+                }
+                panic!("the actual writer reaches its checkpoint within bounded turns");
+            }
+
+            pub(super) fn finish(host: &mut Host, confirm: bool) -> SubmissionResult {
+                for _ in 0..256 {
+                    if host.coordinator.pending.is_some()
+                        && host
+                            .pty
+                            .offers
+                            .last()
+                            .is_some_and(|bytes| bytes == b"~" || bytes == b"\r")
+                    {
+                        if confirm {
+                            host.child_output(SCREEN);
+                        } else {
+                            host.coordinator
+                                .set_post_submit_verification_until(Instant::now());
+                        }
+                    }
+                    if let Some(reply) = turn(host) {
+                        return reply;
+                    }
+                }
+                panic!("the actual coordinator finishes within bounded turns");
+            }
+
+            fn stored(host: &Host, reply: &SubmissionResult) -> storage::InputOperation {
+                storage::get_input(
+                    &host.fixture.conn,
+                    reply.input_id.expect("a written input has a receipt"),
+                )
+                .unwrap()
+            }
+
+            fn assert_left(
+                host: &Host,
+                reply: &SubmissionResult,
+                cause: storage::StopCause,
+                stage: storage::LeftStage,
+            ) {
+                assert_eq!(reply.status, SubmissionStatus::LeftInComposer);
+                let input = stored(host, reply);
+                assert_eq!(input.state, storage::InputState::Settled);
+                assert_eq!(
+                    input.disposition,
+                    Some(storage::InputDisposition::LeftInComposer)
+                );
+                assert_eq!(input.stop_cause, Some(cause));
+                assert_eq!(input.left_stage, Some(stage));
+                assert_eq!(reply.reason.as_deref(), Some(cause.as_str()));
+            }
+
+            fn enable_paste(host: &mut Host) {
+                host.child_output(b"\x1b[?2004h");
+                host.drain();
+                assert!(host.transport.bracketed_paste());
+            }
+
+            fn start(host: &mut Host, key: &str, literal: &str) {
+                host.confirm_submissions = false;
+                let request = request(host, key, literal);
+                assert!(host.handle(request).unwrap().is_none());
+            }
+
+            fn stopped_preview(
+                host: &mut Host,
+                short: bool,
+            ) -> (crate::broker::MessageRecord, i64) {
+                host.confirm_submissions = false;
+                let message = host.message("stopped preview");
+                let literal = canonical_preview(&message);
+                host.pty.expect_program(program(&literal, false));
+                if short {
+                    host.pty.short = Some(3);
+                }
+                let request = preview_request(host, &message, &literal);
+                assert!(host.handle(request).unwrap().is_none());
+                until_written(host, if short { 3 } else { literal.len() });
+                host.show(DRAFT.to_vec());
+                host.type_human(b"x");
+                let reply = finish(host, false);
+                assert_left(
+                    host,
+                    &reply,
+                    storage::StopCause::ManualInput,
+                    if short {
+                        storage::LeftStage::Partial
+                    } else {
+                        storage::LeftStage::LiteralComplete
+                    },
+                );
+                (message, reply.input_id.unwrap())
+            }
+
+            fn old_wait() -> String {
+                crate::time::format_utc(chrono::Utc::now() - chrono::Duration::seconds(181))
+            }
+
+            #[test]
+            fn pointer_input_during_the_settle_preserves_ordinary_submission() {
+                for pointer in [b"\x1b[<35;10;20M".as_slice(), b"\x1b[M !!"] {
+                    with_host(|host| {
+                        start(host, "prompt:pointer-settle", LITERAL);
+                        until_written(host, LITERAL.len());
+                        let keyboard = host.transport.human_generation();
+                        host.type_human(pointer);
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(host.transport.human_generation(), keyboard);
+                        assert_eq!(host.transport.pointer_generation(), pointer.len() as u64);
+                        assert_eq!(stored(host, &reply).stop_cause, None);
+                    });
+                }
+            }
+
+            #[test]
+            fn keyboard_input_during_the_settle_records_a_complete_left_literal() {
+                with_host(|host| {
+                    start(host, "prompt:keyboard-settle", LITERAL);
+                    until_written(host, LITERAL.len());
+                    host.type_human(b"x");
+                    let reply = finish(host, false);
+                    assert_left(
+                        host,
+                        &reply,
+                        storage::StopCause::ManualInput,
+                        storage::LeftStage::LiteralComplete,
+                    );
+                    assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
+                });
+            }
+
+            #[test]
+            fn positive_short_literal_writes_continue_without_settling_between_chunks() {
+                let literal = "あ".repeat(4000);
+                with_catalog_host(
+                    configured("plain", Value::Null),
+                    program(&literal, false),
+                    |host| {
+                        host.pty.short = Some(1000);
+                        start(host, "prompt:long-chunks", &literal);
+                        until_written(host, 1000);
+                        assert_eq!(host.pty.written, literal.as_bytes()[..1000]);
+                        assert!(
+                            host.coordinator
+                                .pending
+                                .as_ref()
+                                .unwrap()
+                                .composer()
+                                .unwrap()
+                                .settle_until
+                                .is_none()
+                        );
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(host.pty.written, program(&literal, false));
+                    },
+                );
+            }
+
+            #[test]
+            fn pointer_input_between_literal_chunks_stops_and_closes_the_open_paste() {
+                let literal = "abcdefghi";
+                with_catalog_host(
+                    configured("bracketed_paste", Value::Null),
+                    program(literal, true),
+                    |host| {
+                        enable_paste(host);
+                        host.pty.short = Some(OPEN.len() + 3);
+                        start(host, "prompt:pointer-chunks", literal);
+                        until_written(host, OPEN.len() + 3);
+                        host.pty.short = None;
+                        host.type_human(b"\x1b[<0;10;20M");
+                        let reply = finish(host, false);
+                        assert_left(
+                            host,
+                            &reply,
+                            storage::StopCause::PointerInput,
+                            storage::LeftStage::Partial,
+                        );
+                        assert_eq!(host.pty.offers.last().unwrap(), CLOSE);
+                        assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
+                    },
+                );
+            }
+
+            #[test]
+            fn keyboard_input_between_chunks_records_the_complete_written_prefix() {
+                with_host(|host| {
+                    host.pty.short = Some(3);
+                    start(host, "prompt:keyboard-chunks", LITERAL);
+                    until_written(host, 3);
+                    host.type_human(b"x");
+                    let reply = finish(host, false);
+                    assert_left(
+                        host,
+                        &reply,
+                        storage::StopCause::ManualInput,
+                        storage::LeftStage::Partial,
+                    );
+                });
+            }
+
+            #[test]
+            fn a_stop_inside_a_utf8_scalar_closes_paste_and_remains_uncertain() {
+                let literal = "あいう";
+                with_catalog_host(
+                    configured("bracketed_paste", Value::Null),
+                    program(literal, true),
+                    |host| {
+                        enable_paste(host);
+                        host.pty.short = Some(OPEN.len() + 1);
+                        start(host, "prompt:scalar-prefix", literal);
+                        until_written(host, OPEN.len() + 1);
+                        host.pty.short = None;
+                        host.type_human(b"x");
+                        let reply = finish(host, false);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(
+                            stored(host, &reply).stop_cause,
+                            Some(storage::StopCause::ShortWrite)
+                        );
+                        assert_eq!(host.pty.offers.last().unwrap(), CLOSE);
+                    },
+                );
+            }
+
+            #[test]
+            fn a_stop_inside_the_opening_marker_does_not_emit_a_close_marker() {
+                with_catalog_host(
+                    configured("bracketed_paste", Value::Null),
+                    program(LITERAL, true),
+                    |host| {
+                        enable_paste(host);
+                        host.pty.short = Some(3);
+                        start(host, "prompt:marker-prefix", LITERAL);
+                        until_written(host, 3);
+                        host.pty.short = None;
+                        host.type_human(b"x");
+                        let reply = finish(host, false);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(
+                            stored(host, &reply).stop_cause,
+                            Some(storage::StopCause::ShortWrite)
+                        );
+                        assert!(!host.pty.offers.iter().any(|bytes| bytes == CLOSE));
+                    },
+                );
+            }
+
+            #[test]
+            fn a_chunk_deadline_at_a_complete_prefix_records_partial_deadline_expired() {
+                with_host(|host| {
+                    host.pty.short = Some(3);
+                    start(host, "prompt:chunk-deadline", LITERAL);
+                    until_written(host, 3);
+                    host.coordinator.pending.as_mut().unwrap().deadline =
+                        Instant::now() + Duration::from_millis(100);
+                    let reply = finish(host, false);
+                    assert_left(
+                        host,
+                        &reply,
+                        storage::StopCause::DeadlineExpired,
+                        storage::LeftStage::Partial,
+                    );
+                });
+            }
+
+            #[test]
+            fn a_verified_fallback_stop_after_escape_records_escape_only() {
+                let mut expected = b"\x1b".to_vec();
+                expected.extend_from_slice(LITERAL.as_bytes());
+                expected.push(b'\r');
+                with_catalog_host(configured("plain", Value::Null), expected, |host| {
+                    host.show(DRAFT.to_vec());
+                    let id = queued(
+                        host,
+                        request(host, "prompt:escape-only", LITERAL),
+                        "composer_busy",
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &old_wait());
+                    until_written(host, 1);
+                    assert_eq!(host.pty.written, b"\x1b");
+                    host.type_human(b"x");
+                    for _ in 0..64 {
+                        let _ = turn(host);
+                    }
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::LeftInComposer)
+                    );
+                    assert_eq!(input.left_stage, Some(storage::LeftStage::EscapeOnly));
+                    assert_eq!(input.stop_cause, Some(storage::StopCause::ManualInput));
+                });
+            }
+
+            #[test]
+            fn bracketed_framing_is_selected_only_while_mode_2004_is_enabled() {
+                for enabled in [false, true] {
+                    with_catalog_host(
+                        configured("bracketed_paste", Value::Null),
+                        program(LITERAL, enabled),
+                        |host| {
+                            if enabled {
+                                enable_paste(host);
+                            }
+                            start(host, "prompt:mode-selection", LITERAL);
+                            let reply = finish(host, true);
+                            assert_eq!(reply.status, SubmissionStatus::Accepted);
+                            assert_eq!(host.pty.written, program(LITERAL, enabled));
+                        },
+                    );
+                }
+            }
+
+            #[test]
+            fn immediate_over_limit_prompt_is_refused_before_receipt_or_bytes() {
+                for framing in ["plain", "bracketed_paste"] {
+                    with_catalog_host(
+                        configured(framing, json!({"unit":"bytes","max":1})),
+                        encoded(),
+                        |host| {
+                            let before = crate::broker::runtime::test_support::rows(
+                                &host.fixture.conn,
+                                "member_input_operations",
+                            );
+                            let result = host.handle(request(host, "prompt:over-limit", LITERAL));
+                            assert!(result.is_err());
+                            assert!(host.pty.offers.is_empty());
+                            assert_eq!(
+                                crate::broker::runtime::test_support::rows(
+                                    &host.fixture.conn,
+                                    "member_input_operations"
+                                ),
+                                before
+                            );
+                        },
+                    );
+                }
+            }
+
+            #[test]
+            fn over_limit_preview_uses_the_pointer_form_with_the_same_payload_identity() {
+                with_catalog_host(
+                    configured("plain", json!({"unit":"bytes","max":1024})),
+                    encoded(),
+                    |host| {
+                        let message = host.message(&"あ".repeat(3000));
+                        let canonical = canonical_preview(&message);
+                        let expected_digest = storage::input_payload_digest(
+                            host.fixture.run.run_id,
+                            &SubmitInput {
+                                operation_key: storage::preview_operation_key(
+                                    host.fixture.run.run_id,
+                                    message.message_id,
+                                    1,
+                                )
+                                .unwrap(),
+                                input_kind: storage::InputKind::Preview,
+                                message_id: Some(message.message_id),
+                                literal: canonical.clone(),
+                            },
+                        );
+                        let request = preview_request(host, &message, &canonical);
+                        assert!(host.handle(request).unwrap().is_none());
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        let text = String::from_utf8(host.pty.written.clone()).unwrap();
+                        assert!(text.contains(&format!(
+                            "cafleet message show {} --json",
+                            message.message_id
+                        )));
+                        assert!(!text.contains(&message.text));
+                        assert_eq!(stored(host, &reply).payload_digest, expected_digest);
+                    },
+                );
+            }
+
+            #[test]
+            fn queued_prompt_over_the_limit_settles_not_submitted_and_advances() {
+                with_catalog_host(
+                    permission_configured("plain", json!({"unit":"bytes","max":1})),
+                    encoded(),
+                    |host| {
+                        form(host);
+                        let id = queued(
+                            host,
+                            request(host, "prompt:queued-over-limit", LITERAL),
+                            "interaction_open",
+                        );
+                        host.show(SCREEN.to_vec());
+                        for _ in 0..64 {
+                            let _ = turn(host);
+                        }
+                        let input = row(host, id);
+                        assert_eq!(
+                            input.disposition,
+                            Some(storage::InputDisposition::NotSubmitted)
+                        );
+                        assert_eq!(
+                            input.delivery_reason.as_deref(),
+                            Some("plain_limit_exceeded")
+                        );
+                        assert!(host.pty.offers.is_empty());
+                    },
+                );
+            }
+
+            #[test]
+            fn submit_key_requires_the_full_verification_window_before_writing() {
+                with_host(|host| {
+                    start(host, "prompt:submit-budget", LITERAL);
+                    until_written(host, LITERAL.len());
+                    host.coordinator.pending.as_mut().unwrap().deadline =
+                        Instant::now() + Duration::from_secs(1);
+                    let reply = finish(host, false);
+                    assert_left(
+                        host,
+                        &reply,
+                        storage::StopCause::DeadlineExpired,
+                        storage::LeftStage::LiteralComplete,
+                    );
+                    assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
+                });
+            }
+
+            #[test]
+            fn short_immediate_budget_queues_zero_bytes_then_uses_a_fresh_runner_budget() {
+                with_host(|host| {
+                    let request = request(host, "prompt:initial-budget", LITERAL);
+                    let reply = submitted(
+                        host.handle_until(request, Instant::now() + Duration::from_secs(1))
+                            .unwrap()
+                            .expect("short budget queues immediately"),
+                    );
+                    assert_eq!(reply.status, SubmissionStatus::Queued);
+                    assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                    assert!(host.pty.offers.is_empty());
+                    assert_eq!(
+                        stored(host, &reply).defer_reason.as_deref(),
+                        Some("delivery_budget_exhausted")
+                    );
+                    let input_id = reply.input_id.unwrap();
+                    for _ in 0..256 {
+                        if row(host, input_id).state == storage::InputState::Accepted {
+                            break;
+                        }
+                        if !host.pty.program.is_empty() {
+                            host.child_output(SCREEN);
+                        }
+                        let _ = turn(host);
+                    }
+                    assert_eq!(row(host, input_id).state, storage::InputState::Accepted);
+                    assert_eq!(host.pty.written, encoded());
+                });
+            }
+
+            #[test]
+            fn deferred_head_budget_check_includes_the_verification_window() {
+                with_catalog_host(
+                    permission_configured("plain", Value::Null),
+                    encoded(),
+                    |host| {
+                        form(host);
+                        let id = queued(
+                            host,
+                            request(host, "prompt:deferred-budget", LITERAL),
+                            "interaction_open",
+                        );
+                        host.show(SCREEN.to_vec());
+                        host.coordinator
+                            .queue
+                            .front_mut()
+                            .expect("the actual queued head")
+                            .attempt_deadline = Some(Instant::now() + Duration::from_secs(1));
+                        let _ = turn(host);
+                        assert_eq!(row(host, id).state, storage::InputState::Ready);
+                        assert!(host.pty.offers.is_empty());
+                        assert_eq!(
+                            host.coordinator
+                                .queue
+                                .front()
+                                .expect("the same waiting head")
+                                .obstacle,
+                            "delivery_budget_exhausted"
+                        );
+                    },
+                );
+            }
+
+            #[test]
+            fn unconfirmed_submit_records_the_submitted_left_stage() {
+                with_host(|host| {
+                    start(host, "prompt:unconfirmed", LITERAL);
+                    let reply = finish(host, false);
+                    assert_left(
+                        host,
+                        &reply,
+                        storage::StopCause::SubmitUnconfirmed,
+                        storage::LeftStage::Submitted,
+                    );
+                    assert_eq!(host.pty.written, encoded());
+                });
+            }
+
+            #[test]
+            fn freshly_verified_empty_composer_confirms_the_written_submit_key() {
+                with_host(|host| {
+                    start(host, "prompt:confirmed", LITERAL);
+                    let reply = finish(host, true);
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(stored(host, &reply).stop_cause, None);
+                    assert_eq!(host.pty.written, encoded());
+                });
+            }
+
+            #[test]
+            fn redelivery_successor_waits_ahead_of_later_inputs_and_survives_the_idle_bound() {
+                with_host(|host| {
+                    let (message, stopped) = stopped_preview(host, false);
+                    let next = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    assert_eq!(next.preview_attempt, Some(2));
+                    assert_eq!(next.defer_reason.as_deref(), Some("redelivery"));
+                    let later = queued(
+                        host,
+                        request(host, "prompt:behind-redelivery", LITERAL),
+                        "earlier_input",
+                    );
+                    let writes = host.pty.written.clone();
+                    host.coordinator
+                        .set_queued_composer_busy_since(next.input_id, &old_wait());
+                    for _ in 0..64 {
+                        let _ = turn(host);
+                    }
+                    assert_eq!(host.pty.written, writes);
+                    assert_eq!(row(host, next.input_id).state, storage::InputState::Ready);
+                    assert_eq!(row(host, later).state, storage::InputState::Ready);
+                    assert_eq!(
+                        row(host, stopped).disposition,
+                        Some(storage::InputDisposition::LeftInComposer)
+                    );
+                });
+            }
+
+            #[test]
+            fn acked_held_preview_is_cancelled_on_the_next_queue_turn_without_writing() {
+                with_host(|host| {
+                    let (message, _) = stopped_preview(host, false);
+                    let next = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    let writes = host.pty.written.clone();
+                    crate::broker::ack_message(&mut host.fixture.conn, message.message_id).unwrap();
+                    let _ = turn(host);
+                    let cancelled = row(host, next.input_id);
+                    assert_eq!(
+                        cancelled.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(
+                        cancelled.delivery_reason.as_deref(),
+                        Some("message_consumed")
+                    );
+                    assert_eq!(host.pty.written, writes);
+                });
+            }
+
+            #[test]
+            fn stalled_held_head_publishes_one_event_with_the_blocking_input() {
+                with_host(|host| {
+                    let (message, stopped) = stopped_preview(host, false);
+                    let next = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    host.coordinator
+                        .set_queued_composer_busy_since(next.input_id, &old_wait());
+                    for _ in 0..64 {
+                        let _ = turn(host);
+                    }
+                    let mut statement = host.fixture.conn.prepare("SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2").unwrap();
+                    let payloads = statement
+                        .query_map(
+                            rusqlite::params![host.fixture.run.run_id, next.input_id],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .unwrap()
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .unwrap();
+                    assert_eq!(payloads.len(), 1);
+                    let event: Value = serde_json::from_str(&payloads[0]).unwrap();
+                    assert_eq!(event["blocking_input_id"], stopped);
+                    assert_eq!(event["message_id"], message.message_id);
+                    assert_eq!(event["director_action"]["kind"], "review_stalled_input");
+                    assert_eq!(event["director_action"]["press_argv"], Value::Null);
+                });
+            }
+
+            #[test]
+            fn a_newly_opened_interaction_confirms_the_written_submit_key() {
+                with_catalog_host(
+                    permission_configured("plain", Value::Null),
+                    encoded(),
+                    |host| {
+                        start(host, "prompt:interaction-confirmation", LITERAL);
+                        until_written(host, encoded().len());
+                        form(host);
+                        let reply = (0..64)
+                            .find_map(|_| turn(host))
+                            .expect("the new interaction confirms the submitted input");
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(stored(host, &reply).stop_cause, None);
+                    },
+                );
+            }
+
+            #[test]
+            fn partial_submit_key_is_uncertain_with_write_failed() {
+                let mut definition = catalog_definition();
+                for operation in ["prompt", "exec"] {
+                    definition["profiles"][0]["capabilities"]["composer"]["submission"]
+                        [operation]["literal_framing"] = json!("plain");
+                    definition["profiles"][0]["capabilities"]["composer"]["submission"]
+                        [operation]["plain_literal_limit"] = Value::Null;
+                }
+                definition["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["submit_hex"] =
+                    json!("6b6c");
+                let catalog =
+                    crate::coding_agent::catalog::test_support::load(&definition).unwrap();
+                let mut bytes = LITERAL.as_bytes().to_vec();
+                bytes.extend_from_slice(b"kl");
+                with_catalog_host(catalog, bytes, |host| {
+                    start(host, "prompt:short-submit", LITERAL);
+                    until_written(host, LITERAL.len());
+                    host.pty.short = Some(1);
+                    let reply = finish(host, false);
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                    assert_eq!(
+                        stored(host, &reply).stop_cause,
+                        Some(storage::StopCause::WriteFailed)
+                    );
+                });
+            }
+
+            #[test]
+            fn failed_or_partial_close_stages_record_write_failed() {
+                for failed in [false, true] {
+                    with_catalog_host(
+                        configured("bracketed_paste", Value::Null),
+                        program(LITERAL, true),
+                        |host| {
+                            enable_paste(host);
+                            host.pty.short = Some(OPEN.len() + 3);
+                            start(host, "prompt:bad-close", LITERAL);
+                            until_written(host, OPEN.len() + 3);
+                            host.pty.short = None;
+                            host.type_human(b"x");
+                            host.drain();
+                            if failed {
+                                host.pty.failure = Some(std::io::ErrorKind::BrokenPipe);
+                            } else {
+                                host.pty.short = Some(1);
+                            }
+                            for _ in 0..64 {
+                                match host.try_advance() {
+                                    Err(_) | Ok(Some(_)) => break,
+                                    Ok(None) => host.drain(),
+                                }
+                            }
+                            let input = storage::find_input(
+                                &host.fixture.conn,
+                                host.fixture.run.run_id,
+                                "prompt:bad-close",
+                            )
+                            .unwrap()
+                            .unwrap();
+                            assert_eq!(input.state, storage::InputState::Uncertain);
+                            assert_eq!(input.stop_cause, Some(storage::StopCause::WriteFailed));
+                            assert!(host.pty.offers.iter().any(|bytes| bytes == CLOSE));
+                        },
+                    );
+                }
+            }
+
+            #[test]
+            fn a_stop_inside_the_closing_marker_closes_paste_and_keeps_short_write_uncertainty() {
+                with_catalog_host(
+                    configured("bracketed_paste", Value::Null),
+                    program(LITERAL, true),
+                    |host| {
+                        enable_paste(host);
+                        let prefix = OPEN.len() + LITERAL.len() + 3;
+                        host.pty.short = Some(prefix);
+                        start(host, "prompt:closing-marker-prefix", LITERAL);
+                        until_written(host, prefix);
+                        host.pty.short = None;
+                        host.type_human(b"x");
+                        let reply = finish(host, false);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(
+                            stored(host, &reply).stop_cause,
+                            Some(storage::StopCause::ShortWrite)
+                        );
+                        assert_eq!(host.pty.offers.last().unwrap(), CLOSE);
+                    },
+                );
+            }
+
+            #[test]
+            fn redelivery_is_inserted_ahead_of_input_already_queued_at_the_stop() {
+                with_host(|host| {
+                    host.confirm_submissions = false;
+                    let message = host.message("redelivery preserves message order");
+                    let literal = canonical_preview(&message);
+                    host.pty.expect_program(program(&literal, false));
+                    assert!(
+                        host.handle(preview_request(host, &message, &literal))
+                            .unwrap()
+                            .is_none()
+                    );
+                    until_written(host, literal.len());
+                    let later = queued(
+                        host,
+                        request(host, "prompt:already-queued", LITERAL),
+                        "earlier_input",
+                    );
+                    host.show(DRAFT.to_vec());
+                    host.type_human(b"x");
+                    let reply = finish(host, false);
+                    assert_left(
+                        host,
+                        &reply,
+                        storage::StopCause::ManualInput,
+                        storage::LeftStage::LiteralComplete,
+                    );
+                    let next = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    let order = host
+                        .coordinator
+                        .queue
+                        .iter()
+                        .map(|input| input.input_id)
+                        .collect::<Vec<_>>();
+                    assert_eq!(order, [next.input_id, later]);
+                });
+            }
+
+            #[test]
+            fn verified_fifo_advances_past_uncertain_and_holds_the_following_ordinary_head() {
+                with_catalog_host(
+                    configured("plain", Value::Null),
+                    program("あxx", false),
+                    |host| {
+                        host.pty.short = Some(1);
+                        start(host, "prompt:uncertain-head", "あxx");
+                        until_written(host, 1);
+                        let later = queued(
+                            host,
+                            request(host, "prompt:behind-uncertain", LITERAL),
+                            "earlier_input",
+                        );
+                        host.show(DRAFT.to_vec());
+                        host.type_human(b"x");
+                        let reply = finish(host, false);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(
+                            stored(host, &reply).stop_cause,
+                            Some(storage::StopCause::ShortWrite)
+                        );
+                        let writes = host.pty.written.clone();
+                        host.coordinator
+                            .set_queued_composer_busy_since(later, &old_wait());
+                        for _ in 0..64 {
+                            let _ = turn(host);
+                        }
+                        assert_eq!(row(host, later).state, storage::InputState::Ready);
+                        assert_eq!(
+                            host.coordinator
+                                .queue
+                                .front()
+                                .expect("the FIFO advanced to the ordinary head")
+                                .input_id,
+                            later
+                        );
+                        assert_eq!(host.pty.written, writes);
+                    },
+                );
+            }
+
+            #[test]
+            fn clearing_the_held_composer_restores_the_human_draft_idle_timeout_rule() {
+                with_catalog_host(
+                    configured("plain", Value::Null),
+                    program("あxx", false),
+                    |host| {
+                        host.pty.short = Some(1);
+                        start(host, "prompt:clear-held", "あxx");
+                        until_written(host, 1);
+                        host.show(DRAFT.to_vec());
+                        host.type_human(b"x");
+                        let reply = finish(host, false);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        host.pty.short = None;
+                        host.show(SCREEN.to_vec());
+                        let _ = turn(host);
+                        host.show(DRAFT.to_vec());
+                        let later = queued(
+                            host,
+                            request(host, "prompt:human-draft-after-clear", LITERAL),
+                            "composer_busy",
+                        );
+                        host.coordinator
+                            .set_queued_composer_busy_since(later, &old_wait());
+                        let before = host.pty.written.len();
+                        until_written(host, before + 1);
+                        let input = row(host, later);
+                        assert_eq!(
+                            input.delivery_method,
+                            Some(storage::DeliveryMethod::Fallback)
+                        );
+                        assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
+                        assert_eq!(host.pty.offers.last().unwrap(), b"\x1b");
+                    },
+                );
+            }
+
+            #[test]
+            fn held_composer_time_behind_an_interaction_publishes_no_stalled_event() {
+                with_catalog_host(
+                    permission_configured("plain", Value::Null),
+                    encoded(),
+                    |host| {
+                        let (message, _) = stopped_preview(host, false);
+                        let waiting = storage::find_latest_preview_input(
+                            &host.fixture.conn,
+                            host.fixture.run.run_id,
+                            message.message_id,
+                        )
+                        .unwrap()
+                        .unwrap();
+                        host.coordinator
+                            .set_queued_composer_busy_since(waiting.input_id, &old_wait());
+                        form(host);
+                        for _ in 0..64 {
+                            let _ = turn(host);
+                        }
+                        let count: i64 = host.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2", rusqlite::params![host.fixture.run.run_id,waiting.input_id], |row| row.get(0)).unwrap();
+                        assert_eq!(count, 0);
+                        assert_eq!(
+                            row(host, waiting.input_id).state,
+                            storage::InputState::Ready
+                        );
+                    },
+                );
+            }
+
+            #[test]
+            fn nonverified_runs_keep_uncertain_fifo_heads_and_create_no_redelivery() {
+                let catalog = configured("plain", Value::Null).without_submission(
+                    crate::coding_agent::CodingAgent::Codex,
+                    ComposerOperation::Prompt,
+                );
+                with_catalog_host(catalog, encoded(), |host| {
+                    host.confirm_submissions = false;
+                    let message = host.message("legacy unverified preview");
+                    let literal = canonical_preview(&message);
+                    let mut bytes = b"\x1b".to_vec();
+                    bytes.extend_from_slice(literal.as_bytes());
+                    bytes.push(b'\r');
+                    host.pty.expect_program(bytes);
+                    assert!(
+                        host.handle(preview_request(host, &message, &literal))
+                            .unwrap()
+                            .is_none()
+                    );
+                    until_written(host, 1 + literal.len());
+                    let later = queued(
+                        host,
+                        request(host, "prompt:legacy-fifo", LITERAL),
+                        "earlier_input",
+                    );
+                    host.type_human(b"x");
+                    let reply = finish(host, false);
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                    let input = stored(host, &reply);
+                    assert_eq!(input.stop_cause, Some(storage::StopCause::ManualInput));
+                    assert_eq!(input.left_stage, None);
+                    let latest = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    assert_eq!(latest.input_id, input.input_id);
+                    assert_eq!(latest.preview_attempt, Some(1));
+                    let written = host.pty.written.clone();
+                    for _ in 0..64 {
+                        let _ = turn(host);
+                    }
+                    assert_eq!(row(host, later).state, storage::InputState::Ready);
+                    assert_eq!(host.pty.written, written);
+                });
+            }
+
+            #[test]
+            fn an_inactive_target_cancels_the_waiting_preview_without_writing() {
+                with_host(|host| {
+                    let (message, _) = stopped_preview(host, false);
+                    let waiting = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    let written = host.pty.written.clone();
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    let _ = host.try_advance();
+                    let input = row(host, waiting.input_id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_reason.as_deref(), Some("target_inactive"));
+                    assert_eq!(host.pty.written, written);
+                });
+            }
+        }
+
         mod staged_delivery {
             use crate::runtime::input::tests::ordinary_prompt::*;
 
@@ -4969,23 +5995,28 @@ mod tests {
             }
 
             #[test]
-            fn staged_human_input_during_the_settle_stops_the_submit_stage_with_uncertainty() {
+            fn staged_human_input_during_the_settle_leaves_the_complete_literal() {
                 with_host(|host| {
                     until_literal_written(host, prompt_request(host, "prompt:human-race"));
                     host.type_human(b"h");
                     let reply = finish_after_interruption(host);
-                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
-                    assert_eq!(reply.stage, SubmissionStage::Partial);
+                    assert_eq!(reply.status, SubmissionStatus::LeftInComposer);
+                    assert_eq!(reply.stage, SubmissionStage::LiteralComplete);
                     assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
                     let id = reply.input_id.unwrap();
                     let stored = storage::get_input(&host.fixture.conn, id).unwrap();
-                    assert_eq!(stored.state, storage::InputState::Uncertain);
+                    assert_eq!(stored.state, storage::InputState::Settled);
+                    assert_eq!(
+                        stored.disposition,
+                        Some(storage::InputDisposition::LeftInComposer)
+                    );
+                    assert_eq!(stored.left_stage, Some(storage::LeftStage::LiteralComplete));
                     assert_eq!(stored.stop_cause, Some(storage::StopCause::ManualInput));
                     assert_eq!(reply.reason.as_deref(), Some("manual_input"));
                     assert_eq!(
                         delivery_selection(host, id),
                         (Some("profile".into()), None),
-                        "the selected method survives the uncertain outcome"
+                        "the selected method survives the settled left outcome"
                     );
                 });
             }
@@ -5061,11 +6092,16 @@ mod tests {
                     reply: &SubmissionResult,
                     cause: storage::StopCause,
                 ) {
-                    assert_eq!(reply.status, SubmissionStatus::Uncertain, "{cause:?}");
-                    assert_eq!(reply.stage, SubmissionStage::Partial, "{cause:?}");
+                    assert_eq!(reply.status, SubmissionStatus::LeftInComposer, "{cause:?}");
+                    assert_eq!(reply.stage, SubmissionStage::LiteralComplete, "{cause:?}");
                     assert_eq!(reply.reason.as_deref(), Some(cause.as_str()));
                     let row = stored(host, reply);
-                    assert_eq!(row.state, storage::InputState::Uncertain);
+                    assert_eq!(row.state, storage::InputState::Settled);
+                    assert_eq!(
+                        row.disposition,
+                        Some(storage::InputDisposition::LeftInComposer)
+                    );
+                    assert_eq!(row.left_stage, Some(storage::LeftStage::LiteralComplete));
                     assert_eq!(row.stop_cause, Some(cause));
                     assert_eq!(
                         host.pty.stage_bytes(),
@@ -5793,8 +6829,7 @@ mod tests {
             }
 
             #[test]
-            fn queue_head_failure_after_a_possible_write_is_uncertain_published_once_and_reconcilable()
-             {
+            fn queued_stopped_inputs_publish_once_and_resume_after_the_composer_empties() {
                 for case in [
                     "write_failure",
                     "human_input_after_the_settle",
@@ -5815,10 +6850,15 @@ mod tests {
                             }
                             _ => host.type_human(b"h"),
                         }
-                        while row(host, first).state != storage::InputState::Uncertain {
+                        let target = if case == "write_failure" {
+                            storage::InputState::Uncertain
+                        } else {
+                            storage::InputState::Settled
+                        };
+                        while row(host, first).state != target {
                             assert!(
                                 Instant::now() < host.until,
-                                "{case}: the head becomes uncertain"
+                                "{case}: the head records its stopped outcome"
                             );
                             host.drain();
                             if let Err(failure) = host.try_advance() {
@@ -5848,14 +6888,26 @@ mod tests {
                         assert_eq!(result_events(host, first), 1, "{case}");
                         let recorded = row(host, first)
                             .stop_cause
-                            .expect("a live uncertain result records its cause");
+                            .expect("a stopped result records its cause");
                         assert_eq!(
                             result_cause(host, first),
                             Some(serde_json::json!({ "kind": recorded.as_str() })),
                             "{case}: the published cause is the receipt's"
                         );
                         assert_eq!(row(host, next).state, storage::InputState::Ready, "{case}");
-                        reconcile(host, first);
+                        if case == "write_failure" {
+                            reconcile(host, first);
+                        } else {
+                            assert_eq!(
+                                row(host, first).disposition,
+                                Some(storage::InputDisposition::LeftInComposer)
+                            );
+                            assert_eq!(
+                                row(host, first).left_stage,
+                                Some(storage::LeftStage::LiteralComplete)
+                            );
+                        }
+                        host.show(SCREEN.to_vec());
                         turns_until(host, |host| settled(host, next));
                         assert_eq!(
                             host.pty.offers[host.pty.offers.len() - 2..],
@@ -5868,7 +6920,7 @@ mod tests {
             }
 
             #[test]
-            fn preview_after_an_uncertain_head_with_an_empty_queue_waits_for_reconciliation() {
+            fn preview_after_an_uncertain_head_waits_for_a_verified_empty_composer() {
                 with_permission_host(Duration::from_secs(60), |host| {
                     form(host);
                     let head = queued(
@@ -5900,17 +6952,18 @@ mod tests {
                     let preview = queued(
                         host,
                         preview_request(host, &message, &canonical),
-                        "earlier_input",
+                        "composer_busy",
                     );
                     crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
                         host.pty.offers.len(),
                         offers,
-                        "the preview receives zero bytes before reconciliation: {:?}",
+                        "the preview receives zero bytes while the composer holds the stopped input: {:?}",
                         &host.pty.offers[offers..]
                     );
                     assert_eq!(row(host, preview).state, storage::InputState::Ready);
                     reconcile(host, head);
+                    host.show(SCREEN.to_vec());
                     turns_until(host, |host| settled(host, preview));
                     assert_eq!(
                         host.pty.offers[offers..],
@@ -6055,7 +7108,8 @@ mod tests {
             }
 
             #[test]
-            fn preview_queued_behind_an_uncertain_immediate_attempt_waits_for_reconciliation() {
+            fn preview_queued_behind_a_left_immediate_attempt_waits_for_a_verified_empty_composer()
+            {
                 with_permission_host(Duration::from_secs(60), |host| {
                     let first = host.request("prompt:immediate-uncertain");
                     assert!(host.handle(first).unwrap().is_none());
@@ -6076,7 +7130,11 @@ mod tests {
                         }
                         std::thread::sleep(Duration::from_millis(5));
                     };
-                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                    assert_eq!(reply.status, SubmissionStatus::LeftInComposer);
+                    assert_eq!(
+                        row(host, reply.input_id.unwrap()).left_stage,
+                        Some(storage::LeftStage::LiteralComplete)
+                    );
                     let offers = host.pty.offers.len();
                     crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
@@ -6086,7 +7144,7 @@ mod tests {
                         &host.pty.offers[offers..]
                     );
                     assert_eq!(row(host, preview).state, storage::InputState::Ready);
-                    reconcile(host, reply.input_id.unwrap());
+                    host.show(SCREEN.to_vec());
                     turns_until(host, |host| settled(host, preview));
                     assert_eq!(
                         host.pty.offers[offers..],
@@ -7474,6 +8532,7 @@ mod tests {
             pub(in crate::runtime::input) struct Pty {
                 pub(crate) child: FakeInput,
                 pub(crate) offers: Vec<Vec<u8>>,
+                pub(crate) written: Vec<u8>,
                 pub(crate) program: Vec<Vec<u8>>,
                 pub(crate) stages: Vec<(Instant, Vec<u8>)>,
                 pub(crate) manual: Vec<u8>,
@@ -7511,7 +8570,9 @@ mod tests {
                     if let Some(kind) = self.failure {
                         return Err(io::Error::new(kind, "injected PTY write failure"));
                     }
-                    if self.expected_program[self.program_offset..].starts_with(bytes) {
+                    let belongs_to_program =
+                        self.expected_program[self.program_offset..].starts_with(bytes);
+                    if belongs_to_program || bytes == b"\x1b[201~" {
                         let conn = crate::db::connect(&self.database_url).unwrap();
                         assert!(
                             self.hooks.reserved_input_ids().into_iter().any(|id| {
@@ -7522,15 +8583,20 @@ mod tests {
                         );
                         assert!(self.hooks.count("before") > 0);
                         self.stages.push((Instant::now(), bytes.to_vec()));
-                        let accepted = self.short.unwrap_or(bytes.len());
-                        self.program_offset += accepted;
-                        if self.program_offset == self.expected_program.len() {
+                        let accepted = self.short.unwrap_or(bytes.len()).min(bytes.len());
+                        self.written.extend_from_slice(&bytes[..accepted]);
+                        if belongs_to_program {
+                            self.program_offset += accepted;
+                        }
+                        if belongs_to_program && self.program_offset == self.expected_program.len()
+                        {
                             self.program.push(self.expected_program.clone());
                             self.program_offset = 0;
                         }
                         Ok(accepted)
                     } else {
                         self.manual.extend_from_slice(bytes);
+                        self.written.extend_from_slice(bytes);
                         Ok(bytes.len())
                     }
                 }
@@ -7682,6 +8748,8 @@ mod tests {
                 pub(crate) hooks: Arc<Hooks>,
                 pub(crate) until: Instant,
                 pub(crate) stage_settle: Duration,
+                pub(crate) confirm_submissions: bool,
+                confirmation_frame: Vec<u8>,
                 expires: u64,
                 child: Child,
             }
@@ -7798,6 +8866,7 @@ mod tests {
                     let pty = Pty {
                         child: FakeInput::new(&screen, screen.len().max(1)),
                         offers: Vec::new(),
+                        written: Vec::new(),
                         program: Vec::new(),
                         stages: Vec::new(),
                         manual: Vec::new(),
@@ -7821,6 +8890,8 @@ mod tests {
                         hooks,
                         until,
                         stage_settle,
+                        confirm_submissions: true,
+                        confirmation_frame: screen,
                         expires,
                         child,
                     };
@@ -7855,8 +8926,13 @@ mod tests {
                     }
                 }
                 pub(crate) fn show(&mut self, bytes: Vec<u8>) {
-                    self.child_output(bytes);
+                    self.child_output(&bytes);
                     self.drain();
+                    if self.controller.health(&self.writer).eligibility
+                        == InputEligibility::ComposerEmpty
+                    {
+                        self.confirmation_frame = bytes;
+                    }
                 }
                 pub(crate) fn drain(&mut self) {
                     loop {
@@ -7897,13 +8973,23 @@ mod tests {
                 pub(crate) fn try_advance(
                     &mut self,
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
-                    self.coordinator.advance(
+                    let ordinary = self
+                        .coordinator
+                        .pending
+                        .as_ref()
+                        .is_some_and(|pending| pending.composer().is_some());
+                    let completed = self.pty.program.len();
+                    let result = self.coordinator.advance(
                         &mut self.fixture.conn,
                         &mut self.transport,
                         &mut self.pty,
                         &self.controller,
                         self.until,
-                    )
+                    );
+                    if ordinary && self.confirm_submissions && self.pty.program.len() > completed {
+                        self.child_output(self.confirmation_frame.clone());
+                    }
+                    result
                 }
                 pub(crate) fn handle(
                     &mut self,
@@ -9591,6 +10677,30 @@ mod tests {
                         original
                     );
                     assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+                });
+            }
+        }
+
+        #[test]
+        fn pointer_reports_revoke_permission_tokens_without_keyboard_generation_changes() {
+            for pointer in [b"\x1b[<0;10;20M".as_slice(), b"\x1b[M !!"] {
+                with_redacted_inspection(|host, _, _| {
+                    let ids = stable_detailed_form(host, "opened");
+                    let inspection = inspect(host, ids);
+                    let input = command(
+                        host,
+                        &inspection,
+                        "response:pointer-revoked",
+                        PermissionDecision::Allow,
+                    );
+                    let keyboard = host.transport.human_generation();
+                    host.type_human(pointer);
+                    host.drain();
+                    assert_eq!(host.transport.human_generation(), keyboard);
+                    assert_eq!(host.transport.pointer_generation(), pointer.len() as u64);
+                    assert!(host.respond(&input).is_err());
+                    assert_eq!(counts(host), [0, 0, 0]);
+                    assert!(host.pty.program.is_empty());
                 });
             }
         }
@@ -11846,9 +12956,13 @@ mod tests {
             #[test]
             fn gated_continuation_binds_only_by_succession_in_the_same_episode() {
                 type Disturbance = fn(&mut Host);
-                let cases: [(&str, Disturbance); 4] = [
+                let cases: [(&str, Disturbance); 5] = [
                     ("human input", |h| {
                         h.type_human(b"x");
+                        h.drain();
+                    }),
+                    ("pointer input", |h| {
+                        h.type_human(b"\x1b[<0;10;20M");
                         h.drain();
                     }),
                     ("an observation gap", |h| {

@@ -1070,6 +1070,43 @@ pub(crate) mod test_support {
             .unwrap()
         }
 
+        pub(crate) fn left_input(
+            &mut self,
+            owner: &RunOwner,
+            key: &str,
+            kind: InputKind,
+            cause: StopCause,
+            stage: LeftStage,
+        ) -> InputOperation {
+            assert!(matches!(kind, InputKind::Prompt | InputKind::Exec));
+            let input = self.input(owner, key, kind, None);
+            if stage == LeftStage::EscapeOnly {
+                storage::requeue_zero_byte_immediate(
+                    &mut self.conn,
+                    owner,
+                    input.input_id,
+                    "composer_busy",
+                )
+                .unwrap();
+                storage::begin_deferred_attempt(
+                    &mut self.conn,
+                    owner,
+                    input.input_id,
+                    DeliveryMethod::Fallback,
+                    Some("idle_timeout"),
+                )
+                .unwrap();
+            }
+            storage::record_input_left_in_composer(
+                &mut self.conn,
+                owner,
+                input.input_id,
+                cause,
+                stage,
+            )
+            .unwrap()
+        }
+
         pub(crate) fn reopen(&self) -> Connection {
             crate::db::connect(&format!("sqlite:///{}", self.conn.path().unwrap())).unwrap()
         }
