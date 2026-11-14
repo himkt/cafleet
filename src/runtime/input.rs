@@ -37,6 +37,10 @@ const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
 const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
+const POST_SUBMIT_VERIFICATION: Duration = Duration::from_secs(2);
+const PASTE_CLOSE_RESERVE: Duration = Duration::from_millis(250);
+const PASTE_OPEN: &[u8] = b"\x1b[200~";
+const PASTE_CLOSE: &[u8] = b"\x1b[201~";
 const FALLBACK_ESCAPE: u8 = 0x1b;
 const FALLBACK_ENTER: u8 = 0x0d;
 
@@ -80,6 +84,7 @@ pub(crate) struct InputCoordinator {
     lock: Arc<RunLock>,
     services: InputServices,
     manual_generation: u64,
+    pointer_generation: u64,
     manual_accounting_failed: bool,
     placement: Placement,
     operations: BTreeMap<i64, RetainedInput>,
@@ -92,6 +97,9 @@ pub(crate) struct InputCoordinator {
     finalization: Option<PendingFinalization>,
     pending_stamp: Option<PendingStamp>,
     deferred_failed: bool,
+    held_composer: Option<(i64, u64)>,
+    output_seq: u64,
+    bracketed_paste: bool,
 }
 
 /// An accepted deferred preview whose notification stamp and settlement storage prevented; like
@@ -122,6 +130,8 @@ fn storage_failure(cause: &CafleetError) -> bool {
 #[derive(Clone)]
 struct QueuedInput {
     input_id: i64,
+    redelivery: bool,
+    stalled: bool,
     request: storage::NewInput,
     literal: String,
     operation: ComposerOperation,
@@ -138,6 +148,29 @@ type DeliverySelection = (
     Arc<[Arc<[u8]>]>,
 );
 
+enum DeliveryChoice {
+    Ready(DeliverySelection),
+    Waiting,
+    PlainLimit(String),
+}
+
+struct ComposerInput<'a> {
+    operation: ComposerOperation,
+    kind: storage::InputKind,
+    message_id: Option<i64>,
+    literal: &'a str,
+}
+
+impl DeliveryChoice {
+    fn immediate(self) -> Result<Option<DeliverySelection>> {
+        match self {
+            Self::Ready(selection) => Ok(Some(selection)),
+            Self::Waiting => Ok(None),
+            Self::PlainLimit(cause) => Err(error(cause)),
+        }
+    }
+}
+
 struct DeferredAttempt {
     queued: QueuedInput,
     obstacle: &'static str,
@@ -150,6 +183,7 @@ pub(crate) struct CurrentRequest {
     event_id: i64,
     message_id: i64,
     manual_generation: u64,
+    pointer_generation: u64,
 }
 impl CurrentRequest {
     fn same_request(&self, other: &Self) -> bool {
@@ -158,6 +192,7 @@ impl CurrentRequest {
             && self.event_id == other.event_id
             && self.message_id == other.message_id
             && self.manual_generation == other.manual_generation
+            && self.pointer_generation == other.pointer_generation
             && self.observed.same_request(&other.observed)
     }
 }
@@ -269,6 +304,8 @@ enum InputPhase {
     AwaitBeforeWrite,
     Armed,
     Blocked,
+    Closing,
+    Verifying,
 }
 
 struct PermissionSelection {
@@ -291,6 +328,8 @@ enum RetainedSelection {
         method: storage::DeliveryMethod,
         stages: Arc<[Arc<[u8]>]>,
         next_stage: usize,
+        offset: usize,
+        closing: bool,
     },
     Permission {
         selection: Arc<PermissionSelection>,
@@ -332,17 +371,35 @@ struct ComposerDelivery {
     reason: Option<&'static str>,
     stages: Arc<[Arc<[u8]>]>,
     written_stages: usize,
+    started: bool,
     settle_until: Option<Instant>,
     manual_generation: Option<u64>,
+    pointer_generation: Option<u64>,
+    stop: Option<ComposerStop>,
+    stop_failure: Option<CafleetError>,
+    verification: Option<PostSubmitVerification>,
     pane: Option<PaneLock>,
     literal: String,
     operation: ComposerOperation,
     deferred: Option<DeferredAttempt>,
 }
 
+#[derive(Clone, Copy)]
+struct ComposerStop {
+    cause: storage::StopCause,
+    stage: storage::LeftStage,
+    complete_prefix: bool,
+}
+
+struct PostSubmitVerification {
+    until: Instant,
+    output_seq: u64,
+    episode_seq: Option<i64>,
+}
+
 impl ComposerDelivery {
     fn requires_empty_composer(&self) -> bool {
-        self.method == storage::DeliveryMethod::Profile && self.written_stages == 0
+        self.method == storage::DeliveryMethod::Profile && !self.started
     }
 }
 
@@ -569,7 +626,17 @@ impl InputGuard<'_> {
                 method,
                 stages,
                 next_stage,
+                offset,
+                closing,
             } => {
+                if *closing {
+                    ensure(
+                        bytes == PASTE_CLOSE,
+                        "paste cleanup writes only its closing marker",
+                    )?;
+                    self.permit = GuardPermit::ConsumedPreIo;
+                    return Ok(self.deadline);
+                }
                 let proof = self
                     .proof
                     .as_ref()
@@ -577,10 +644,10 @@ impl InputGuard<'_> {
                 ensure(
                     stages
                         .get(*next_stage)
-                        .is_some_and(|stage| stage.as_ref() == bytes),
+                        .is_some_and(|stage| stage.get(*offset..) == Some(bytes)),
                     "composer stage selection changed",
                 )?;
-                if *method == storage::DeliveryMethod::Profile && *next_stage == 0 {
+                if *method == storage::DeliveryMethod::Profile && *next_stage == 0 && *offset == 0 {
                     transport.validate_input_drain(proof, self.deadline)?
                 } else {
                     transport.validate_observation_drain(proof, self.deadline)?
@@ -592,7 +659,7 @@ impl InputGuard<'_> {
             } => {
                 let stage = selected_answer_stage(&selection.plan, *next_stage)?;
                 ensure(stage.bytes() == bytes, "permission stage selection changed")?;
-                transport.validate_observation_drain(
+                transport.validate_permission(
                     self.proof
                         .as_ref()
                         .ok_or_else(|| error("native drain is absent"))?,
@@ -642,8 +709,18 @@ impl InputGuard<'_> {
                 if *count == offered {
                     retained.stage = match &mut retained.selection {
                         RetainedSelection::Composer {
-                            stages, next_stage, ..
+                            stages,
+                            next_stage,
+                            offset,
+                            closing,
+                            ..
                         } => {
+                            if *closing {
+                                retained.stage = SubmissionStage::Partial;
+                                self.permit = GuardPermit::ResultRecorded;
+                                return Ok(());
+                            }
+                            *offset = 0;
                             *next_stage = next_stage
                                 .checked_add(1)
                                 .ok_or_else(|| error("composer stage index exhausted"))?;
@@ -675,6 +752,21 @@ impl InputGuard<'_> {
                     };
                 } else if *count > 0 {
                     retained.stage = SubmissionStage::Partial;
+                    if let RetainedSelection::Composer {
+                        stages,
+                        next_stage,
+                        offset,
+                        closing,
+                        ..
+                    } = &mut retained.selection
+                        && !*closing
+                        && *next_stage + 1 < stages.len()
+                    {
+                        *offset = offset
+                            .checked_add(*count)
+                            .ok_or_else(|| error("composer offset exhausted"))?;
+                        retained.bytes = Arc::from(&stages[*next_stage][*offset..]);
+                    }
                 }
             }
             Err(cause)
@@ -718,6 +810,15 @@ enum WriteValidation {
 
 #[cfg(test)]
 impl InputCoordinator {
+    fn set_post_submit_verification_until(&mut self, until: Instant) {
+        self.pending
+            .as_mut()
+            .and_then(PendingInput::composer_mut)
+            .and_then(|composer| composer.verification.as_mut())
+            .expect("an active post-submit verification is required")
+            .until = until;
+    }
+
     /// Sets when the queued input began waiting only on a composer that is not verified empty.
     pub(crate) fn set_queued_composer_busy_since(&mut self, input_id: i64, since: &str) {
         let since = chrono::DateTime::parse_from_rfc3339(since).expect("RFC 3339 busy start");
@@ -783,7 +884,7 @@ impl InputCoordinator {
                     interaction_missing_evidence(interaction.classification, &evidence)?;
                 let fresh = match transport.take_input_drain() {
                     Some(proof) => {
-                        transport.validate_observation_drain(&proof, deadline)?;
+                        transport.validate_permission(&proof, deadline)?;
                         true
                     }
                     None => false,
@@ -792,6 +893,7 @@ impl InputCoordinator {
                 if let Some((current, _)) = &self.current_request
                     && (current.observed.request_generation != observation.request_generation()
                         || current.manual_generation != self.manual_generation
+                        || current.pointer_generation != self.pointer_generation
                         || observed.is_none())
                 {
                     self.current_request = None;
@@ -820,6 +922,7 @@ impl InputCoordinator {
                         event_id: view.event.event_id,
                         message_id,
                         manual_generation: self.manual_generation,
+                        pointer_generation: self.pointer_generation,
                     };
                     if !next.observed.answer_matches.is_empty() {
                         if let Some((current, _)) = &mut self.current_request
@@ -1013,6 +1116,7 @@ impl InputCoordinator {
             return ensure(
                 token == &selection.request.metadata.request_token
                     && self.manual_generation == bound.manual_generation
+                    && self.pointer_generation == bound.pointer_generation
                     && observation.gap_count() == selection.gap_count
                     && observation.request_generation() == continuation.request_generation
                     && observation.current_continuation() == Some(continuation),
@@ -1026,6 +1130,7 @@ impl InputCoordinator {
             token == &selection.request.metadata.request_token
                 && current.same_request(bound)
                 && self.manual_generation == bound.manual_generation
+                && self.pointer_generation == bound.pointer_generation
                 && observation.request_generation() == bound.observed.request_generation
                 && observed.request_generation == bound.observed.request_generation
                 && observed.classification
@@ -1093,6 +1198,7 @@ impl InputCoordinator {
         ensure(next_stage > 0, "the first stage's gate does not hold")?;
         ensure(
             self.manual_generation == bound.manual_generation
+                && self.pointer_generation == bound.pointer_generation
                 && !self.manual_accounting_failed
                 && !self.input_fenced
                 && self.observation_blocker.is_none()
@@ -1500,7 +1606,7 @@ impl InputCoordinator {
         )
     }
 
-    fn failure(&self, source: CafleetError) -> InputFailure {
+    fn input_context(&self) -> InputContext {
         InputContext {
             run_id: Some(self.run.run_id),
             interaction_id: self.pending.as_ref().and_then(|pending| {
@@ -1515,7 +1621,10 @@ impl InputCoordinator {
                 .as_ref()
                 .map(|pending| pending.request.operation_key.clone()),
         }
-        .failure(source)
+    }
+
+    fn failure(&self, source: CafleetError) -> InputFailure {
+        self.input_context().failure(source)
     }
 
     fn effective_deadline(&self, conn: &Connection, deadline: Instant) -> Result<Instant> {
@@ -1638,7 +1747,11 @@ impl InputCoordinator {
         let Some(proof) = transport.take_input_drain() else {
             return Ok(None);
         };
-        transport.validate_observation_drain(&proof, deadline)?;
+        transport.validate_permission(&proof, deadline)?;
+        ensure(
+            proof.pointer_generation() == self.pointer_generation,
+            "permission pointer generation changed",
+        )?;
         self.current_drain_seq(&proof, "permission manual generation changed")?;
         binding.rearm = Some(selection.clone());
         Ok(Some(InputGuard {
@@ -1864,6 +1977,36 @@ impl InputCoordinator {
             && status.diagnostic.is_none()
     }
 
+    fn verified_composer(&self, operation: ComposerOperation) -> Result<bool> {
+        let backend =
+            coding_agent(&self.run.backend).ok_or_else(|| error("unknown input backend"))?;
+        Ok(self.services.catalog.verified_composer(
+            backend,
+            self.run.native_version.as_deref(),
+            operation,
+        ))
+    }
+
+    fn attempt_requirement(&self, operation: ComposerOperation, stages: usize) -> Result<Duration> {
+        let settles = u32::try_from(stages.checked_sub(1).expect("a delivery has stages"))
+            .expect("a delivery has bounded stages");
+        Ok(self.stage_settle() * settles
+            + STAGE_WRITE_MARGIN
+            + if self.verified_composer(operation)? {
+                POST_SUBMIT_VERIFICATION
+            } else {
+                Duration::ZERO
+            })
+    }
+
+    fn unresolved_ordinary(&self, conn: &Connection, operation: ComposerOperation) -> Result<bool> {
+        if self.verified_composer(operation)? {
+            Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state='in_progress')", [self.run.run_id], |row| row.get(0))?)
+        } else {
+            storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
+        }
+    }
+
     fn result(&self, operation: &storage::InputOperation) -> SubmissionResult {
         use storage::InputState;
         let (status, mut stage, reason) = crate::runtime::input_client::durable_outcome(operation)
@@ -2002,8 +2145,9 @@ impl InputCoordinator {
             let digest = storage::input_payload_digest(self.run.run_id, &input);
             request.identity.validate(&self.run)?;
             let unresolved_deferred = with_database_deadline(conn, deadline, |conn| {
-                storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
+                self.unresolved_ordinary(conn, composer_operation)
             })?;
+            self.clear_verified_hold(observation);
             let status = observation.status();
             let defer_reason = match ordinary_blocker(&status) {
                 Some(OrdinaryBlocker::ObserverUnavailable) => {
@@ -2016,20 +2160,41 @@ impl InputCoordinator {
                     || !self.queue.is_empty()
                     || self.finalization.is_some()
                     || self.pending_stamp.is_some()
+                    || self.held_composer.is_some()
                     || unresolved_deferred =>
                 {
                     Some("earlier_input")
                 }
-                None => self
-                    .select_delivery(
-                        observation,
-                        composer_operation,
-                        input.input_kind,
-                        &input.literal,
-                        false,
-                    )?
-                    .is_none()
-                    .then_some("composer_busy"),
+                None => {
+                    let selection = self
+                        .select_delivery(
+                            conn,
+                            observation,
+                            ComposerInput {
+                                operation: composer_operation,
+                                kind: input.input_kind,
+                                message_id: input.message_id,
+                                literal: &input.literal,
+                            },
+                            false,
+                            deadline,
+                        )?
+                        .immediate()?;
+                    match selection {
+                        None => Some("composer_busy"),
+                        Some(selection)
+                            if self.verified_composer(composer_operation)?
+                                && deadline.saturating_duration_since(Instant::now())
+                                    < self.attempt_requirement(
+                                        composer_operation,
+                                        selection.2.len(),
+                                    )? =>
+                        {
+                            Some("delivery_budget_exhausted")
+                        }
+                        Some(_) => None,
+                    }
+                }
             };
             let new_input = storage::NewInput {
                 operation_key: input.operation_key.clone(),
@@ -2054,6 +2219,8 @@ impl InputCoordinator {
                     storage::InputReservation::Inserted(operation) => {
                         self.queue.push_back(QueuedInput {
                             input_id: operation.input_id,
+                            redelivery: false,
+                            stalled: false,
                             request: new_input,
                             literal: input.literal,
                             operation: composer_operation,
@@ -2075,12 +2242,18 @@ impl InputCoordinator {
             with_database_deadline(conn, deadline, |conn| self.validate_live(conn))?;
             let (method, reason, stages) = self
                 .select_delivery(
+                    conn,
                     observation,
-                    composer_operation,
-                    input.input_kind,
-                    &input.literal,
+                    ComposerInput {
+                        operation: composer_operation,
+                        kind: input.input_kind,
+                        message_id: input.message_id,
+                        literal: &input.literal,
+                    },
                     false,
+                    deadline,
                 )?
+                .immediate()?
                 .expect("a busy composer queues the input before selection");
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
@@ -2091,8 +2264,13 @@ impl InputCoordinator {
                     reason,
                     stages,
                     written_stages: 0,
+                    started: false,
                     settle_until: None,
                     manual_generation: None,
+                    pointer_generation: None,
+                    stop: None,
+                    stop_failure: None,
+                    verification: None,
                     pane: None,
                     literal: input.literal,
                     operation: composer_operation,
@@ -2110,12 +2288,18 @@ impl InputCoordinator {
     /// delivery fallback otherwise, rendering a fallback preview with its dismissal clause.
     fn select_delivery(
         &self,
+        conn: &mut Connection,
         observation: &ObservationController,
-        operation: ComposerOperation,
-        kind: storage::InputKind,
-        literal: &str,
+        input: ComposerInput<'_>,
         idle_timeout: bool,
-    ) -> Result<Option<DeliverySelection>> {
+        deadline: Instant,
+    ) -> Result<DeliveryChoice> {
+        let ComposerInput {
+            operation,
+            kind,
+            message_id,
+            literal,
+        } = input;
         let composer = match self.run.native_version.as_deref() {
             Some(native) => {
                 let backend = coding_agent(&self.run.backend)
@@ -2126,36 +2310,58 @@ impl InputCoordinator {
             }
             None => None,
         };
-        let prefix = operation.prefix();
-        let fallback_literal = if kind == storage::InputKind::Preview {
-            crate::delivery::fallback_preview_line(literal)
-        } else {
-            literal.to_owned()
-        };
-        Ok(Some(match composer {
-            Some(plan) => {
-                if Self::composer_eligible(observation) {
-                    let [literal, submit] =
-                        plan.stages(literal, crate::coding_agent::catalog::LiteralFraming::Plain)?;
-                    let stages: Arc<[Arc<[u8]>]> =
-                        Arc::from(vec![Arc::from(literal), Arc::from(submit)]);
-                    (storage::DeliveryMethod::Profile, None, stages)
-                } else if idle_timeout {
-                    (
-                        storage::DeliveryMethod::Fallback,
-                        Some("idle_timeout"),
-                        fallback_stages(prefix, &fallback_literal)?,
-                    )
-                } else {
-                    return Ok(None);
-                }
+        let (method, reason) = match &composer {
+            Some(_) if Self::composer_eligible(observation) => {
+                (storage::DeliveryMethod::Profile, None)
             }
+            Some(_) if idle_timeout => (storage::DeliveryMethod::Fallback, Some("idle_timeout")),
+            Some(_) => return Ok(DeliveryChoice::Waiting),
             None => (
                 storage::DeliveryMethod::Fallback,
                 Some("submission_plan_unavailable"),
-                fallback_stages(prefix, &fallback_literal)?,
             ),
-        }))
+        };
+        let render = |base: &str| {
+            if method == storage::DeliveryMethod::Fallback && kind == storage::InputKind::Preview {
+                crate::delivery::fallback_preview_line(base)
+            } else {
+                base.to_owned()
+            }
+        };
+        let mut literal = render(literal);
+        let mut framing = crate::coding_agent::catalog::LiteralFraming::Plain;
+        if let Some(plan) = &composer {
+            if plan.literal_framing()
+                == crate::coding_agent::catalog::LiteralFraming::BracketedPaste
+                && self.bracketed_paste
+            {
+                framing = crate::coding_agent::catalog::LiteralFraming::BracketedPaste;
+            } else if !plan.plain_literal_allowed(&literal) {
+                if kind != storage::InputKind::Preview {
+                    return Ok(DeliveryChoice::PlainLimit(
+                        plan.plain_limit_refusal(&literal, &self.run.backend),
+                    ));
+                }
+                let message = with_database_deadline(conn, deadline, |conn| {
+                    crate::broker::get_message(conn, message_id.expect("a preview has its message"))
+                })?;
+                literal = render(&crate::delivery::pointer_preview_line(&message));
+            }
+        }
+        let stages = if let Some(plan) = &composer {
+            let [literal, submit] = plan.stages(&literal, framing)?;
+            let mut stages: Vec<Arc<[u8]>> = Vec::new();
+            if method == storage::DeliveryMethod::Fallback {
+                stages.push(Arc::from(&[FALLBACK_ESCAPE][..]));
+                stages.extend([Arc::from(literal), Arc::from(&[FALLBACK_ENTER][..])]);
+            } else {
+                stages.extend([Arc::from(literal), Arc::from(submit)]);
+            }
+            Arc::from(stages)
+        } else {
+            fallback_stages(operation.prefix(), &literal)?
+        };
+        Ok(DeliveryChoice::Ready((method, reason, stages)))
     }
 
     /// A started deferred attempt holds the pane and advances its stages on every tick.
@@ -2193,14 +2399,6 @@ impl InputCoordinator {
             stage.as_str(),
             stop_cause,
         ));
-    }
-
-    fn retained_stop_cause(&self, input_id: i64) -> Option<storage::StopCause> {
-        self.operations
-            .get(&input_id)
-            .expect("a published input retains its receipt")
-            .operation
-            .stop_cause
     }
 
     /// Settles queued or attempted zero-byte work as not submitted and publishes its result. When
@@ -2276,6 +2474,20 @@ impl InputCoordinator {
         Ok(None)
     }
 
+    fn clear_verified_hold(&mut self, observation: &ObservationController) {
+        if self
+            .held_composer
+            .is_some_and(|(_, output_seq)| self.output_seq > output_seq)
+            && Self::composer_eligible(observation)
+        {
+            self.held_composer = None;
+            if let Some(head) = self.queue.front_mut() {
+                head.composer_busy_since = None;
+                head.attempt_deadline = None;
+            }
+        }
+    }
+
     /// Starts the queued head once no interaction blocks it, or settles it when its attempt
     /// budget expires or its preview was consumed.
     fn start_deferred(
@@ -2287,6 +2499,7 @@ impl InputCoordinator {
         if self.input_fenced {
             return Ok(());
         }
+        self.clear_verified_hold(observation);
         if let Some(pending) = self.finalization.take() {
             self.cancel_deferred(
                 conn,
@@ -2305,51 +2518,127 @@ impl InputCoordinator {
                 return Ok(());
             }
         }
-        if self.queue.is_empty() {
+        let Some(head) = self.queue.front() else {
             return Ok(());
-        }
+        };
+        let (input_id, message_id, operation) =
+            (head.input_id, head.request.message_id, head.operation);
         let now = Instant::now();
-        match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-            storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
-        }) {
-            Ok(false) => {}
-            Ok(true) => return Ok(()),
+        let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+            if let Some(message_id) = message_id
+                && crate::broker::get_message(conn, message_id)?.status
+                    != crate::broker::MessageStatus::InputRequired
+            {
+                return Ok(Some("message_consumed"));
+            }
+            self.deferred_target(conn)
+        });
+        match target {
+            Ok(Some(reason)) => {
+                self.queue.pop_front();
+                return self.cancel_deferred(
+                    conn,
+                    observation,
+                    input_id,
+                    storage::InputState::Ready,
+                    reason,
+                );
+            }
+            Ok(None) => {}
             Err(cause) if storage_failure(&cause) => {
-                self.queue.front_mut().expect("nonempty queue").obstacle = "storage_unavailable";
+                self.note_head_obstacle("storage_unavailable");
                 return Ok(());
             }
             Err(cause) => return Err(cause),
         }
-        let head = self.queue.front_mut().expect("nonempty queue");
+        match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+            self.unresolved_ordinary(conn, operation)
+        }) {
+            Ok(false) => {}
+            Ok(true) => return Ok(()),
+            Err(cause) if storage_failure(&cause) => {
+                self.note_head_obstacle("storage_unavailable");
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        }
         let blocker = ordinary_blocker(&observation.status());
+        let head = self
+            .queue
+            .front_mut()
+            .expect("the checked queue head remains");
         if matches!(blocker, Some(OrdinaryBlocker::Interaction)) {
             head.attempt_deadline = None;
             head.composer_busy_since = None;
             return Ok(());
         }
-        if matches!(blocker, Some(OrdinaryBlocker::ObserverUnavailable)) {
-            head.obstacle = "observer_unavailable";
-        } else {
-            let (operation, kind, literal) =
-                (head.operation, head.request.kind, head.literal.clone());
-            let idle_timeout = head
-                .composer_busy_since
-                .is_some_and(|since| now.duration_since(since) >= COMPOSER_BUSY_BOUND);
-            let selection =
-                self.select_delivery(observation, operation, kind, &literal, idle_timeout)?;
-            let head = self.queue.front_mut().expect("queued head remains");
-            let Some(selection) = selection else {
-                head.composer_busy_since.get_or_insert(now);
+        if blocker.is_none() {
+            if let Some((blocking_input_id, _)) = self.held_composer {
+                let since = *head.composer_busy_since.get_or_insert(now);
                 head.attempt_deadline = None;
+                if now.duration_since(since) >= COMPOSER_BUSY_BOUND && !head.stalled {
+                    head.stalled = true;
+                    observation.publish_delivery_stalled(serde_json::json!({
+                        "kind":"input_delivery_stalled", "input_id":input_id,
+                        "blocking_input_id":blocking_input_id,
+                        "waiting_since":crate::time::format_utc(chrono::Utc::now() - chrono::Duration::from_std(now.duration_since(since)).expect("bounded composer wait"))
+                    }));
+                }
                 return Ok(());
-            };
-            return self.attempt_deferred(conn, observation, deadline, now, selection);
+            }
+            let (kind, literal) = (head.request.kind, head.literal.clone());
+            let redelivery = head.redelivery;
+            let idle_timeout = !redelivery
+                && head
+                    .composer_busy_since
+                    .is_some_and(|since| now.duration_since(since) >= COMPOSER_BUSY_BOUND);
+            let choice = self.select_delivery(
+                conn,
+                observation,
+                ComposerInput {
+                    operation,
+                    kind,
+                    message_id,
+                    literal: &literal,
+                },
+                idle_timeout,
+                deadline,
+            )?;
+            match choice {
+                DeliveryChoice::Ready(selection) => {
+                    return self.attempt_deferred(conn, observation, deadline, now, selection);
+                }
+                DeliveryChoice::PlainLimit(_) => {
+                    self.queue.pop_front();
+                    return self.cancel_deferred(
+                        conn,
+                        observation,
+                        input_id,
+                        storage::InputState::Ready,
+                        "plain_limit_exceeded",
+                    );
+                }
+                DeliveryChoice::Waiting => {
+                    let head = self
+                        .queue
+                        .front_mut()
+                        .expect("the waiting queue head remains");
+                    head.composer_busy_since.get_or_insert(now);
+                    head.attempt_deadline = None;
+                    return Ok(());
+                }
+            }
         }
+        let head = self
+            .queue
+            .front_mut()
+            .expect("the blocked queue head remains");
+        head.composer_busy_since = None;
+        head.obstacle = "observer_unavailable";
         let attempt_deadline = *head
             .attempt_deadline
             .get_or_insert((now + DEFERRED_ATTEMPT_BUDGET).min(deadline));
         if now >= attempt_deadline {
-            let input_id = head.input_id;
             self.queue.pop_front();
             return self.cancel_deferred(
                 conn,
@@ -2377,6 +2666,7 @@ impl InputCoordinator {
             .get_or_insert((now + DEFERRED_ATTEMPT_BUDGET).min(deadline));
         let input_id = head.input_id;
         let message_id = head.request.message_id;
+        let composer_operation = head.operation;
         if now >= attempt_deadline {
             let obstacle = head.obstacle;
             self.queue.pop_front();
@@ -2418,11 +2708,8 @@ impl InputCoordinator {
             self.note_head_obstacle("pane_input_busy");
             return Ok(());
         };
-        let settles =
-            u32::try_from(selection.2.len() - 1).expect("a plan has a bounded stage count");
-        if attempt_deadline.saturating_duration_since(now)
-            <= self.stage_settle() * settles + STAGE_WRITE_MARGIN
-        {
+        let requirement = self.attempt_requirement(composer_operation, selection.2.len())?;
+        if attempt_deadline.saturating_duration_since(now) < requirement {
             self.note_head_obstacle("delivery_budget_exhausted");
             return Ok(());
         }
@@ -2447,6 +2734,8 @@ impl InputCoordinator {
                     method,
                     stages: stages.clone(),
                     next_stage: 0,
+                    offset: 0,
+                    closing: false,
                 },
                 stage: SubmissionStage::ZeroBytes,
                 written_bytes: 0,
@@ -2464,8 +2753,13 @@ impl InputCoordinator {
                 reason,
                 stages,
                 written_stages: 0,
+                started: false,
                 settle_until: None,
                 manual_generation: None,
+                pointer_generation: None,
+                stop: None,
+                stop_failure: None,
+                verification: None,
                 pane: Some(pane),
                 literal: head.literal.clone(),
                 operation: head.operation,
@@ -2600,11 +2894,15 @@ impl InputCoordinator {
             return Ok(None);
         }
         let status = observation.status();
+        let insufficient_budget = self.verified_composer(composer.operation)?
+            && pending.deadline.saturating_duration_since(Instant::now())
+                < self.attempt_requirement(composer.operation, composer.stages.len())?;
         let defer_reason = match ordinary_blocker(&status) {
             Some(OrdinaryBlocker::Interaction) => interaction_cause(&status).as_str(),
             None if composer.requires_empty_composer() && !Self::composer_eligible(observation) => {
                 "composer_busy"
             }
+            None if insufficient_budget => "delivery_budget_exhausted",
             _ => return Ok(None),
         };
         let pending = self.pending.take().expect("immediate pending input");
@@ -2643,6 +2941,8 @@ impl InputCoordinator {
         };
         self.queue.push_front(QueuedInput {
             input_id: operation.input_id,
+            redelivery: false,
+            stalled: false,
             request: pending.request,
             literal: composer.literal,
             operation: composer.operation,
@@ -2820,7 +3120,7 @@ impl InputCoordinator {
     ) -> Result<bool> {
         match requirement {
             DrainRequirement::Observation => {
-                transport.validate_observation_drain(proof, deadline)?;
+                transport.validate_permission(proof, deadline)?;
                 Ok(true)
             }
             DrainRequirement::EmptyComposer => {
@@ -3012,11 +3312,6 @@ impl InputCoordinator {
         let Some((id, proof, deadline, output_seq)) = result else {
             return Ok(None);
         };
-        if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer_mut()) {
-            composer
-                .manual_generation
-                .get_or_insert(self.manual_generation);
-        }
         let retained = self
             .operations
             .get_mut(&id)
@@ -3042,8 +3337,43 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        self.output_seq = transport.snapshot().screen_seq;
+        let context = self.input_context();
         let mut terminal_bookkeeping = false;
         let result = (|| {
+            if self.pending.is_some()
+                && self.finalization.is_none()
+                && let Some(head) = self.queue.front()
+            {
+                let (input_id, message_id) = (head.input_id, head.request.message_id);
+                let reason =
+                    with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
+                        if let Some(message_id) = message_id
+                            && crate::broker::get_message(conn, message_id)?.status
+                                != crate::broker::MessageStatus::InputRequired
+                        {
+                            return Ok(Some("message_consumed"));
+                        }
+                        self.deferred_target(conn)
+                    });
+                match reason {
+                    Ok(Some(reason)) => {
+                        self.queue.pop_front();
+                        self.cancel_deferred(
+                            conn,
+                            observation,
+                            input_id,
+                            storage::InputState::Ready,
+                            reason,
+                        )?;
+                    }
+                    Ok(None) => {}
+                    Err(cause) if storage_failure(&cause) => {
+                        self.note_head_obstacle("storage_unavailable")
+                    }
+                    Err(cause) => return Err(cause),
+                }
+            }
             if self.pending.is_none() {
                 self.start_deferred(conn, observation, deadline)?;
                 return Ok(None);
@@ -3053,6 +3383,9 @@ impl InputCoordinator {
             }
             if let Some(reply) = self.immediate_preflight(conn, observation, deadline)? {
                 return Ok(Some(reply));
+            }
+            if self.refresh_zero_delivery(conn, observation)? {
+                return Ok(None);
             }
             let deferred = self
                 .pending
@@ -3070,6 +3403,12 @@ impl InputCoordinator {
             let effective = self.effective_deadline(conn, deadline)?;
             match pending.phase {
                 InputPhase::Blocked => Ok(None),
+                InputPhase::Closing => {
+                    self.write_close_stage(conn, transport, pty, observation, effective)
+                }
+                InputPhase::Verifying => {
+                    self.verify_submit(conn, transport, observation, effective)
+                }
                 InputPhase::AwaitReservation => {
                     self.reserve_pending(conn, transport, observation, effective)
                 }
@@ -3089,6 +3428,15 @@ impl InputCoordinator {
             }
         })();
         result.map_err(|source| {
+            let source = match self
+                .pending
+                .as_mut()
+                .and_then(PendingInput::composer_mut)
+                .and_then(|composer| composer.stop_failure.take())
+            {
+                Some(primary) => primary.with_diagnostic(source.message()),
+                None => source,
+            };
             if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer_mut()) {
                 composer.pane = None;
             }
@@ -3098,7 +3446,11 @@ impl InputCoordinator {
             } else {
                 self.retain_permission_failure(conn, deadline, source)
             };
-            self.failure(source)
+            if self.pending.is_some() {
+                self.failure(source)
+            } else {
+                context.failure(source)
+            }
         })
     }
 
@@ -3107,6 +3459,136 @@ impl InputCoordinator {
             .as_ref()
             .and_then(|pending| pending.input_id())
             .ok_or_else(|| error("input writer has no reservation"))
+    }
+
+    fn refresh_zero_delivery(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) -> Result<bool> {
+        let pending = self.pending.as_ref().expect("a pending input remains");
+        let Some(composer) = pending.composer() else {
+            return Ok(false);
+        };
+        if composer.started || pending.phase == InputPhase::Blocked {
+            return Ok(false);
+        }
+        let (operation, literal, request, deadline, id, deferred, idle_timeout) = (
+            composer.operation,
+            composer.literal.clone(),
+            pending.request.clone(),
+            pending.deadline,
+            pending.input_id(),
+            composer.deferred.is_some(),
+            composer.reason == Some("idle_timeout"),
+        );
+        let choice = self.select_delivery(
+            conn,
+            observation,
+            ComposerInput {
+                operation,
+                kind: request.kind,
+                message_id: request.message_id,
+                literal: &literal,
+            },
+            idle_timeout,
+            deadline,
+        )?;
+        let selection = match choice {
+            DeliveryChoice::Waiting => return Ok(false),
+            DeliveryChoice::PlainLimit(cause) => {
+                if let Some(id) = id {
+                    if deferred {
+                        self.cancel_deferred(
+                            conn,
+                            observation,
+                            id,
+                            storage::InputState::InProgress,
+                            "plain_limit_exceeded",
+                        )?;
+                        self.pending = None;
+                        self.operations.remove(&id);
+                        return Ok(true);
+                    }
+                    let operation = with_database_deadline(conn, deadline, |conn| {
+                        storage::record_input_state(
+                            conn,
+                            &self.run.owner(),
+                            id,
+                            storage::InputState::InProgress,
+                            storage::InputState::Ready,
+                        )
+                    })?;
+                    let retained = self
+                        .operations
+                        .get_mut(&id)
+                        .expect("a zero-byte input retains its receipt");
+                    retained.operation = operation;
+                    retained.attempt_available = false;
+                    self.pending.as_mut().expect("refused input remains").phase =
+                        InputPhase::Blocked;
+                }
+                return Err(error(cause));
+            }
+            DeliveryChoice::Ready(selection) => selection,
+        };
+        let (method, reason, stages) = selection;
+        if let Some(id) = id {
+            let retained = self.operations.get(&id).expect("zero-byte receipt remains");
+            ensure(
+                retained.stage == SubmissionStage::ZeroBytes
+                    && retained.written_bytes == 0
+                    && !retained.leased,
+                "zero-byte selection requires its recorded writer exclusion",
+            )?;
+            if retained.operation.delivery_method != Some(method)
+                || retained.operation.delivery_reason.as_deref() != reason
+            {
+                let expected = retained.operation.clone();
+                let operation = with_database_deadline(conn, deadline, |conn| {
+                    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                    self.validate_live(&tx)?;
+                    ensure(
+                        storage::get_input(&tx, id)? == expected,
+                        "zero-byte selection receipt changed",
+                    )?;
+                    let count = tx.execute("UPDATE member_input_operations SET delivery_method=?1,delivery_reason=?2,updated_at=?3 WHERE input_id=?4 AND state='in_progress'", rusqlite::params![method.as_str(),reason,crate::time::now_stamp(),id])?;
+                    ensure(
+                        count == 1,
+                        "zero-byte selection requires its in-progress receipt",
+                    )?;
+                    let operation = storage::get_input(&tx, id)?;
+                    tx.commit()?;
+                    Ok(operation)
+                })?;
+                self.operations
+                    .get_mut(&id)
+                    .expect("zero-byte receipt remains")
+                    .operation = operation;
+            }
+            let retained = self
+                .operations
+                .get_mut(&id)
+                .expect("zero-byte receipt remains");
+            retained.bytes = stages[0].clone();
+            retained.selection = RetainedSelection::Composer {
+                method,
+                stages: stages.clone(),
+                next_stage: 0,
+                offset: 0,
+                closing: false,
+            };
+        }
+        let pending = self
+            .pending
+            .as_mut()
+            .expect("zero-byte pending input remains");
+        pending.bytes = stages[0].clone();
+        let composer = pending.composer_mut().expect("zero-byte composer remains");
+        composer.method = method;
+        composer.reason = reason;
+        composer.stages = stages;
+        Ok(false)
     }
 
     fn reserve_pending(
@@ -3227,6 +3709,8 @@ impl InputCoordinator {
                         method: composer.method,
                         stages: composer.stages.clone(),
                         next_stage: 0,
+                        offset: 0,
+                        closing: false,
                     },
                 },
                 stage: SubmissionStage::ZeroBytes,
@@ -3248,6 +3732,53 @@ impl InputCoordinator {
         Ok(None)
     }
 
+    fn composer_interruption(
+        &self,
+        id: i64,
+        observation: &ObservationController,
+    ) -> Result<Option<storage::StopCause>> {
+        let pending = self.pending.as_ref().expect("pending write remains");
+        let Some(composer) = pending.composer() else {
+            return Ok(None);
+        };
+        if !composer.started {
+            return Ok(None);
+        }
+        let retained = self.operations.get(&id).expect("pending receipt remains");
+        let RetainedSelection::Composer {
+            stages,
+            next_stage,
+            offset,
+            ..
+        } = &retained.selection
+        else {
+            return Err(error("ordinary writer selection changed"));
+        };
+        let literal_index = usize::from(composer.method == storage::DeliveryMethod::Fallback);
+        let between_chunks = *next_stage == literal_index && *offset > 0;
+        let cause = if self.manual_accounting_failed {
+            Some(storage::StopCause::ManualAccountingFailed)
+        } else if composer.manual_generation != Some(self.manual_generation) {
+            Some(storage::StopCause::ManualInput)
+        } else if between_chunks && composer.pointer_generation != Some(self.pointer_generation) {
+            Some(storage::StopCause::PointerInput)
+        } else {
+            blocker_cause(&observation.status())
+        };
+        if cause.is_some() {
+            return Ok(cause);
+        }
+        let remaining = pending.deadline.saturating_duration_since(Instant::now());
+        if (between_chunks && remaining <= PASTE_CLOSE_RESERVE)
+            || (*next_stage + 1 == stages.len()
+                && self.verified_composer(composer.operation)?
+                && remaining < POST_SUBMIT_VERIFICATION + STAGE_WRITE_MARGIN)
+        {
+            return Ok(Some(storage::StopCause::DeadlineExpired));
+        }
+        Ok(None)
+    }
+
     fn arm_pending(
         &mut self,
         conn: &mut Connection,
@@ -3259,23 +3790,18 @@ impl InputCoordinator {
         if let StageGateProgress::Waiting = self.advance_stage_gate(observation)? {
             return Ok(None);
         }
-        if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer())
-            && let Some(settle_until) = composer.settle_until
+        if let Some(cause) = self.composer_interruption(id, observation)? {
+            *terminal_bookkeeping = true;
+            return self.interrupt_composer(conn, id, observation, effective, cause);
+        }
+        if self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .and_then(|composer| composer.settle_until)
+            .is_some_and(|until| Instant::now() < until)
         {
-            let interruption = if self.manual_accounting_failed {
-                Some(storage::StopCause::ManualAccountingFailed)
-            } else if composer.manual_generation != Some(self.manual_generation) {
-                Some(storage::StopCause::ManualInput)
-            } else {
-                blocker_cause(&observation.status())
-            };
-            if let Some(cause) = interruption {
-                *terminal_bookkeeping = true;
-                return self.interrupt_composer(conn, id, observation, effective, cause);
-            }
-            if Instant::now() < settle_until {
-                return Ok(None);
-            }
+            return Ok(None);
         }
         let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
             return Ok(None);
@@ -3306,21 +3832,117 @@ impl InputCoordinator {
         effective: Instant,
         cause: storage::StopCause,
     ) -> Result<Option<InputControlReply>> {
-        let deferred = self
-            .pending
-            .as_ref()
-            .is_some_and(|pending| pending.deferred().is_some());
-        let reply = self.stop_composer_stages(conn, id, effective, cause)?;
-        if deferred {
-            Self::publish_result(
-                observation,
-                id,
-                SubmissionStage::Partial,
-                self.retained_stop_cause(id),
-            );
+        let (mut stop, needs_close) = self.composer_stop(id, cause)?;
+        if !stop.complete_prefix && cause.permits_left_in_composer() {
+            stop.cause = storage::StopCause::ShortWrite;
+        }
+        if needs_close {
+            self.prepare_paste_close(id, stop)?;
             return Ok(None);
         }
-        Ok(Some(reply))
+        self.stop_composer_stages(conn, id, observation, effective, stop)
+    }
+
+    fn prepare_paste_close(&mut self, id: i64, stop: ComposerStop) -> Result<()> {
+        let pending = self.pending.as_mut().expect("stopped composer remains");
+        pending.composer_mut().expect("ordinary composer").stop = Some(stop);
+        pending.bytes = Arc::from(PASTE_CLOSE);
+        pending.phase = InputPhase::Closing;
+        let retained = self.operations.get_mut(&id).expect("stopped input remains");
+        let RetainedSelection::Composer { closing, .. } = &mut retained.selection else {
+            return Err(error("paste cleanup requires ordinary input"));
+        };
+        *closing = true;
+        retained.bytes = Arc::from(PASTE_CLOSE);
+        retained.attempt_available = false;
+        Ok(())
+    }
+
+    fn finish_composer_stop(
+        &mut self,
+        conn: &mut Connection,
+        id: i64,
+        observation: &ObservationController,
+        effective: Instant,
+        stop: ComposerStop,
+    ) -> Result<Option<InputControlReply>> {
+        let failure = self
+            .pending
+            .as_mut()
+            .and_then(PendingInput::composer_mut)
+            .expect("stopped composer remains")
+            .stop_failure
+            .take();
+        let settled = self.stop_composer_stages(conn, id, observation, effective, stop);
+        match (failure, settled) {
+            (Some(primary), Ok(_)) => Err(primary),
+            (Some(primary), Err(bookkeeping)) => {
+                Err(primary.with_diagnostic(bookkeeping.message()))
+            }
+            (None, result) => result,
+        }
+    }
+
+    fn composer_stop(&self, id: i64, cause: storage::StopCause) -> Result<(ComposerStop, bool)> {
+        let retained = self
+            .operations
+            .get(&id)
+            .ok_or_else(|| error("stopped input is absent"))?;
+        let composer = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .ok_or_else(|| error("stopped composer is absent"))?;
+        let RetainedSelection::Composer {
+            stages,
+            next_stage,
+            offset,
+            ..
+        } = &retained.selection
+        else {
+            return Err(error("ordinary stop requires a composer selection"));
+        };
+        let literal_index = usize::from(composer.method == storage::DeliveryMethod::Fallback);
+        let literal = &stages[literal_index];
+        let written = if *next_stage > literal_index {
+            literal.len()
+        } else if *next_stage == literal_index {
+            *offset
+        } else {
+            0
+        };
+        let stage = if *next_stage == stages.len() {
+            storage::LeftStage::Submitted
+        } else if written == 0
+            && composer.method == storage::DeliveryMethod::Fallback
+            && *next_stage > 0
+        {
+            storage::LeftStage::EscapeOnly
+        } else if written == literal.len() {
+            storage::LeftStage::LiteralComplete
+        } else {
+            storage::LeftStage::Partial
+        };
+        let prefix = composer.operation.prefix().len();
+        let bracketed = literal
+            .get(prefix..)
+            .is_some_and(|bytes| bytes.starts_with(PASTE_OPEN));
+        let complete_prefix = std::str::from_utf8(&literal[..written]).is_ok()
+            && (!bracketed
+                || written <= prefix
+                || (written >= prefix + PASTE_OPEN.len()
+                    && written <= literal.len() - PASTE_CLOSE.len())
+                || written == literal.len());
+        let needs_close =
+            bracketed && written >= prefix + PASTE_OPEN.len() && written < literal.len();
+        Ok((
+            ComposerStop {
+                cause,
+                stage,
+                complete_prefix,
+            },
+            needs_close,
+        ))
     }
 
     fn write_pending_stage(
@@ -3332,22 +3954,9 @@ impl InputCoordinator {
         terminal_bookkeeping: &mut bool,
     ) -> Result<Option<InputControlReply>> {
         let id = self.reserved_input_id()?;
-        let status = observation.status();
-        if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer())
-            && composer.written_stages > 0
-            && matches!(
-                ordinary_blocker(&status),
-                Some(OrdinaryBlocker::Interaction)
-            )
-        {
+        if let Some(cause) = self.composer_interruption(id, observation)? {
             *terminal_bookkeeping = true;
-            return self.interrupt_composer(
-                conn,
-                id,
-                observation,
-                effective,
-                interaction_cause(&status),
-            );
+            return self.interrupt_composer(conn, id, observation, effective, cause);
         }
         let bytes = self
             .pending
@@ -3418,6 +4027,40 @@ impl InputCoordinator {
             }
             Ok(outcome)
         });
+        let point = self.retained_checkpoint(id)?;
+        let literal_stage = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .is_some_and(|composer| {
+                composer.written_stages
+                    == usize::from(composer.method == storage::DeliveryMethod::Fallback)
+            });
+        if point.written_bytes > 0
+            && let Some(composer) = self.pending.as_mut().and_then(PendingInput::composer_mut)
+        {
+            composer.started = true;
+            composer
+                .manual_generation
+                .get_or_insert(self.manual_generation);
+            if literal_stage {
+                composer
+                    .pointer_generation
+                    .get_or_insert(self.pointer_generation);
+            }
+        }
+        if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) && literal_stage {
+            let next_bytes = self
+                .operations
+                .get(&id)
+                .expect("partial receipt remains")
+                .bytes
+                .clone();
+            let pending = self.pending.as_mut().expect("partial literal remains");
+            pending.bytes = next_bytes;
+            pending.phase = InputPhase::AwaitBeforeWrite;
+            return Ok(None);
+        }
         if matches!(&write, Ok(ProgrammaticWrite::Complete { .. }))
             && self
                 .operations
@@ -3442,6 +4085,24 @@ impl InputCoordinator {
             pending.phase = InputPhase::AwaitBeforeWrite;
             return Ok(None);
         }
+        if matches!(&write, Ok(ProgrammaticWrite::Complete { .. }))
+            && point.stage == SubmissionStage::Submitted
+            && let Some(composer) = self.pending.as_ref().and_then(PendingInput::composer)
+            && self.verified_composer(composer.operation)?
+        {
+            let verification = PostSubmitVerification {
+                until: Instant::now() + POST_SUBMIT_VERIFICATION,
+                output_seq: transport.snapshot().screen_seq,
+                episode_seq: observation.active_episode_seq(),
+            };
+            let pending = self.pending.as_mut().expect("submitted input remains");
+            pending
+                .composer_mut()
+                .expect("verified composer")
+                .verification = Some(verification);
+            pending.phase = InputPhase::Verifying;
+            return Ok(None);
+        }
         if matches!(&write, Ok(ProgrammaticWrite::Pending)) {
             self.pending
                 .as_mut()
@@ -3454,18 +4115,39 @@ impl InputCoordinator {
             .get(&id)
             .expect("actual input outcome retained")
             .stage;
-        let stop_cause = if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) {
-            storage::StopCause::ShortWrite
-        } else {
-            storage::StopCause::WriteFailed
-        };
+        let stop_cause = storage::StopCause::WriteFailed;
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.composer().is_some())
+            && stage != SubmissionStage::ZeroBytes
+            && (!matches!(&write, Ok(ProgrammaticWrite::Complete { .. }))
+                || stage != SubmissionStage::Submitted)
+        {
+            *terminal_bookkeeping = true;
+            let (mut stop, needs_close) = self.composer_stop(id, stop_cause)?;
+            stop.complete_prefix = false;
+            self.pending
+                .as_mut()
+                .and_then(PendingInput::composer_mut)
+                .expect("failed composer remains")
+                .stop_failure = write.err();
+            if needs_close {
+                self.prepare_paste_close(id, stop)?;
+                return Ok(None);
+            }
+            return self.finish_composer_stop(conn, id, observation, effective, stop);
+        }
         *terminal_bookkeeping = true;
         let persisted = with_database_deadline(conn, effective, |conn| {
             self.validate_live(conn)?;
             let next = match stage {
                 SubmissionStage::Submitted => storage::InputState::Accepted,
                 SubmissionStage::ZeroBytes => storage::InputState::Ready,
-                SubmissionStage::Partial | SubmissionStage::Unknown => {
+                SubmissionStage::Partial
+                | SubmissionStage::Unknown
+                | SubmissionStage::EscapeOnly
+                | SubmissionStage::LiteralComplete => {
                     return storage::record_input_uncertain(
                         conn,
                         &self.run.owner(),
@@ -3605,32 +4287,249 @@ impl InputCoordinator {
         &mut self,
         conn: &mut Connection,
         id: i64,
+        observation: &ObservationController,
         effective: Instant,
-        cause: storage::StopCause,
-    ) -> Result<InputControlReply> {
-        let pending = self.pending.as_mut().expect("staged composer input");
+        stop: ComposerStop,
+    ) -> Result<Option<InputControlReply>> {
+        let pending = self.pending.as_mut().expect("stopped composer remains");
         pending.phase = InputPhase::Blocked;
-        if let Some(composer) = pending.composer_mut() {
-            composer.pane = None;
-        }
-        // Recording uncertainty writes no child byte, so the input fences, which only withhold
-        // write authority, must not keep the stop's cause from being persisted.
-        let operation = with_database_deadline(conn, effective, |conn| {
+        let request = pending.request.clone();
+        let composer = pending.composer().expect("ordinary composer");
+        let literal = composer.literal.clone();
+        let composer_operation = composer.operation;
+        let deferred = composer.deferred.is_some();
+        let verified = self.verified_composer(composer_operation)?;
+        let left = verified && stop.complete_prefix && stop.cause.permits_left_in_composer();
+        let bookkeeping = if effective > Instant::now() {
+            effective
+        } else {
+            Instant::now() + DEFERRED_FINALIZATION
+        };
+        let (operation, successor) = with_database_deadline(conn, bookkeeping, |conn| {
             self.validate_live_run(conn)?;
-            storage::record_input_uncertain(conn, &self.run.owner(), id, cause)
+            if left && request.kind == storage::InputKind::Preview {
+                let (input, next) = storage::settle_left_and_queue_redelivery(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    stop.cause,
+                    stop.stage,
+                )?;
+                Ok((input, Some(next)))
+            } else if left {
+                storage::record_input_left_in_composer(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    stop.cause,
+                    stop.stage,
+                )
+                .map(|input| (input, None))
+            } else {
+                storage::record_input_uncertain(conn, &self.run.owner(), id, stop.cause)
+                    .map(|input| (input, None))
+            }
         })?;
-        let retained = self.operations.get_mut(&id).expect("staged input retained");
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("stopped receipt remains");
         retained.operation = operation.clone();
         retained.attempt_available = false;
+        let stage = if left {
+            match stop.stage {
+                storage::LeftStage::EscapeOnly => SubmissionStage::EscapeOnly,
+                storage::LeftStage::Partial => SubmissionStage::Partial,
+                storage::LeftStage::LiteralComplete => SubmissionStage::LiteralComplete,
+                storage::LeftStage::Submitted => SubmissionStage::Submitted,
+            }
+        } else {
+            retained.stage
+        };
+        if verified && stop.stage != storage::LeftStage::EscapeOnly {
+            self.held_composer = Some((id, self.output_seq));
+            if let Some(head) = self.queue.front_mut() {
+                head.composer_busy_since = None;
+                head.attempt_deadline = None;
+            }
+        }
+        if let Some(next) = successor {
+            self.queue.push_front(QueuedInput {
+                input_id: next.input_id,
+                redelivery: true,
+                stalled: false,
+                request: storage::NewInput {
+                    operation_key: next.operation_key,
+                    kind: request.kind,
+                    payload_digest: request.payload_digest,
+                    message_id: request.message_id,
+                },
+                literal,
+                operation: composer_operation,
+                composer_busy_since: None,
+                attempt_deadline: None,
+                obstacle: "redelivery",
+            });
+        }
         self.checkpoint(
             id,
             #[cfg(test)]
             InputBoundary::TerminalState,
-            effective,
+            bookkeeping,
         )?;
-        let reply = InputControlReply::Submission(self.result(&operation));
+        Self::publish_result(observation, id, stage, operation.stop_cause);
+        let reply = self.result(&operation);
         self.pending = None;
-        Ok(reply)
+        Ok((!deferred).then_some(InputControlReply::Submission(reply)))
+    }
+
+    fn write_close_stage(
+        &mut self,
+        conn: &mut Connection,
+        transport: &mut Transport,
+        pty: &mut impl PtyIo,
+        observation: &ObservationController,
+        effective: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        let id = self.reserved_input_id()?;
+        if !self.hold_composer_pane()? {
+            return Ok(None);
+        }
+        with_database_deadline(conn, effective, |conn| {
+            self.validate_live_run(conn)?;
+            self.lock.validate(conn, &self.run.owner())?;
+            let retained = self.operations.get(&id).expect("closing input remains");
+            ensure(
+                storage::get_input(conn, id)? == retained.operation,
+                "paste cleanup receipt changed",
+            )
+        })?;
+        let retained = self.operations.get_mut(&id).expect("closing input remains");
+        ensure(
+            !retained.leased,
+            "paste cleanup requires exclusive input authority",
+        )?;
+        retained.leased = true;
+        let mut guard = InputGuard {
+            retained: Some(retained),
+            proof: None,
+            binding: None,
+            deadline: effective,
+            permit: GuardPermit::Fresh,
+            exclusion: std::marker::PhantomData,
+        };
+        let written = transport.write_programmatic(pty, PASTE_CLOSE, &mut guard, effective);
+        drop(guard);
+        let after = self.checkpoint(
+            id,
+            #[cfg(test)]
+            InputBoundary::AfterWrite,
+            effective,
+        );
+        let written = combine_manual_progress(written, after);
+        if matches!(written, Ok(ProgrammaticWrite::Pending)) {
+            return Ok(None);
+        }
+        let mut stop = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .and_then(|composer| composer.stop)
+            .expect("closing input has its stopped outcome");
+        if !matches!(written, Ok(ProgrammaticWrite::Complete { .. })) {
+            stop.cause = storage::StopCause::WriteFailed;
+            stop.complete_prefix = false;
+        }
+        if let Err(cause) = written {
+            let failure = &mut self
+                .pending
+                .as_mut()
+                .and_then(PendingInput::composer_mut)
+                .expect("closing composer remains")
+                .stop_failure;
+            *failure = Some(match failure.take() {
+                Some(primary) => primary.with_diagnostic(cause.message()),
+                None => cause,
+            });
+        } else if !matches!(written, Ok(ProgrammaticWrite::Complete { .. })) {
+            let failure = &mut self
+                .pending
+                .as_mut()
+                .and_then(PendingInput::composer_mut)
+                .expect("closing composer remains")
+                .stop_failure;
+            if let Some(primary) = failure.take() {
+                *failure = Some(
+                    primary.with_diagnostic("paste closing marker was not completely written"),
+                );
+            }
+        }
+        self.finish_composer_stop(conn, id, observation, effective, stop)
+    }
+
+    fn verify_submit(
+        &mut self,
+        conn: &mut Connection,
+        transport: &mut Transport,
+        observation: &ObservationController,
+        effective: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        let id = self.reserved_input_id()?;
+        let verification = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .and_then(|composer| composer.verification.as_ref())
+            .expect("active verification is required");
+        let fresh = if let Some(proof) = transport.take_input_drain() {
+            transport.validate_ordinary(&proof, effective)?;
+            proof.output_seq() > verification.output_seq
+        } else {
+            false
+        };
+        let new_interaction = observation.active_episode_seq().is_some_and(|episode| {
+            verification
+                .episode_seq
+                .is_none_or(|before| episode > before)
+        }) && observation.status().eligibility
+            != InputEligibility::Hold(GateReason::Candidate);
+        if fresh && (Self::composer_eligible(observation) || new_interaction) {
+            let operation = with_database_deadline(conn, effective, |conn| {
+                self.validate_live_run(conn)?;
+                storage::record_input_state(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::InputState::InProgress,
+                    storage::InputState::Accepted,
+                )
+            })?;
+            self.operations
+                .get_mut(&id)
+                .expect("verified input remains")
+                .operation = operation.clone();
+            let deferred = self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.deferred().is_some());
+            if deferred {
+                self.finish_deferred(conn, observation, &operation)?;
+                self.pending = None;
+                return Ok(None);
+            }
+            let reply = self.result(&operation);
+            self.pending = None;
+            return Ok(Some(InputControlReply::Submission(reply)));
+        }
+        if Instant::now() >= verification.until {
+            let stop = ComposerStop {
+                cause: storage::StopCause::SubmitUnconfirmed,
+                stage: storage::LeftStage::Submitted,
+                complete_prefix: true,
+            };
+            return self.stop_composer_stages(conn, id, observation, effective, stop);
+        }
+        Ok(None)
     }
 
     fn retain_permission_failure(
@@ -3645,6 +4544,19 @@ impl InputCoordinator {
         if pending.permission().is_none() {
             return source;
         }
+        let binding = &pending
+            .permission()
+            .expect("a permission selection remains")
+            .binding;
+        let stop_cause = if self.manual_accounting_failed {
+            storage::StopCause::ManualAccountingFailed
+        } else if self.manual_generation != binding.manual_generation
+            || self.pointer_generation != binding.pointer_generation
+        {
+            storage::StopCause::ManualInput
+        } else {
+            storage::StopCause::WriteFailed
+        };
         pending.phase = InputPhase::Blocked;
         let Some(id) = pending.installed_input_id() else {
             return source;
@@ -3663,7 +4575,7 @@ impl InputCoordinator {
             return source;
         };
         let persisted = with_database_deadline(conn, effective, |conn| {
-            self.validate_live(conn)?;
+            self.validate_live_run(conn)?;
             if zero_bytes {
                 storage::record_input_state(
                     conn,
@@ -3673,12 +4585,7 @@ impl InputCoordinator {
                     storage::InputState::Ready,
                 )
             } else {
-                storage::record_input_uncertain(
-                    conn,
-                    &self.run.owner(),
-                    id,
-                    storage::StopCause::WriteFailed,
-                )
+                storage::record_input_uncertain(conn, &self.run.owner(), id, stop_cause)
             }
         });
         match persisted {
@@ -3771,6 +4678,7 @@ impl InputCoordinator {
             lock,
             services,
             manual_generation: 0,
+            pointer_generation: 0,
             manual_accounting_failed: false,
             current_request: None,
             input_fenced: false,
@@ -3780,6 +4688,9 @@ impl InputCoordinator {
             finalization: None,
             pending_stamp: None,
             deferred_failed: false,
+            held_composer: None,
+            output_seq: 0,
+            bracketed_paste: false,
         })
     }
 
@@ -3789,7 +4700,10 @@ impl InputCoordinator {
         step: impl FnOnce(&mut Transport) -> Result<T>,
     ) -> std::result::Result<T, InputFailure> {
         let before = transport.human_generation();
+        let before_pointer = transport.pointer_generation();
         let progress = step(transport);
+        self.output_seq = transport.snapshot().screen_seq;
+        self.bracketed_paste = transport.bracketed_paste();
         self.observation_blocker = transport.drain_blocker().map(str::to_owned);
         let accounting = transport
             .human_generation()
@@ -3799,6 +4713,21 @@ impl InputCoordinator {
                 usize::try_from(count).map_err(|_| error("manual input delta exceeds count range"))
             })
             .and_then(|count| self.observe_manual(count));
+        let pointer_accounting = transport
+            .pointer_generation()
+            .checked_sub(before_pointer)
+            .ok_or_else(|| error("pointer input generation decreased"))
+            .and_then(|count| {
+                if count > 0 {
+                    self.current_request = None;
+                }
+                self.pointer_generation = self
+                    .pointer_generation
+                    .checked_add(count)
+                    .ok_or_else(|| error("pointer input generation exhausted"))?;
+                Ok(())
+            });
+        let accounting = combine_manual_progress(accounting, pointer_accounting);
         if accounting.is_err() {
             self.manual_accounting_failed = true;
         }

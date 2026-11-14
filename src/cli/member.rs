@@ -909,10 +909,31 @@ fn wrapped_delivery_refusal(
     result: &crate::runtime::SubmissionResult,
 ) -> String {
     use crate::runtime::SubmissionStatus;
+    if result.status == SubmissionStatus::LeftInComposer {
+        let cause = result
+            .reason
+            .as_deref()
+            .expect("a left input has its stop cause");
+        let method = result
+            .delivery
+            .as_ref()
+            .and_then(|delivery| delivery.method)
+            .expect("a left input has its delivery method");
+        let text = if result.stage == crate::runtime::SubmissionStage::EscapeOnly {
+            "Escape was sent but no text was typed."
+        } else {
+            "the typed text stays in the member's composer."
+        };
+        return format!(
+            "{label} delivery to member {member_id} was not submitted: {cause} (method={}); {text} Inspect the pane before retrying.",
+            method.as_str()
+        );
+    }
     let description = match result.status {
         SubmissionStatus::Held => "held",
         SubmissionStatus::Rejected => "rejected",
         SubmissionStatus::Uncertain => "uncertain",
+        SubmissionStatus::LeftInComposer => unreachable!("left inputs have their scoped refusal"),
         SubmissionStatus::Accepted | SubmissionStatus::Queued => {
             unreachable!("submitted and queued results are not refusals")
         }

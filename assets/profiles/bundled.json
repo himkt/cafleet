@@ -5630,6 +5630,206 @@
       "cols": 120,
       "source_ref": "native/hermes.json",
       "sha256": "95254c232c121c037dd90d5c7367088555d16583c24321b8ae82c29900bb4eec"
+    },
+    {
+      "id": "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.319",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/claude.json",
+      "sha256": "15dd44fbf0a8ac274f67a32e1ef8909f44ace2f9d8e3b7c817fa83b596a993ce"
+    },
+    {
+      "id": "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.319",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "2c3667e3e807043b924bb5234a2b3dba7fa951f37a1541f1fc2958be8ed13f5a"
+    },
+    {
+      "id": "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.319",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/claude.json",
+      "sha256": "71cae04a7d2bbe1e4125f2ac51e1db2bf749ec7f20c0ab5d504d64045ac72733"
+    },
+    {
+      "id": "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.319",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "728b202c04678e00aae40f41b87fa8677feccaaf9d4ac1cd683a27d3c2c040e3"
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/codex.json",
+      "sha256": "0ff98ac91724e44129bbded9dccf05eeffb1fd4dbc47dcfa4123b2884f364896"
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d9d8bcf2bfd9e20afc5dba5a54c9630be68f844ad0ff66c5c4c1910b21864421"
+    },
+    {
+      "id": "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.5",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/opencode.json",
+      "sha256": "9f3fee0d88e9bb452fe4ce7b8225ffc4d84369b2e5ab76d111bdb92922760535"
+    },
+    {
+      "id": "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.5",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "82f4c3f0832c8c8ed3e9278767e9189dca8b18ae1717fad1356f0376be667d99"
+    },
+    {
+      "id": "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.5",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/opencode.json",
+      "sha256": "6609a07205bc96b0777afc7296135b53b93d4a459a47f0612a4f98ea03ca2d09"
+    },
+    {
+      "id": "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.5",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "f673febcf6af9ce372c5b6a8d7c7fb59edfe188bd403b3a372927fe4013bd4de"
+    },
+    {
+      "id": "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/pi.json",
+      "sha256": "466e0e2b883d8abba6335a3c740eee225c209011f20af828bcf7264369729cbe"
+    },
+    {
+      "id": "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/pi.json",
+      "sha256": "4a69b7f237a282717c03130ee6f1492e8b8b56a6156bb45af02037a1c27cb0b7"
+    },
+    {
+      "id": "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "8bb95fd33ec2422677bc7f08d0e88882db4fb029ab412cf06a6983a821ee911a"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "4a0adc52a0991eeb7a24cda2d8665f34b5503560cca382ded33e780cc3b7dfdc"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/hermes.json",
+      "sha256": "c0c9ad0dc52bc1a269645483263e694afedee319aa39917c1dfe213d87725907"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-tmux-120-94",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "5b8a2d4c32a1a05116410d414c70fa3c50591262af17c6a7b8bd9d2d5b25b51a"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/hermes.json",
+      "sha256": "967e623e58fe454a74cb084452c1595877ee19fdc50e4e434f7ab3f999533f4d"
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/codex.json",
+      "sha256": "c4780e298e28a252a050e7015eeb4cfef22a2a3c8a0620d20d7d1a3d8bc8d028"
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "4e20b44d413832317041b54b09c4278ecb8b3e93ef98645174e61ae17c84b196"
+    },
+    {
+      "id": "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "0dfa203512a3d9fe9a527b1b585ed543f17816c6a2b4115f917a38309e86d09b"
     }
   ],
   "profiles": [
@@ -6731,7 +6931,11 @@
             "claude-2.1.319-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
             "claude-2.1.319-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
             "claude-2.1.319-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
-            "claude-2.1.319-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34"
+            "claude-2.1.319-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+            "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+            "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
+            "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+            "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
           ],
           "submission": {
             "prompt": {
@@ -6766,7 +6970,9 @@
                 "claude-2.1.319-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
                 "claude-2.1.319-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
                 "claude-2.1.319-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
-                "claude-2.1.319-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34"
+                "claude-2.1.319-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+                "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+                "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
               ],
               "literal_framing": "plain",
               "plain_literal_limit": null
@@ -6805,7 +7011,9 @@
                 "claude-2.1.319-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-60",
                 "claude-2.1.319-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-60",
                 "claude-2.1.319-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-69",
-                "claude-2.1.319-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-69"
+                "claude-2.1.319-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-69",
+                "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+                "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68"
               ],
               "literal_framing": "plain",
               "plain_literal_limit": null
@@ -7390,7 +7598,11 @@
             "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-herdr-119-1",
             "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-tmux-120-1",
             "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-41",
-            "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-41"
+            "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-41",
+            "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
+            "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
+            "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
+            "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
           ],
           "submission": {
             "prompt": {
@@ -7429,7 +7641,9 @@
                 "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-herdr-119-1",
                 "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-tmux-120-1",
                 "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-41",
-                "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-41"
+                "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-41",
+                "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
+                "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
               ],
               "literal_framing": "bracketed_paste",
               "plain_literal_limit": {
@@ -7479,7 +7693,9 @@
                 "codex-0.167.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-herdr-119-7",
                 "codex-0.167.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-7",
                 "codex-0.167.0-composer-exec-unsubmitted-literal-confirmed-tapped-v2-herdr-119-40",
-                "codex-0.167.0-composer-exec-unsubmitted-literal-confirmed-tapped-v2-tmux-120-40"
+                "codex-0.167.0-composer-exec-unsubmitted-literal-confirmed-tapped-v2-tmux-120-40",
+                "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
+                "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39"
               ],
               "literal_framing": "bracketed_paste",
               "plain_literal_limit": {
@@ -7838,7 +8054,11 @@
             "opencode-2.2.5-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
             "opencode-2.2.5-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
             "opencode-2.2.5-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
-            "opencode-2.2.5-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34"
+            "opencode-2.2.5-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+            "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+            "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
+            "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+            "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
           ],
           "submission": {
             "prompt": {
@@ -7871,7 +8091,9 @@
                 "opencode-2.2.5-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
                 "opencode-2.2.5-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
                 "opencode-2.2.5-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
-                "opencode-2.2.5-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34"
+                "opencode-2.2.5-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+                "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+                "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
               ],
               "literal_framing": "plain",
               "plain_literal_limit": null
@@ -7918,7 +8140,9 @@
                 "opencode-2.2.5-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-60",
                 "opencode-2.2.5-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-60",
                 "opencode-2.2.5-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-69",
-                "opencode-2.2.5-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-69"
+                "opencode-2.2.5-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-69",
+                "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+                "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68"
               ],
               "literal_framing": "plain",
               "plain_literal_limit": null
@@ -8329,7 +8553,11 @@
             "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-45",
             "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-46",
             "hermes-2026.9.24-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-50",
-            "hermes-2026.9.24-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-51"
+            "hermes-2026.9.24-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-51",
+            "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
+            "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43",
+            "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-tmux-120-94",
+            "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93"
           ],
           "submission": {
             "prompt": {
@@ -8372,7 +8600,9 @@
                 "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-herdr-119-49",
                 "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-tmux-120-50",
                 "hermes-2026.9.24-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-50",
-                "hermes-2026.9.24-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-51"
+                "hermes-2026.9.24-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-51",
+                "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
+                "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43"
               ],
               "literal_framing": "bracketed_paste",
               "plain_literal_limit": {
@@ -8428,7 +8658,9 @@
                 "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-99",
                 "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-100",
                 "hermes-2026.9.24-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-100",
-                "hermes-2026.9.24-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-101"
+                "hermes-2026.9.24-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-101",
+                "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-tmux-120-94",
+                "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93"
               ],
               "literal_framing": "plain",
               "plain_literal_limit": {
@@ -8741,7 +8973,11 @@
             "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
             "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
             "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
-            "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34"
+            "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+            "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
+            "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+            "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+            "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
           ],
           "submission": {
             "prompt": {
@@ -8783,7 +9019,9 @@
                 "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
                 "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
                 "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
-                "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34"
+                "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+                "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+                "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
               ],
               "literal_framing": "plain",
               "plain_literal_limit": null
@@ -8831,7 +9069,9 @@
                 "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61",
                 "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61",
                 "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-70",
-                "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-70"
+                "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-70",
+                "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
+                "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
               ],
               "literal_framing": "plain",
               "plain_literal_limit": null

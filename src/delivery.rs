@@ -71,6 +71,17 @@ pub(crate) fn canonical_preview_line(message: &broker::MessageRecord) -> String 
     )
 }
 
+pub(crate) fn pointer_preview_line(message: &broker::MessageRecord) -> String {
+    format!(
+        "[cafleet msg {} from {} {}] Body is {} characters; run cafleet message show {} --json to read it. {RESUME_CLAUSE}",
+        message.message_id,
+        message.from_member_id,
+        message.created_at,
+        message.text.chars().count(),
+        message.message_id
+    )
+}
+
 pub(crate) fn notification_error(
     member_id: i64,
     message_id: i64,
@@ -189,6 +200,85 @@ fn deliver_pending_with(
     })
 }
 
+fn scoped_preview_error(
+    conn: &Connection,
+    run: &storage::RunRecord,
+    message: &MessageRecord,
+    input: &storage::InputOperation,
+) -> Result<NotificationError, CafleetError> {
+    if input.run_id != run.run_id
+        || input.kind != InputKind::Preview
+        || input.message_id != Some(message.message_id)
+    {
+        return Err(CafleetError::App(
+            "preview diagnostic receipt association changed".into(),
+        ));
+    }
+    let member = run.member_id;
+    let id = input.input_id;
+    let message_id = message.message_id;
+    let text = if input.disposition == Some(InputDisposition::LeftInComposer) {
+        let attempt = input
+            .preview_attempt
+            .expect("a left preview has its attempt")
+            .checked_add(1)
+            .ok_or_else(|| CafleetError::App("preview attempt exhausted".into()))?;
+        let key = storage::preview_operation_key(run.run_id, message_id, attempt)?;
+        let next = storage::find_input(conn, run.run_id, &key)?.ok_or_else(|| {
+            CafleetError::App(format!(
+                "preview input {id} was left in the composer without a re-delivery attempt"
+            ))
+        })?;
+        let effect = match input.left_stage.expect("a left receipt has its stage") {
+            storage::LeftStage::EscapeOnly => format!(
+                "was not typed: Escape was sent to member {member} but the input was not typed"
+            ),
+            storage::LeftStage::Partial => {
+                format!("was partly typed into member {member}'s composer and not submitted")
+            }
+            storage::LeftStage::LiteralComplete => {
+                format!("was typed into member {member}'s composer but not submitted")
+            }
+            storage::LeftStage::Submitted => format!(
+                "was typed into member {member}'s composer and its submit key sent, but the submission was not confirmed"
+            ),
+        };
+        let cause = input
+            .stop_cause
+            .expect("a left receipt has its cause")
+            .as_str();
+        format!(
+            "message {message_id} {effect}: {cause} (input_id={id}, redelivery input_id={}); the runner re-delivers it once the composer is empty.",
+            next.input_id
+        )
+    } else if input.state == InputState::InProgress {
+        format!(
+            "message {message_id} was not notified to member {member}: input {id} is in progress; inspect it with cafleet input show {id} --json."
+        )
+    } else if input.state == InputState::Uncertain {
+        let cause = input
+            .stop_cause
+            .expect("an uncertain receipt has its cause")
+            .as_str();
+        format!(
+            "message {message_id} was not notified to member {member}: input {id} is uncertain ({cause}); inspect it with cafleet input show {id} --json and reconcile it with cafleet input reconcile."
+        )
+    } else if input.disposition == Some(InputDisposition::AbandonedUncertain) {
+        format!(
+            "message {message_id} was not notified to member {member}: input {id} was abandoned as uncertain; send its content again as a new message if it is still needed."
+        )
+    } else {
+        return Err(CafleetError::App(
+            "scoped preview diagnostics require a stopped or held receipt".into(),
+        ));
+    };
+    Ok(NotificationError {
+        member_id: member,
+        message_id,
+        error: text,
+    })
+}
+
 fn deliver_wrapped_pending(
     conn: &mut Connection,
     settings: &Settings,
@@ -210,6 +300,15 @@ fn deliver_wrapped_pending(
     let mut guard = None;
     let mut sent = Vec::new();
     let mut held_reason = None;
+    let mut notification_errors = Vec::new();
+    let mut attempted_inputs = std::collections::BTreeMap::new();
+    let backend = crate::coding_agent::coding_agent(&run.backend)
+        .ok_or_else(|| CafleetError::App("unknown preview backend".into()))?;
+    let verified = crate::coding_agent::ProfileCatalog::bundled().verified_composer(
+        backend,
+        run.native_version.as_deref(),
+        crate::coding_agent::ComposerOperation::Prompt,
+    );
     let mut skipped = attempted.clone();
     let mut operation_key =
         broker::runtime::preview_operation_key(run.run_id, message.message_id, 1)?;
@@ -218,6 +317,24 @@ fn deliver_wrapped_pending(
     let result = (|| {
         let end = 'drain: loop {
             deadline.remaining()?;
+            let latest = storage::find_latest_preview_input(conn, run.run_id, message.message_id)?;
+            let attempt_number = match latest.as_ref() {
+                None => 1,
+                Some(input) if input.disposition == Some(InputDisposition::LeftInComposer) => {
+                    return Err(CafleetError::App(format!(
+                        "preview input {} was left in the composer without a re-delivery attempt",
+                        input.input_id
+                    )));
+                }
+                Some(input) if input.disposition == Some(InputDisposition::NotSubmitted) => input
+                    .preview_attempt
+                    .expect("a preview has its attempt")
+                    .checked_add(1)
+                    .ok_or_else(|| CafleetError::App("preview attempt exhausted".into()))?,
+                Some(input) => input.preview_attempt.expect("a preview has its attempt"),
+            };
+            operation_key =
+                storage::preview_operation_key(run.run_id, message.message_id, attempt_number)?;
             let request = SubmitInput {
                 operation_key: operation_key.clone(),
                 input_kind: InputKind::Preview,
@@ -227,16 +344,27 @@ fn deliver_wrapped_pending(
             let retained =
                 find_submission(conn, &identity, &request, deadline).map_err(CafleetError::from)?;
             known_input_id = retained.as_ref().map(|input| input.input_id);
-            if retained.as_ref().is_some_and(|input| {
+            attempted_inputs.insert(message.message_id, known_input_id);
+            let scoped_hold = retained.as_ref().is_some_and(|input| {
                 matches!(input.state, InputState::InProgress | InputState::Uncertain)
                     || (input.state == InputState::Settled
-                        && input.disposition != Some(InputDisposition::Submitted))
-            }) {
+                        && input.disposition == Some(InputDisposition::AbandonedUncertain))
+            });
+            if scoped_hold && !verified {
                 break AttemptEnd::Held;
             }
             let attempt =
                 PreparedSubmission::new(&request, deadline.instant(), &mut RealInputDeadlineClock)?;
             let accepted = 'submit: {
+                if scoped_hold {
+                    notification_errors.push(scoped_preview_error(
+                        conn,
+                        &run,
+                        &message,
+                        retained.as_ref().expect("a scoped hold has its receipt"),
+                    )?);
+                    break 'submit None;
+                }
                 if retained.as_ref().is_some_and(|input| {
                     input.state == InputState::Ready && input.deferred_at.is_some()
                 }) {
@@ -268,6 +396,7 @@ fn deliver_wrapped_pending(
                             conn, settings, &run, placement, held, &attempt, deadline, host,
                         )
                         .map_err(CafleetError::from)?;
+                        attempted_inputs.insert(message.message_id, result.input_id);
                         match result.status {
                             SubmissionStatus::Accepted => {}
                             SubmissionStatus::Queued => break 'submit None,
@@ -275,7 +404,20 @@ fn deliver_wrapped_pending(
                                 held_reason = result.reason;
                                 break 'drain AttemptEnd::Held;
                             }
-                            SubmissionStatus::Rejected | SubmissionStatus::Uncertain => {
+                            SubmissionStatus::Uncertain | SubmissionStatus::LeftInComposer
+                                if verified =>
+                            {
+                                let input = storage::get_input(
+                                    conn,
+                                    result.input_id.expect("a stopped preview has its receipt"),
+                                )?;
+                                notification_errors
+                                    .push(scoped_preview_error(conn, &run, &message, &input)?);
+                                break 'submit None;
+                            }
+                            SubmissionStatus::Rejected
+                            | SubmissionStatus::Uncertain
+                            | SubmissionStatus::LeftInComposer => {
                                 break 'drain AttemptEnd::Held;
                             }
                         }
@@ -350,7 +492,7 @@ fn deliver_wrapped_pending(
     })();
     let end = match result {
         Ok(end) => end,
-        Err(source) if sent.is_empty() => return Err(source),
+        Err(source) if sent.is_empty() && notification_errors.is_empty() => return Err(source),
         Err(source) => {
             let cause = CafleetError::from(
                 InputContext {
@@ -389,6 +531,8 @@ fn deliver_wrapped_pending(
         sent,
         end,
         held_reason,
+        notification_errors,
+        attempted_inputs,
     })
 }
 
@@ -402,6 +546,7 @@ pub(crate) struct PendingPreview {
 pub(crate) struct ReceiveSnapshot {
     pub(crate) messages: Vec<MessageRecord>,
     pub(crate) pending: Vec<PendingPreview>,
+    pub(crate) pending_notifications: Vec<PendingPreview>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,6 +562,14 @@ pub(crate) struct AttemptOutcome {
     pub(crate) end: AttemptEnd,
     /// The recipient runner's reason when it held the preview without accepting it.
     pub(crate) held_reason: Option<String>,
+    pub(crate) notification_errors: Vec<NotificationError>,
+    pub(crate) attempted_inputs: std::collections::BTreeMap<i64, Option<i64>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WaitOutcome {
+    pub(crate) messages: Vec<MessageRecord>,
+    pub(crate) notification_errors: Vec<NotificationError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -432,6 +585,8 @@ impl AttemptOutcome {
             sent: Vec::new(),
             end,
             held_reason: None,
+            notification_errors: Vec::new(),
+            attempted_inputs: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -450,13 +605,14 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
     clock: &C,
     io: &mut I,
     timeout: Duration,
-) -> Result<Vec<MessageRecord>, CafleetError> {
+) -> Result<WaitOutcome, CafleetError> {
     let started = clock.now();
     let expires = started + timeout;
     let mut next_check = started;
     let mut last_interval = None;
     let mut cursor = None;
     let mut messages = Vec::new();
+    let mut notification_errors: Vec<NotificationError> = Vec::new();
     let mut attempted = BTreeSet::new();
     loop {
         let now = clock.now();
@@ -480,6 +636,11 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
             }
             Err(error) => return Err(error),
         };
+        notification_errors.retain(|error| {
+            snapshot.pending_notifications.iter().any(|pending| {
+                pending.member_id == error.member_id && pending.message_id == error.message_id
+            })
+        });
         messages = snapshot.messages;
         let now = clock.now();
         if !messages.is_empty() || now >= expires {
@@ -517,23 +678,36 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     )),
                     Err(error) => return Err(error),
                 };
+            notification_errors.retain(|error| !outcome.sent.contains(&error.message_id));
+            let mut diagnostics = outcome.notification_errors;
             if let AttemptEnd::Failed(error) = outcome.end {
+                diagnostics.push(error);
+            }
+            for error in diagnostics {
                 assert_eq!(
                     error.member_id, member,
                     "the owned attempt reports its selected member"
                 );
-                assert!(
-                    attempted.insert(error.message_id),
-                    "one invocation attempts each failed message at most once"
-                );
+                attempted.insert(error.message_id);
                 eprintln!("{}", error.error);
+                if let Some(previous) = notification_errors.iter_mut().find(|previous| {
+                    previous.member_id == error.member_id && previous.message_id == error.message_id
+                }) {
+                    *previous = error;
+                } else {
+                    notification_errors.push(error);
+                }
             }
             next_check = clock.now();
         } else {
             next_check = started + Duration::from_secs(interval + 1);
         }
     }
-    Ok(messages)
+    notification_errors.sort_by_key(|error| error.message_id);
+    Ok(WaitOutcome {
+        messages,
+        notification_errors,
+    })
 }
 
 pub(crate) struct BrokerReceiver<'a> {
@@ -579,8 +753,23 @@ impl ReceiveIo for BrokerReceiver<'_> {
                     message_id,
                 })
                 .collect();
+            let pending_notifications =
+                broker::messaging::pending_notifications(&tx, fleet, self.member_id)?
+                    .into_iter()
+                    .map(|(member_id, message_id)| PendingPreview {
+                        member_id,
+                        message_id,
+                    })
+                    .collect();
             tx.commit()?;
-            Ok((ReceiveSnapshot { messages, pending }, fleet))
+            Ok((
+                ReceiveSnapshot {
+                    messages,
+                    pending,
+                    pending_notifications,
+                },
+                fleet,
+            ))
         })?;
         self.fleet_id = Some(fleet);
         Ok(snapshot)

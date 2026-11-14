@@ -152,6 +152,9 @@ pub(crate) fn run(
                     &std::collections::BTreeSet::new(),
                 ) {
                     Ok(outcome) => {
+                        for error in &outcome.notification_errors {
+                            eprintln!("Message {message_id} was persisted. {}", error.error);
+                        }
                         if let AttemptEnd::Failed(error) = &outcome.end {
                             eprintln!("Message {message_id} was persisted. {}", error.error);
                         }
@@ -191,15 +194,19 @@ pub(crate) fn run(
             json,
         } => {
             let mut receiver = BrokerReceiver::new(conn, settings, member_id);
-            let messages = &crate::delivery::wait(
+            let outcome = crate::delivery::wait(
                 &SystemClock,
                 &mut receiver,
                 std::time::Duration::from_secs(timeout),
             )?;
+            let messages = &outcome.messages;
             let payload = serde_json::json!({
                 "member_id":member_id,
                 "outcome":if messages.is_empty() { "timeout" } else { "messages" },
                 "messages":messages.iter().map(crate::output::json::message).collect::<Vec<_>>(),
+                "notification_errors":outcome.notification_errors.iter().map(|error| serde_json::json!({
+                    "member_id":error.member_id,"message_id":error.message_id,"error":error.error
+                })).collect::<Vec<_>>(),
             });
             emit(json, &payload, || format_message_wait(member_id, messages))
         }
@@ -266,7 +273,25 @@ fn send_delivery(
         ));
     }
     if let Some(runtime) = &recipient.runtime {
-        if let Some(input) = crate::broker::runtime::find_latest_preview_input(
+        if let Some(attempted) =
+            outcome.and_then(|outcome| outcome.attempted_inputs.get(&message.message_id))
+        {
+            if let Some(input_id) = attempted {
+                let input = crate::broker::runtime::get_input(conn, *input_id)?;
+                if input.run_id != runtime.run.run_id
+                    || input.kind != crate::broker::runtime::InputKind::Preview
+                    || input.message_id != Some(message.message_id)
+                {
+                    return Err(CafleetError::App(
+                        "invocation preview receipt association changed".into(),
+                    ));
+                }
+                let delivery = input.delivery().ok_or_else(|| {
+                    CafleetError::App("invocation preview has no delivery projection".into())
+                })?;
+                return Ok((Some(*input_id), delivery));
+            }
+        } else if let Some(input) = crate::broker::runtime::find_latest_preview_input(
             conn,
             runtime.run.run_id,
             message.message_id,

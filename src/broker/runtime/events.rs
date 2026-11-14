@@ -121,9 +121,12 @@ pub(crate) fn get_event(
     let transition = original(&view)?;
     validate_transition(&view.run.run, &transition)?;
     let event = &view.event;
-    let delivery = (event.kind == RuntimeEventKind::InputDeliveryResult)
-        .then(|| published_delivery(conn, event))
-        .transpose()?;
+    let delivery = matches!(
+        event.kind,
+        RuntimeEventKind::InputDeliveryResult | RuntimeEventKind::InputDeliveryStalled
+    )
+    .then(|| published_delivery(conn, event))
+    .transpose()?;
     require(
         payload(
             &view.run.run,
@@ -157,10 +160,16 @@ pub(crate) fn get_event(
     Ok(view)
 }
 
-const DELIVERY_RESULT_STAGES: [&str; 4] = ["zero_bytes", "partial", "submitted", "unknown"];
+const DELIVERY_RESULT_STAGES: [&str; 6] = [
+    "zero_bytes",
+    "escape_only",
+    "partial",
+    "literal_complete",
+    "submitted",
+    "unknown",
+];
 
-/// `input_id` as a deferred ordinary input of `run_id`, with its receipt's delivery projection.
-fn deferred_delivery(
+fn result_delivery(
     conn: &Connection,
     run_id: i64,
     input_id: i64,
@@ -168,14 +177,48 @@ fn deferred_delivery(
 ) -> Result<(InputOperation, DeliveryProjection), CafleetError> {
     let input = get_input(conn, input_id)?;
     require(
-        input.run_id == run_id && input.deferred_at.is_some(),
+        input.run_id == run_id && (input.deferred_at.is_some() || input.stop_cause.is_some()),
         field,
-        "delivery results describe this run's deferred inputs",
+        "delivery results describe this run's deferred or stopped ordinary inputs",
     )?;
-    let delivery = input
+    let mut delivery = input
         .delivery()
         .ok_or_else(|| invalid(field, "delivery results describe ordinary inputs"))?;
+    if input.deferred_at.is_none() && input.stop_cause.is_some() && input.left_stage.is_none() {
+        delivery.status = DeliveryStatus::Uncertain;
+    }
     Ok((input, delivery))
+}
+
+fn validate_result_stage(
+    input: &InputOperation,
+    stage: &Value,
+    field: &str,
+) -> Result<(), CafleetError> {
+    require(
+        stage
+            .as_str()
+            .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
+        field,
+        "stage outside its domain",
+    )?;
+    if let Some(left_stage) = input.left_stage {
+        require(
+            stage.as_str() == Some(left_stage.as_str()),
+            field,
+            "stage must match the input receipt's left stage",
+        )?;
+    }
+    Ok(())
+}
+
+fn result_stop_cause(input: &InputOperation, status: DeliveryStatus) -> Option<StopCause> {
+    input.stop_cause.filter(|_| {
+        matches!(
+            status,
+            DeliveryStatus::Uncertain | DeliveryStatus::LeftInComposer
+        )
+    })
 }
 
 /// The delivery fields a stored result publishes, checked against its input receipt: an uncertain
@@ -188,18 +231,28 @@ fn published_delivery(
     let input_id = payload["input_id"]
         .as_i64()
         .ok_or_else(|| invalid("payload_json.input_id", "input identity required"))?;
-    let (input, delivery) =
-        deferred_delivery(conn, event.run_id, input_id, "payload_json.input_id")?;
+    if event.kind == RuntimeEventKind::InputDeliveryStalled {
+        return stalled_delivery(
+            conn,
+            &get_run(conn, event.run_id)?,
+            payload,
+            Some(&payload["delivery"]),
+        );
+    }
+    let (input, delivery) = result_delivery(conn, event.run_id, input_id, "payload_json.input_id")?;
     let published: DeliveryProjection = serde_json::from_value(payload["delivery"].clone())
         .map_err(|_| invalid("payload_json.delivery", "delivery projection required"))?;
     let consistent = if published.status == DeliveryStatus::Uncertain {
         delivery.status != DeliveryStatus::Queued
             && delivery.status != DeliveryStatus::Held
             && delivery.method == published.method
+            && delivery.reason == published.reason
     } else {
         matches!(
             published.status,
-            DeliveryStatus::Submitted | DeliveryStatus::NotSubmitted
+            DeliveryStatus::Submitted
+                | DeliveryStatus::NotSubmitted
+                | DeliveryStatus::LeftInComposer
         ) && published == delivery
     };
     require(
@@ -207,19 +260,13 @@ fn published_delivery(
         "payload_json.delivery",
         "delivery must match the input receipt's settled result",
     )?;
-    require(
-        payload["stage"]
-            .as_str()
-            .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
-        "payload_json.stage",
-        "stage outside its domain",
-    )?;
+    validate_result_stage(&input, &payload["stage"], "payload_json.stage")?;
     Ok(DeliveryFields {
         input_id,
         message_id: input.message_id,
-        cause: input
-            .stop_cause
-            .filter(|_| published.status == DeliveryStatus::Uncertain),
+        cause: result_stop_cause(&input, published.status),
+        action: left_input_action(conn, &get_run(conn, event.run_id)?, &input)?,
+        stalled: None,
         delivery: published,
         stage: payload["stage"].clone(),
     })
@@ -253,7 +300,12 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
         observed_at: view.event.observed_at.clone(),
         evidence_json: payload["evidence"].clone(),
         close_reason,
-        cause_json: if view.event.kind == RuntimeEventKind::InputDeliveryResult {
+        cause_json: if view.event.kind == RuntimeEventKind::InputDeliveryStalled {
+            Some(
+                json!({"kind":"input_delivery_stalled","input_id":payload["input_id"],
+                "blocking_input_id":payload["blocking_input_id"],"waiting_since":payload["waiting_since"]}),
+            )
+        } else if view.event.kind == RuntimeEventKind::InputDeliveryResult {
             let mut cause = json!({"kind":"input_delivery_result",
                 "input_id":payload["input_id"],"stage":payload["stage"]});
             if let Some(diagnostic) = payload.get("cause") {
@@ -349,6 +401,28 @@ pub(crate) fn validate_transition(
         )?;
         if transition.kind == RuntimeEventKind::InputDeliveryResult {
             validate_delivery_cause(transition)?;
+        } else if transition.kind == RuntimeEventKind::InputDeliveryStalled {
+            let record = transition
+                .cause_json
+                .as_ref()
+                .and_then(Value::as_object)
+                .ok_or_else(|| invalid("cause_json", "stalled delivery record required"))?;
+            require(
+                record.len() == 4
+                    && record["kind"] == "input_delivery_stalled"
+                    && record["input_id"].as_i64().is_some_and(|id| id > 0)
+                    && record["blocking_input_id"]
+                        .as_i64()
+                        .is_some_and(|id| id > 0),
+                "cause_json",
+                "a stalled record names its head, blocker and wait start",
+            )?;
+            rfc3339(
+                record["waiting_since"]
+                    .as_str()
+                    .ok_or_else(|| invalid("waiting_since", "timestamp required"))?,
+                "waiting_since",
+            )?;
         } else {
             validate_cause(transition)?;
         }
@@ -528,6 +602,150 @@ struct DeliveryFields {
     delivery: DeliveryProjection,
     stage: Value,
     cause: Option<StopCause>,
+    action: Value,
+    stalled: Option<(i64, String)>,
+}
+
+fn input_press_argv(conn: &Connection, run: &RunRecord) -> Result<Value, CafleetError> {
+    let mut argv = vec![
+        "cafleet".to_owned(),
+        "member".into(),
+        "press".into(),
+        run.member_id.to_string(),
+        "--from-member-id".into(),
+        run.director_member_id.to_string(),
+        "Enter".into(),
+    ];
+    argv.extend(action_database_args(conn)?);
+    Ok(json!(argv))
+}
+
+fn action_database_args(conn: &Connection) -> Result<Vec<String>, CafleetError> {
+    let path = conn.path().ok_or_else(|| {
+        invalid(
+            "database_url",
+            "a delivery action requires its database path",
+        )
+    })?;
+    let url = format!("sqlite:///{path}");
+    Ok(if url == crate::config::default_database_url()? {
+        Vec::new()
+    } else {
+        vec!["--database-url".into(), url]
+    })
+}
+
+fn left_input_action(
+    conn: &Connection,
+    run: &RunRecord,
+    input: &InputOperation,
+) -> Result<Value, CafleetError> {
+    let recoverable = input.disposition == Some(InputDisposition::LeftInComposer)
+        && matches!(
+            input.left_stage,
+            Some(LeftStage::LiteralComplete | LeftStage::Submitted)
+        )
+        && matches!(
+            input.stop_cause,
+            Some(
+                StopCause::ObserverUnavailable
+                    | StopCause::DeadlineExpired
+                    | StopCause::SubmitUnconfirmed
+            )
+        );
+    if !recoverable {
+        return Ok(Value::Null);
+    }
+    Ok(json!({"kind":"review_left_input",
+        "instruction":"Capture the member's pane and confirm with member show that no interaction is current. When its composer holds exactly this input's whole text, submit it with press_argv; otherwise ask the user to clear or submit the composer on the member's native surface.",
+        "press_argv":input_press_argv(conn, run)?}))
+}
+
+fn stalled_delivery(
+    conn: &Connection,
+    run: &RunRecord,
+    record: &Value,
+    published: Option<&Value>,
+) -> Result<DeliveryFields, CafleetError> {
+    let input_id = record["input_id"]
+        .as_i64()
+        .ok_or_else(|| invalid("input_id", "stalled head identity required"))?;
+    let blocking_input_id = record["blocking_input_id"]
+        .as_i64()
+        .ok_or_else(|| invalid("blocking_input_id", "blocking identity required"))?;
+    let input = get_input(conn, input_id)?;
+    let blocking = get_input(conn, blocking_input_id)?;
+    require(
+        input.run_id == run.run_id
+            && blocking.run_id == run.run_id
+            && input.kind != InputKind::PermissionResponse
+            && blocking.kind != InputKind::PermissionResponse
+            && input.deferred_at.is_some()
+            && input_id != blocking_input_id,
+        "input_id",
+        "a stalled head and its ordinary blocker belong to this run",
+    )?;
+    if published.is_none() {
+        require(
+            input.state == InputState::Ready,
+            "input_id",
+            "a new stalled head must be ready",
+        )?;
+        require(
+            blocking.state == InputState::Uncertain
+                || blocking.disposition == Some(InputDisposition::LeftInComposer),
+            "blocking_input_id",
+            "a new stalled blocker must be uncertain or left in the composer",
+        )?;
+    }
+    let expected_delivery = DeliveryProjection {
+        status: DeliveryStatus::Queued,
+        method: None,
+        reason: Some(input.defer_reason.clone().ok_or_else(|| {
+            invalid(
+                "defer_reason",
+                "a stalled head has its immutable queue reason",
+            )
+        })?),
+    };
+    let delivery = match published {
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|_| invalid("delivery", "queued delivery required"))?,
+        None => input
+            .delivery()
+            .ok_or_else(|| invalid("delivery", "ordinary delivery required"))?,
+    };
+    require(
+        delivery == expected_delivery,
+        "delivery",
+        "a stalled head publishes its immutable queued method and reason",
+    )?;
+    let waiting_since = record["waiting_since"]
+        .as_str()
+        .ok_or_else(|| invalid("waiting_since", "timestamp required"))?
+        .to_owned();
+    rfc3339(&waiting_since, "waiting_since")?;
+    let action = left_input_action(conn, run, &blocking)?;
+    let mut inspect = vec![
+        "cafleet".to_owned(),
+        "input".into(),
+        "show".into(),
+        blocking_input_id.to_string(),
+        "--json".into(),
+    ];
+    inspect.extend(action_database_args(conn)?);
+    Ok(DeliveryFields {
+        input_id,
+        message_id: input.message_id,
+        delivery,
+        stage: Value::Null,
+        cause: None,
+        stalled: Some((blocking_input_id, waiting_since)),
+        action: json!({"kind":"review_stalled_input",
+            "instruction":"Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; otherwise ask the user to clear or submit the composer. Reconcile an uncertain blocker after that evidence. ACK the waiting preview when its composer stays unverified after clearing or its message no longer needs delivery.",
+            "inspect_argv":inspect,
+            "press_argv":action.get("press_argv").cloned().unwrap_or(Value::Null)}),
+    })
 }
 
 fn payload(
@@ -549,7 +767,10 @@ fn payload(
         payload["close_reason"] = json!(reason.as_str());
     }
     if let Some(cause) = &transition.cause_json
-        && transition.kind != RuntimeEventKind::InputDeliveryResult
+        && !matches!(
+            transition.kind,
+            RuntimeEventKind::InputDeliveryResult | RuntimeEventKind::InputDeliveryStalled
+        )
     {
         payload["cause"] = cause.clone();
     }
@@ -559,17 +780,27 @@ fn payload(
         }
         payload["input_id"] = json!(fields.input_id);
         payload["message_id"] = json!(fields.message_id);
+        if let Some((blocking_input_id, waiting_since)) = &fields.stalled {
+            payload["blocking_input_id"] = json!(blocking_input_id);
+            payload["waiting_since"] = json!(waiting_since);
+        }
         payload["delivery"] = fields.delivery.to_json();
-        payload["stage"] = fields.stage.clone();
+        if fields.stalled.is_none() {
+            payload["stage"] = fields.stage.clone();
+        }
     }
-    payload["director_action"] = director_action(
-        run,
-        transition.kind,
-        transition.classification,
-        event_id,
-        interaction_id,
-        &transition.evidence_json,
-    )?;
+    payload["director_action"] = if let Some(fields) = delivery {
+        fields.action.clone()
+    } else {
+        director_action(
+            run,
+            transition.kind,
+            transition.classification,
+            event_id,
+            interaction_id,
+            &transition.evidence_json,
+        )?
+    };
     Ok(payload)
 }
 
@@ -632,7 +863,10 @@ pub(crate) fn persist_transition_in_transaction(
     if archive_reason.is_none() {
         crate::broker::fleets::require_live_fleet(conn, run.fleet_id)?;
     }
-    let delivery_fields = if transition.kind == RuntimeEventKind::InputDeliveryResult {
+    let delivery_fields = if matches!(
+        transition.kind,
+        RuntimeEventKind::InputDeliveryResult | RuntimeEventKind::InputDeliveryStalled
+    ) {
         let record = transition
             .cause_json
             .as_ref()
@@ -642,24 +876,29 @@ pub(crate) fn persist_transition_in_transaction(
             .expect("validated delivery result input");
         let published: Option<i64> = conn
             .query_row(
-                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
-                params![run.run_id, input_id],
+                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind=?2 AND json_extract(payload_json,'$.input_id')=?3",
+                params![run.run_id, transition.kind.as_str(), input_id],
                 |row| row.get(0),
             )
             .optional()?;
         if let Some(id) = published {
             return Ok((get_event(conn, id)?.event, false));
         }
-        let (input, delivery) = deferred_delivery(conn, run.run_id, input_id, "input_id")?;
-        Some(DeliveryFields {
-            input_id,
-            message_id: input.message_id,
-            cause: input
-                .stop_cause
-                .filter(|_| delivery.status == DeliveryStatus::Uncertain),
-            delivery,
-            stage: record["stage"].clone(),
-        })
+        if transition.kind == RuntimeEventKind::InputDeliveryStalled {
+            Some(stalled_delivery(conn, run, record, None)?)
+        } else {
+            let (input, delivery) = result_delivery(conn, run.run_id, input_id, "input_id")?;
+            validate_result_stage(&input, &record["stage"], "cause_json.stage")?;
+            Some(DeliveryFields {
+                input_id,
+                message_id: input.message_id,
+                cause: result_stop_cause(&input, delivery.status),
+                action: left_input_action(conn, run, &input)?,
+                stalled: None,
+                delivery,
+                stage: record["stage"].clone(),
+            })
+        }
     } else {
         None
     };

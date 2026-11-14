@@ -249,6 +249,21 @@ pub(super) fn durable_outcome(
             SubmissionStage::Unknown,
             uncertain_reason(input),
         )),
+        (InputState::Settled, Some(InputDisposition::LeftInComposer)) => Some((
+            SubmissionStatus::LeftInComposer,
+            match input
+                .left_stage
+                .expect("a left input has its durable stage")
+            {
+                crate::broker::runtime::LeftStage::EscapeOnly => SubmissionStage::EscapeOnly,
+                crate::broker::runtime::LeftStage::Partial => SubmissionStage::Partial,
+                crate::broker::runtime::LeftStage::LiteralComplete => {
+                    SubmissionStage::LiteralComplete
+                }
+                crate::broker::runtime::LeftStage::Submitted => SubmissionStage::Submitted,
+            },
+            uncertain_reason(input),
+        )),
         (InputState::Settled, _) => Some((
             SubmissionStatus::Rejected,
             SubmissionStage::ZeroBytes,
@@ -324,6 +339,11 @@ fn validate_reply_against_durable(
                 SubmissionStatus::Uncertain => {
                     matches!(input.state, InputState::InProgress | InputState::Uncertain)
                         && reply.reason == uncertain_reason(input)
+                }
+                SubmissionStatus::LeftInComposer => {
+                    durable_outcome(input).is_some_and(|(status, stage, reason)| {
+                        reply.status == status && reply.stage == stage && reply.reason == reason
+                    })
                 }
                 SubmissionStatus::Held | SubmissionStatus::Rejected => {
                     reply.stage == SubmissionStage::ZeroBytes

@@ -338,15 +338,12 @@ pub(crate) fn requeue_zero_byte_immediate(
 
 pub(crate) type UnpublishedDeliveryResult = (i64, &'static str, Option<StopCause>);
 
-/// The deferred inputs of a run whose first result is durable but whose result event is not, with
-/// the stage and recorded uncertain cause that event reports. Recovery publishes these after the
-/// live writer is gone.
 pub(crate) fn unpublished_delivery_results(
     conn: &Connection,
     run_id: i64,
 ) -> Result<Vec<UnpublishedDeliveryResult>, CafleetError> {
     let mut statement = conn.prepare(
-        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND deferred_at IS NOT NULL AND input_id NOT IN (SELECT json_extract(payload_json,'$.input_id') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result') ORDER BY input_id",
+        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND kind<>'permission_response' AND (deferred_at IS NOT NULL OR stop_cause IS NOT NULL) AND input_id NOT IN (SELECT json_extract(payload_json,'$.input_id') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result') ORDER BY input_id",
     )?;
     let ids = statement
         .query_map([run_id], |row| row.get::<_, i64>(0))?
@@ -354,6 +351,10 @@ pub(crate) fn unpublished_delivery_results(
     let mut results = Vec::new();
     for input_id in ids {
         let input = get_input(conn, input_id)?;
+        if input.deferred_at.is_none() && input.stop_cause.is_some() && input.left_stage.is_none() {
+            results.push((input_id, "unknown", input.stop_cause));
+            continue;
+        }
         let delivery = input
             .delivery()
             .expect("a deferred input is an ordinary input");

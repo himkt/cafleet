@@ -1255,6 +1255,31 @@ impl ComposerPlan {
         })
     }
 
+    pub(crate) fn plain_limit_refusal(&self, literal: &str, backend: &str) -> String {
+        let limit = self
+            .plain_literal_limit
+            .expect("a refused plain literal has its limit");
+        let (size, unit) = match limit.unit {
+            LiteralUnit::Bytes => (literal.len(), "bytes"),
+            LiteralUnit::Scalars => (literal.chars().count(), "scalars"),
+        };
+        let size = size
+            .checked_add(self.operation.prefix().len())
+            .expect("a bounded input size fits");
+        let reason = match self.literal_framing {
+            LiteralFraming::Plain => {
+                format!("the {backend} profile has no bracketed-paste delivery")
+            }
+            LiteralFraming::BracketedPaste => {
+                "the native CLI has not enabled bracketed paste".into()
+            }
+        };
+        format!(
+            "the input is {size} {unit}, above the {backend} plain-input limit of {} {unit}, and {reason}",
+            limit.max
+        )
+    }
+
     fn encode(&self, literal: &str) -> std::result::Result<Vec<u8>, CafleetError> {
         let prefix = self.operation.prefix();
         let size = prefix

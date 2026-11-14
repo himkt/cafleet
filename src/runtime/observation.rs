@@ -297,12 +297,14 @@ impl ObservationController {
             .delivery_results
             .lock()
             .expect("delivery result queue is never poisoned");
-        if queue
-            .iter()
-            .all(|queued| queued["input_id"] != record["input_id"])
-        {
+        if queue.iter().all(|queued| {
+            queued["input_id"] != record["input_id"] || queued["kind"] != record["kind"]
+        }) {
             queue.push_back(record);
         }
+    }
+    pub(crate) fn publish_delivery_stalled(&self, record: serde_json::Value) {
+        self.publish_delivery_result(record);
     }
     pub(crate) fn current_request(&self) -> Option<&ObservedRequest> {
         self.current_request.as_ref()
@@ -873,12 +875,19 @@ impl ObservationController {
                 .expect("delivery result queue is never poisoned")
                 .pop_front()
         {
-            let value = self.lifecycle(
-                RuntimeEventKind::InputDeliveryResult,
-                record,
-                &now.observed_at,
-                current.screen_seq,
+            let kind = RuntimeEventKind::try_from(
+                record["kind"]
+                    .as_str()
+                    .expect("a delivery record names its event kind"),
             )?;
+            ensure(
+                matches!(
+                    kind,
+                    RuntimeEventKind::InputDeliveryResult | RuntimeEventKind::InputDeliveryStalled
+                ),
+                "delivery publication requires a delivery event",
+            )?;
+            let value = self.lifecycle(kind, record, &now.observed_at, current.screen_seq)?;
             self.retain(self.update(vec![value]))?;
             self.route(writer, &now)?;
         }
