@@ -6388,6 +6388,15 @@ mod tests {
 
             #[test]
             fn immediate_over_limit_prompt_is_refused_before_receipt_or_bytes() {
+                assert_immediate_limit_rejection(storage::InputKind::Prompt);
+            }
+
+            #[test]
+            fn immediate_over_limit_exec_is_refused_before_receipt_or_bytes() {
+                assert_immediate_limit_rejection(storage::InputKind::Exec);
+            }
+
+            fn assert_immediate_limit_rejection(kind: storage::InputKind) {
                 for framing in ["plain", "bracketed_paste"] {
                     with_catalog_host(
                         configured(framing, json!({"unit":"bytes","max":1})),
@@ -6397,8 +6406,42 @@ mod tests {
                                 &host.fixture.conn,
                                 "member_input_operations",
                             );
-                            let result = host.handle(request(host, "prompt:over-limit", LITERAL));
-                            assert!(result.is_err());
+                            let mut input = request(host, "ordinary:over-limit", LITERAL);
+                            if kind == storage::InputKind::Exec {
+                                let InputControlOperation::SubmitPrompt(mut body) = input.operation
+                                else {
+                                    panic!("the harness creates a prompt body")
+                                };
+                                body.input_kind = kind;
+                                input.operation = InputControlOperation::SubmitExec(body);
+                            }
+                            let reply = submitted(
+                                host.handle(input)
+                                    .unwrap()
+                                    .expect("a pre-write refusal returns immediately"),
+                            );
+                            assert_eq!(reply.status, SubmissionStatus::Rejected);
+                            assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                            assert_eq!(reply.input_id, None);
+                            assert_eq!(reply.output_seq, None);
+                            assert_eq!(reply.delivery, None);
+                            let size = LITERAL.len()
+                                + if kind == storage::InputKind::Exec {
+                                    2
+                                } else {
+                                    0
+                                };
+                            let cause = if framing == "plain" {
+                                "the codex profile has no bracketed-paste delivery"
+                            } else {
+                                "the native CLI has not enabled bracketed paste"
+                            };
+                            assert_eq!(
+                                reply.reason,
+                                Some(format!(
+                                    "the input is {size} bytes, above the codex plain-input limit of 1 bytes, and {cause}"
+                                ))
+                            );
                             assert!(host.pty.offers.is_empty());
                             assert_eq!(
                                 crate::broker::runtime::test_support::rows(
@@ -6407,6 +6450,72 @@ mod tests {
                                 ),
                                 before
                             );
+                        },
+                    );
+                }
+            }
+
+            #[test]
+            fn zero_byte_reselection_refuses_with_the_actual_ready_receipt_and_projection() {
+                for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
+                    with_catalog_host(
+                        configured("bracketed_paste", json!({"unit":"bytes","max":1})),
+                        encoded(),
+                        |host| {
+                            enable_paste(host);
+                            let mut input = request(host, "ordinary:mode-disabled", LITERAL);
+                            if kind == storage::InputKind::Exec {
+                                let InputControlOperation::SubmitPrompt(mut body) = input.operation
+                                else {
+                                    panic!("the harness creates a prompt body")
+                                };
+                                body.input_kind = kind;
+                                input.operation = InputControlOperation::SubmitExec(body);
+                            }
+                            assert!(host.handle(input).unwrap().is_none());
+                            assert!(turn(host).is_none());
+                            assert!(host.pty.offers.is_empty());
+                            let id = host
+                                .coordinator
+                                .pending
+                                .as_ref()
+                                .unwrap()
+                                .input_id()
+                                .unwrap();
+                            let before = row(host, id);
+                            assert_eq!(before.state, storage::InputState::InProgress);
+                            let retained = host.coordinator.operations.get(&id).unwrap();
+                            assert_eq!(retained.stage, SubmissionStage::ZeroBytes);
+                            assert_eq!(retained.written_bytes, 0);
+                            assert!(!retained.leased);
+                            let mut screen = b"\x1b[?2004l".to_vec();
+                            screen.extend_from_slice(SCREEN);
+                            host.show(screen);
+                            assert!(!host.transport.bracketed_paste());
+                            let reply = finish(host, false);
+                            assert_eq!(reply.status, SubmissionStatus::Rejected);
+                            assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                            assert_eq!(reply.input_id, Some(id));
+                            let after = row(host, id);
+                            assert_eq!(after.state, storage::InputState::Ready);
+                            assert_eq!(after.operation_key, before.operation_key);
+                            assert_eq!(after.payload_digest, before.payload_digest);
+                            assert_eq!(after.kind, kind);
+                            assert_eq!(after.disposition, None);
+                            assert_eq!(reply.delivery, after.delivery());
+                            let size = LITERAL.len()
+                                + if kind == storage::InputKind::Exec {
+                                    2
+                                } else {
+                                    0
+                                };
+                            assert_eq!(
+                                reply.reason,
+                                Some(format!(
+                                    "the input is {size} bytes, above the codex plain-input limit of 1 bytes, and the native CLI has not enabled bracketed paste"
+                                ))
+                            );
+                            assert!(host.pty.offers.is_empty());
                         },
                     );
                 }

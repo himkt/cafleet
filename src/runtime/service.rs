@@ -2387,6 +2387,13 @@ pub(crate) mod test_support {
             with_configured_input_service(false, 0, body);
         }
 
+        pub(crate) fn with_input_service_catalog(
+            configure_catalog: impl FnOnce(&mut Value),
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            with_configured_input_service_catalog(false, 0, configure_catalog, body);
+        }
+
         pub(crate) fn with_detecting_input_service(
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
@@ -2407,9 +2414,23 @@ pub(crate) mod test_support {
             exit_code: i32,
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
+            with_configured_input_service_catalog(detecting, exit_code, |_| {}, body);
+        }
+
+        fn with_configured_input_service_catalog(
+            detecting: bool,
+            exit_code: i32,
+            configure_catalog: impl FnOnce(&mut Value),
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
             let until = Instant::now() + Duration::from_secs(10);
             let mut fixture = ServiceFixture::configured_until(false, until, |fixture, spec| {
-                configure_with(fixture, spec, until, detecting)
+                configure_with(fixture, spec, until, detecting);
+                let path = fixture._dir.path().join("observation-services.json");
+                let mut config: Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                configure_catalog(&mut config["catalog"]);
+                std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
             });
             fixture.cleanup_deadline = Some(until);
             let primary = catch_unwind(AssertUnwindSafe(|| {

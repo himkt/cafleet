@@ -4214,6 +4214,25 @@ mod tests {
                 failure.context.operation_key.as_deref(),
                 Some(request.operation_key.as_str())
             );
+            assert!(
+                matches!(&failure.source, CafleetError::App(cause) if cause == "owned reply consumer closed")
+            );
+            let presented: CafleetError = failure.into();
+            let CafleetError::WithDiagnostics { cause, diagnostics } = presented else {
+                panic!("a possible submission retains its original failure and context")
+            };
+            assert_eq!(cause.exit_code(), 1);
+            assert!(
+                matches!(*cause, CafleetError::App(ref message) if message == "owned reply consumer closed")
+            );
+            assert_eq!(
+                diagnostics,
+                vec![format!(
+                    "run_id={} operation_key={}",
+                    run.run_id,
+                    serde_json::to_string(&request.operation_key).unwrap()
+                )]
+            );
             let identity = PermissionReceiptIdentity {
                 database_identity_json: run.database_identity_json.clone(),
                 run_id: run.run_id,
