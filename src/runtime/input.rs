@@ -5799,6 +5799,135 @@ mod tests {
                 });
             }
 
+            struct FailAfterWrite {
+                inner: Arc<Hooks>,
+                armed: std::sync::atomic::AtomicBool,
+            }
+
+            impl InputHooks for FailAfterWrite {
+                fn checkpoint(
+                    &self,
+                    boundary: InputBoundary,
+                    state: &InputCheckpoint,
+                    deadline: Instant,
+                ) -> Result<()> {
+                    let after_write = matches!(boundary, InputBoundary::AfterWrite);
+                    self.inner.checkpoint(boundary, state, deadline)?;
+                    if after_write && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        return Err(error("injected post-write checkpoint failure"));
+                    }
+                    Ok(())
+                }
+            }
+
+            fn finish_fault(host: &mut Host, input_id: i64) -> InputFailure {
+                for _ in 0..64 {
+                    host.drain();
+                    match host.try_advance() {
+                        Err(failure) => return failure,
+                        Ok(Some(_)) => panic!("a failed write preserves its primary InputFailure"),
+                        Ok(None) => {
+                            if !host.pty.offers.iter().any(|bytes| bytes == CLOSE) {
+                                assert_eq!(
+                                    storage::get_input(&host.fixture.conn, input_id)
+                                        .unwrap()
+                                        .state,
+                                    storage::InputState::InProgress
+                                );
+                            }
+                        }
+                    }
+                }
+                panic!("paste cleanup finishes within bounded drained turns");
+            }
+
+            fn assert_fault_closed(host: &Host, input_id: i64) {
+                assert_eq!(host.pty.offers.last().unwrap(), CLOSE);
+                assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
+                assert!(host.pty.program.is_empty());
+                assert!(host.pty.manual.is_empty());
+                let input = storage::get_input(&host.fixture.conn, input_id).unwrap();
+                assert_eq!(input.state, storage::InputState::Uncertain);
+                assert_eq!(input.stop_cause, Some(storage::StopCause::WriteFailed));
+                assert_eq!(input.disposition, None);
+                assert_eq!(input.left_stage, None);
+            }
+
+            #[test]
+            fn known_open_paste_write_failure_attempts_close_and_preserves_the_primary_failure() {
+                for close_fails in [false, true] {
+                    with_catalog_host(
+                        configured("bracketed_paste", Value::Null),
+                        program(LITERAL, true),
+                        |host| {
+                            enable_paste(host);
+                            host.pty.short = Some(OPEN.len() + 3);
+                            start(host, "prompt:open-paste-write-failure", LITERAL);
+                            until_written(host, OPEN.len() + 3);
+                            let input_id = host
+                                .coordinator
+                                .pending
+                                .as_ref()
+                                .unwrap()
+                                .input_id()
+                                .unwrap();
+                            host.pty.short = None;
+                            host.pty.fail_next = Some(std::io::ErrorKind::BrokenPipe);
+                            host.pty.failure =
+                                close_fails.then_some(std::io::ErrorKind::PermissionDenied);
+                            let failure = finish_fault(host, input_id);
+                            assert_fault_closed(host, input_id);
+                            assert!(
+                                failure
+                                    .source
+                                    .message()
+                                    .contains("injected one-shot PTY write failure")
+                            );
+                            let mut expected = [OPEN, &LITERAL.as_bytes()[..3]].concat();
+                            if !close_fails {
+                                expected.extend_from_slice(CLOSE);
+                            }
+                            assert_eq!(host.pty.written, expected);
+                        },
+                    );
+                }
+            }
+
+            #[test]
+            fn known_open_paste_checkpoint_failure_closes_before_terminal_settlement() {
+                with_catalog_host(
+                    configured("bracketed_paste", Value::Null),
+                    program(LITERAL, true),
+                    |host| {
+                        enable_paste(host);
+                        host.pty.short = Some(OPEN.len() + 3);
+                        start(host, "prompt:open-paste-checkpoint-failure", LITERAL);
+                        until_written(host, OPEN.len() + 3);
+                        let input_id = host
+                            .coordinator
+                            .pending
+                            .as_ref()
+                            .unwrap()
+                            .input_id()
+                            .unwrap();
+                        let hooks = Arc::new(FailAfterWrite {
+                            inner: host.hooks.clone(),
+                            armed: std::sync::atomic::AtomicBool::new(true),
+                        });
+                        host.coordinator.services.hooks = hooks;
+                        let failure = finish_fault(host, input_id);
+                        assert_fault_closed(host, input_id);
+                        assert!(
+                            failure
+                                .source
+                                .message()
+                                .contains("injected post-write checkpoint failure")
+                        );
+                        assert!(host.pty.written.ends_with(CLOSE));
+                    },
+                );
+            }
+
             #[test]
             fn failed_or_partial_close_stages_record_write_failed() {
                 for failed in [false, true] {
@@ -7160,7 +7289,7 @@ mod tests {
                     let preview = queued(
                         host,
                         preview_request(host, &message, &canonical),
-                        "composer_busy",
+                        "earlier_input",
                     );
                     crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
@@ -7187,6 +7316,7 @@ mod tests {
                 with_permission_host(Duration::from_secs(60), |host| {
                     let message = host.message("preview whose stamp is busy once");
                     let canonical = canonical_preview(&message);
+                    host.confirm_after_programs([[canonical.as_bytes(), b"~"].concat()]);
                     form(host);
                     let id = queued(
                         host,
@@ -8745,6 +8875,7 @@ mod tests {
                 pub(crate) stages: Vec<(Instant, Vec<u8>)>,
                 pub(crate) manual: Vec<u8>,
                 pub(crate) short: Option<usize>,
+                pub(crate) fail_next: Option<io::ErrorKind>,
                 pub(crate) failure: Option<io::ErrorKind>,
                 expected_program: Vec<u8>,
                 program_offset: usize,
@@ -8775,6 +8906,9 @@ mod tests {
                 fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                     assert!(!bytes.is_empty());
                     self.offers.push(bytes.to_vec());
+                    if let Some(kind) = self.fail_next.take() {
+                        return Err(io::Error::new(kind, "injected one-shot PTY write failure"));
+                    }
                     if let Some(kind) = self.failure {
                         return Err(io::Error::new(kind, "injected PTY write failure"));
                     }
@@ -8958,6 +9092,8 @@ mod tests {
                 pub(crate) stage_settle: Duration,
                 pub(crate) confirm_submissions: bool,
                 confirmation_frame: Vec<u8>,
+                confirmation_programs: std::collections::VecDeque<Vec<u8>>,
+                confirmed_bytes: usize,
                 expires: u64,
                 child: Child,
             }
@@ -9079,6 +9215,7 @@ mod tests {
                         stages: Vec::new(),
                         manual: Vec::new(),
                         short: None,
+                        fail_next: None,
                         failure: None,
                         expected_program,
                         program_offset: 0,
@@ -9100,6 +9237,8 @@ mod tests {
                         stage_settle,
                         confirm_submissions: true,
                         confirmation_frame: screen,
+                        confirmation_programs: std::collections::VecDeque::new(),
+                        confirmed_bytes: 0,
                         expires,
                         child,
                     };
@@ -9178,6 +9317,20 @@ mod tests {
                 pub(crate) fn advance(&mut self) -> Option<InputControlReply> {
                     self.try_advance().unwrap()
                 }
+                pub(crate) fn confirm_after_programs(
+                    &mut self,
+                    programs: impl IntoIterator<Item = Vec<u8>>,
+                ) {
+                    assert!(self.confirmation_programs.is_empty());
+                    self.confirmation_programs.extend(programs);
+                    assert!(!self.confirmation_programs.is_empty());
+                    assert!(
+                        self.confirmation_programs
+                            .iter()
+                            .all(|program| !program.is_empty())
+                    );
+                    self.confirmed_bytes = self.pty.written.len();
+                }
                 pub(crate) fn try_advance(
                     &mut self,
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
@@ -9194,7 +9347,16 @@ mod tests {
                         &self.controller,
                         self.until,
                     );
-                    if ordinary && self.confirm_submissions && self.pty.program.len() > completed {
+                    let complete_program = match self.confirmation_programs.front() {
+                        Some(program) => {
+                            self.pty.written.len() >= self.confirmed_bytes + program.len()
+                                && self.pty.written.ends_with(program)
+                        }
+                        None => self.pty.program.len() > completed,
+                    };
+                    if ordinary && self.confirm_submissions && complete_program {
+                        self.confirmation_programs.pop_front();
+                        self.confirmed_bytes = self.pty.written.len();
                         self.child_output(self.confirmation_frame.clone());
                     }
                     result
@@ -10520,6 +10682,11 @@ mod tests {
                     program.extend_from_slice(LITERAL.as_bytes());
                     program.push(b'\r');
                     h.pty.expect_program(program.clone());
+                    h.confirm_after_programs([
+                        [preview.as_bytes(), b"\r"].concat(),
+                        [LITERAL.as_bytes(), b"\r"].concat(),
+                        [b"! ".as_slice(), LITERAL.as_bytes(), b"\r"].concat(),
+                    ]);
                     let mut prompt = h.request("prompt:dialog-a");
                     prompt.operation = InputControlOperation::SubmitPrompt(SubmitInput {
                         operation_key: "prompt:dialog-a".into(),
@@ -11189,6 +11356,7 @@ mod tests {
                     vec![b"!".to_vec(), b"n".to_vec(), b"\r".to_vec()]
                 );
                 let ordinary = h.request(ordinary_key);
+                h.confirm_after_programs([[ordinary_literal.as_bytes(), b"~"].concat()]);
                 let resumed = h
                     .coordinator
                     .handle_received(&mut h.fixture.conn, ordinary, &h.controller, h.until)
@@ -13867,15 +14035,33 @@ mod tests {
                 let id = h.arm(key);
                 h.pty.short = Some(3);
                 h.drain();
-                let InputControlReply::Submission(partial) =
-                    h.advance().expect("actual partial write")
-                else {
-                    panic!("actual partial result")
-                };
-                assert_eq!(partial.status, SubmissionStatus::Uncertain);
-                assert_eq!(partial.stage, SubmissionStage::Partial);
+                assert!(h.advance().is_none());
+                assert!(h.coordinator.pending.is_some());
+                let written = cached(h, id);
+                assert_eq!(written.1, SubmissionStage::Partial);
+                assert_eq!(written.2, 3);
+                h.pty.failure = Some(std::io::ErrorKind::BrokenPipe);
+                let failure = (0..4)
+                    .find_map(|_| {
+                        h.drain();
+                        match h.try_advance() {
+                            Err(failure) => Some(failure),
+                            Ok(None) => None,
+                            Ok(Some(_)) => panic!("the pending suffix fails before submission"),
+                        }
+                    })
+                    .expect("the subsequent PTY write fails within bounded drained turns");
+                assert!(
+                    failure
+                        .source
+                        .message()
+                        .contains("injected PTY write failure")
+                );
                 let original = storage::get_input(&h.fixture.conn, id).unwrap();
+                assert_eq!(original.state, storage::InputState::Uncertain);
+                assert_eq!(original.stop_cause, Some(storage::StopCause::WriteFailed));
                 let point = cached(h, id);
+                assert_eq!(point.1, SubmissionStage::Partial);
                 assert_eq!(point.2, 3);
                 let offers = h.pty.offers.clone();
                 let action = |expected| ReceiptAction::Reconcile {
@@ -13993,8 +14179,8 @@ mod tests {
                 assert_eq!(h.pty.offers, offers);
                 assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
                 assert_eq!(h.hooks.count("reserved"), 1);
-                assert_eq!(h.hooks.count("before"), 1);
-                assert_eq!(h.hooks.count("after"), 1);
+                assert_eq!(h.hooks.count("before"), 2);
+                assert_eq!(h.hooks.count("after"), 2);
             });
         }
 
