@@ -2519,7 +2519,7 @@ The Claude profile from `2.1.302` applies to Claude Code under every Claude laun
 | Prompt submission | `tested` | Composer plan `prompt` (§ Executable native plans) |
 | Native-exec submission | `tested` | Composer plan `exec` (§ Executable native plans) |
 
-Every permission answer and both Teach-auto-mode choices select their choice by its number, independent of focus; the Make-auto-mode-default dialog has no numbered choices, so its `decline` plan gates each stage on the marked focus. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty.
+Every permission answer and both Teach-auto-mode choices select their choice by its number, independent of focus; the Make-auto-mode-default dialog has no numbered choices, so its `decline` plan gates each stage on the marked focus. The empty-composer observation reads the composer as empty when the cursor sits at the end of the prompt prefix, including a native ghost hint displayed after that cursor: typing replaces the hint and moves the cursor after the typed text. Typed text with its native cursor after the literal is nonempty; a draft whose cursor was moved back to the prefix reads as empty.
 
 | Request rule | Allow byte (digit, label) | Deny byte (digit, label) | Native outcome in the captures |
 |---|---|---|---|
@@ -2800,12 +2800,14 @@ The Hermes profile from `2026.9.24` applies to `hermes chat --cli` under its `sm
 | Detection | `tested` | Request rule `hermes-approval-escalate` for the guardian ESCALATE form (choices `1. Allow once`, `2. Allow for this session`, `3. Add to permanent allowlist`, `4. Deny`) and `hermes-approval-override` for the guardian-DENY owner-override form (`1. Allow once`, `2. Deny`), on the primary screen from the box's `╭` row to the `↑/↓ to select` footer. The operation is the box's command rows. `smart` reached no `execute_code` or action gate and no other native form in the captures. |
 | Allow answer | `tested` | One stage `1` (`31`) on both forms, as `allow-once` |
 | Deny answer | `tested` | One stage `4` (`34`) on the ESCALATE form and `2` (`32`) on the override form, as `deny-once` |
-| Empty-composer observation | `tested` | `hermes-idle-composer`: the classic REPL row `❯ ` with the terminal cursor immediately after it; the rotating placeholder text follows the cursor |
+| Empty-composer observation | `tested` | `hermes-idle-composer` observes the idle `❯ ` prefix; `hermes-working-composer` observes the complete working placeholder at `☤ ❯ `, with the terminal cursor immediately after its prefix. Both are verified non-interaction boundaries |
 | Prompt submission | `tested` | Composer plan `prompt`, submit `0d` |
 | Native-exec submission | `tested` | Composer plan `exec`, submit `0d` |
 | Annotations | `unknown` | None declared |
 
 A digit selects and confirms its choice whatever the focus, so the answer stages have no focus gate. The focused choice carries the `❯ ` marker, and choices carry no background colour. Recorded layout limits: the ESCALATE form is detected at 37 columns and above, below which `3. Add to permanent allowlist` wraps; the override form is detected at 28 columns and above, below which the box border wraps. A command too long for the box adds `5. Show full command` and is answered manually.
+
+The idle rule keeps its classic REPL prefix and rotating placeholder. The working rule has priority 50, uses a primary-screen single-row region with `cursor=at_end`, starts at `^☤ ❯ type to redirect this turn · Tab queues it for after *$` and ends at the prefix pattern `^☤ ❯ `; its line matcher `prompt` requires the same full placeholder as the start pattern. This binds the cursor to prefix column 4 while requiring the measured working placeholder, independently of submitted `❯ ...` history above it. A typed suffix, paste token, arbitrary working literal, cursor away from the prefix or multi-row retained draft supplies no empty-composer observation. Both operations cite native working/idle post-submit and unsubmitted-literal fixtures under § Bundled profiles and native screen fixtures.
 
 The Director answers single-request choices only: allow once or deny, on both the ESCALATE and the override prompt. The session and always choices have no choice entry. When the guardian model is unavailable, Hermes shows the same human prompt, detected by the same rule. An unanswered prompt fails closed after `approvals.timeout` (default 300 seconds): Hermes prints its timeout notice and returns a BLOCKED result to the model, the form disappears, and the runner closes the episode with the `not_visible` close reason. A later bound response then fails request-token revalidation.
 
@@ -2816,7 +2818,7 @@ The pi profile from `1.5.0` applies to pi under every pi launch mode; only `cafl
 | Detection | `tested` | Request rule `pi-gate-approval`: the gate's form on the alternate screen, from the `CAFleet member gate: allow this bash command?` title row to pi's select hint row within 24 rows, with the `$ ` operation row, the focused choice and the `Allow once` and `Deny` choice rows. The operation is the single `$ ` row |
 | Allow answer | `tested` | Answer rule `pi-gate-allow-once`: one stage, Enter (`0d`) gated on focus `allow-once`, as `allow-once` |
 | Deny answer | `tested` | Answer rule `pi-gate-deny-once`: two stages, `j` (`6a`) gated on focus `allow-once`, then Enter (`0d`) gated on focus `deny-once`, as `deny-once` |
-| Empty-composer observation | `tested` | `pi-idle-composer`: the idle editor between its two full-width `─` border rows, with the terminal cursor in the editor; a verified non-interaction boundary |
+| Empty-composer observation | `tested` | `pi-idle-composer` observes an empty editor between plain `─` borders; `pi-working-composer` observes an empty editor below its measured `Working` border. Both require the terminal cursor inside the alternate-screen editor region and establish a verified non-interaction boundary |
 | Prompt submission | `tested` | Composer plan `prompt`, submit `0d` (§ Executable native plans) |
 | Native-exec submission | `tested` | Composer plan `exec` for `! COMMAND`, submit `0d` (§ Executable native plans) |
 | Annotations | `unknown` | None declared |
@@ -2844,10 +2846,12 @@ The title, the `Allow once` and `Deny` labels and the `$ ` operation prefix are 
 | `pi-gate-approval` | `focus`, `allow`, `deny` (line) | <code>^ → (?:Allow once&#124;Deny) *$</code> with `focus_style` `marker`, <code>^ (?:→ &#124;  )(?P&lt;label&gt;Allow once) *$</code>, <code>^ (?:→ &#124;  )(?P&lt;label&gt;Deny) *$</code> |
 | `pi-idle-composer` | Region | Start and end `^─+ *$`, 3 rows, cursor `inside` |
 | `pi-idle-composer` | `editor` (region) | `\A─+ *\n *\n─+ *\z` |
+| `pi-working-composer` | Region | Start `^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+ *$`, end `^─+ *$`, 3 rows, cursor `inside` |
+| `pi-working-composer` | `editor` (region) | `\A── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+ *\n *\n─+ *\z` |
 
 The operation is the single row after `$ `: the gate blocks a command holding a control character, a newline included, before the form opens (§6.7 pi member gate), so the form shows one command line. A command line too long for its row wraps onto a further row, which the operation matcher does not accept. The `operation` evidence reports that command line.
 
-`pi-idle-composer` matches the empty editor row between the two rules with the cursor on it. A draft fills the editor row, a multi-line draft adds rows, and a running turn titles the upper rule `── ⠋ Working ──`, so none of them matches. The transcript draws a `! COMMAND` result between `─` rules too, but the cursor stays in the editor below it.
+Both composer rules have priority 50, require exactly one blank editor row between the matched borders and preserve the alternate-screen/cursor constraint. The working rule accepts only the measured spinner frames in the table and the `Working` title; its empty editor can confirm submission during a running native command or model turn. A typed row or paste token remains nonempty, a multi-row draft exceeds the three-row region, and the measured `↑ N more` overflow title supplies no working-empty match. The transcript draws command results between `─` borders too, with the cursor in the live editor below them; history alone establishes no empty composer. Each operation cites its native idle/working post-submit and retained-literal fixtures under § Bundled profiles and native screen fixtures.
 
 | Answer | Native surface in the captures | Continuation |
 |---|---|---|
