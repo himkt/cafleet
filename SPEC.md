@@ -36,7 +36,7 @@ CLI -> coding-agent backends -> availability probes
 CLI -> ordered output presenters
 ```
 
-The broker persists/queries typed data. It performs no pane I/O. Multiplexer utilities use injected process runners; bounded pipe draining and owned-child cleanup remain independent of native command submission. Pane ownership transfers only after successful split, with explicit rollback guards.
+The broker persists/queries typed data. It performs no pane I/O. Multiplexer utilities use injected process runners; bounded pipe draining and owned-child cleanup remain independent of native command submission. Pane ownership transfers only after a successful member pane spawn, with explicit rollback guards.
 
 ## 5. Shared domain model
 
@@ -48,9 +48,9 @@ Serialize timestamps as fixed-width UTC `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` text 
 
 | Entity | Required shape |
 |---|---|
-| Fleet | ID, name, creation/deletion timestamp and root Director reference |
+| Fleet | ID, name, creation/deletion timestamp, root Director reference and last allocated window ordinal |
 | Member | ID, fleet, name, description, active/deregistered status and registration timestamp |
-| Placement | Member, multiplexer session/window, optional pending pane, mux backend, agent backend and creation time |
+| Placement | Member, multiplexer session, window ordinal and column side, window ID/name and pane (all pending until published), mux backend, agent backend and creation time |
 | Message | Sender, integer recipient, exact text, creation and consumption state/timestamp |
 | Asset install | Backend/config-path identity and installation timestamp |
 
@@ -66,7 +66,7 @@ Derive `director` exactly when `fleets.director_member_id == members.member_id`,
 
 ### 5.5 Recipient and pending placement
 
-Every message has an integer `to_member_id` identifying its inbox owner. Nullable `mux_pane_id` represents pending member creation and documented diagnostics; required concrete pane actions fail contextually until it is patched.
+Every message has an integer `to_member_id` identifying its inbox owner. Nullable `mux_pane_id` represents pending member creation and documented diagnostics; `mux_window_id` and `mux_window_name` are null exactly when it is, because an overflow window's ID exists only after its creation. Required concrete pane actions fail contextually until all three are patched.
 
 ### 5.6 Typed records and wire presenters
 
@@ -86,13 +86,15 @@ Format validation, baseline initialization, incompatible-file refusal and file p
 
 #### Fleets
 
-Bootstrap validates the Director's multiplexer server, pane and backend token, then inserts fleet, Director and placement and backfills the Director reference in one transaction. The current session remains the Director; no pane split or process launch occurs.
+Bootstrap validates the Director's multiplexer server, pane and backend token, then inserts fleet, Director and placement and backfills the Director reference in one transaction. The Director placement is ordinal `0`, column `left`, with the window ID of its pane context and the window name `fleet create` read (§6.3 `fleet create`); the fleet starts with `last_window_ordinal` `0`. The current session remains the Director; no pane split or process launch occurs.
 
 List, show and delete follow §6.3 `fleet list`, `fleet show` and `fleet delete`; deletion preserves messages, and repeat deletion returns zero newly deregistered members.
 
 #### Members
 
-Registration requires a live fleet and active valid root Director. Insert the member and pending placement atomically. Creation owns compensation for later prompt/split/patch failures. Root Director individual deletion fails. Member deletion locks its concrete pane, kills it and deregisters it; a pending member requires no concrete pane lock.
+Registration requires a live fleet and active valid root Director. Insert the member and pending placement atomically, recording the chosen slot's `window_ordinal` and `column_side` with a null window ID, window name and pane (§6.5 Fleet window layout). A new-window choice advances the fleet's ordinal in the same transaction with `UPDATE fleets SET last_window_ordinal=<new> WHERE fleet_id=<fleet> AND last_window_ordinal=<read>`; the fleet layout lock makes a mismatch impossible, so a changed-row count other than 1 rolls the transaction back and fails creation with the ordinal invariant error (§6.3 Error Messages). Creation owns compensation for later prompt/spawn/patch failures. Root Director individual deletion fails. Member deletion locks its concrete pane and the fleet layout, kills the pane and deregisters it; a pending member requires no concrete pane lock.
+
+Slot occupancy counts the fleet's active members with a concrete placement by `window_ordinal` and `column_side`, excluding the Director row; a pending placement holds no slot (§6.5 Fleet window layout).
 
 Roster reads active members of live fleets, derive kind (§5.4 Member kind discriminator) and include nullable activity. Activity is the maximum sent, received and ACK timestamp; `idle` is the elapsed seconds since the latest known activity, truncated to an integer, and null is the correct state without activity. Detailed views retain registration, description and placement data. Placement mutations acquire the same pane input locks as input writers. Required Director/placement/enum corruption fails rather than producing placeholder values.
 
@@ -170,9 +172,9 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `message show` | Envelope | `{message}` |
 | `message wait` | Availability/timeout line and any messages | `{member_id, outcome, messages, notification_errors}` |
 | `message listen` | — | Tagged `ready`, `message`, `closed` JSONL records; no `--json` flag |
-| `member create` | `ID NAME backend=AGENT pane=PANE` plus runtime line | Member with placement and runtime |
+| `member create` | `ID NAME backend=AGENT pane=PANE window=WINDOW` plus runtime line | Member with placement and runtime |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
-| `member show` | `ID NAME STATUS` plus wrapped runtime line | Detail including kind, placement and runtime |
+| `member show` | `ID NAME STATUS window=WINDOW` plus wrapped runtime line | Detail including kind, placement and runtime |
 | `member recover` | Recovery counts/state and cleanup lines | Ordered recovery result |
 | `event show` | Event, runtime and optional interaction lines | Event and current state |
 | `input show` / `input reconcile` | Input receipt and optional decision lines | `{input}` |
@@ -187,7 +189,20 @@ An invalid value for an option with possible values exits 2 with a usage error t
 
 ##### Member list output
 
-Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack` and `idle`. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending pane.
+Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack` and `idle`. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending window or pane.
+
+Every JSON `placement` object, in roster, `member create`, `member show` and `fleet create` output, has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id` and `mux_window_name` are null exactly when `mux_pane_id` is null.
+
+Text rows use the format `"  {:<9}  {:<13}  {:<8}  {backend:<8}  {window:<13}  {pane:<7}  {}"` for member ID, name, kind, backend, window name, pane ID and idle:
+
+```text
+2 members:
+  member_id  name           kind      backend   window         pane_id  idle
+  8          director       director  claude    main           %3       12s
+  9          drafter        member    claude    cafleet-3-1    %12      5s
+```
+
+`member create` and `member show` text render `WINDOW` as the placement's `mux_window_name`, or `(pending)` while the placement is pending.
 
 #### JSON output (`--json`)
 
@@ -364,7 +379,7 @@ Every fleet, member, message, event, input and permission command validates the 
 | `mux_server` (herdr) | `--mux-server`; else a non-empty `HERDR_SESSION`; else the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; else `default`. With `--pane`, these environment sources apply only when the detected backend equals the pane's (§ `--pane` ID form) |
 | Director pane | `--pane`, an operator assertion checked only for existence on the chosen server; else a non-empty `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr), verified against the caller's process ancestry (§ Caller pane verification) |
 
-The pane is then read on the chosen server — `tmux -S <server> display-message -p -t <pane> '#{session_name}|#{window_id}|#{pane_id}'` or `herdr --session <server> pane current --pane <pane>` — and its session, window and pane are recorded with the server as the Director's placement (§6.5 Multiplexer context). tmux prints `||` and exits 0 for a missing pane, so a reply with an empty field, or whose `pane_id` differs from the requested pane, means the pane was not found. Each failure exits 1 before any write:
+The pane is then read on the chosen server — `tmux -S <server> display-message -p -t <pane> '#{session_name}|#{window_id}|#{pane_id}'` or `herdr --session <server> pane current --pane <pane>` — and its session, window and pane are recorded with the server as the Director's placement (§6.5 Multiplexer context). tmux prints `||` and exits 0 for a missing pane, so a reply with an empty field, or whose `pane_id` differs from the requested pane, means the pane was not found. After the pane context succeeds, `fleet create` reads the name of the Director's window (§6.5 Backend operations Window name) and records it as the Director placement's `mux_window_name`; a failed read exits 1 with the multiplexer error before any write, as a failed pane-context read does. `cafleet doctor` reads no window name. Each failure below exits 1 before any write:
 
 | Condition | Error |
 |---|---|
@@ -513,8 +528,8 @@ List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain t
 
 `cafleet fleet delete FLEET_ID [--json]` ends every active ordinary member that owns a concrete pane, then deregisters the fleet. It retains messages and is idempotent; an unknown ID fails with `fleet 'X' not found.`, exit 1. One operation-wide five-second deadline bounds the whole command, extended by the time each Hermes work settlement takes (§6.3 `member delete`).
 
-1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds; a set change releases every acquired guard and restarts within the same deadline. Contention until the deadline releases every acquired guard, leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`
-2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure: runner shutdown and recovery for a wrapped member, pane close, that member's deregistration, then optional layout restoration. The root Director's pane stays open.
+1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds; a set change releases every acquired guard and restarts within the same deadline. Contention until the deadline releases every acquired guard, leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.` After all pane locks, acquire the fleet layout lock once within `LAYOUT_LOCK_WAIT` (§6.5 Fleet window layout), moving the deadline later by the wait's duration; expiry exits 1 with the fleet delete busy error (§6.3 Error Messages) and leaves every member unchanged.
+2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure with the held layout lock: runner shutdown and recovery for a wrapped member, pane close in the placement's recorded window, that member's deregistration, then optional layout restoration of that window. The root Director's pane stays open.
 3. **Deregister the fleet.** One transaction revalidates the placement set, stamps deletion, deregisters the remaining active members (the root Director and members with a pending placement) and removes their placements.
 
 The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause and `IDS` is a comma-separated id list or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
@@ -911,7 +926,9 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 
 A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight). The pi backend also requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a missing or unreadable extension exits 1 (§6.7 Contract error strings), and a pi prompt beginning with `@` exits 2 before registration (§6.7 Per-backend `build_spawn_argv`).
 
-The split reference — session, window and Director pane — and the multiplexer server come from the fleet Director's recorded placement (§6.5 Multiplexer context); each new member placement copies the Director's `mux_server`.
+After prompt validation, `member create` acquires the fleet layout lock within `LAYOUT_LOCK_WAIT` (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
+
+The pane target — a column of an existing window or a new overflow window in the Director's session — and the multiplexer server come from the registry and the fleet Director's recorded placement (§6.5 Multiplexer context); each new member placement copies the Director's `mux_server`. Publication patches the pane ID, window ID and window name together (§6.9 Runner boundary and creation transaction).
 
 ###### Member environment
 
@@ -931,11 +948,11 @@ The native child runs in the multiplexer pane's environment overridden by the sp
 
 The spawned member learns its identity and database from the literals rendered into its prompt; commands take every ID as a literal argument, and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A prompt without `{database_url}` is accepted only for the default database; against a non-default database `member create` exits 1 before registration (§6.3 Error Messages). Besides the names above, the formatter accepts only doubled literal braces (`{{` / `}}`), not Python format specifications, conversions, or attribute/index access; an unknown placeholder or malformed brace expression exits 2 before registration (§6.3 Error Messages).
 
-The spawn always creates the pane without stealing focus (tmux `split-window -d`): the Director's pane and active window stay active. In the default output, `pane` renders `(pending)` until the pane id is patched onto the placement.
+The spawn always creates the pane without stealing focus (tmux `split-window -d` / `new-window -d`, herdr `--no-focus`): the Director's pane and active window stay active (§6.5 Member pane creation). In the default output, `pane` and `window` render `(pending)` until the placement is published.
 
 ###### Creation failure compensation
 
-Member creation validates policy, evidence configuration and assignment, and records the installed native version (§6.9 Native version probe: a failed probe warns and creation continues with unknown coverage), then registers a pending placement and run. A known version below the backend's first boundary exits 1 before member/run registration or pane creation (§6.9 Profile selection by minimum version). The multiplexer starts a runner from a private descriptor; a `prepared` handshake precedes placement publication and `start`, and creation returns only after child spawn produces `started` within one handshake deadline. §6.9 Runner boundary and creation transaction owns descriptor cleanup and uncertain-launch compensation. Spawn-prompt placeholders are validated before registration, so a placeholder error exits 2 with nothing registered. The backend owns a newly split pane until the split returns (§6.5 Pane ownership during creation).
+Member creation validates policy, evidence configuration and assignment, and records the installed native version (§6.9 Native version probe: a failed probe warns and creation continues with unknown coverage), then registers a pending placement and run. A known version below the backend's first boundary exits 1 before member/run registration or pane creation (§6.9 Profile selection by minimum version). The multiplexer starts a runner from a private descriptor; a `prepared` handshake precedes placement publication and `start`, and creation returns only after child spawn produces `started` within one handshake deadline. §6.9 Runner boundary and creation transaction owns descriptor cleanup and uncertain-launch compensation. Spawn-prompt placeholders are validated before registration, so a placeholder error exits 2 with nothing registered. The backend owns a newly spawned pane until the spawn returns (§6.5 Pane ownership during creation).
 
 After registration, compensation ends with the descriptor/run/member rollback: remove the pending descriptor, then mark the run `failed` and deregister the member in one transaction. When compensation succeeds, the member is deregistered, its placement removed and the run `failed`.
 
@@ -943,8 +960,10 @@ After registration, compensation ends with the descriptor/run/member rollback: r
 |---|---|
 | Pending member/run registration | The registration transaction rolls back, leaving no new member, placement or run |
 | Runtime artifact preparation or prompt rendering after registration | The descriptor/run/member rollback |
-| Runner pane split | The backend closes a pane it already identified, then the rollback |
-| After the split: handshake, placement publication, `start` or the started-state check | Shut down the owned runner and child when the runner already owns the run, close the created pane, then the rollback |
+| Runner pane spawn | The backend closes a pane it already identified, then the rollback |
+| After the spawn: handshake, placement publication, `start` or the started-state check | Shut down the owned runner and child when the runner already owns the run, close the created pane in its spawned window and restore that window, then the rollback |
+
+Closing an overflow window's only pane closes that window. A new-window ordinal consumed at registration stays consumed after compensation (§6.5 Fleet window layout).
 
 For a `hermes` run whose child started, compensation runs the Hermes work settlement (§6.7 Hermes work settlement) before the owned runner shutdown, under its own 20-second budget; an unverified settlement appends its cause as a cleanup diagnostic.
 
@@ -952,7 +971,7 @@ Compensation continues past a failed cleanup and never re-closes a pane the back
 
 | Cleanup outcome | Appended diagnostic |
 |---|---|
-| Failed split with no confirmed id (no other pane is inferred or closed) | `pane ID unknown; pane cleanup unconfirmed` |
+| Failed spawn with no confirmed id (no other pane is inferred or closed) | `pane ID unknown; pane cleanup unconfirmed` |
 | Backend close failure | `cleanup failed for pane <id>: <detail>` |
 | Unconfirmed owned-child shutdown | Its shutdown diagnostics, or `owned child cleanup remains unconfirmed` when it reports none |
 | Failed descriptor removal, run update or deregistration | Its own cause; a recorded run with remaining diagnostics keeps `cleanup_state=incomplete` |
@@ -965,17 +984,19 @@ Once the runner reports `started` under the matching identity, creation removes 
 
 Request owned runner shutdown under the member's recorded run identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock a concrete placement before kill/deregistration (a member without a concrete pane needs no lock), retrying contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
+After the pane lock and before any cleanup step (Hermes settlement, runner shutdown, pane close), acquire the fleet layout lock within `LAYOUT_LOCK_WAIT` (§6.5 Fleet window layout) and hold it through deregistration and layout restoration. The deletion deadline moves later by the wait's duration, as it does for Hermes settlement. Expiry exits 1 with the delete busy error (§6.3 Error Messages) and leaves the run, pane and row unchanged.
+
 For a `hermes` run, after the pane lock is held and before runner shutdown, run the Hermes work settlement (§6.7 Hermes work settlement) under its own 20-second budget; the deletion deadline moves later by the settlement's duration, so lock acquisition stays bounded by the original five seconds and the remaining steps keep the time they had when settlement began. An unverified stop exits 1 (§6.3 Error Messages) and retains the runner's cleanup records and the member row; a retry re-runs the settlement.
 
-Revalidate pending placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization within the original deadline. A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
+Revalidate pending placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins; actual database failures report that the pane was closed and preserve the database cause. The close passes the placement's recorded `mux_window_id`, and optional layout restoration of that window follows mandatory finalization within the original deadline (§6.5 Delete-time pane layout). A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
 
 ##### `member show`
 
-`cafleet member show MEMBER_ID [--json]` reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row; an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement sub-dict and the appended runtime summary (§6.3 Runtime presentation).
+`cafleet member show MEMBER_ID [--json]` reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement sub-dict and the appended runtime summary (§6.3 Runtime presentation).
 
 ##### `member list`
 
-`cafleet member list FLEET_ID [--json]` lists every **active** registry entry of the fleet (root Director and ordinary members) and takes no identity flag; an empty roster prints `0 members.`. Field projection and absent values: §6.3 Member list output; rows and activity: §6.2 Members. Text idle values render as `Ns` / `Nm` / `Nh`. Per-member `description` and `registered_at` are on §6.3 `member show`.
+`cafleet member list FLEET_ID [--json]` lists every **active** registry entry of the fleet (root Director and ordinary members) and takes no identity flag; an empty roster prints `0 members.`. Field projection, the `window` column and absent values: §6.3 Member list output; rows and activity: §6.2 Members. Text idle values render as `Ns` / `Nm` / `Nh`. Per-member `description` and `registered_at` are on §6.3 `member show`.
 
 ##### `member prompt`
 
@@ -1208,6 +1229,16 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member create` | `--coding-agent hermes` with an unreadable `hermes config path`, before registration or multiplexer effects | §6.7 Hermes availability preflight | 1 |
 | `member create` | A non-default database and a spawn prompt without `{database_url}`, before registration (§6.3 Spawn-prompt substitution) | `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url` | 1 |
 | `member delete` | A `hermes` run whose work settlement cannot be verified; the member row and runner cleanup records are kept | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 |
+| `fleet create` | The tmux window-name reply is malformed or names another window, before any write (§6.5 Backend operations) | `Error: unexpected tmux display-message output: <quoted>` | 1 |
+| `fleet create` | The herdr `tab get` reply has no label, before any write (§6.5 Backend operations) | `Error: herdr tab get missing 'label' field` | 1 |
+| `member create` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; nothing is registered (§6.5 Fleet window layout) | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` | 1 |
+| `member delete` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; the run, pane and row are unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` | 1 |
+| `fleet delete` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; every member is unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.` | 1 |
+| `member create` | An overflow window's height read fails or is unparsable; nothing is registered (§6.5 Fleet window layout) | `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.` | 1 |
+| `member create` | The conditional `last_window_ordinal` update changes a row count other than 1; the registration transaction rolls back (§6.2 Members) | `Error: fleet <fleet-id> window ordinal changed under the layout lock` | 1 |
+| `member create` | The tmux `new-window` reply is malformed; the cleanup diagnostic follows (§6.5 Member pane creation) | `Error: unexpected tmux new-window output: <quoted>` | 1 |
+| `member create` | The herdr `tab create` reply lacks `result.root_pane.pane_id` or `result.tab.tab_id`; the cleanup diagnostic follows | `Error: herdr tab create missing '<key>' field` | 1 |
+| `member create` | A herdr re-parenting move failed; a stderr diagnostic while the spawn continues (§6.5 herdr re-parenting) | `layout re-parenting incomplete: <cause>` | The command's own result |
 | `setup` | An extension file or its executable record cannot be installed, or the Hermes `config path` read fails; no `asset_installs` row for the agent (§6.3 Asset installation, Hermes plugin enablement) | `failed to install extension into <target>: <error>` | 1 |
 | `setup` | The Hermes plugin enablement fails; no `asset_installs` row for `hermes` (§6.3 Hermes plugin enablement) | `failed to enable hermes plugin cafleet in <config path>: <cause>` | 1 |
 | `message listen --codex-thread` | `codex` is not on `PATH`, or no Codex ancestor process exists; before `ready` | §6.3 Codex forwarding | 1 |
@@ -1303,9 +1334,13 @@ CAFleet hosts coding-agent sessions in tmux or herdr panes. Both backends are dr
 | Behavior | tmux | herdr |
 |---|---|---|
 | Pane ID example | `%7` | `w1:p1` |
-| Spawn working directory | Splitting pane inheritance | Explicit `--cwd` |
+| Window | tmux window | herdr tab |
+| Spawn working directory | Splitting pane inheritance; explicit `new-window -c` for an overflow window | Explicit `--cwd` |
+| Overflow window creation | `new-window -d -n <name>` | `tab create --label <name> --no-focus` |
+| Member pane name | Pane title through `select-pane -T` | Pane label through `pane rename` |
+| Column equalization | `select-layout -E` per column | Arithmetic `pane resize` per column, with re-parenting for a full-height column |
 | Capture for `member capture` | `capture-pane -p -e` | `pane read --format ansi` |
-| Delete layout | Native auto-fit | Best-effort rebalance scoped to the closed pane’s tab |
+| Delete layout | Best-effort per-column equalization of the closed pane's recorded window | Best-effort restoration of the closed pane's recorded tab |
 
 #### Backend selection
 
@@ -1326,15 +1361,15 @@ Both backends report failures through one multiplexer error type carrying the ba
 
 #### Pane ownership during creation
 
-The split owns a newly created pane until it returns successfully; herdr takes ownership as soon as it extracts the pane id from the split response, and closes that pane itself when the subsequent `pane run` fails, returning the original run error. A creation error carries one of these pane-cleanup outcomes:
+The member pane spawn owns a newly created pane until it returns successfully. The backend takes ownership as soon as it extracts the pane id from the split, `new-window` or `tab create` response; herdr closes that pane itself when the subsequent `pane run` fails, returning the original run error. An owned-pane close inside the spawn receives the Column target's window ID or the window ID parsed from the `new-window` / `tab create` reply. A creation error carries one of these pane-cleanup outcomes:
 
 | Outcome | Meaning and caller action |
 |---|---|
 | Closed | The backend already closed the known pane, tolerating an already-missing pane; the caller performs the remaining database compensation without another close |
 | Close failed | The backend tried to close the known pane and failed; the error keeps the pane id and the original error and appends `cleanup failed for pane <id>: <detail>`, and the caller performs the remaining compensation without retrying the close |
-| Unknown | A failed or malformed split response left no confirmed pane id; the error appends `pane ID unknown; pane cleanup unconfirmed`, and the caller closes no pane |
+| Unknown | A failed or malformed split, `new-window` or `tab create` response left no confirmed pane id; the error appends `pane ID unknown; pane cleanup unconfirmed`, and the caller closes no pane |
 
-On success, ownership transfers immediately to member creation, whose compensation follows the creation failure order (§6.3 Creation failure compensation) and closes only the pane owned by that operation. Layout equalization is best effort (§ herdr column equalization).
+On success, the spawn returns the pane ID and its window ID, and ownership transfers immediately to member creation, whose compensation follows the creation failure order (§6.3 Creation failure compensation) and closes only the pane owned by that operation, passing the spawned window ID with it. Pane naming, column equalization and herdr re-parenting are best effort (§ Member pane creation).
 
 #### Subprocess output and deadlines
 
@@ -1344,11 +1379,13 @@ At the deadline, including when the direct child has exited but a descendant sti
 
 #### Pane spawn working directory
 
-A member pane spawned by `cafleet member create` starts in the invoking process's working directory (the Director's pane cwd): tmux inherits it from the split pane, and herdr receives it verbatim as `--cwd` rather than relying on herdr's own inheritance, which spawns `/bin/sh` instead of the passwd login shell when `SHELL` is unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)). An unresolvable cwd fails the spawn with `cannot resolve the working directory for pane spawn: <cause>`; there is no fallback directory.
+A member pane spawned by `cafleet member create` starts in the invoking process's working directory (the Director's pane cwd): a tmux split inherits it from the splitting pane and a tmux overflow window receives it as `new-window -c <cwd>`, and herdr receives it verbatim as `--cwd` rather than relying on herdr's own inheritance, which spawns `/bin/sh` instead of the passwd login shell when `SHELL` is unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)). An unresolvable cwd fails the spawn with `cannot resolve the working directory for pane spawn: <cause>`; there is no fallback directory.
 
 #### Delete-time pane layout
 
-On tmux, `kill-pane` auto-fits natively. herdr reads the target pane's tab (`herdr pane get`), runs `herdr pane close`, then rebalances that tab (§ herdr column equalization) within the original operation deadline after registry finalization. A failed or expired restoration emits a stderr diagnostic; `member delete` retains its successful close and deregistration result.
+Every close receives its window ID from the caller: deletion passes the placement's recorded `mux_window_id`, creation compensation the window ID the spawn returned. Neither backend reads the pre-close window from the multiplexer.
+
+Deletion closes the pane (tmux `kill-pane`, herdr `pane close`), then, after registry finalization and within the original operation deadline, restores the recorded window. tmux equalizes every column of the window (§ Member pane creation), and a `list-panes` failure whose stderr contains `can't find window` means the closed pane was the window's last, leaving nothing to restore. herdr applies the delete-time restoration of § herdr column equalization to the recorded tab. Creation compensation and the spawn's owned-pane rollback run the same close and restoration in one call. An emptied overflow window closes natively on both backends; the Director window always keeps the Director pane. A failed or expired restoration emits a stderr diagnostic; `member delete` retains its successful close and deregistration result.
 
 #### Pane input lock
 
@@ -1382,8 +1419,8 @@ Interrupting a host turn, including through Escape-first delivery fallback, can 
 | `message send`, each `message wait` attempt | From lock acquisition through the last `notified_at` stamp |
 | `member prompt`, `member exec` | From the runner request through its reply |
 | `member press` | Begin before acquiring the lock; retain it through the writing process and bounded cleanup, releasing the lock before restoring signals |
-| `member create` | From the pane spawn through the registry commit or its compensation |
-| `member delete`, `fleet delete` | From lock acquisition through deregistration and layout cleanup |
+| `member create` | From fleet layout lock acquisition (§ Fleet window layout) through `started` or the end of its compensation |
+| `member delete`, `fleet delete` | From pane lock acquisition through fleet layout lock acquisition, deregistration and layout cleanup |
 
 Every span is bounded by its own deadline, so a deferred signal waits at most one span. `message wait` outside an attempt keeps default signal behavior. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts; the member session, started by the multiplexer server, does not inherit it.
 
@@ -1394,7 +1431,7 @@ Every span is bounded by its own deadline, so a deferred signal waits at most on
 | `message send` / `message wait` between first keystroke and stamp | `notified_at` stays NULL; the line may or may not have reached the pane | The next send or `message wait` retries it; a duplicate line is possible |
 | `member prompt` / `member exec` after typing began | Partial or complete input | `member capture`; re-dispatch only after inspecting the pane |
 | `member press` after its writing process starts | Any prefix, including empty or complete, may have been handled | Inspect the pane before an explicitly authorized new action |
-| `member create` | A pane without a registry row, or a row whose placement stays pending | `member list` and `member capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
+| `member create` | A pane without a registry row, or a row whose placement stays pending; the OS releases the fleet layout lock, and a consumed overflow ordinal stays consumed | `member list` and `member capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
 | `member delete` / `fleet delete` | A closed pane whose row remains, or the reverse | `member list`; rerun the delete |
 
 #### Explicit key dispatch
@@ -1504,7 +1541,92 @@ A multiplexer context is a plain value of three non-empty strings: `session` (tm
 | tmux | The absolute server socket path | `tmux -S <mux_server> …` |
 | herdr | The herdr session name (`default` for the default session) | `herdr --session <mux_server> …` |
 
-Each member placement copies the Director's `mux_server`. A split takes the Director's recorded context, not a bare window ID: tmux splits the reference window, herdr splits relative to the reference pane. A missing or invalid created-pane ID is an unconfirmed cleanup, never a license to infer another target (§ Pane ownership during creation).
+Each member placement copies the Director's `mux_server`. `fleet create` also reads the Director window's name after the pane context succeeds (§ Backend operations); the multiplexer context itself and the `cafleet doctor` reads stay three strings.
+
+A member pane spawn takes the slot's pane target (§ Fleet window layout), built from the registry and the Director's recorded session:
+
+| Target | Fields |
+|---|---|
+| Column | The window ID, the column side, the column's concrete member panes in registry order and the opposite column's panes (the Director pane for ordinal 0) |
+| New window | The Director's recorded session and the overflow window name |
+
+The spawn returns the new pane ID and its window ID. A missing or invalid created-pane ID is an unconfirmed cleanup, never a license to infer another target (§ Pane ownership during creation).
+
+#### Fleet window layout
+
+A fleet spreads its member panes across several windows. Every `member create` takes the first free slot in a height-derived column layout and opens an overflow window when every column is full.
+
+| Term | Meaning |
+|---|---|
+| Window | A tmux window or a herdr tab |
+| Director window | The window recorded in the Director's placement at `fleet create`; ordinal `0` |
+| Overflow window | A window CAFleet opens for the fleet; ordinal `1` or greater |
+| Column | The `left` or `right` half of a window; the Director window's left column holds only the Director |
+| Slot | One member position in a column |
+
+| Constant | Value |
+|---|---|
+| `MIN_PANE_HEIGHT` | 30 rows |
+| `MAX_PANES_PER_COLUMN` | 8 |
+| `LAYOUT_LOCK_WAIT` | 60 seconds |
+
+The constants are fixed; no flag or configuration changes them. A column in a window whose live height is `H` rows has capacity `capacity(H) = min(MAX_PANES_PER_COLUMN, floor(H / MIN_PANE_HEIGHT))`. `H` is the tmux `#{window_height}`, which excludes the status line, or the herdr `layout.area.height`; the 30-row minimum is a per-slot budget that includes the tmux pane separator. The Director window's right column holds `capacity(H)` members and is skipped when that is 0. An overflow column holds `max(1, capacity(H))` members, so a new overflow window always makes progress.
+
+| Window height `H` | Capacity per column | Director window members | Overflow window members |
+|---|---|---|---|
+| < 30 | 0 | 0 (skipped) | 2 (one per column, by the overflow minimum) |
+| 50 | 1 | 1 | 2 |
+| 60 | 2 | 2 | 4 |
+| 120 | 4 | 4 | 8 |
+| ≥ 240 | 8 | 8 | 16 |
+
+##### Slot selection
+
+1. Scan the fleet's windows by ascending ordinal. For ordinal 0, consider only the right column. For each overflow window, consider the left column, then the right column.
+2. Choose the first column whose member count is below its capacity.
+3. Otherwise open a new overflow window with ordinal `fleets.last_window_ordinal + 1`, named `cafleet-<fleet_id>-<ordinal>`; its first member takes the left column, which the overflow minimum always makes available, so a new window needs no height read.
+
+Occupancy comes from the registry: the fleet's active members whose placement is concrete, grouped by `window_ordinal` and `column_side`, excluding the Director's own row (ordinal 0, `left`). A pending placement holds no slot: every creation holds the fleet layout lock until it completes or compensates, so a pending row seen under the lock belongs to a killed creation (§ Termination during pane input), which `member delete` removes. An overflow ordinal with no concrete member is a closed window and is not scanned.
+
+Each scanned window's height is read live before registration (§ Backend operations Window height). The anchors are the Director pane for ordinal 0 and every concrete member pane of the window, in registry order, for an overflow window, so one member whose pane died does not make a live herdr tab unreadable. A failed Director-window read propagates the multiplexer error unchanged. A failed or unparsable overflow-window read (the user closed the window, or every member pane in it died while the members stayed registered) fails `member create` with the unreadable-window error (§6.3 Error Messages), whose `<member-ids>` lists the window's active member IDs ascending, separated by `, `. Neither failure registers anything.
+
+##### Placement policy
+
+- **First free slot.** A slot freed by `member delete` is reused by the next creation, so a newer member can land in the Director window while overflow windows hold older members.
+- **No migration.** Existing members never change window or column; capacity changes from a resized terminal affect only later placements. herdr re-parenting (§ herdr re-parenting) moves a pane only visually inside its own window, keeping its pane ID, window and column.
+- **Ordinals only increase.** `fleets.last_window_ordinal` advances in the registration transaction of every new-window choice and never decreases, even when that creation later fails, so a fleet's overflow windows can skip a number.
+- **Emptied overflow windows close.** When the last member of an overflow window is deleted, the window closes natively on both backends. The Director window always stays open.
+
+##### Window and pane naming
+
+| Object | Name | Mechanism |
+|---|---|---|
+| Overflow window | `cafleet-<fleet_id>-<ordinal>`, e.g. `cafleet-3-1` | tmux `new-window -n`, which also turns `automatic-rename` off for that window; herdr `tab create --label` |
+| Director window | Its name when `fleet create` ran | The window-name read of `fleet create` (§ Backend operations) |
+| Member pane | The member name | tmux `select-pane -T`; herdr `pane rename` |
+
+The recorded Director window name is a snapshot; renaming the window later leaves the registry unchanged. A tmux pane title is visible only when `pane-border-status` is on, and a coding agent may retitle its pane (§6.7 Backend capabilities); a herdr pane label is independent of the agent's terminal title. Naming failures never fail a spawn.
+
+##### Fleet layout lock
+
+A fleet-scoped OS file lock serializes every operation that creates or closes a member pane, beside the pane input lock (§ Pane input lock).
+
+| Property | Contract |
+|---|---|
+| Directory | `<canonical-database-file>.layout-locks/` adjacent to the database, created on demand |
+| Key | SHA-256 hex of the fleet ID's UTF-8 decimal text |
+| File | `<key>.lock`, created `0600` |
+| Acquisition | Exclusive OS file lock retried every 50 milliseconds within `LAYOUT_LOCK_WAIT`, a budget separate from each command's operation deadline; the OS releases it when its holder exits, including after `SIGKILL` |
+
+| Holder | Acquired | Held through |
+|---|---|---|
+| `member create` | After prompt validation, before resolving the Director placement; the ten-second creation deadline starts after acquisition | `started`, or the end of compensation |
+| `member delete` | After its pane lock, before any cleanup step | Deregistration and layout restoration |
+| `fleet delete` | Once, after all its pane locks and before the first member's cleanup | The last member's layout restoration |
+
+A deletion's operation deadline moves later by the layout-lock wait. Expiry exits 1 with the holder's busy error (§6.3 Error Messages) and changes no state. Lock order is always pane lock → layout lock; `member create` takes no pane lock and a runner's own delivery takes only its pane lock, so no cycle exists.
+
+Creation holds the lock until it completes because before publication its new pane is invisible to other creations: occupancy counts only concrete placements, and the pane ID is published only after the `prepared` handshake (§6.9 Runner boundary and creation transaction). After publication, `start` can still fail, and its compensation closes the published pane, which a concurrent creation could otherwise already target as a split anchor, bottom pane or re-parenting move. A creation holds the lock for at most its ten-second deadline plus compensation, so the 60-second wait admits several queued creations.
 
 #### Capture windowing
 
@@ -1525,11 +1647,13 @@ argv in § Prompt dispatch and § Explicit key dispatch.
 | Availability | `tmux` on `PATH` | `herdr` on `PATH` | `<backend> binary not found on PATH` |
 | Pane context (`fleet create` and `doctor`) | <code>tmux display-message -p -t &lt;pane&gt; "#{session_name}&#124;#{window_id}&#124;#{pane_id}"</code>, split on the first two <code>&#124;</code> | `herdr pane current --pane <pane>`; `result.pane` supplies `workspace_id`, `tab_id`, `pane_id` | tmux: `unexpected tmux display-message output: <quoted>`; herdr: `herdr <context> missing '<key>' field`; an unknown pane fails per §6.3 `fleet create` |
 | Pane process (`fleet create` and `doctor`, §6.3 Caller pane verification) | <code>tmux display-message -p -t &lt;pane&gt; "#{pane_id}&#124;#{pane_pid}"</code>, split on the first <code>&#124;</code> | `herdr pane process-info --pane <pane>`; `result.process_info.shell_pid` supplies the pid | tmux: an empty `pane_id` or one that differs from `<pane>` is a missing pane, and with a matching `pane_id` a pid that is not a positive integer fails with `unexpected tmux display-message output: <quoted>`; herdr: error code `pane_not_found` is a missing pane, and a missing or non-integer field fails with `herdr pane process-info missing 'shell_pid' field` |
-| Split | `tmux split-window -t <window_id> -P -F "#{pane_id}" -d <command>...`, then `tmux select-layout -t <window_id> main-vertical` | <code>herdr pane split &lt;pane&gt; --direction right&#124;down --no-focus --cwd &lt;cwd&gt;</code>, then `herdr pane run <new pane> "<shell-quoted command>"` | An empty or failed split is an unknown pane-cleanup outcome (§ Pane ownership during creation); tmux ignores a layout error |
+| Window name (`fleet create` only) | <code>tmux display-message -p -t &lt;window_id&gt; "#{window_id}&#124;#{window_name}"</code>, split on the first <code>&#124;</code> so a name containing <code>&#124;</code> survives; an empty name is valid | `herdr tab get <tab_id>`; `result.tab.label` supplies the name | tmux: a reply without <code>&#124;</code> or whose first field differs from `<window_id>` (a missing window prints an empty line) fails with `unexpected tmux display-message output: <quoted>`; herdr: the command failure (`tab_not_found`) propagates, and a missing label fails with `herdr tab get missing 'label' field` |
+| Window height (`member create`) | `tmux display-message -p -t <window_id> "#{window_height}"`; the anchors are ignored | `herdr pane layout --pane <anchor>` for each anchor in order; the first successful `result.layout.area.height` is the height | tmux: output that is not a positive integer, including the empty line of a missing window, fails with `unexpected tmux display-message output: <quoted>`; herdr: a reply without the area fails with `herdr pane layout missing 'area' field`, any failure moves to the next anchor, and the read fails with the last anchor's error only when no anchor answers |
+| Spawn member pane | Per pane target, § Member pane creation | Per pane target, § Member pane creation | A failed or malformed creation response is an unknown pane-cleanup outcome (§ Pane ownership during creation); naming, equalization and re-parenting failures never fail the spawn |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
-| Close | `tmux kill-pane -t <pane>` | `herdr pane get <pane>`, `herdr pane close <pane>`, then the delete-time rebalance | Close tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`) |
+| Close | `tmux kill-pane -t <pane>`, then the restoration of the caller-supplied window | `herdr pane close <pane>`, then the delete-time restoration of the caller-supplied tab | Close tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`); restoration is best effort (§ Delete-time pane layout) |
 
-The herdr split targets the Director's pane rightward for the first member; otherwise it splits the highest-sorting pane ID in the Director's tab (other than the Director) downward and then equalizes the member column. Its `--cwd` follows § Pane spawn working directory. `pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`.
+`pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`.
 
 Process failures preserve their context in the multiplexer error:
 `<backend> binary not found: <detail>`, `<backend> command was not started:
@@ -1537,27 +1661,81 @@ Process failures preserve their context in the multiplexer error:
 <argv>` for a deadline-bounded call and `<backend> command failed: <argv>` followed by a
 `stderr: <trimmed stderr>` line. Other errors propagate.
 
+#### Member pane creation
+
+The spawn creates the member pane for its pane target (§ Multiplexer context) without stealing focus, names it after the member and equalizes every column of its window. Naming, equalization and herdr re-parenting are best effort: their failures never fail the spawn.
+
+tmux creates the pane with one argv per target:
+
+| Target | Creation argv |
+|---|---|
+| Column with member panes | `tmux split-window -v -d -t <last column pane> -P -F "#{pane_id}" <command>...` |
+| Empty `right` column | `tmux split-window -h -f -l 50% -d -t <first opposite pane> -P -F "#{pane_id}" <command>...` |
+| Empty `left` column (an overflow window whose left column emptied) | `tmux split-window -h -f -b -l 50% -d -t <first opposite pane> -P -F "#{pane_id}" <command>...` |
+| New window | <code>tmux new-window -d -t &lt;session&gt;: -n &lt;window_name&gt; -c &lt;cwd&gt; -P -F "#{window_id}&#124;#{pane_id}" &lt;command&gt;...</code> |
+
+A Column target's window ID is the target's own. A `new-window` reply splits on the first `|` and requires both fields non-empty; any other reply fails with `unexpected tmux new-window output: <quoted>` and an unknown pane-cleanup outcome. After creation tmux runs `tmux select-pane -t <new pane> -T <member name>`, then equalizes every column of the window: `tmux list-panes -t <window> -F "#{pane_id}|#{pane_left}"` groups the panes by `pane_left`, and `tmux select-layout -E -t <first pane of the group>` runs for each group of 2 or more panes. Deletion runs the same equalization (§ Delete-time pane layout).
+
+herdr reads every column order (top to bottom: `L1..Lk` in the left column, `R1..Rm` in the right column, the bottom pane last) from a live `herdr pane layout` read, as the panes at the column's `rect.x` sorted by `rect.y`; the target's pane lists supply only the anchor for that read. Every split, move and tab creation passes `--no-focus`, and `pane swap` is never used.
+
+| Target | Creation |
+|---|---|
+| Column with member panes | Read `herdr pane layout --pane <first column pane>`, then `herdr pane split <bottom pane of the column> --direction down --no-focus --cwd <cwd>` |
+| Empty `right` column, one pane in the left column | `herdr pane split <that pane> --direction right --no-focus --cwd <cwd>` |
+| Empty `right` column, two or more panes in the left column | `herdr pane split L1 --direction right --no-focus --cwd <cwd>`, then Right re-parenting |
+| Empty `left` column | `herdr pane split R1 --direction right --no-focus --cwd <cwd>`, then Left re-parenting |
+| New window | `herdr tab create --workspace <session> --cwd <cwd> --label <window_name> --no-focus`; `result.root_pane.pane_id` is the member pane and `result.tab.tab_id` its window |
+
+A `tab create` reply without either field fails with `herdr tab create missing '<key>' field` and an unknown pane-cleanup outcome. After creation, in order:
+
+1. `herdr pane run <new pane> "<shell-quoted command>"`. On failure the backend closes the new pane (§ Pane ownership during creation) and returns the run error; no re-parenting has run, so every other pane stays where it was.
+2. `herdr pane rename <new pane> <member name>`.
+3. Right or Left re-parenting, when the target requires it (§ herdr re-parenting).
+4. Equalize every column of the tab (§ herdr column equalization), anchored at the new pane.
+
+The member's agent starts at the pre-re-parenting size and receives a terminal resize when its pane moves or is equalized.
+
+#### herdr re-parenting
+
+herdr has no full-height column split: `pane split --direction right` splits only its target pane, and a `pane move` within one tab changes nothing. Re-parenting therefore rebuilds a column chain through one temporary tab `T'`: `pane move <pane> --new-tab --no-focus` creates it, and herdr closes it when the last move empties it. Each move keeps the pane ID and terminal within one workspace.
+
+**Right re-parenting** (left column `L1..Lk`, k ≥ 2; the new pane `R` was split off `L1`, so the tab is `down(right(L1, R), L2..Lk)`) rebuilds the left chain under `L1`:
+
+1. `herdr pane move L2 --new-tab --no-focus` creates `T'`; for `i = 3..k`, `herdr pane move Li --tab T' --split down --target-pane L(i-1) --no-focus`.
+2. For `i = 2..k`, `herdr pane move Li --tab <tab> --split down --target-pane L(i-1) --no-focus`. The last move empties `T'`.
+
+**Left re-parenting** (right column `R1..Rm`, m ≥ 1; the new pane `X` was split off `R1`, so the tab is `down(right(R1, X), R2..Rm)`) moves the right chain to the right of `X`:
+
+1. `herdr pane move R1 --new-tab --no-focus` creates `T'`, leaving the tab `down(X, R2..Rm)`.
+2. For `i = 2..m`, `herdr pane move Ri --tab T' --split down --target-pane R(i-1) --no-focus`, leaving `X` alone in the tab.
+3. `herdr pane move R1 --tab <tab> --split right --target-pane X --no-focus` places `X` left and `R1` right.
+4. For `i = 2..m`, `herdr pane move Ri --tab <tab> --split down --target-pane R(i-1) --no-focus`. The last move empties `T'` (for m = 1, step 3 empties it).
+
+A failed move leaves the remaining panes where they are, emits the stderr diagnostic `layout re-parenting incomplete: <cause>` and lets the spawn continue. Re-parenting changes no registry placement. While a pane sits in `T'`, a concurrent `member press` to it fails its target validation against the recorded window (§ Explicit key dispatch); wrapped delivery revalidates only the registry placement.
+
 #### herdr column equalization
 
-herdr has no single reflow command, so it rebalances the member column arithmetically, emulating tmux `main-vertical`. A layout read `herdr pane layout --pane <anchor>` returns `result.layout` with `panes[].rect{x,y,width,height}` and `splits[].{direction,rect,ratio}` for the anchor pane's tab, whichever tab or pane holds focus, so the read needs no tab-ID comparison. The member column is every pane whose `rect.x` is not the minimum x (the Director column), sorted by `y`; its `down` splits at the column's x form a right-leaning chain where split *k* (top→bottom) separates member *k* from the members below.
+herdr has no single reflow command, so it rebalances every column of a tab arithmetically. A layout read `herdr pane layout --pane <anchor>` returns `result.layout` with `panes[].rect{x,y,width,height}` and `splits[].{direction,rect,ratio}` for the anchor pane's tab, whichever tab or pane holds focus, so the read needs no tab-ID comparison. A column is every pane sharing one `rect.x`, sorted by `rect.y`. For a column of N ≥ 2 panes, the `down` splits whose `rect.x` and `rect.width` equal the column's form a right-leaning chain where split *k* (top→bottom) separates pane *k* from the panes below. A single-pane column, such as the Director's, has nothing to equalize.
 
 Equal heights ⇔ split *k* has ratio `1/(N-k)` (top → `1/N`, …, bottom pair →
 `1/2`). `herdr pane resize --amount` is a signed delta on a split's ratio, so
 each split is driven to target by one resize: `delta = 1/(N-k) - ratio`
 (rounded to 4 decimal places; skipped if `|delta| < 1e-3`); `delta > 0` →
-`herdr pane resize --pane <member k> --direction down --amount <delta>`, else
-`--pane <member k+1> --direction up --amount <|delta|>`. A chain whose `down`
-split count is not `N - 1` is left untouched.
+`herdr pane resize --pane <pane k> --direction down --amount <delta>`, else
+`--pane <pane k+1> --direction up --amount <|delta|>`. A column whose matching
+`down` split count is not `N - 1` is left untouched.
 
-| Trigger | Anchor | Column size and action |
-|---|---|---|
-| A split appended a member to an existing column | The Director's own pane | Size ≥ 2: equalize |
-| A member pane closed | The first pane in `herdr pane list` whose `tab_id` equals the closed pane's pre-close tab; no surviving pane skips the rebalance | Size ≥ 2: equalize. Size 1: no resize. Size 0: with exactly one pane and exactly one residual `right` split, `herdr pane resize --pane <director> --direction right --amount <1 - ratio, rounded to 4 places>` unless the delta is below `1e-3`; any other residue is left untouched |
+Delete-time restoration anchors at the first surviving pane in `herdr pane list` whose `tab_id` equals the caller-supplied window ID:
 
-The pre-close tab read is `herdr pane get <pane>`; any failure there skips the
-later rebalance and never blocks the close. A close error that the teardown
-does not tolerate propagates unchanged and no rebalance runs. Every rebalance is
-best effort: its failure never fails a spawn or a delete.
+| Tab state after close | Action |
+|---|---|
+| No surviving pane | Nothing to do: herdr closed the tab with its last pane |
+| One pane with exactly one residual `right` split | `herdr pane resize --pane <that pane> --direction right --amount <1 - ratio, rounded to 4 places>` unless the delta is below `1e-3` |
+| Otherwise | Equalize every column |
+
+A close error that the teardown does not tolerate propagates unchanged and no
+restoration runs. Every rebalance is best effort: its failure never fails a
+spawn or a delete.
 
 ### 6.6 Receiving and pane input
 
@@ -1676,7 +1854,7 @@ A coding-agent backend is a stateless value selected per member at spawn time, w
 - **`ensure_available()`** — fails on the first unmet spawn precondition, in order: the config directory resolves per §6.3 CLI *Config-dir resolution* (an invalid config-location variable fails first); the binary resolves on `PATH`; the backend's own check (opencode: the selected preset file is readable; hermes: the effective approvals configuration passes § Hermes availability preflight; pi: the CAFleet pi extension `<pi base>/extensions/cafleet.ts` is readable). A shared helper resolves `binary_name` to an absolute path per §6.9 Member PTY runtime *Native executable resolution*, failing with `binary {binary_name} not found on PATH`. Preconditions read the host through a **spawn probe** (binary lookup, home directory, `env_var(name) -> optional string`); the system probe reads the process environment.
 - **`validate_model(model)`**, **`validate_effort(effort)`** — raise a value-error for a value malformed or unacceptable for this backend; `None` (flag omitted) is always valid. A backend without a reasoning-effort control rejects every non-`None` effort.
 - **`validate_prompt(prompt)`** — raises a value-error for a spawn-prompt body this backend cannot carry as its prompt argument; only pi rejects a body (§ Per-backend `build_spawn_argv`), and every other backend accepts every prompt. `member create` checks the raw body, before placeholder substitution.
-- **`build_spawn_argv(prompt, display_name, cwd, model, effort)`** — the full argv (binary + flags + prompt) for the multiplexer's window-split. Its leading token is `binary_name`; the launched `argv[0]` follows §6.9 Native executable resolution and later tokens are unchanged. `cwd` is the member's resolved absolute working directory (§6.5 Pane spawn working directory); only hermes emits it, and every other backend's argv is independent of it.
+- **`build_spawn_argv(prompt, display_name, cwd, model, effort)`** — the full argv (binary + flags + prompt) for the multiplexer's member pane spawn. Its leading token is `binary_name`; the launched `argv[0]` follows §6.9 Native executable resolution and later tokens are unchanged. `cwd` is the member's resolved absolute working directory (§6.5 Pane spawn working directory); only hermes emits it, and every other backend's argv is independent of it.
 
 **Ordering invariant:** `member create` MUST call `validate_model` → `validate_effort` → `validate_prompt` → `ensure_available` → `build_spawn_argv`, so a malformed model, effort or prompt fails before any precondition check or side effect, as a usage error (exit 2) with the backend's message; broker value-errors (§7.2) exit 1. `validate_prompt` runs on the resolved prompt body before the Director placement lookup and registration.
 
@@ -1799,10 +1977,12 @@ pi clamps a thinking level to the model's capability, and a non-reasoning model 
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset or config prerequisite |
 |---|---|---|---|---|
 | `claude` | None | Yes, via `--name <member-name>` | Runs its spawn-time allow rules and every command matching `permissions.allow`; auto mode's classifier reviews the rest, and a refused command routes to the Director | A Claude Code permission profile; a permission posture, not a spawn dependency |
-| `codex` | Kernel-enforced workspace-write sandbox | No; `member list` `pane_id` locates the pane | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `<codex home>/rules/cafleet.rules`, the `config.toml` settings below and a trusted working directory; a permission posture, not a spawn dependency |
-| `opencode` | None | No; `member list` `pane_id` locates the pane | `cafleet-ask` (default): the member broker commands run and every other shell command opens a native permission form; `cafleet`: the same broker commands, every other command denied | The selected policy's preset `<preset base>/agents/<mode>.md`; a spawn precondition |
-| `hermes` | None | No; `member list` `pane_id` locates the pane | `smart`: commands outside Hermes's dangerous-command patterns run unreviewed, and the guardian model reviews the rest and may open an approval prompt. Hardline floors, the sudo guard and `approvals.deny` block before any review | The operator configuration's `approvals.mode` |
+| `codex` | Kernel-enforced workspace-write sandbox | No; `member list` `window` and `pane_id` locate the pane | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `<codex home>/rules/cafleet.rules`, the `config.toml` settings below and a trusted working directory; a permission posture, not a spawn dependency |
+| `opencode` | None | No; `member list` `window` and `pane_id` locate the pane | `cafleet-ask` (default): the member broker commands run and every other shell command opens a native permission form; `cafleet`: the same broker commands, every other command denied | The selected policy's preset `<preset base>/agents/<mode>.md`; a spawn precondition |
+| `hermes` | None | No; `member list` `window` and `pane_id` locate the pane | `smart`: commands outside Hermes's dangerous-command patterns run unreviewed, and the guardian model reviews the rest and may open an approval prompt. Hardline floors, the sudo guard and `approvals.deny` block before any review | The operator configuration's `approvals.mode` |
 | `pi` | None | Yes, via `--name <member-name>`; pi titles the terminal `π - <name> - <cwd basename>` | `cafleet-ask` (default): the member broker commands run and every other bash command opens a native permission form, the gate's approval form for a command without a control character (§ pi member gate); `cafleet`: the same broker commands, every other command denied | The CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a spawn precondition |
+
+"Sets the pane title" is the backend's own title mechanism. Independently of it, CAFleet names every member pane after the member on the multiplexer, as a tmux pane title or a herdr pane label (§6.5 Fleet window layout); a backend that sets its own title can retitle the tmux pane, while the herdr label stays independent of the agent's terminal title.
 
 The omitted claude and codex policies are native automatic approval modes (§6.9 Launch policy and capability registry). The omitted hermes policy `smart` is also an `auto` mode: an ESCALATE or a guardian DENY opens a native approval prompt that the Director answers allow once or deny through the permission commands (§6.9 Bundled profiles and native screen fixtures), and an unanswered prompt fails closed after the configuration's `approvals.timeout`. Every session that reads a Hermes configuration applies its `approvals.deny`, so an operator glob there that matches a Director-only command also blocks it in a Hermes Director's own session, reported as `BLOCKED: this command matches the user-defined deny rule '<glob>' …`. CAFleet needs no `approvals.deny` entry, because the runner guard covers members (§6.3 Director-only command guard). The omitted OpenCode and pi policy `cafleet-ask` is a `manual` mode whose form the Director answers; explicit `cafleet` is an `auto` mode with a fixed allow/deny policy that renders no approval form (§ opencode preset, § pi member gate).
 
@@ -2822,9 +3002,9 @@ Prepare connection setup waits, before any request write and within the original
 Creation follows this ordered protocol:
 
 1. Validate assignment input/placeholders, backend policy eligibility, runtime paths and backend/multiplexer prerequisites. Preserve one assignment substitution and one literal prompt argv element.
-2. Register the pending member and allocate its run row in one transaction. Write the private descriptor and create the pane with the absolute current CAFleet executable and the internal runner argv.
+2. Register the pending member with its chosen slot and allocate its run row in one transaction (§6.2 Members). Write the private descriptor and create the pane in that slot (§6.5 Fleet window layout) with the absolute current CAFleet executable and the internal runner argv.
 3. The runner validates the descriptor, acquires the precreated identity-pinned ownership lock, records its process identity, opens the PTY, initializes terminal state and event machinery, and binds its control endpoint. It reports `prepared` without spawning the native CLI.
-4. The creator connects, validates the nonce/run identity, publishes the concrete pane placement with `status=prepared` and only then sends the control `start` frame. The runner revalidates placement, spawns the child and records `running` before reporting `started` with child PID/start identity.
+4. The creator connects, validates the nonce/run identity, publishes the concrete placement with `status=prepared` and only then sends the control `start` frame. Publication patches the pane ID, the spawned window ID and the window name together in one update conditioned on a null `mux_pane_id`, which must change exactly one row. The runner revalidates placement, spawns the child and records `running` before reporting `started` with child PID/start identity.
 5. Return creation success only after `started`, meaning child spawn succeeded without a native-policy/liveness guarantee; include the run identity and detection coverage with the member result. A child that immediately exits is reported by `runner_exited`, including its native status and Director notification. Use a ten-second monotonic handshake budget and preserve the rollback/cleanup diagnostics of any phase that fails.
 
 Until `start`, the runner exits if its creator disconnects or the handshake expires. Failure after child spawn kills and reaps that owned child, closes the known pane, deregisters the pending member and retains a failed run record. A failed cleanup retains the original failure plus explicit orphan/pane diagnostics. A timeout after `start` is an uncertain launch: compensation inspects the existing run and stops its owned child, never retrying with a second child. Registration and pane ownership remain guarded until the handshake is complete.
@@ -3223,6 +3403,8 @@ Recovery follows this sequence:
 5. Persist the final `lost`, `exited` or `failed` status, ended/cleanup evidence and notification disposition, then truncate/fsync the outbox after validating all complete frames are committed and release ownership. Reconcile verified descendants under the bounded cleanup rules; unknown ownership remains a diagnostic. Retain archived events permanently under database retention and delete the outbox only when all complete frames are durably represented.
 
 Only the lock owner reads/compacts/writes the outbox, including in normal event-worker operation, so an external pass cannot race the live writer.
+
+Recovery and deletion count a recorded process as alive only while its PID/start identity matches and it has not exited. A process that has exited but is not yet reaped (state `Z`; macOS `SZOMB`) is terminated evidence for the run owner's process evidence, for deletion's wait for a `hermes` runner to exit after its work settlement, and for recovery's descendant-group checks, which count only non-zombie group members. Closing a herdr pane by hand kills the pane shell and reparents its runner, which shuts down, exits and stays a zombie when the reparenting process never reaps; recovery settles that run like any exited runner, so `member delete` and `fleet delete` complete.
 
 For a missing directory/lock or identity mismatch, a recorded owner still alive under its PID/start identity returns `live_or_unreachable`; unknown process identity returns `operator_reconciliation_required`. Preserve the recorded run status and the open interaction in both cases. An owner may hold an unlinked original lock, so creating/acquiring a new pathname supplies no death proof. Startup without a registered runner requires reconciling the creator, pinned pane and any started process before treating ownership as stopped.
 
@@ -3643,7 +3825,8 @@ CREATE TABLE fleets (
     name TEXT NOT NULL,
     created_at TEXT NOT NULL,
     deleted_at TEXT,
-    director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT
+    director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT,
+    last_window_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(last_window_ordinal >= 0)
 );
 
 CREATE TABLE asset_installs (
@@ -3656,12 +3839,17 @@ CREATE TABLE asset_installs (
 CREATE TABLE member_placements (
     member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members (member_id) ON DELETE CASCADE,
     mux_session TEXT NOT NULL,
-    mux_window_id TEXT NOT NULL,
+    mux_window_id TEXT,
+    mux_window_name TEXT,
+    window_ordinal INTEGER NOT NULL CHECK(window_ordinal >= 0),
+    column_side TEXT NOT NULL CHECK(column_side IN ('left','right')),
     mux_pane_id TEXT,
     backend TEXT NOT NULL,
     mux_server TEXT NOT NULL,
     coding_agent TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    CHECK((mux_pane_id IS NULL) = (mux_window_id IS NULL)
+          AND (mux_window_id IS NULL) = (mux_window_name IS NULL))
 );
 
 CREATE TABLE messages (
@@ -3823,9 +4011,18 @@ Baseline column semantics:
 |---|---|
 | `fleets` | `director_member_id` is backfilled inside the bootstrap transaction. A live fleet has null `deleted_at` and an active valid Director with placement |
 | `members` | `status` decodes as `active` or `deregistered`; unknown values fail. Deregistration is soft and keeps the row |
-| `member_placements` | `mux_pane_id` is null while member creation is pending. `mux_server` is the server every invocation for the fleet targets (§6.5 Multiplexer context); member placements copy the Director's |
+| `member_placements` | `mux_pane_id`, `mux_window_id` and `mux_window_name` are null exactly while member creation is pending. `mux_server` is the server every invocation for the fleet targets (§6.5 Multiplexer context); member placements copy the Director's |
 | `messages` | `status_state` decodes as `input_required` or `completed`. `notified_at` is internal preview state that the public message record omits; a self-send stamps it on insertion and stays pending for reception and explicit ACK |
 | `asset_installs` | Each successful backend asset installation upserts its timestamp at `(coding_agent, path)`, independently of member registration |
+
+Window layout columns follow §6.5 Fleet window layout:
+
+| Column | Semantics |
+|---|---|
+| `fleets.last_window_ordinal` | Highest overflow ordinal ever allocated for the fleet; `0` until the first overflow window, and never decreased |
+| `member_placements.mux_window_name` | `cafleet-<fleet_id>-<ordinal>` for an overflow window; the Director window's name read at `fleet create` for ordinal 0 |
+| `member_placements.window_ordinal` | Chosen at registration; `0` for the Director and Director-window members |
+| `member_placements.column_side` | Chosen at registration; `left` for the Director row and `right` for every Director-window member. A stored value outside `left` / `right` fails decoding |
 
 A concrete placement selects the shared pane input lock, and duplicate entries targeting the same backend/session/pane share it. Inbox streaming ignores `notified_at`, and native handles and emitted-ID tracking belong to the receiver process with no durable consumer state.
 

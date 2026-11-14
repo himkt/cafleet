@@ -1601,7 +1601,7 @@ pub(crate) mod test_support {
             fixture
                 .conn
                 .execute(
-                    "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+                    "UPDATE member_placements SET mux_pane_id=NULL, mux_window_id=NULL, mux_window_name=NULL WHERE member_id=?1",
                     [fixture.run.member_id],
                 )
                 .unwrap();
@@ -1802,7 +1802,7 @@ pub(crate) mod test_support {
             self.fixture
                 .conn
                 .execute(
-                    "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                    "UPDATE member_placements SET mux_pane_id='%9', mux_window_id=COALESCE(mux_window_id, '@1'), mux_window_name=COALESCE(mux_window_name, 'main') WHERE member_id=?1",
                     [self.fixture.run.member_id],
                 )
                 .unwrap();

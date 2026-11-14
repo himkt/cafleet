@@ -56,6 +56,17 @@ Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/
 
 Roster records contain `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack`, `idle`. Fleet-reference matches have kind `director`; others `member`. Missing activity may be null and pane placement pending.
 
+Every JSON `placement` has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id`, `mux_window_name` and `mux_pane_id` are null together while creation is pending. `window_ordinal` is `0` for the Director window and `1` or greater for an overflow window named `cafleet-<fleet_id>-<ordinal>`; `column_side` is `left` or `right`.
+
+Text rows list `member_id`, `name`, `kind`, `backend`, `window` (the window name) and `pane_id`, then `idle`; a pending window or pane prints `(pending)` and absent activity `-`:
+
+```text
+2 members:
+  member_id  name           kind      backend   window         pane_id  idle
+  8          director       director  claude    main           %3       12s
+  9          drafter        member    claude    cafleet-3-1    %12      5s
+```
+
 ## JSON output
 
 Place `--json` before any `--` literal-key separator. JSON is compact UTF-8. Commands marked no in the summary, including the root group, reject `--json`.
@@ -81,11 +92,13 @@ Send/create require exactly one positional body or `--file PATH`; `--file -` rea
 | herdr session | `--mux-server`; `HERDR_SESSION`; the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; `default`. With `--pane`, these environment sources apply only when the environment detects herdr |
 | Director pane | `--pane`, checked only for existence on the server; else `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr), verified against the caller's process ancestry |
 
-Each failure exits 1 before any write:
+After reading the pane's session, window and pane, `fleet create` reads the Director window's name and records it as the Director placement's `mux_window_name`. Each failure exits 1 before any write:
 
 | Condition | Error |
 |---|---|
 | tmux finds no server | `Error: no tmux server found; pass --mux-server <socket path>` |
+| The tmux window-name reply is malformed or names another window | `Error: unexpected tmux display-message output: <quoted>` |
+| The herdr `tab get` reply has no label; a `tab_not_found` failure propagates | `Error: herdr tab get missing 'label' field` |
 | The pane is not on the chosen server (a tmux reply with an empty field or another `pane_id`) | `Error: pane <pane-id> was not found on the <backend> server <server>; pass --pane and --mux-server for the Director's pane` |
 | `--pane` is neither ID form | `Error: --pane <pane> is neither a tmux pane ID (%N) nor a herdr pane ID (<workspace>:<pane>)` |
 | A shared-server ancestor, without `--pane` | `Error: cafleet fleet create cannot verify this session's pane: a shared <label> server (pid <pid>) runs this command, …` naming both the tmux and the herdr guidance |
@@ -108,6 +121,7 @@ With `--pane`, `fleet create` reads no process ancestry, and an environment nami
 | Outcome | Result |
 |---|---|
 | Lock contention until the deadline | Exit 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`; every pane and registry row is unchanged |
+| Fleet layout lock busy for 60 seconds, after the pane locks | Exit 1 with `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.`; every member is unchanged |
 | A member cannot be ended | Exit 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`; earlier members stay deregistered, and a rerun resumes |
 | Placement set changed after cleanup began | Exit 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` |
 
@@ -217,7 +231,7 @@ Pane operations require active placement; opaque pane IDs may be pending. Indivi
 
 `cafleet member create --fleet-id ID --name NAME --description DESCRIPTION [--coding-agent AGENT] [--model MODEL] [--permission-mode MODE] [--event-evidence POLICY] [--event-redaction-file PATH] [--effort LEVEL] (PROMPT | --file PATH) [--json]`
 
-Registers and spawns, resolving the acting Director from the fleet. Omitted backend inherits its placement backend. Description is one sentence; only Claude and pi display the name as pane title. Model forwards to the native CLI; OpenCode requires `<provider-id>/<model-id>`, Hermes passes any value through, and pi passes any value without a `:<thinking>` suffix through. Hermes argv: `hermes chat --cli --source tool --in <cwd>`, then optional `--model MODEL` and `--reasoning LEVEL`, then `-q PROMPT`; it never carries `--provider`, `--resume`, `--continue` or `--create-if-missing`. pi argv: `pi --cafleet-gate MODE --no-approve --tui-mode fullscreen --name NAME`, then optional `--model MODEL` and `--thinking LEVEL`, then `-- PROMPT`, as a fresh session.
+Registers and spawns, resolving the acting Director from the fleet. Omitted backend inherits its placement backend. Description is one sentence. CAFleet names every member pane after `--name` (herdr pane label, tmux pane title; Claude and pi also set their own title), and `member list` `window` and `pane_id` locate it. Model forwards to the native CLI; OpenCode requires `<provider-id>/<model-id>`, Hermes passes any value through, and pi passes any value without a `:<thinking>` suffix through. Hermes argv: `hermes chat --cli --source tool --in <cwd>`, then optional `--model MODEL` and `--reasoning LEVEL`, then `-q PROMPT`; it never carries `--provider`, `--resume`, `--continue` or `--create-if-missing`. pi argv: `pi --cafleet-gate MODE --no-approve --tui-mode fullscreen --name NAME`, then optional `--model MODEL` and `--thinking LEVEL`, then `-- PROMPT`, as a fresh session.
 
 Evidence defaults to `metadata`; `redacted` requires an absolute readable UTF-8 redaction file. Invalid policy/configuration combinations exit 2 before registration.
 
@@ -238,7 +252,17 @@ Invalid OpenCode model: `Error: --model for the opencode backend must be '<provi
 
 A pi prompt body beginning with `@` exits 2 before registration with `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).`; start the prompt with text.
 
-The split reference (session, window, Director pane) and the multiplexer server come from the Director's recorded placement; the new placement copies its server.
+After prompt validation, creation waits up to 60 seconds for the fleet's pane layout lock, which serializes every member creation and deletion in the fleet, and holds it until creation returns. Under it the member takes the first free slot: the Director window's right column, then each overflow window's left and right columns, each holding one member per 30 rows of window height up to 8 (an overflow column at least one). When every column is full, creation opens an overflow window `cafleet-<fleet_id>-<ordinal>` in the Director's session without taking focus; ordinals only increase. Existing members never move. The multiplexer server comes from the Director's recorded placement, and the new placement copies it.
+
+Text output is `ID NAME backend=AGENT pane=PANE window=WINDOW` plus the runtime line; `PANE` and `WINDOW` print `(pending)` until the placement is published.
+
+| Outcome | Result |
+|---|---|
+| Fleet layout lock busy for 60 seconds | Exit 1, nothing registered: `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` |
+| An overflow window cannot be read (closed by hand, or every member pane in it died) | Exit 1, nothing registered: `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.`; delete each listed member, then retry |
+| The fleet's window ordinal changed under the lock | Exit 1, registration rolled back: `Error: fleet <fleet-id> window ordinal changed under the layout lock` |
+| A malformed tmux `new-window` or herdr `tab create` reply | Exit 1 with `Error: unexpected tmux new-window output: <quoted>` or `Error: herdr tab create missing '<key>' field`, followed by `pane ID unknown; pane cleanup unconfirmed` |
+| A herdr re-parenting move failed | Creation continues; stderr shows `layout re-parenting incomplete: <cause>` |
 
 Hermes availability preflight runs `hermes config path` under the member's `HERMES_HOME` after the config-dir and PATH checks. Each failure exits 1 before registration:
 
@@ -266,6 +290,7 @@ Before runner shutdown, a `hermes` run's session work is stopped through native 
 | Outcome | Result |
 |---|---|
 | Busy pane input | Exit 1, member unchanged: `member ID's pane input remained busy for 5 seconds; member was not deleted.` |
+| Fleet layout lock busy for 60 seconds, after the pane lock and before cleanup | Exit 1, run, pane and row unchanged: `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` |
 | Unverified Hermes stop | Exit 1, member kept, a retry re-runs the settlement: `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.` |
 | Hermes client already exited | Deletion completes with `warning: hermes client for member ID had already exited; its session work may still be running in the Hermes gateway` |
 
@@ -275,7 +300,7 @@ Before runner shutdown, a `hermes` run's session work is stopped through native 
 
 ### `member show`
 
-`cafleet member show MEMBER_ID [--json]` reads any active member, including Director, without a multiplexer; includes `kind`, placement and runtime.
+`cafleet member show MEMBER_ID [--json]` reads any active member, including Director, without a multiplexer; includes `kind`, placement and runtime. Text is `ID NAME STATUS window=WINDOW`, then the runtime line for an ordinary member; `WINDOW` prints `(pending)` while pending.
 
 ### `member prompt`
 
@@ -514,6 +539,9 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `member create` | A pi prompt begins with `@` (exit 2) | The prompt error under § `member create` |
 | `member create` | A non-default database and a prompt without `{database_url}` | The placeholder error under § `member create` |
 | `member delete` | A `hermes` run's work stop cannot be verified | The settlement error under § `member delete` |
+| `fleet create` | The Director window's name cannot be read | The window-name errors under § Fleet commands |
+| `member create` | The fleet layout lock stays busy, an overflow window cannot be read, the window ordinal changed, or a new-window reply is malformed | The outcomes under § `member create` |
+| `member delete` / `fleet delete` | The fleet layout lock stays busy for 60 seconds | The busy outcomes under § `member delete` and § Fleet commands |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` |
 | `member create` | The fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` |

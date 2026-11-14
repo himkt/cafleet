@@ -1589,7 +1589,7 @@ mod tests {
                 let other = Connection::open(&path).unwrap();
                 other
                     .execute(
-                        "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                        "UPDATE member_placements SET mux_pane_id='%9', mux_window_id=COALESCE(mux_window_id, '@1'), mux_window_name=COALESCE(mux_window_name, 'main') WHERE member_id=?1",
                         [worker],
                     )
                     .unwrap();

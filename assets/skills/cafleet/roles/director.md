@@ -128,7 +128,7 @@ Write each pre-substitution prompt before `member create --file`. Its canonical 
 
 When BASE is `<unset>`, omit the BASE line, skip audit files and use a compact path-by-reference positional `PROMPT` under about 2 KB; explicit output targets remain available. Unguarded sentinel construction fails with `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
-Discover panes through `member list`'s recorded `pane_id`; pane title: {pane_title}.
+Discover panes through `member list`'s recorded `window` and `pane_id`; pane title: {pane_title}.
 
 ### Base directory resolution
 

@@ -13,6 +13,10 @@ use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::Multiplexer;
+use crate::multiplexer::layout::ColumnSide;
+use crate::multiplexer::layout::SlotChoice;
+use crate::multiplexer::layout::WindowOccupancy;
+use crate::multiplexer::layout::choose_slot;
 use crate::output;
 use crate::output::format_member;
 use crate::output::format_member_delete;
@@ -344,6 +348,162 @@ fn launch_evidence(
 }
 
 fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> {
+    create_with_layout_wait(conn, args, crate::pane_lock::LAYOUT_LOCK_WAIT)
+}
+
+/// The slot choice, the window list it was chosen from and the fleet's `last_window_ordinal`.
+struct ChosenSlot {
+    choice: SlotChoice,
+    windows: Vec<WindowOccupancy>,
+    last_window_ordinal: i64,
+}
+
+/// Reads occupancy from the registry and each scanned window's live height, stopping at the
+/// first window with a free slot.
+fn choose_member_slot(
+    conn: &Connection,
+    mux: &dyn Multiplexer,
+    fleet_id: i64,
+    director: &crate::broker::Placement,
+) -> Result<ChosenSlot, CafleetError> {
+    let director_pane = director
+        .mux_pane_id
+        .clone()
+        .expect("the root Director placement records its pane");
+    let director_window = director.concrete_window_id().to_owned();
+    let last_window_ordinal = broker::members::last_window_ordinal(conn, fleet_id)?;
+    let mut occupied = broker::members::concrete_occupancy(conn, fleet_id)?;
+    let director_members = match occupied.first() {
+        Some(window) if window.window_ordinal == 0 => occupied.remove(0).right,
+        _ => Vec::new(),
+    };
+    let mut windows = vec![WindowOccupancy {
+        ordinal: 0,
+        height: mux.window_height(&director_window, std::slice::from_ref(&director_pane))?,
+        window_id: director_window,
+        window_name: director
+            .mux_window_name
+            .clone()
+            .expect("a concrete placement records its window name"),
+        left: Vec::new(),
+        right: director_members,
+        director_pane: Some(director_pane),
+    }];
+    let found_free_slot = |windows: &[WindowOccupancy]| {
+        matches!(
+            choose_slot(fleet_id, windows, last_window_ordinal),
+            SlotChoice::Existing { .. }
+        )
+    };
+    for window in occupied {
+        if found_free_slot(&windows) {
+            break;
+        }
+        let height = mux
+            .window_height(&window.mux_window_id, &window.panes)
+            .map_err(|cause| unreadable_window(conn, fleet_id, &window, &cause))?;
+        windows.push(WindowOccupancy {
+            ordinal: window.window_ordinal,
+            window_id: window.mux_window_id,
+            window_name: window.mux_window_name,
+            height,
+            left: window.left,
+            right: window.right,
+            director_pane: None,
+        });
+    }
+    Ok(ChosenSlot {
+        choice: choose_slot(fleet_id, &windows, last_window_ordinal),
+        windows,
+        last_window_ordinal,
+    })
+}
+
+fn unreadable_window(
+    conn: &Connection,
+    fleet_id: i64,
+    window: &broker::members::OccupiedWindow,
+    cause: &crate::multiplexer::MultiplexerError,
+) -> CafleetError {
+    let members = match broker::members::window_member_ids(conn, fleet_id, window.window_ordinal) {
+        Ok(ids) => ids
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+        Err(error) => return error,
+    };
+    let cause = cause.to_string().lines().collect::<Vec<_>>().join("; ");
+    CafleetError::App(format!(
+        "window {} (ordinal {}) of fleet {fleet_id} cannot be read: {cause}. Its active members {members} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.",
+        window.mux_window_name, window.window_ordinal
+    ))
+}
+
+struct SlotTarget {
+    pane: crate::multiplexer::PaneTarget,
+    window_ordinal: i64,
+    column_side: ColumnSide,
+    window_name: String,
+    advances_window_ordinal_from: Option<i64>,
+}
+
+fn slot_target(slot: &ChosenSlot, session: &str) -> SlotTarget {
+    use crate::multiplexer::ColumnTarget;
+    use crate::multiplexer::PaneTarget;
+    match &slot.choice {
+        SlotChoice::Existing {
+            ordinal,
+            window_id,
+            window_name,
+            side,
+        } => {
+            let window = slot
+                .windows
+                .iter()
+                .find(|window| window.ordinal == *ordinal)
+                .expect("the chosen slot's window was scanned");
+            let (column_panes, other_panes) = match (side, &window.director_pane) {
+                (ColumnSide::Right, Some(director_pane)) => {
+                    (window.right.clone(), vec![director_pane.clone()])
+                }
+                (ColumnSide::Right, None) => (window.right.clone(), window.left.clone()),
+                (ColumnSide::Left, _) => (window.left.clone(), window.right.clone()),
+            };
+            SlotTarget {
+                pane: PaneTarget::Column(ColumnTarget {
+                    window_id: window_id.clone(),
+                    side: *side,
+                    column_panes,
+                    other_panes,
+                }),
+                window_ordinal: *ordinal,
+                column_side: *side,
+                window_name: window_name.clone(),
+                advances_window_ordinal_from: None,
+            }
+        }
+        SlotChoice::NewWindow {
+            ordinal,
+            window_name,
+        } => SlotTarget {
+            pane: PaneTarget::NewWindow {
+                session: session.to_owned(),
+                window_name: window_name.clone(),
+            },
+            window_ordinal: *ordinal,
+            column_side: ColumnSide::Left,
+            window_name: window_name.clone(),
+            advances_window_ordinal_from: Some(slot.last_window_ordinal),
+        },
+    }
+}
+
+pub(crate) fn create_with_layout_wait(
+    conn: &mut Connection,
+    args: &CreateArgs,
+    layout_wait: std::time::Duration,
+) -> Result<(), CafleetError> {
     let fleet_id = args.fleet_id;
     let name = args.name.as_str();
     let (model, effort) = (args.model.as_deref(), args.effort.as_deref());
@@ -369,23 +529,37 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
     let prompt_body = resolve_body(args.body.prompt.as_deref(), args.body.file.as_deref())?;
     backend.validate_prompt(&prompt_body)?;
 
-    let director = broker::director_placement(conn, fleet_id)?;
-    let mux = crate::runtime::mux_for_placement(&director, None)?;
-    let executable = backend.ensure_available(&SystemProbe, policy.resolved_mode())?;
-    let context = crate::multiplexer::MultiplexerContext {
-        session: director.mux_session.clone(),
-        window_id: director.mux_window_id.clone(),
-        pane_id: director
-            .mux_pane_id
-            .clone()
-            .expect("the root Director placement records its pane"),
-    };
-
     use crate::runtime as runner;
     use std::io::IsTerminal;
     use std::time::Duration;
     use std::time::Instant;
+    let database_url = format!(
+        "sqlite:///{}",
+        conn.path().expect("the registry is a file database")
+    );
+    let _layout = crate::pane_lock::LayoutLock::acquire_within(
+        &database_url,
+        fleet_id,
+        crate::time::Deadline::until(Instant::now() + layout_wait),
+    )?
+    .ok_or_else(|| {
+        CafleetError::App(format!(
+            "fleet {fleet_id} pane layout remained busy for 60 seconds; member was not created."
+        ))
+    })?;
+    let _span = crate::time::DeferTermination::begin()?;
     let deadline = Instant::now() + Duration::from_secs(10);
+
+    let director = broker::director_placement(conn, fleet_id)?;
+    let mux = crate::runtime::mux_for_placement(&director, None)?;
+    let executable = backend.ensure_available(&SystemProbe, policy.resolved_mode())?;
+    let slot = choose_member_slot(
+        conn,
+        &*mux.bounded(crate::time::Deadline::until(deadline)),
+        fleet_id,
+        &director,
+    )?;
+    let target = slot_target(&slot, &director.mux_session);
     let hermes = (backend == crate::coding_agent::CodingAgent::Hermes)
         .then(|| {
             SystemProbe
@@ -425,7 +599,11 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         |row| row.get(0),
     )?;
     runner::RuntimePaths::for_run(&identity, next_run)?;
-    let cwd = std::env::current_dir().map_err(|cause| CafleetError::App(cause.to_string()))?;
+    let cwd = std::env::current_dir().map_err(|cause| {
+        CafleetError::App(format!(
+            "cannot resolve the working directory for pane spawn: {cause}"
+        ))
+    })?;
     let size = if std::io::stdin().is_terminal() {
         runner::terminal_size(&std::io::stdin())?
     } else {
@@ -439,12 +617,15 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         description: args.description.clone(),
         placement: NewPlacement {
             backend: mux.name().into(),
-            mux_session: context.session.clone(),
-            mux_window_id: context.window_id.clone(),
-            mux_pane_id: None,
+            mux_session: director.mux_session.clone(),
+            window_ordinal: target.window_ordinal,
+            column_side: target.column_side,
             coding_agent: agent_name.into(),
             mux_server: director.mux_server.clone(),
+            pane: None,
         },
+        window_name: target.window_name,
+        advances_window_ordinal_from: target.advances_window_ordinal_from,
     };
     let run_settings = runner::RunSettings {
         database_identity_json: identity,
@@ -459,7 +640,16 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         native_version: native.native_version,
         coverage: native.coverage,
     };
-    let mut host = runner::NativeLaunchHost::new(&*mux, &context);
+    let cwd_text = cwd
+        .to_str()
+        .ok_or_else(|| {
+            CafleetError::App(format!(
+                "cannot resolve the working directory for pane spawn: {} is not valid UTF-8",
+                cwd.display()
+            ))
+        })?
+        .to_owned();
+    let mut host = runner::NativeLaunchHost::new(&*mux, &target.pane, name, &cwd_text);
     let created = runner::create_registered(
         conn,
         &pending,
@@ -581,12 +771,38 @@ fn delete(
     json: bool,
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
+    delete_with_layout_wait(
+        conn,
+        settings,
+        member_id,
+        json,
+        deadline,
+        crate::pane_lock::LAYOUT_LOCK_WAIT,
+    )
+}
+
+pub(crate) fn delete_with_layout_wait(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    json: bool,
+    deadline: crate::time::Deadline,
+    layout_wait: std::time::Duration,
+) -> Result<(), CafleetError> {
     let mut locked = lock_member_deletion(conn, settings, member_id, deadline)?;
     let pane_status = match &locked.value {
         DeleteAction::Deregistered(status) => status.to_string(),
         DeleteAction::Close => {
             let mux = crate::runtime::mux_for_fleet(conn, locked.snapshot.fleet_id, None)?;
-            close_member(conn, settings, member_id, &mut locked, &*mux, deadline)?
+            close_member_within(
+                conn,
+                settings,
+                member_id,
+                &mut locked,
+                &*mux,
+                deadline,
+                layout_wait,
+            )?
         }
     };
     drop(locked);
@@ -597,19 +813,49 @@ fn delete(
     )
 }
 
+#[cfg(test)]
 fn close_member(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     locked: &mut crate::pane_lock::LockedDeletion<MemberRecord, DeleteAction>,
     mux: &dyn Multiplexer,
-    mut deadline: crate::time::Deadline,
+    deadline: crate::time::Deadline,
+) -> Result<String, CafleetError> {
+    close_member_within(
+        conn,
+        settings,
+        member_id,
+        locked,
+        mux,
+        deadline,
+        crate::pane_lock::LAYOUT_LOCK_WAIT,
+    )
+}
+
+/// Acquires the fleet layout lock within `layout_wait` after the held pane lock, then ends the
+/// member under both.
+fn close_member_within(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    locked: &mut crate::pane_lock::LockedDeletion<MemberRecord, DeleteAction>,
+    mux: &dyn Multiplexer,
+    deadline: crate::time::Deadline,
+    layout_wait: std::time::Duration,
 ) -> Result<String, CafleetError> {
     assert!(
         matches!(locked.value, DeleteAction::Close),
         "pane close requires a concrete input-locked placement"
     );
     assert_eq!(locked.snapshot.member_id, member_id);
+    let (layout, mut deadline) = crate::cli::fleet::acquire_deletion_layout(
+        settings,
+        locked.snapshot.fleet_id,
+        deadline,
+        layout_wait,
+        "member",
+    )?;
     let placement = locked.snapshot.placement.clone();
     let (snapshot, held) = locked.snapshot_and_pane_lock(&settings.database_url, &placement)?;
     crate::cli::fleet::end_member(
@@ -617,6 +863,7 @@ fn close_member(
         settings,
         snapshot,
         held,
+        &layout,
         &mut crate::cli::fleet::MultiplexerDeletionHost::new(mux),
         &mut deadline,
         &mut |_| Ok(()),
@@ -1030,7 +1277,7 @@ mod tests {
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "hermes-busy");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
-            crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
+            crate::broker::members::test_support::publish_placement_pane(&mut conn, worker, "%9")
                 .unwrap();
             let identity = storage::database_identity(&conn).unwrap();
             let process = ProcessIdentity::current().unwrap();
@@ -1142,7 +1389,7 @@ mod tests {
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "member-recovery");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
-            crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
+            crate::broker::members::test_support::publish_placement_pane(&mut conn, worker, "%9")
                 .unwrap();
             let identity = storage::database_identity(&conn).unwrap();
             let process = ProcessIdentity::current().unwrap();
@@ -1288,7 +1535,7 @@ mod tests {
             let hermes = format!(
                 "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config path')\n    {config_path} ;;\n  *) exit 3 ;;\nesac"
             );
-            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' #{window_height} '*) printf '120\\n' ;; *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
             let fleet = fleet.to_string();
             let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
                 &settings,
@@ -1331,7 +1578,7 @@ mod tests {
         let config = dir.path().join("claude config");
         std::fs::create_dir(&config).unwrap();
         let descriptor_copy = dir.path().join("descriptor-copy.json");
-        let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' display-message '*) printf 'main|@1|%%1\\n' ;;\n  *' split-window '*)\n    while [ $# -gt 0 ]; do\n      if [ \"$1\" = --descriptor ]; then\n        IFS= read -r line < \"$2\" || true\n        printf '%s' \"$line\" > \"$CAFLEET_TEST_DESCRIPTOR_COPY\"\n      fi\n      shift\n    done\n    exit 1 ;;\nesac";
+        let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' #{window_height} '*) printf '120\\n' ;;\n  *' display-message '*) printf 'main|@1|%%1\\n' ;;\n  *' split-window '*)\n    while [ $# -gt 0 ]; do\n      if [ \"$1\" = --descriptor ]; then\n        IFS= read -r line < \"$2\" || true\n        printf '%s' \"$line\" > \"$CAFLEET_TEST_DESCRIPTOR_COPY\"\n      fi\n      shift\n    done\n    exit 1 ;;\nesac";
         let claude = "printf '2.1.302 (Claude Code)\\n'";
         let fleet = fleet.to_string();
         let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
@@ -1996,7 +2243,22 @@ mod tests {
             crate::multiplexer::test_support::run_until_through_run_for(self, argv, deadline)
         }
 
+        /// Counts and checks the pane close; the window restoration that follows it lists a
+        /// single-column window, which needs no equalization.
         fn run(&self, argv: &[String]) -> Result<String, RunError> {
+            let restoration = [
+                "tmux",
+                "-S",
+                CLOSE_SOCKET,
+                "list-panes",
+                "-t",
+                "@1",
+                "-F",
+                "#{pane_id}|#{pane_left}",
+            ];
+            if argv == restoration {
+                return Ok("%0|0\n".into());
+            }
             assert_eq!(argv, &["tmux", "-S", CLOSE_SOCKET, "kill-pane", "-t", "%9"]);
             self.calls.set(self.calls.get() + 1);
             (self.check)();
@@ -2032,7 +2294,7 @@ mod tests {
                     Connection::open(&path)
                         .unwrap()
                         .execute(
-                            "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                            "UPDATE member_placements SET mux_pane_id='%9', mux_window_id=COALESCE(mux_window_id, '@1'), mux_window_name=COALESCE(mux_window_name, 'main') WHERE member_id=?1",
                             [worker],
                         )
                         .unwrap();
@@ -2040,7 +2302,7 @@ mod tests {
                 Authorization::Allow
             }))
             .unwrap();
-            let deadline = Deadline::until(Instant::now() + Duration::from_millis(100));
+            let deadline = Deadline::until(Instant::now() + Duration::from_millis(500));
             let mut locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
             let placement = locked.snapshot.placement.clone();
             assert_eq!(placement.mux_pane_id.as_deref(), Some("%9"));
@@ -2055,7 +2317,7 @@ mod tests {
                         .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
                         .expect("pane close holds no SQLite writer transaction");
                     if expire_after_close {
-                        std::thread::sleep(Duration::from_millis(110));
+                        std::thread::sleep(Duration::from_millis(510));
                     }
                 }),
             });
@@ -2089,7 +2351,7 @@ mod tests {
     #[test]
     fn irreversible_close_preserves_the_registry_error_and_releases_ownership_on_return() {
         let (_dir, mut conn, settings, fleet, _, worker) = fixture();
-        crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
+        crate::broker::members::test_support::publish_placement_pane(&mut conn, worker, "%9")
             .unwrap();
         conn.execute_batch(
             "CREATE TRIGGER reject_deregister BEFORE UPDATE OF status ON members
@@ -2747,6 +3009,242 @@ mod tests {
                     .unwrap_err()
                     .to_string()
                     .contains("output unavailable")
+            );
+        }
+    }
+
+    mod window_layout {
+        use crate::broker::members::test_support::register_in_slot;
+        use crate::cli::CliArgs;
+        use crate::cli::Command;
+        use crate::cli::member::tests::*;
+        use crate::multiplexer::layout::ColumnSide;
+        use crate::pane_lock::LayoutLock;
+
+        fn member_rows(conn: &Connection) -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
+                .unwrap()
+        }
+
+        fn create_arguments(fleet: &str) -> Vec<&str> {
+            vec![
+                "member",
+                "create",
+                "--fleet-id",
+                fleet,
+                "--name",
+                "worker",
+                "--description",
+                "window layout fixture",
+                "--coding-agent",
+                "claude",
+                "literal assignment on {database_url}",
+            ]
+        }
+
+        fn create_args(fleet: i64) -> CreateArgs {
+            let fleet = fleet.to_string();
+            let mut arguments = vec!["cafleet"];
+            arguments.extend(create_arguments(&fleet));
+            let Command::Member(MemberCommand::Create(args)) =
+                CliArgs::try_parse_from(arguments).unwrap().command
+            else {
+                panic!("member create expected")
+            };
+            args
+        }
+
+        #[test]
+        fn a_busy_layout_lock_fails_member_create_and_registers_nothing() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout-busy");
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            let _held = LayoutLock::try_acquire(&settings.database_url, fleet)
+                .unwrap()
+                .expect("the test holds the fleet layout");
+            let before = member_rows(&conn);
+            let started = Instant::now();
+            let error =
+                create_with_layout_wait(&mut conn, &create_args(fleet), Duration::from_millis(300))
+                    .unwrap_err();
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_millis(300), "{waited:?}");
+            assert!(waited < Duration::from_secs(3), "{waited:?}");
+            assert_eq!(
+                error.message(),
+                format!(
+                    "fleet {fleet} pane layout remained busy for 60 seconds; member was not created."
+                )
+            );
+            assert_eq!(error.exit_code(), 1);
+            assert_eq!(member_rows(&conn), before);
+        }
+
+        #[test]
+        fn the_unreadable_window_error_renders_a_multi_line_cause_on_one_line() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout-one-line");
+            let window = format!("cafleet-{fleet}-1");
+            let first = register_in_slot(
+                &mut conn,
+                fleet,
+                "first",
+                1,
+                ColumnSide::Left,
+                Some(("w1:t3", &window, "w1:p5")),
+            );
+            let occupied = crate::broker::members::OccupiedWindow {
+                window_ordinal: 1,
+                mux_window_id: "w1:t3".into(),
+                mux_window_name: window.clone(),
+                left: vec!["w1:p5".into()],
+                right: Vec::new(),
+                panes: vec!["w1:p5".into()],
+            };
+            let stderr = r#"{"error":{"code":"pane_not_found","message":"boom"},"id":1}"#;
+            let cause = crate::multiplexer::MultiplexerError::new(format!(
+                "herdr command failed: herdr pane layout --pane w1:p5\nstderr: {stderr}"
+            ));
+            let error = crate::cli::member::unreadable_window(&conn, fleet, &occupied, &cause);
+            assert_eq!(
+                error.message(),
+                format!(
+                    "window {window} (ordinal 1) of fleet {fleet} cannot be read: herdr command failed: herdr pane layout --pane w1:p5; stderr: {stderr}. Its active members {first} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry."
+                )
+            );
+            let single = crate::multiplexer::MultiplexerError::new(
+                "unexpected tmux display-message output: ''",
+            );
+            assert_eq!(
+                crate::cli::member::unreadable_window(&conn, fleet, &occupied, &single).message(),
+                format!(
+                    "window {window} (ordinal 1) of fleet {fleet} cannot be read: unexpected tmux display-message output: ''. Its active members {first} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry."
+                )
+            );
+        }
+
+        #[test]
+        fn an_unreadable_overflow_window_fails_member_create_naming_its_members() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "layout-unreadable");
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            conn.execute(
+                "UPDATE fleets SET last_window_ordinal=1 WHERE fleet_id=?1",
+                [fleet],
+            )
+            .unwrap();
+            let window = format!("cafleet-{fleet}-1");
+            register_in_slot(
+                &mut conn,
+                fleet,
+                "director-window",
+                0,
+                ColumnSide::Right,
+                Some(("@1", "main", "%2")),
+            );
+            let first = register_in_slot(
+                &mut conn,
+                fleet,
+                "first",
+                1,
+                ColumnSide::Left,
+                Some(("@7", &window, "%10")),
+            );
+            let second = register_in_slot(
+                &mut conn,
+                fleet,
+                "second",
+                1,
+                ColumnSide::Right,
+                Some(("@7", &window, "%11")),
+            );
+            let before = member_rows(&conn);
+            let config = dir.path().join("claude config");
+            std::fs::create_dir(&config).unwrap();
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' -t @1 #{window_height} '*) printf '50\\n' ;;\n  *' #{window_height} '*) printf '\\n' ;;\n  *) exit 1 ;;\nesac";
+            let claude = "printf '2.1.302 (Claude Code)\\n'";
+            let fleet_arg = fleet.to_string();
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                &settings,
+                &create_arguments(&fleet_arg),
+                &[("tmux", tmux), ("claude", claude)],
+                &[
+                    ("TMUX_PANE", "%0"),
+                    ("CLAUDE_CONFIG_DIR", config.to_str().unwrap()),
+                ],
+            );
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(output.status.code(), Some(1), "{stderr}");
+            assert!(
+                stderr.starts_with(&format!(
+                    "Error: window {window} (ordinal 1) of fleet {fleet} cannot be read: unexpected tmux display-message output: "
+                )),
+                "{stderr}"
+            );
+            assert!(
+                stderr.ends_with(&format!(
+                    ". Its active members {first}, {second} may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.\n"
+                )),
+                "{stderr}"
+            );
+            assert!(
+                pane_calls.contains(" -t @7 #{window_height}"),
+                "{pane_calls}"
+            );
+            assert!(!pane_calls.contains("split-window"), "{pane_calls}");
+            assert!(!pane_calls.contains("new-window"), "{pane_calls}");
+            assert_eq!(member_rows(&conn), before);
+        }
+
+        #[test]
+        fn a_busy_layout_lock_fails_member_delete_and_leaves_run_pane_and_row_unchanged() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            let (fleet, director) = create_fleet_fixture(&mut conn, "layout-delete-busy");
+            let worker = register(&mut conn, fleet, "worker", Some("%9"));
+            let spec =
+                crate::broker::runtime::test_support::Fixture::spec(&conn, fleet, director, worker);
+            let run = crate::broker::runtime::test_support::create_run(&mut conn, &spec).unwrap();
+            let before = crate::broker::members::active_member(&conn, worker).unwrap();
+            let _held = LayoutLock::try_acquire(&settings.database_url, fleet)
+                .unwrap()
+                .expect("the test holds the fleet layout");
+            let started = Instant::now();
+            let error = delete_with_layout_wait(
+                &mut conn,
+                &settings,
+                worker,
+                false,
+                Deadline::until(started + Duration::from_secs(5)),
+                Duration::from_millis(300),
+            )
+            .unwrap_err();
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_millis(300), "{waited:?}");
+            assert!(waited < Duration::from_secs(3), "{waited:?}");
+            assert_eq!(
+                error.message(),
+                format!(
+                    "fleet {fleet} pane layout remained busy for 60 seconds; member was not deleted."
+                )
+            );
+            assert_eq!(error.exit_code(), 1);
+            let after = crate::broker::members::active_member(&conn, worker).unwrap();
+            assert_eq!(after.placement, before.placement);
+            let current = crate::broker::runtime::get_run(&conn, run.run_id).unwrap();
+            assert_eq!(
+                (current.status, current.owner_epoch, current.cleanup_state),
+                (run.status, run.owner_epoch, run.cleanup_state)
+            );
+            assert!(
+                PaneLock::acquire_released(&settings.database_url, &after.placement)
+                    .unwrap()
+                    .is_some(),
+                "the refused deletion releases its pane lock"
             );
         }
     }

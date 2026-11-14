@@ -6,6 +6,8 @@ pub(crate) mod members;
 pub(crate) mod messaging;
 pub(crate) mod runtime;
 
+use crate::multiplexer::layout::ColumnSide;
+
 macro_rules! stored_enum {
     (values $name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
         stored_enum!(@enum $name, $field, {$($variant => $wire),+});
@@ -76,7 +78,10 @@ stored_enum!(MessageStatus, "messages.status_state", {InputRequired => "input_re
 pub(crate) struct Placement {
     pub(crate) backend: String,
     pub(crate) mux_session: String,
-    pub(crate) mux_window_id: String,
+    pub(crate) mux_window_id: Option<String>,
+    pub(crate) mux_window_name: Option<String>,
+    pub(crate) window_ordinal: i64,
+    pub(crate) column_side: ColumnSide,
     pub(crate) mux_pane_id: Option<String>,
     pub(crate) coding_agent: String,
     pub(crate) created_at: String,
@@ -84,7 +89,8 @@ pub(crate) struct Placement {
 }
 
 /// The `member_placements` columns [`Placement::from_row`] reads, in order, for the `p` alias.
-pub(crate) const PLACEMENT_COLUMNS: &str = "p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at, p.mux_server";
+pub(crate) const PLACEMENT_COLUMNS: &str = "p.backend, p.mux_session, p.mux_window_id, p.mux_window_name, p.window_ordinal, p.column_side, p.mux_pane_id, p.coding_agent, p.created_at, p.mux_server";
+pub(crate) const PLACEMENT_COLUMN_COUNT: usize = 10;
 
 impl Placement {
     pub(crate) fn from_row(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<Self> {
@@ -92,11 +98,20 @@ impl Placement {
             backend: row.get(offset)?,
             mux_session: row.get(offset + 1)?,
             mux_window_id: row.get(offset + 2)?,
-            mux_pane_id: row.get(offset + 3)?,
-            coding_agent: row.get(offset + 4)?,
-            created_at: row.get(offset + 5)?,
-            mux_server: row.get(offset + 6)?,
+            mux_window_name: row.get(offset + 3)?,
+            window_ordinal: row.get(offset + 4)?,
+            column_side: row.get(offset + 5)?,
+            mux_pane_id: row.get(offset + 6)?,
+            coding_agent: row.get(offset + 7)?,
+            created_at: row.get(offset + 8)?,
+            mux_server: row.get(offset + 9)?,
         })
+    }
+
+    pub(crate) fn concrete_window_id(&self) -> &str {
+        self.mux_window_id
+            .as_deref()
+            .expect("a concrete placement records its window")
     }
 }
 

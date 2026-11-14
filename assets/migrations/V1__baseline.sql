@@ -15,7 +15,8 @@ CREATE TABLE fleets (
     name TEXT NOT NULL,
     created_at TEXT NOT NULL,
     deleted_at TEXT,
-    director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT
+    director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT,
+    last_window_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(last_window_ordinal >= 0)
 );
 
 CREATE TABLE asset_installs (
@@ -28,12 +29,17 @@ CREATE TABLE asset_installs (
 CREATE TABLE member_placements (
     member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members (member_id) ON DELETE CASCADE,
     mux_session TEXT NOT NULL,
-    mux_window_id TEXT NOT NULL,
+    mux_window_id TEXT,
+    mux_window_name TEXT,
+    window_ordinal INTEGER NOT NULL CHECK(window_ordinal >= 0),
+    column_side TEXT NOT NULL CHECK(column_side IN ('left','right')),
     mux_pane_id TEXT,
     backend TEXT NOT NULL,
     mux_server TEXT NOT NULL,
     coding_agent TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    CHECK((mux_pane_id IS NULL) = (mux_window_id IS NULL)
+          AND (mux_window_id IS NULL) = (mux_window_name IS NULL))
 );
 
 CREATE TABLE messages (

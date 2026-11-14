@@ -805,9 +805,9 @@ mod tests {
                     (1, 1, 'Director', 'director assignment', 'active', 'registered'),
                     (2, 1, 'worker', 'worker assignment', 'active', 'registered'),
                     (3, 1, 'departed', 'finished assignment', 'deregistered', 'registered');
-                 INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, mux_server, coding_agent, created_at) VALUES
-                    (1, 'main', '@1', '%0', 'tmux', '/tmp/tmux-0/default', 'claude', 'placed'),
-                    (2, 'main', '@1', NULL, 'tmux', '/tmp/tmux-0/default', 'codex', 'placed');
+                 INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, backend, mux_server, coding_agent, created_at) VALUES
+                    (1, 'main', '@1', 'main', 0, 'left', '%0', 'tmux', '/tmp/tmux-0/default', 'claude', 'placed'),
+                    (2, 'main', NULL, NULL, 1, 'right', NULL, 'tmux', '/tmp/tmux-0/default', 'codex', 'placed');
                  UPDATE fleets SET director_member_id=1 WHERE fleet_id=1;
                  INSERT INTO messages(message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at) VALUES
                     (7, 1, 2, 'created-7', 'input_required', 'status-7', 'pending unicode 世界', NULL),
@@ -1020,6 +1020,127 @@ mod tests {
         }
         for url in ["postgresql:///registry", "mysql://localhost/registry"] {
             assert!(connect(url).is_err());
+        }
+    }
+
+    mod placement_shape {
+        use crate::db::tests::initialized_conn;
+        use rusqlite::Connection;
+        use rusqlite::params;
+
+        fn fleet_with_member() -> Connection {
+            let conn = initialized_conn();
+            conn.execute_batch(
+                "INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'layout', 'created');
+                 INSERT INTO members(member_id, fleet_id, name, description, status, registered_at)
+                    VALUES(1, 1, 'worker', '', 'active', 'registered');",
+            )
+            .unwrap();
+            conn
+        }
+
+        fn insert(
+            conn: &Connection,
+            window_id: Option<&str>,
+            window_name: Option<&str>,
+            pane_id: Option<&str>,
+            ordinal: i64,
+            side: &str,
+        ) -> rusqlite::Result<usize> {
+            conn.execute(
+                "INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_window_name,
+                    window_ordinal, column_side, mux_pane_id, backend, mux_server, coding_agent, created_at)
+                 VALUES(1, 'main', ?1, ?2, ?3, ?4, ?5, 'tmux', '/tmp/tmux-0/default', 'claude', 'placed')",
+                params![window_id, window_name, ordinal, side, pane_id],
+            )
+        }
+
+        #[test]
+        fn a_placement_records_its_pane_window_id_and_window_name_all_together_or_none() {
+            for (window_id, window_name, pane_id) in [
+                (None, None, None),
+                (Some("@3"), Some("cafleet-1-1"), Some("%7")),
+                (Some("@3"), Some(""), Some("%7")),
+            ] {
+                let conn = fleet_with_member();
+                insert(&conn, window_id, window_name, pane_id, 1, "left").unwrap();
+            }
+            for (window_id, window_name, pane_id) in [
+                (Some("@3"), None, None),
+                (None, Some("cafleet-1-1"), None),
+                (None, None, Some("%7")),
+                (Some("@3"), Some("cafleet-1-1"), None),
+                (Some("@3"), None, Some("%7")),
+                (None, Some("cafleet-1-1"), Some("%7")),
+            ] {
+                let conn = fleet_with_member();
+                assert!(
+                    insert(&conn, window_id, window_name, pane_id, 1, "left").is_err(),
+                    "{window_id:?} {window_name:?} {pane_id:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn publishing_a_pending_placement_requires_every_concrete_field_in_one_update() {
+            let conn = fleet_with_member();
+            insert(&conn, None, None, None, 2, "right").unwrap();
+            assert!(
+                conn.execute(
+                    "UPDATE member_placements SET mux_pane_id='%7' WHERE member_id=1",
+                    []
+                )
+                .is_err()
+            );
+            assert_eq!(
+                conn.execute(
+                    "UPDATE member_placements SET mux_pane_id='%7', mux_window_id='@3', mux_window_name='cafleet-1-2' WHERE member_id=1 AND mux_pane_id IS NULL",
+                    []
+                )
+                .unwrap(),
+                1
+            );
+        }
+
+        #[test]
+        fn window_ordinal_and_column_side_accept_only_their_domains() {
+            for (ordinal, side) in [(0, "left"), (0, "right"), (5, "left")] {
+                let conn = fleet_with_member();
+                insert(&conn, None, None, None, ordinal, side).unwrap();
+            }
+            for (ordinal, side) in [(-1, "left"), (1, "middle"), (1, "Left"), (1, "")] {
+                let conn = fleet_with_member();
+                assert!(
+                    insert(&conn, None, None, None, ordinal, side).is_err(),
+                    "{ordinal} {side}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_fleet_starts_at_window_ordinal_zero_and_refuses_a_negative_ordinal() {
+            let conn = fleet_with_member();
+            assert_eq!(
+                conn.query_row(
+                    "SELECT last_window_ordinal FROM fleets WHERE fleet_id=1",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+            assert!(
+                conn.execute(
+                    "UPDATE fleets SET last_window_ordinal=-1 WHERE fleet_id=1",
+                    []
+                )
+                .is_err()
+            );
+            conn.execute(
+                "UPDATE fleets SET last_window_ordinal=3 WHERE fleet_id=1",
+                [],
+            )
+            .unwrap();
         }
     }
 

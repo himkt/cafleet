@@ -31,6 +31,55 @@ pub(crate) struct PaneLock {
     path: PathBuf,
 }
 
+pub(crate) const LAYOUT_LOCK_WAIT: Duration = Duration::from_secs(60);
+
+/// `<canonical database file><suffix>/<sha256 hex of key>.lock`.
+fn database_lock_path(
+    database_url: &str,
+    suffix: &str,
+    purpose: &str,
+    key: &[u8],
+) -> Result<PathBuf, CafleetError> {
+    let database =
+        std::fs::canonicalize(crate::db::database_path(database_url)?).map_err(|error| {
+            CafleetError::App(format!(
+                "cannot resolve database {purpose}-lock identity: {error}"
+            ))
+        })?;
+    let mut directory = database.into_os_string();
+    directory.push(suffix);
+    let key = crate::digest::sha256_hex(key);
+    Ok(PathBuf::from(directory).join(format!("{key}.lock")))
+}
+
+/// Opens (creating `0600` and its directory on demand) and tries the lock at `path`; `None`
+/// means another holder has it.
+fn open_and_try_lock(path: &Path, label: &str) -> Result<Option<File>, CafleetError> {
+    let directory = path
+        .parent()
+        .expect("a database lock has its database-adjacent directory");
+    std::fs::create_dir_all(directory).map_err(|error| {
+        CafleetError::App(format!(
+            "cannot create {label}-lock directory {}: {error}",
+            directory.display()
+        ))
+    })?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .map_err(|error| {
+            CafleetError::App(format!(
+                "cannot open {label} lock {}: {error}",
+                path.display()
+            ))
+        })?;
+    Ok(try_lock(&file, path, label)?.then_some(file))
+}
+
 pub(crate) fn lock_path(
     database_url: &str,
     placement: &Placement,
@@ -39,17 +88,42 @@ pub(crate) fn lock_path(
         .mux_pane_id
         .as_deref()
         .ok_or_else(|| CafleetError::App("pane input requires a concrete placement".into()))?;
-    let database =
-        std::fs::canonicalize(crate::db::database_path(database_url)?).map_err(|error| {
-            CafleetError::App(format!(
-                "cannot resolve database input-lock identity: {error}"
-            ))
-        })?;
-    let mut directory = database.into_os_string();
-    directory.push(".pane-locks");
     let key = format!("{}\0{}\0{pane}", placement.backend, placement.mux_session);
-    let key = crate::digest::sha256_hex(key.as_bytes());
-    Ok(PathBuf::from(directory).join(format!("{key}.lock")))
+    database_lock_path(database_url, ".pane-locks", "input", key.as_bytes())
+}
+
+pub(crate) fn layout_lock_path(database_url: &str, fleet_id: i64) -> Result<PathBuf, CafleetError> {
+    database_lock_path(
+        database_url,
+        ".layout-locks",
+        "layout",
+        fleet_id.to_string().as_bytes(),
+    )
+}
+
+/// The fleet-scoped lock serializing every member pane creation and close; dropping it releases
+/// the lock.
+pub(crate) struct LayoutLock {
+    _file: File,
+}
+
+impl LayoutLock {
+    pub(crate) fn try_acquire(
+        database_url: &str,
+        fleet_id: i64,
+    ) -> Result<Option<Self>, CafleetError> {
+        let path = layout_lock_path(database_url, fleet_id)?;
+        Ok(open_and_try_lock(&path, "pane layout")?.map(|file| Self { _file: file }))
+    }
+
+    /// Retry every 50 ms until `lock_deadline`; `None` means the lock stayed busy.
+    pub(crate) fn acquire_within(
+        database_url: &str,
+        fleet_id: i64,
+        lock_deadline: Deadline,
+    ) -> Result<Option<Self>, CafleetError> {
+        retry_until(lock_deadline, || Self::try_acquire(database_url, fleet_id))
+    }
 }
 
 impl PaneLock {
@@ -84,29 +158,7 @@ impl PaneLock {
         placement: &Placement,
     ) -> Result<Option<Self>, CafleetError> {
         let path = lock_path(database_url, placement)?;
-        let directory = path
-            .parent()
-            .expect("a pane lock has its database-adjacent directory");
-        std::fs::create_dir_all(directory).map_err(|error| {
-            CafleetError::App(format!(
-                "cannot create pane input-lock directory {}: {error}",
-                directory.display()
-            ))
-        })?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|error| {
-                CafleetError::App(format!(
-                    "cannot open pane input lock {}: {error}",
-                    path.display()
-                ))
-            })?;
-        Ok(try_lock(&file, &path)?.then_some(Self { file, path }))
+        Ok(open_and_try_lock(&path, PANE_INPUT)?.map(|file| Self { file, path }))
     }
 
     /// Releases this held lock so the member's runner can write its staged input.
@@ -123,7 +175,7 @@ impl PaneLock {
     /// stayed busy.
     pub(crate) fn reacquire_within(&self, lock_deadline: Deadline) -> Result<bool, CafleetError> {
         let reacquired = retry_until(lock_deadline, || {
-            Ok(try_lock(&self.file, &self.path)?.then_some(()))
+            Ok(try_lock(&self.file, &self.path, PANE_INPUT)?.then_some(()))
         })?;
         Ok(reacquired.is_some())
     }
@@ -138,13 +190,15 @@ impl PaneLock {
     }
 }
 
+const PANE_INPUT: &str = "pane input";
+
 /// `false` means another holder has the lock.
-fn try_lock(file: &File, path: &Path) -> Result<bool, CafleetError> {
+fn try_lock(file: &File, path: &Path, label: &str) -> Result<bool, CafleetError> {
     match file.try_lock() {
         Ok(()) => Ok(true),
         Err(TryLockError::WouldBlock) => Ok(false),
         Err(TryLockError::Error(error)) => Err(CafleetError::App(format!(
-            "cannot lock pane input {}: {error}",
+            "cannot lock {label} {}: {error}",
             path.display()
         ))),
     }
@@ -446,7 +500,7 @@ mod tests {
             let selected = pane_lock_for(&guards, &database_url, &placement).unwrap();
             assert!(std::ptr::eq(selected, &guards[0]));
             let mut shared = placement.clone();
-            shared.mux_window_id = "@shared".into();
+            shared.mux_window_id = Some("@shared".into());
             assert!(std::ptr::eq(
                 pane_lock_for(&guards, &database_url, &shared).unwrap(),
                 &guards[0]
@@ -527,7 +581,10 @@ mod tests {
             let path = lock_path(url, placement).unwrap();
             assert_eq!(lock_path(&alias_url, placement).unwrap(), path);
             let mut duplicate = placement.clone();
-            duplicate.mux_window_id = "@99".into();
+            duplicate.mux_window_id = Some("@99".into());
+            duplicate.mux_window_name = Some("cafleet-1-9".into());
+            duplicate.window_ordinal = 9;
+            duplicate.column_side = crate::multiplexer::layout::ColumnSide::Left;
             duplicate.coding_agent = "codex".into();
             assert_eq!(lock_path(url, &duplicate).unwrap(), path);
             for alternative in [
@@ -681,6 +738,120 @@ mod tests {
             }
             drop(high_guard);
             thread.join().unwrap();
+        }
+    }
+
+    mod layout_lock {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use crate::pane_lock::LAYOUT_LOCK_WAIT;
+        use crate::pane_lock::LayoutLock;
+        use crate::pane_lock::layout_lock_path;
+        use crate::time::Deadline;
+
+        fn database() -> (tempfile::TempDir, String) {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("registry.db");
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            crate::db::initialize(&mut conn).unwrap();
+            let url = format!("sqlite:///{}", path.display());
+            (dir, url)
+        }
+
+        fn within(wait: Duration) -> Deadline {
+            Deadline::until(Instant::now() + wait)
+        }
+
+        #[test]
+        fn the_layout_lock_waits_up_to_sixty_seconds() {
+            assert_eq!(LAYOUT_LOCK_WAIT, Duration::from_secs(60));
+        }
+
+        #[test]
+        fn the_layout_lock_lives_beside_the_canonical_database_keyed_by_the_fleet_digest() {
+            let (dir, url) = database();
+            let canonical = std::fs::canonicalize(crate::db::database_path(&url).unwrap()).unwrap();
+            let mut directory = canonical.into_os_string();
+            directory.push(".layout-locks");
+            let expected = std::path::PathBuf::from(directory)
+                .join(format!("{}.lock", crate::digest::sha256_hex(b"7")));
+            assert_eq!(layout_lock_path(&url, 7).unwrap(), expected);
+            let alias = dir.path().join("alias.db");
+            std::os::unix::fs::symlink(crate::db::database_path(&url).unwrap(), &alias).unwrap();
+            let alias_url = format!("sqlite:///{}", alias.display());
+            assert_eq!(layout_lock_path(&alias_url, 7).unwrap(), expected);
+            assert_ne!(layout_lock_path(&url, 8).unwrap(), expected);
+            assert!(!expected.parent().unwrap().exists());
+            let held = LayoutLock::try_acquire(&url, 7).unwrap().unwrap();
+            let metadata = std::fs::metadata(&expected).unwrap();
+            assert!(metadata.is_file());
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+            assert!(
+                LayoutLock::try_acquire(&alias_url, 7).unwrap().is_none(),
+                "an aliased database path shares the fleet's layout lock"
+            );
+            drop(held);
+        }
+
+        #[test]
+        fn a_second_acquisition_blocks_until_the_holder_releases() {
+            let (_dir, url) = database();
+            let held = LayoutLock::try_acquire(&url, 1).unwrap().unwrap();
+            assert!(LayoutLock::try_acquire(&url, 1).unwrap().is_none());
+            let started = Instant::now();
+            let release = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                drop(held);
+            });
+            let acquired = LayoutLock::acquire_within(&url, 1, within(Duration::from_secs(5)))
+                .unwrap()
+                .expect("the waiter acquires once the holder releases");
+            let waited = started.elapsed();
+            release.join().unwrap();
+            assert!(waited >= Duration::from_millis(250), "{waited:?}");
+            assert!(waited < Duration::from_secs(4), "{waited:?}");
+            assert!(LayoutLock::try_acquire(&url, 1).unwrap().is_none());
+            drop(acquired);
+        }
+
+        #[test]
+        fn an_expired_wait_reports_busy_after_its_full_budget() {
+            let (_dir, url) = database();
+            let _held = LayoutLock::try_acquire(&url, 1).unwrap().unwrap();
+            let started = Instant::now();
+            assert!(
+                LayoutLock::acquire_within(&url, 1, within(Duration::from_millis(300)))
+                    .unwrap()
+                    .is_none()
+            );
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_millis(300), "{waited:?}");
+            assert!(waited < Duration::from_secs(2), "{waited:?}");
+        }
+
+        #[test]
+        fn distinct_fleets_do_not_contend() {
+            let (_dir, url) = database();
+            let _first = LayoutLock::try_acquire(&url, 1).unwrap().unwrap();
+            let started = Instant::now();
+            let second = LayoutLock::acquire_within(&url, 2, within(Duration::from_secs(5)))
+                .unwrap()
+                .expect("another fleet's layout lock is free");
+            assert!(started.elapsed() < Duration::from_secs(1));
+            drop(second);
+        }
+
+        #[test]
+        fn a_released_layout_lock_is_free_for_the_next_holder() {
+            let (_dir, url) = database();
+            drop(LayoutLock::try_acquire(&url, 1).unwrap().unwrap());
+            assert!(
+                LayoutLock::acquire_within(&url, 1, within(Duration::from_secs(2)))
+                    .unwrap()
+                    .is_some()
+            );
         }
     }
 }

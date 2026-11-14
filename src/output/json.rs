@@ -15,7 +15,9 @@ pub(crate) fn runtime_recovery(report: &crate::runtime::RecoveryReport) -> Value
 
 pub(crate) fn placement(row: &Placement) -> Value {
     json!({"backend":row.backend,"mux_session":row.mux_session,
-        "mux_window_id":row.mux_window_id,"mux_pane_id":row.mux_pane_id,
+        "mux_window_id":row.mux_window_id,"mux_window_name":row.mux_window_name,
+        "window_ordinal":row.window_ordinal,"column_side":row.column_side.as_str(),
+        "mux_pane_id":row.mux_pane_id,
         "coding_agent":row.coding_agent,"created_at":row.created_at})
 }
 
@@ -395,6 +397,83 @@ mod tests {
         }
     }
 
+    mod placement_json {
+        use crate::broker::Placement;
+        use crate::broker::runtime::test_support::assert_key_order;
+        use crate::multiplexer::layout::ColumnSide;
+        use serde_json::Value;
+        use serde_json::json;
+
+        const PLACEMENT_KEYS: [&str; 9] = [
+            "backend",
+            "mux_session",
+            "mux_window_id",
+            "mux_window_name",
+            "window_ordinal",
+            "column_side",
+            "mux_pane_id",
+            "coding_agent",
+            "created_at",
+        ];
+
+        fn placement(concrete: bool) -> Placement {
+            Placement {
+                backend: "tmux".into(),
+                mux_session: "main".into(),
+                mux_window_id: concrete.then(|| "@6".into()),
+                mux_window_name: concrete.then(|| "cafleet-3-1".into()),
+                window_ordinal: 1,
+                column_side: ColumnSide::Left,
+                mux_pane_id: concrete.then(|| "%12".into()),
+                coding_agent: "claude".into(),
+                created_at: "2026-11-13T00:00:00+00:00".into(),
+                mux_server: "/tmp/tmux-1000/default".into(),
+            }
+        }
+
+        #[test]
+        fn a_concrete_placement_orders_its_window_and_slot_keys_before_the_pane() {
+            let value = crate::output::json::placement(&placement(true));
+            assert_key_order(&value, &PLACEMENT_KEYS);
+            assert_eq!(
+                value,
+                json!({
+                    "backend": "tmux",
+                    "mux_session": "main",
+                    "mux_window_id": "@6",
+                    "mux_window_name": "cafleet-3-1",
+                    "window_ordinal": 1,
+                    "column_side": "left",
+                    "mux_pane_id": "%12",
+                    "coding_agent": "claude",
+                    "created_at": "2026-11-13T00:00:00+00:00",
+                })
+            );
+        }
+
+        #[test]
+        fn a_pending_placement_has_a_null_window_and_pane_and_keeps_its_slot() {
+            let value = crate::output::json::placement(&placement(false));
+            assert_key_order(&value, &PLACEMENT_KEYS);
+            for key in ["mux_window_id", "mux_window_name", "mux_pane_id"] {
+                assert_eq!(value[key], Value::Null, "{key}");
+            }
+            assert_eq!(value["window_ordinal"], 1);
+            assert_eq!(value["column_side"], "left");
+        }
+
+        #[test]
+        fn column_sides_render_as_their_stored_values() {
+            for (side, wire) in [(ColumnSide::Left, "left"), (ColumnSide::Right, "right")] {
+                let value = crate::output::json::placement(&Placement {
+                    column_side: side,
+                    ..placement(true)
+                });
+                assert_eq!(value["column_side"], wire);
+            }
+        }
+    }
+
     mod runtime {
         use crate::broker::runtime as storage;
         use crate::broker::runtime::test_support::*;
@@ -576,7 +655,7 @@ mod tests {
             assert_eq!(
                 text,
                 format!(
-                    "{} worker active\nRuntime: run={} mode=never status=running coverage=unknown review=-",
+                    "{} worker active window=main\nRuntime: run={} mode=never status=running coverage=unknown review=-",
                     fixture.member, owner.run_id
                 )
             );
@@ -599,7 +678,7 @@ mod tests {
             );
             assert_eq!(
                 crate::output::format_member_detail(&member),
-                format!("{} worker active\n{line}", fixture.member)
+                format!("{} worker active window=main\n{line}", fixture.member)
             );
             let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
             assert_key_order(
@@ -646,7 +725,7 @@ mod tests {
                 );
                 assert_eq!(
                     crate::output::format_member_detail(&member),
-                    format!("{} worker active\n{line}", fixture.member)
+                    format!("{} worker active window=main\n{line}", fixture.member)
                 );
                 let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
                 let shown = crate::output::json::runtime_event(&view);

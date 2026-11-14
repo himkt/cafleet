@@ -56,6 +56,10 @@ impl ProcessIdentity {
     pub(crate) fn matches(&self) -> Result<bool> {
         Ok(Self::read(self.pid)?.as_ref() == Some(self))
     }
+    /// An unreaped zombie keeps its identity but is not alive.
+    pub(crate) fn is_alive(&self) -> Result<bool> {
+        Ok(self.matches()? && !stopped(self.pid)?)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -218,8 +222,15 @@ fn signal_pid(pid: i64, signal: nix::sys::signal::Signal) -> Result<()> {
     }
 }
 
-fn running(process: &ProcessIdentity) -> Result<bool> {
-    Ok(process.matches()? && !stopped(process.pid)?)
+/// The members of `group` that have not exited; an unreaped zombie member counts as exited.
+fn live_group_members(group: i32) -> Result<Vec<i64>> {
+    let mut live = Vec::new();
+    for pid in group_members(group)? {
+        if !stopped(pid)? {
+            live.push(pid);
+        }
+    }
+    Ok(live)
 }
 
 pub(super) fn recover_descendants(
@@ -231,8 +242,8 @@ pub(super) fn recover_descendants(
         return Ok(outcome);
     };
     let group = i32::try_from(child.pid).map_err(io_error)?;
-    if !running(&child)? {
-        if !group_members(group)?.is_empty() {
+    if !child.is_alive()? {
+        if !live_group_members(group)?.is_empty() {
             outcome
                 .fail("descendant ownership cannot be anchored to the recorded child generation");
         }
@@ -250,7 +261,7 @@ pub(super) fn recover_descendants(
                 Ok(found || process.matches()?)
             })?;
         if !anchored {
-            if !group_members(group)?.is_empty() {
+            if !live_group_members(group)?.is_empty() {
                 outcome.fail("descendant ownership lost its recorded process generation");
             }
             break;
@@ -268,7 +279,7 @@ pub(super) fn recover_descendants(
             }
         }
         for process in owned.values() {
-            if running(process)? {
+            if process.is_alive()? {
                 signal_pid(process.pid, signal)?;
             }
         }
@@ -279,7 +290,7 @@ pub(super) fn recover_descendants(
         };
         while Instant::now() < until {
             let alive = owned.values().try_fold(false, |alive, process| {
-                Ok::<_, CafleetError>(alive || running(process)?)
+                Ok::<_, CafleetError>(alive || process.is_alive()?)
             })?;
             if !alive {
                 break;
@@ -288,7 +299,7 @@ pub(super) fn recover_descendants(
         }
     }
     for process in owned.values() {
-        if running(process)? {
+        if process.is_alive()? {
             outcome.fail("verified descendants remain after the original cleanup deadline");
             break;
         }
@@ -866,6 +877,40 @@ pub(crate) mod test_support {
                 None => Ok(self.nested),
             }
         }
+    }
+
+    /// A killed child that stays unreaped until the caller waits on it.
+    pub(crate) fn zombie() -> (std::process::Child, crate::runtime::ProcessIdentity) {
+        zombie_in_group(0)
+    }
+
+    /// `group` 0 makes the child lead its own process group.
+    pub(crate) fn zombie_in_group(
+        group: i32,
+    ) -> (std::process::Child, crate::runtime::ProcessIdentity) {
+        use std::os::unix::process::CommandExt;
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(group)
+            .spawn()
+            .unwrap();
+        let identity = crate::runtime::ProcessIdentity::read(i64::from(child.id()))
+            .unwrap()
+            .expect("a just-spawned child is visible");
+        child.kill().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !super::stopped(identity.pid).unwrap() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the killed child did not exit"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(
+            identity.matches().unwrap(),
+            "an unreaped zombie keeps its recorded identity"
+        );
+        (child, identity)
     }
 }
 
@@ -2066,6 +2111,98 @@ mod tests {
             fn nested_pid_namespace_reads_without_error() {
                 SystemProcessTable.nested_pid_namespace().unwrap();
             }
+        }
+    }
+
+    mod zombie_liveness {
+        use std::os::unix::process::CommandExt;
+
+        use crate::runtime::process::test_support::zombie;
+        use crate::runtime::process::test_support::zombie_in_group;
+        use crate::runtime::process::tests::*;
+        use crate::runtime::test_support::Fixture;
+
+        fn with_child(child: &ProcessIdentity) -> crate::broker::runtime::RunRecord {
+            let mut run = Fixture::new().run;
+            run.child_pid = Some(child.pid);
+            run.child_start_identity = Some(child.start_identity.clone());
+            run
+        }
+
+        fn clock() -> ShutdownClock {
+            ShutdownClock::with_unit(Instant::now(), Duration::from_millis(100))
+        }
+
+        fn group_leader() -> (std::process::Child, ProcessIdentity) {
+            let child = std::process::Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let identity = ProcessIdentity::read(i64::from(child.id()))
+                .unwrap()
+                .expect("a just-spawned leader is visible");
+            (child, identity)
+        }
+
+        #[test]
+        fn a_process_with_its_recorded_identity_is_alive_only_as_that_generation() {
+            let current = ProcessIdentity::current().unwrap();
+            assert!(current.is_alive().unwrap());
+            let other_generation = ProcessIdentity {
+                start_identity: format!("{}-other", current.start_identity),
+                ..current
+            };
+            assert!(!other_generation.is_alive().unwrap());
+        }
+
+        #[test]
+        fn an_unreaped_zombie_keeps_its_identity_but_is_not_alive() {
+            let (mut child, identity) = zombie();
+            assert!(identity.matches().unwrap());
+            assert!(!identity.is_alive().unwrap());
+            child.wait().unwrap();
+            assert!(!identity.matches().unwrap());
+            assert!(!identity.is_alive().unwrap());
+        }
+
+        #[test]
+        fn recovery_completes_for_a_zombie_child_alone_in_its_group() {
+            let (mut child, identity) = zombie();
+            let outcome = recover_descendants(&with_child(&identity), clock()).unwrap();
+            child.wait().unwrap();
+            assert_eq!(outcome.diagnostics, Vec::<String>::new());
+            assert_eq!(outcome.cleanup_state, CleanupState::Complete);
+        }
+
+        #[test]
+        fn recovery_counts_only_non_zombie_members_of_a_reaped_child_group() {
+            let (mut leader, identity) = group_leader();
+            let group = i32::try_from(identity.pid).unwrap();
+            let (mut descendant, _) = zombie_in_group(group);
+            leader.kill().unwrap();
+            leader.wait().unwrap();
+            let outcome = recover_descendants(&with_child(&identity), clock()).unwrap();
+            descendant.wait().unwrap();
+            assert_eq!(outcome.diagnostics, Vec::<String>::new());
+            assert_eq!(outcome.cleanup_state, CleanupState::Complete);
+        }
+
+        #[test]
+        fn recovery_still_refuses_a_live_group_member_it_cannot_anchor() {
+            let (mut leader, identity) = group_leader();
+            let stale = ProcessIdentity {
+                start_identity: format!("{}-stale", identity.start_identity),
+                ..identity
+            };
+            let outcome = recover_descendants(&with_child(&stale), clock()).unwrap();
+            leader.kill().unwrap();
+            leader.wait().unwrap();
+            assert_eq!(
+                outcome.diagnostics,
+                ["descendant ownership cannot be anchored to the recorded child generation"]
+            );
+            assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
         }
     }
 }

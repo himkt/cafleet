@@ -1,8 +1,8 @@
 # Multi-window fleet layout
 
-**Status**: Approved
-**Progress**: 0/58 tasks complete
-**Last Updated**: 2026-11-13
+**Status**: Complete
+**Progress**: 64/64 tasks complete
+**Last Updated**: 2026-11-14
 
 ## Overview
 
@@ -10,16 +10,16 @@ A fleet spreads its member panes across several multiplexer windows (a tmux wind
 
 ## Success Criteria
 
-- [ ] With the Director window full, the next `member create` opens a detached overflow window named `cafleet-<fleet_id>-<ordinal>` without stealing focus, on both tmux and herdr.
-- [ ] Column capacity is `min(8, floor(window_height / 30))` and is evaluated at spawn time; existing members never move to another window.
-- [ ] The Director window keeps the Director alone in its left half and stacks members in the right column; overflow windows fill the left column top to bottom, then the right column.
-- [ ] After every member create and member delete, each column of the affected window has equal pane heights (tmux `select-layout -E`, herdr arithmetic equalization per column), best effort.
-- [ ] Overflow-window ordinals only increase within a fleet; an overflow window closes when its last member leaves.
-- [ ] Member panes carry the member name as their pane title (tmux) / pane label (herdr), best effort.
-- [ ] `member list` text shows a `window` column; `member create` and `member show` text append `window=<name>`; the JSON `placement` object carries `mux_window_name`, `window_ordinal` and `column_side`.
-- [ ] Concurrent `member create` and `member delete` calls in one fleet never choose the same slot, open two windows for one ordinal, or target a pane another operation is closing.
-- [ ] An overflow window that can no longer be read fails `member create` with an error naming the window, its active members and the remedy.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass; the manual live checks in Step 13 pass on tmux 3.6a and herdr 0.9.5.
+- [x] With the Director window full, the next `member create` opens a detached overflow window named `cafleet-<fleet_id>-<ordinal>` without stealing focus, on both tmux and herdr.
+- [x] Column capacity is `min(8, floor(window_height / 30))` and is evaluated at spawn time; existing members never move to another window.
+- [x] The Director window keeps the Director alone in its left half and stacks members in the right column; overflow windows fill the left column top to bottom, then the right column.
+- [x] After every member create and member delete, each column of the affected window has equal pane heights (tmux `select-layout -E`, herdr arithmetic equalization per column), best effort.
+- [x] Overflow-window ordinals only increase within a fleet; an overflow window closes when its last member leaves.
+- [x] Member panes carry the member name as their pane title (tmux) / pane label (herdr), best effort.
+- [x] `member list` text shows a `window` column; `member create` and `member show` text append `window=<name>`; the JSON `placement` object carries `mux_window_name`, `window_ordinal` and `column_side`.
+- [x] Concurrent `member create` and `member delete` calls in one fleet never choose the same slot, open two windows for one ordinal, or target a pane another operation is closing.
+- [x] An overflow window that can no longer be read fails `member create` with an error naming the window, its active members and the remedy.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass; the manual live checks in Step 13 pass on tmux 3.6a and herdr 0.9.5.
 
 ---
 
@@ -410,103 +410,115 @@ A user-configurable column bound or minimum height, a `member create --window` t
 
 ### Step 1: SPEC.md
 
-- [ ] Add `#### Fleet window layout` to §6.5 with terms, constants, capacity formula and table, slot selection, the unreadable-window error, policy decisions, naming and the fleet layout lock with its hold rationale <!-- completed: -->
-- [ ] Update §6.5 Backend matrix, Multiplexer context, Backend operations rows, Delete-time pane layout, and generalize herdr column equalization to every column with the re-parenting procedures <!-- completed: -->
-- [ ] Update §6.5 Termination during pane input spans for the layout lock <!-- completed: -->
-- [ ] Update §5.5, §6.2 Members and §6.9 Runner boundary and creation transaction for nullable window fields, occupancy and publication <!-- completed: -->
-- [ ] Update §6.3 `fleet create`, Output shapes, Member list output, `member create`, `member show`, `member delete`, `fleet delete` and Error Messages <!-- completed: -->
-- [ ] Update §6.7 Backend capabilities for multiplexer pane naming <!-- completed: -->
-- [ ] Update §8 DDL and the `member_placements` / `fleets` semantics rows <!-- completed: -->
+- [x] Add `#### Fleet window layout` to §6.5 with terms, constants, capacity formula and table, slot selection, the unreadable-window error, policy decisions, naming and the fleet layout lock with its hold rationale <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.5 Backend matrix, Multiplexer context, Backend operations rows, Delete-time pane layout, and generalize herdr column equalization to every column with the re-parenting procedures <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.5 Termination during pane input spans for the layout lock <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §5.5, §6.2 Members and §6.9 Runner boundary and creation transaction for nullable window fields, occupancy and publication <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.3 `fleet create`, Output shapes, Member list output, `member create`, `member show`, `member delete`, `fleet delete` and Error Messages <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §6.7 Backend capabilities for multiplexer pane naming <!-- completed: 2026-11-13T14:07 -->
+- [x] Update §8 DDL and the `member_placements` / `fleets` semantics rows <!-- completed: 2026-11-13T14:07 -->
 
 ### Step 2: User documentation
 
-- [ ] Add the "Pane layout" section to `docs/docs/concepts/members.md` <!-- completed: -->
-- [ ] Update the Core terms table in `docs/docs/concepts/overview.md` <!-- completed: -->
-- [ ] Update the pane-name sentence in `docs/docs/concepts/coding-agents.md` <!-- completed: -->
-- [ ] Confirm `README.md` needs no change <!-- completed: -->
+- [x] Add the "Pane layout" section to `docs/docs/concepts/members.md` <!-- completed: 2026-11-13T14:09 -->
+- [x] Update the Core terms table in `docs/docs/concepts/overview.md` <!-- completed: 2026-11-13T14:09 -->
+- [x] Update the pane-name sentence in `docs/docs/concepts/coding-agents.md` <!-- completed: 2026-11-13T14:09 -->
+- [x] Confirm `README.md` needs no change <!-- completed: 2026-11-13T14:09 -->
 
 ### Step 3: Skills
 
-- [ ] Update `assets/skills/cafleet/reference/cli.md` (`fleet create`, `member create` output, `member list` / `member show`, `member delete` / `fleet delete` busy outcomes, split reference, error rows) <!-- completed: -->
-- [ ] Update the pane-discovery sentence in `assets/skills/cafleet/roles/director.md` <!-- completed: -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` (`fleet create`, `member create` output, `member list` / `member show`, `member delete` / `fleet delete` busy outcomes, split reference, error rows) <!-- completed: 2026-11-13T14:09 -->
+- [x] Update the pane-discovery sentence in `assets/skills/cafleet/roles/director.md` <!-- completed: 2026-11-13T14:09 -->
 
 ### Step 4: Schema and registry
 
-- [ ] Edit `assets/migrations/V1__baseline.sql`: `fleets.last_window_ordinal`, nullable `mux_window_id`, `mux_window_name`, `window_ordinal`, `column_side`, the nullability CHECK <!-- completed: -->
-- [ ] Update `Placement`, `PLACEMENT_COLUMNS`, row decoding (typed `ColumnSide`, `InvalidStoredValue` on a bad value) in `src/broker/mod.rs`, and every `PLACEMENT_COLUMNS` consumer <!-- completed: -->
-- [ ] Update `NewPlacement`, `insert_placement_row` and `RETURNING` lists in `src/broker/members.rs`; add an occupancy query returning concrete placements by ordinal and side, and the active members of one ordinal <!-- completed: -->
-- [ ] Update every `Placement` / `NewPlacement` construction, production and test alike, to the new fields <!-- completed: -->
-- [ ] Record the Director row as ordinal 0, `left`, with its window ID and the name from `window_name` in `fleet create` (`src/cli/fleet.rs`, `src/broker/fleets.rs`), with a unit test in `src/cli/fleet.rs` that a failed window-name read registers nothing <!-- completed: -->
-- [ ] Adapt `mux_window_id` consumers (both backends' `check_key_target`, fleet-delete revalidation) to `Option<String>` with `.expect` after the concrete-pane check <!-- completed: -->
-- [ ] Unit tests in `src/db.rs`: the baseline CHECK rejects a placement whose pane, window ID and window name are not all null or all set <!-- completed: -->
-- [ ] Unit tests in `src/broker/members.rs`: the occupancy query groups concrete placements by ordinal and side and excludes the Director and pending rows; a bad stored `column_side` fails with `InvalidStoredValue` <!-- completed: -->
+- [x] Edit `assets/migrations/V1__baseline.sql`: `fleets.last_window_ordinal`, nullable `mux_window_id`, `mux_window_name`, `window_ordinal`, `column_side`, the nullability CHECK <!-- completed: 2026-11-13T14:30 -->
+- [x] Update `Placement`, `PLACEMENT_COLUMNS`, row decoding (typed `ColumnSide`, `InvalidStoredValue` on a bad value) in `src/broker/mod.rs`, and every `PLACEMENT_COLUMNS` consumer <!-- completed: 2026-11-13T14:30 -->
+- [x] Update `NewPlacement`, `insert_placement_row` and `RETURNING` lists in `src/broker/members.rs`; add an occupancy query returning concrete placements by ordinal and side, and the active members of one ordinal <!-- completed: 2026-11-13T14:30 -->
+- [x] Update every `Placement` / `NewPlacement` construction, production and test alike, to the new fields <!-- completed: 2026-11-13T14:40 -->
+- [x] Record the Director row as ordinal 0, `left`, with its window ID and the name from `window_name` in `fleet create` (`src/cli/fleet.rs`, `src/broker/fleets.rs`), with a unit test in `src/cli/fleet.rs` that a failed window-name read registers nothing <!-- completed: 2026-11-13T14:30 -->
+- [x] Adapt `mux_window_id` consumers (both backends' `check_key_target`, fleet-delete revalidation) to `Option<String>` with `.expect` after the concrete-pane check <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/db.rs`: the baseline CHECK rejects a placement whose pane, window ID and window name are not all null or all set <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/broker/members.rs`: the occupancy query groups concrete placements by ordinal and side and excludes the Director and pending rows; a bad stored `column_side` fails with `InvalidStoredValue` <!-- completed: 2026-11-13T14:30 -->
 
 ### Step 5: Slot selection
 
-- [ ] Create `src/multiplexer/layout.rs` with `MIN_PANE_HEIGHT`, `MAX_PANES_PER_COLUMN`, `ColumnSide`, `capacity`, `WindowOccupancy`, `SlotChoice`, `choose_slot` <!-- completed: -->
-- [ ] Unit tests in `src/multiplexer/layout.rs`: capacity table rows; Director window fill; Director right capacity 0 skipped; overflow left-then-right; new window ordinal = last + 1 with `cafleet-<fleet>-<n>` name; freed Director slot reused before overflow; emptied left column refilled first; invariant panics <!-- completed: -->
+- [x] Create `src/multiplexer/layout.rs` with `MIN_PANE_HEIGHT`, `MAX_PANES_PER_COLUMN`, `ColumnSide`, `capacity`, `WindowOccupancy`, `SlotChoice`, `choose_slot` <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/multiplexer/layout.rs`: capacity table rows; Director window fill; Director right capacity 0 skipped; overflow left-then-right; new window ordinal = last + 1 with `cafleet-<fleet>-<n>` name; freed Director slot reused before overflow; emptied left column refilled first; invariant panics <!-- completed: 2026-11-13T14:30 -->
 
 ### Step 6: Fleet layout lock
 
-- [ ] Add the fleet layout lock (path, `0600`, `LAYOUT_LOCK_WAIT`, retry every 50 ms) beside the pane lock in `src/pane_lock.rs` <!-- completed: -->
-- [ ] Unit tests in `src/pane_lock.rs`: a second acquisition blocks until release; expiry reports busy; distinct fleets do not contend <!-- completed: -->
+- [x] Add the fleet layout lock (path, `0600`, `LAYOUT_LOCK_WAIT`, retry every 50 ms) beside the pane lock in `src/pane_lock.rs` <!-- completed: 2026-11-13T14:30 -->
+- [x] Unit tests in `src/pane_lock.rs`: a second acquisition blocks until release; expiry reports busy; distinct fleets do not contend <!-- completed: 2026-11-13T14:30 -->
 
 ### Step 7: Multiplexer interface
 
-- [ ] Replace `split_window` with `spawn_member_pane`; add `window_height`, `window_name`, `PaneTarget`, `ColumnTarget`, `SpawnedPane`; change `kill_pane` and `close_pane` to take the window ID in `src/multiplexer/mod.rs` <!-- completed: -->
-- [ ] Update every `LaunchHost` implementation, production and test alike, so `split_runner` returns `SpawnedPane` <!-- completed: -->
-- [ ] Update every `LaunchHost::close_pane` implementation, production and test alike, to take the `SpawnedPane` and pass its window ID to `kill_pane` <!-- completed: -->
+- [x] Replace `split_window` with `spawn_member_pane`; add `window_height`, `window_name`, `PaneTarget`, `ColumnTarget`, `SpawnedPane`; change `kill_pane` and `close_pane` to take the window ID in `src/multiplexer/mod.rs` <!-- completed: 2026-11-13T14:40 -->
+- [x] Update every `LaunchHost` implementation, production and test alike, so `split_runner` returns `SpawnedPane` <!-- completed: 2026-11-13T14:40 -->
+- [x] Update every `LaunchHost::close_pane` implementation, production and test alike, to take the `SpawnedPane` and pass its window ID to `kill_pane` <!-- completed: 2026-11-13T14:40 -->
 
 ### Step 8: tmux backend
 
-- [ ] Implement the four creation argvs, `new-window` reply parsing, `select-pane -T`, and remove `main-vertical` in `src/multiplexer/tmux.rs` <!-- completed: -->
-- [ ] Implement `window_name` (`#{window_id}|#{window_name}`, first field must match) and `window_height` <!-- completed: -->
-- [ ] Implement equalize-every-column (`list-panes` + `select-layout -E` per column) after creation and in `restore_after_close`, tolerating `can't find window` <!-- completed: -->
-- [ ] Unit tests in `src/multiplexer/tmux.rs` (FakeRunner argv): each creation target; naming and equalization errors ignored; malformed `new-window` reply is `PaneCleanup::Unknown`; empty and non-integer height replies fail; `window_name` rejects an empty or other-window reply and keeps a name containing `|`; restoration of a closed window does nothing; compensation `kill_pane("%7", "@1")` runs exactly `kill-pane -t %7`, `list-panes -t @1 -F "#{pane_id}|#{pane_left}"`, then `select-layout -E -t <first pane>` per column of 2 or more panes <!-- completed: -->
+- [x] Implement the four creation argvs, `new-window` reply parsing, `select-pane -T`, and remove `main-vertical` in `src/multiplexer/tmux.rs` <!-- completed: 2026-11-13T14:40 -->
+- [x] Implement `window_name` (`#{window_id}|#{window_name}`, first field must match) and `window_height` <!-- completed: 2026-11-13T14:40 -->
+- [x] Implement equalize-every-column (`list-panes` + `select-layout -E` per column) after creation and in `restore_after_close`, tolerating `can't find window` <!-- completed: 2026-11-13T15:08 -->
+- [x] Unit tests in `src/multiplexer/tmux.rs` (FakeRunner argv): each creation target; naming and equalization errors ignored; malformed `new-window` reply is `PaneCleanup::Unknown`; empty and non-integer height replies fail; `window_name` rejects an empty or other-window reply and keeps a name containing `|`; restoration of a closed window does nothing; compensation `kill_pane("%7", "@1")` runs exactly `kill-pane -t %7`, `list-panes -t @1 -F "#{pane_id}|#{pane_left}"`, then `select-layout -E -t <first pane>` per column of 2 or more panes <!-- completed: 2026-11-13T14:40 -->
 
 ### Step 9: herdr backend
 
-- [ ] Implement column append (bottom pane from the live layout), first-right split, `tab create` new window, then `pane run`, `pane rename` in that order in `src/multiplexer/herdr.rs` <!-- completed: -->
-- [ ] Implement Right and Left re-parenting, each through one temporary tab with `--no-focus` moves, after `pane run` and `pane rename` <!-- completed: -->
-- [ ] Generalize `right_column` / `equalize_column` to every column (group by `rect.x`, match split `rect.x` and `rect.width`) <!-- completed: -->
-- [ ] Replace the `closed_tab` pre-close `pane get` read with the window ID passed to `close_pane`; implement the three-row delete-time restoration <!-- completed: -->
-- [ ] Implement `window_name` (`tab get` label) and `window_height` (`layout.area.height`, trying each anchor in order) <!-- completed: -->
-- [ ] Unit tests in `src/multiplexer/herdr.rs`: each creation target argv; re-parenting argv for k = 2 and k = 4 and for m = 1 and m = 3; a `pane run` failure closes only the new pane and runs no move; a failed move emits the diagnostic and keeps the spawn; two-column equalization; restoration per tab state; `tab create` missing fields are `PaneCleanup::Unknown`; `window_height` with a first anchor failing `pane_not_found` and a second answering returns the second's height, and fails with the last error only when every anchor fails; `window_name` reads the `tab get` label and rejects a reply without one <!-- completed: -->
+- [x] Implement column append (bottom pane from the live layout), first-right split, `tab create` new window, then `pane run`, `pane rename` in that order in `src/multiplexer/herdr.rs` <!-- completed: 2026-11-13T14:40 -->
+- [x] Implement Right and Left re-parenting, each through one temporary tab with `--no-focus` moves, after `pane run` and `pane rename` <!-- completed: 2026-11-13T14:40 -->
+- [x] Generalize `right_column` / `equalize_column` to every column (group by `rect.x`, match split `rect.x` and `rect.width`) <!-- completed: 2026-11-13T14:40 -->
+- [x] Replace the `closed_tab` pre-close `pane get` read with the window ID passed to `close_pane`; implement the three-row delete-time restoration <!-- completed: 2026-11-13T14:40 -->
+- [x] Implement `window_name` (`tab get` label) and `window_height` (`layout.area.height`, trying each anchor in order) <!-- completed: 2026-11-13T14:40 -->
+- [x] Unit tests in `src/multiplexer/herdr.rs`: each creation target argv; re-parenting argv for k = 2 and k = 4 and for m = 1 and m = 3; a `pane run` failure closes only the new pane and runs no move; a failed move emits the diagnostic and keeps the spawn; two-column equalization; restoration per tab state; `tab create` missing fields are `PaneCleanup::Unknown`; `window_height` with a first anchor failing `pane_not_found` and a second answering returns the second's height, and fails with the last error only when every anchor fails; `window_name` reads the `tab get` label and rejects a reply without one <!-- completed: 2026-11-13T14:40 -->
 
 ### Step 10: `member create` wiring
 
-- [ ] Acquire the layout lock before resolving the Director placement and capture the creation deadline after it; read occupancy and heights; call `choose_slot`; register with ordinal/side and the ordinal update in `src/cli/member.rs` and `src/runtime/lifecycle.rs` <!-- completed: -->
-- [ ] Publish pane ID, window ID and window name together; release the lock when creation returns <!-- completed: -->
-- [ ] Unit tests in `src/runtime/lifecycle.rs`: publication updates all three fields; compensation passes the spawned window ID to `close_pane`; compensation after a new-window spawn failure leaves the ordinal consumed <!-- completed: -->
-- [ ] Unit tests in `src/cli/member.rs`: a busy layout lock fails with the create busy string and registers nothing; an unreadable overflow window fails with the unreadable-window string listing its members and registers nothing; a changed `last_window_ordinal` rolls back with the invariant message <!-- completed: -->
+- [x] Acquire the layout lock before resolving the Director placement and capture the creation deadline after it; read occupancy and heights; call `choose_slot`; register with ordinal/side and the ordinal update in `src/cli/member.rs` and `src/runtime/lifecycle.rs` <!-- completed: 2026-11-13T14:59 -->
+- [x] Publish pane ID, window ID and window name together; release the lock when creation returns <!-- completed: 2026-11-13T14:59 -->
+- [x] Unit tests in `src/runtime/lifecycle.rs`: publication updates all three fields; compensation passes the spawned window ID to `close_pane`; compensation after a new-window spawn failure leaves the ordinal consumed <!-- completed: 2026-11-13T15:08 -->
+- [x] Unit tests in `src/cli/member.rs`: a busy layout lock fails with the create busy string and registers nothing; an unreadable overflow window fails with the unreadable-window string listing its members and registers nothing; a changed `last_window_ordinal` rolls back with the invariant message <!-- completed: 2026-11-13T15:08 -->
 
 ### Step 11: Deletion
 
-- [ ] Acquire the layout lock in `member delete` after the pane lock and before cleanup, extending the deletion deadline by the wait, in `src/cli/member.rs` <!-- completed: -->
-- [ ] Acquire the layout lock once in `fleet delete` after its pane locks; pass it to `end_member`; pass `placement.mux_window_id` to `close_pane` in `src/cli/fleet.rs` <!-- completed: -->
-- [ ] Unit tests in `src/cli/member.rs`: a busy layout lock fails `member delete` with its busy string and leaves the run, pane and row unchanged <!-- completed: -->
-- [ ] Unit tests in `src/cli/fleet.rs`: a busy layout lock fails `fleet delete` with its busy string and leaves every member unchanged; `close_pane` receives the recorded window ID <!-- completed: -->
+- [x] Acquire the layout lock in `member delete` after the pane lock and before cleanup, extending the deletion deadline by the wait, in `src/cli/member.rs` <!-- completed: 2026-11-13T14:59 -->
+- [x] Acquire the layout lock once in `fleet delete` after its pane locks; pass it to `end_member`; pass `placement.mux_window_id` to `close_pane` in `src/cli/fleet.rs` <!-- completed: 2026-11-13T14:59 -->
+- [x] Unit tests in `src/cli/member.rs`: a busy layout lock fails `member delete` with its busy string and leaves the run, pane and row unchanged <!-- completed: 2026-11-13T15:08 -->
+- [x] Unit tests in `src/cli/fleet.rs`: a busy layout lock fails `fleet delete` with its busy string and leaves every member unchanged; `close_pane` receives the recorded window ID <!-- completed: 2026-11-13T15:08 -->
 
 ### Step 12: Output
 
-- [ ] Update `format_member`, `format_member_list`, `format_member_detail` in `src/output/text.rs` and `placement` in `src/output/json.rs` <!-- completed: -->
-- [ ] Unit tests in `src/output/text.rs`: the example `member list` rows above and a `(pending)` window <!-- completed: -->
-- [ ] Unit tests in `src/output/json.rs`: placement key order and nulls <!-- completed: -->
+- [x] Update `format_member`, `format_member_list`, `format_member_detail` in `src/output/text.rs` and `placement` in `src/output/json.rs` <!-- completed: 2026-11-13T14:59 -->
+- [x] Unit tests in `src/output/text.rs`: the example `member list` rows above and a `(pending)` window <!-- completed: 2026-11-13T15:08 -->
+- [x] Unit tests in `src/output/json.rs`: placement key order and nulls <!-- completed: 2026-11-13T15:08 -->
 
 ### Step 13: Live verification
 
-- [ ] tmux 3.6a: create a fleet in a ≥ 120-row window and spawn enough members to open two overflow windows; confirm names, focus, per-column equal heights, `member list` windows <!-- completed: -->
-- [ ] tmux: delete members to empty an overflow left column, then create one member and confirm the left column is recreated; delete the rest and confirm the window closes and the next window takes a higher ordinal <!-- completed: -->
-- [ ] herdr 0.9.5: repeat the two tmux checks, confirming re-parenting keeps pane IDs and the focused tab <!-- completed: -->
-- [ ] Close an overflow window by hand and confirm the next `member create` reports the unreadable-window error naming its members <!-- completed: -->
-- [ ] Run three `member create` calls concurrently, then one `member delete` concurrently with a `member create`, on each backend; confirm distinct slots, no busy error and an intact layout <!-- completed: -->
+- [x] tmux 3.6a: create a fleet in a ≥ 120-row window and spawn enough members to open two overflow windows; confirm names, focus, per-column equal heights, `member list` windows <!-- completed: 2026-11-13T15:19 -->
+- [x] tmux: delete members to empty an overflow left column, then create one member and confirm the left column is recreated; delete the rest and confirm the window closes and the next window takes a higher ordinal <!-- completed: 2026-11-13T15:19 -->
+- [x] herdr 0.9.5: repeat the two tmux checks, confirming re-parenting keeps pane IDs and the focused tab <!-- completed: 2026-11-13T15:19 -->
+- [x] Close an overflow window by hand and confirm the next `member create` reports the unreadable-window error naming its members <!-- completed: 2026-11-13T15:19 -->
+- [x] Run three `member create` calls concurrently, then one `member delete` concurrently with a `member create`, on each backend; confirm distinct slots, no busy error and an intact layout <!-- completed: 2026-11-13T15:19 -->
 
 ### Step 14: Validation
 
-- [ ] `mise //:test` <!-- completed: -->
-- [ ] `mise //:lint` <!-- completed: -->
-- [ ] `mise //docs:build` and inspect any changed table with a literal pipe in the rendered HTML <!-- completed: -->
-- [ ] Reinstall the CLI through its mise task <!-- completed: -->
+- [x] `mise //:test` <!-- completed: 2026-11-13T15:15 -->
+- [x] `mise //:lint` <!-- completed: 2026-11-13T15:13 -->
+- [x] `mise //docs:build` and inspect any changed table with a literal pipe in the rendered HTML <!-- completed: 2026-11-13T15:13 -->
+- [x] Reinstall the CLI through its mise task <!-- completed: 2026-11-14T00:03 -->
+
+### Step 15: Deleting a member whose herdr pane was closed by hand
+
+The unreadable-window remedy (`cafleet member delete MEMBER_ID`) works on both backends. Closing a herdr tab by hand kills the pane shell; the runner is reparented, shuts down and exits, and stays an unreaped zombie when the reparenting process never reaps. A recorded process that has exited but is not yet reaped (state `Z`; macOS `SZOMB`) is terminated evidence wherever recovery or deletion judges liveness: the run owner's process evidence, the Hermes runner-exit wait, and recovery's descendant-group checks, which count only non-zombie group members. `member delete` and `fleet delete` then complete as for any exited runner; their command facts are unchanged.
+
+- [x] Diagnose the deletion/recovery path that records `terminal restoration requires host recovery: EIO` and propose the exact rule in `COMMENT(programmer)` at this step before changing code <!-- completed: 2026-11-13T23:40 -->
+- [x] Update `SPEC.md` (recovery/deletion contract) and, if it changes a command fact, `assets/skills/cafleet/reference/cli.md` <!-- completed: 2026-11-13T23:41 -->
+- [x] Implement the rule so `member delete` and `fleet delete` complete for a member whose herdr pane is gone <!-- completed: 2026-11-13T23:49 -->
+- [x] Render the unreadable-window `<cause>` on one line (herdr's `\nstderr:` separator) <!-- completed: 2026-11-13T23:49 -->
+- [x] Unit tests for the rule in the file that owns it, and for the one-line cause in `src/cli/member.rs` <!-- completed: 2026-11-13T23:49 -->
+- [x] herdr 0.9.5 live: close an overflow tab by hand, then `member delete` each listed member and confirm the next `member create` succeeds <!-- completed: 2026-11-13T23:52 -->
+
 
 ---
 
@@ -517,3 +529,4 @@ A user-configurable column bound or minimum height, a `member create --window` t
 | 2026-11-13 | Initial draft |
 | 2026-11-13 | Review round 1: unreadable-window error; layout lock spans deletion and the whole creation with its own 60-second wait; restoration interface; Director window name read with the pane context; one-tab Left re-parenting; herdr step ordering and live column order; verified herdr tab closure; complete documentation surfaces |
 | 2026-11-13 | Review round 2: herdr height read tries every member anchor; window name read only by `fleet create` (doctor unchanged); every close receives its window ID, including creation compensation |
+| 2026-11-13 | Execution: Step 15 added after live verification showed the unreadable-window remedy failing on herdr (user-approved scope extension) |

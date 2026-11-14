@@ -7,7 +7,8 @@ use crate::broker::runtime::CleanupState;
 use crate::broker::runtime::RunRecord;
 use crate::broker::runtime::*;
 use crate::multiplexer::Multiplexer;
-use crate::multiplexer::MultiplexerContext;
+use crate::multiplexer::PaneTarget;
+use crate::multiplexer::SpawnedPane;
 use crate::runtime::control::ControlClient;
 use crate::runtime::control::pause;
 use crate::runtime::control::request;
@@ -235,6 +236,10 @@ pub(crate) struct PendingMemberSpec {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) placement: NewPlacement,
+    /// The chosen slot's window name, published with the pane.
+    pub(crate) window_name: String,
+    /// The fleet's `last_window_ordinal` as read under the layout lock, for a new-window slot.
+    pub(crate) advances_window_ordinal_from: Option<i64>,
 }
 pub(crate) struct RunSettings {
     pub(crate) database_identity_json: Value,
@@ -272,6 +277,18 @@ pub(super) fn register_pending_run(
             &member.description,
             &member.placement,
         )?;
+        if let Some(read) = member.advances_window_ordinal_from {
+            let changed = tx.execute(
+                "UPDATE fleets SET last_window_ordinal=?1 WHERE fleet_id=?2 AND last_window_ordinal=?3",
+                params![member.placement.window_ordinal, member.fleet_id, read],
+            )?;
+            if changed != 1 {
+                return Err(error(format!(
+                    "fleet {} window ordinal changed under the layout lock",
+                    member.fleet_id
+                )));
+            }
+        }
         let next: i64 = tx.query_row(
             "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
             [],
@@ -356,7 +373,7 @@ pub(crate) struct Started {
 pub(crate) trait LaunchHost {
     fn now(&self) -> Instant;
     fn current_executable(&self) -> Result<PathBuf>;
-    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<String>;
+    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<SpawnedPane>;
     fn wait_prepared(
         &mut self,
         descriptor: &LaunchDescriptor,
@@ -369,7 +386,7 @@ pub(crate) trait LaunchHost {
         deadline: Instant,
     ) -> Result<Started>;
     fn shutdown_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome>;
-    fn close_pane(&mut self, pane_id: &str, deadline: Instant) -> Result<()>;
+    fn close_pane(&mut self, pane: &SpawnedPane, deadline: Instant) -> Result<()>;
     fn settle_hermes(
         &mut self,
         conn: &Connection,
@@ -467,12 +484,21 @@ pub(crate) fn create_registered(
             return Err(guard.rollback(cause, ShutdownClock::new(host.now()), Vec::new()));
         }
     };
-    launch_registered(&mut guard, pending, &mut artifacts, &spawn, host, deadline)
+    launch_registered(
+        &mut guard,
+        pending,
+        &member.window_name,
+        &mut artifacts,
+        &spawn,
+        host,
+        deadline,
+    )
 }
 
 fn launch_registered(
     guard: &mut PendingGuard<'_>,
     pending: PendingRegistration,
+    window_name: &str,
     artifacts: &mut RunArtifacts,
     spawn: &SpawnSpec,
     host: &mut impl LaunchHost,
@@ -553,7 +579,17 @@ fn launch_registered(
             )?;
             let changed=tx.execute("UPDATE member_runs SET status='prepared',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='starting'",params![crate::time::now_stamp(),run.run_id,current.owner_epoch])?;
             ensure(changed == 1, "prepared publication lost run ownership")?;
-            let changed=tx.execute("UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2 AND mux_pane_id IS NULL",params![pane.as_ref().expect("created pane"),run.member_id])?;
+            let spawned = pane.as_ref().expect("created pane");
+            let changed = tx.execute(
+                "UPDATE member_placements SET mux_pane_id=?1, mux_window_id=?2, mux_window_name=?3
+                 WHERE member_id=?4 AND mux_pane_id IS NULL",
+                params![
+                    spawned.pane_id,
+                    spawned.window_id,
+                    window_name,
+                    run.member_id
+                ],
+            )?;
             ensure(
                 changed == 1,
                 "pending placement vanished or changed before start",
@@ -609,7 +645,7 @@ fn launch_registered(
         Ok(current) if current.owner_kind == OwnerKind::Runner => {
             if current.backend == crate::coding_agent::CodingAgent::Hermes.name()
                 && current.child_pid.is_some()
-                && let Some(pane_id) = pane.as_deref()
+                && let Some(pane_id) = pane.as_ref().map(|spawned| spawned.pane_id.as_str())
             {
                 let until = crate::coding_agent::hermes::settlement_deadline().instant();
                 note(
@@ -644,17 +680,27 @@ fn launch_registered(
     Err(failure)
 }
 
+/// Spawns the runner pane at `target`, named `pane_name`, starting in `cwd`.
 pub(crate) struct NativeLaunchHost<'a> {
     mux: &'a dyn Multiplexer,
-    context: &'a MultiplexerContext,
+    target: &'a PaneTarget,
+    pane_name: &'a str,
+    cwd: &'a str,
     client: Option<ControlClient>,
 }
 
 impl<'a> NativeLaunchHost<'a> {
-    pub(crate) fn new(mux: &'a dyn Multiplexer, context: &'a MultiplexerContext) -> Self {
+    pub(crate) fn new(
+        mux: &'a dyn Multiplexer,
+        target: &'a PaneTarget,
+        pane_name: &'a str,
+        cwd: &'a str,
+    ) -> Self {
         Self {
             mux,
-            context,
+            target,
+            pane_name,
+            cwd,
             client: None,
         }
     }
@@ -667,10 +713,10 @@ impl LaunchHost for NativeLaunchHost<'_> {
     fn current_executable(&self) -> Result<std::path::PathBuf> {
         std::env::current_exe().map_err(io_error)
     }
-    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<String> {
+    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<SpawnedPane> {
         self.mux
             .bounded(crate::time::Deadline::until(deadline))
-            .split_window(self.context, argv)
+            .spawn_member_pane(self.target, self.pane_name, self.cwd, argv)
             .map_err(|cause| error(format!("runner pane spawn failed: {cause}")))
     }
     fn wait_prepared(
@@ -757,10 +803,10 @@ impl LaunchHost for NativeLaunchHost<'_> {
         }
         Ok(ShutdownOutcome::new(None, notes))
     }
-    fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<()> {
+    fn close_pane(&mut self, pane: &SpawnedPane, deadline: Instant) -> Result<()> {
         self.mux
             .bounded(crate::time::Deadline::until(deadline))
-            .kill_pane(pane)
+            .kill_pane(&pane.pane_id, &pane.window_id)
             .map_err(|cause| error(format!("runner pane cleanup failed: {cause}")))
     }
 }
@@ -785,7 +831,6 @@ mod tests {
         use nix::sys::socket::listen;
 
         use crate::error::CafleetError;
-        use crate::multiplexer::MultiplexerContext;
         use crate::multiplexer::TmuxMultiplexer;
         use crate::multiplexer::test_support;
         use crate::runtime::control::test_support::Endpoint;
@@ -801,12 +846,18 @@ mod tests {
         fn with_native_host<T>(operation: impl FnOnce(&mut NativeLaunchHost<'_>) -> T) -> T {
             let runner = test_support::FakeRunner::without_binaries();
             let mux = TmuxMultiplexer::for_server(runner.clone(), "/tmp/tmux-1000/default");
-            let context = MultiplexerContext {
-                session: "readiness-fixture".into(),
+            let target = PaneTarget::Column(crate::multiplexer::ColumnTarget {
                 window_id: "@1".into(),
-                pane_id: "%1".into(),
-            };
-            let result = operation(&mut NativeLaunchHost::new(&mux, &context));
+                side: crate::multiplexer::layout::ColumnSide::Right,
+                column_panes: Vec::new(),
+                other_panes: vec!["%1".into()],
+            });
+            let result = operation(&mut NativeLaunchHost::new(
+                &mux,
+                &target,
+                "readiness-fixture",
+                "/readiness-fixture",
+            ));
             assert!(runner.events().is_empty(), "{:?}", runner.events());
             result
         }
@@ -1048,6 +1099,7 @@ mod tests {
     use crate::broker::members::test_support::placement;
     use crate::broker::runtime as storage;
     use crate::error::CafleetError;
+    use crate::multiplexer::SpawnedPane;
     use crate::runtime::lifecycle::*;
     use rusqlite::hooks::AuthAction;
     use rusqlite::hooks::AuthContext;
@@ -1084,6 +1136,7 @@ mod tests {
         cleanup_failure: bool,
         hermes_failure: Option<&'static str>,
         lock: Option<RunLock>,
+        closed: Vec<SpawnedPane>,
     }
 
     impl LaunchFixtureHost {
@@ -1106,6 +1159,7 @@ mod tests {
                 cleanup_failure: false,
                 hermes_failure: None,
                 lock: None,
+                closed: Vec::new(),
             }
         }
         fn phase(&mut self, name: &'static str, deadline: Instant) -> Result<(), CafleetError> {
@@ -1128,6 +1182,15 @@ mod tests {
         }
     }
 
+    const FIXTURE_WINDOW: &str = "@4";
+
+    fn fixture_pane() -> SpawnedPane {
+        SpawnedPane {
+            pane_id: "%9".into(),
+            window_id: FIXTURE_WINDOW.into(),
+        }
+    }
+
     impl LaunchHost for LaunchFixtureHost {
         fn now(&self) -> Instant {
             self.now
@@ -1139,7 +1202,7 @@ mod tests {
             &mut self,
             argv: &[String],
             deadline: Instant,
-        ) -> Result<String, CafleetError> {
+        ) -> Result<SpawnedPane, CafleetError> {
             self.phase("split", deadline)?;
             self.argv = argv.to_vec();
             assert_eq!(argv[0], "/absolute/cafleet");
@@ -1157,7 +1220,7 @@ mod tests {
             assert_eq!(argv[4], "--descriptor");
             assert!(std::path::Path::new(&argv[5]).is_absolute());
             assert_eq!(argv.len(), 6);
-            Ok("%9".into())
+            Ok(fixture_pane())
         }
         fn wait_prepared(
             &mut self,
@@ -1312,10 +1375,15 @@ mod tests {
                 None => Ok(()),
             }
         }
-        fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<(), CafleetError> {
+        fn close_pane(
+            &mut self,
+            pane: &SpawnedPane,
+            deadline: Instant,
+        ) -> Result<(), CafleetError> {
             self.calls.push("close");
             self.deadlines.push(("close", deadline));
-            assert_eq!(pane, "%9");
+            self.closed.push(pane.clone());
+            assert_eq!(pane, &fixture_pane());
             if self.cleanup_failure {
                 Err(CafleetError::App("fixture pane cleanup failed".into()))
             } else {
@@ -1345,6 +1413,8 @@ mod tests {
                 name: "pending-worker".into(),
                 description: "pending assignment".into(),
                 placement,
+                window_name: "main".into(),
+                advances_window_ordinal_from: None,
             },
             RunSettings {
                 database_identity_json: fixture.run.database_identity_json.clone(),
@@ -2520,6 +2590,229 @@ mod tests {
     #[test]
     fn runner_database_deadline_review_inner_success_restores_the_live_outer_scope() {
         assert_retired_inner_scope_preserves_outer(InnerOutcome::Success);
+    }
+
+    mod window_layout {
+        use crate::multiplexer::layout::ColumnSide;
+        use crate::runtime::lifecycle::tests::*;
+
+        fn last_window_ordinal(fixture: &Fixture) -> i64 {
+            fixture
+                .conn
+                .query_row(
+                    "SELECT last_window_ordinal FROM fleets WHERE fleet_id=?1",
+                    [fixture.run.fleet_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn count(fixture: &Fixture, table: &str) -> i64 {
+            fixture
+                .conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        }
+
+        /// A pending member that opens overflow window 1 from a fleet whose last ordinal is 0.
+        fn overflow_member(fixture: &Fixture) -> (PendingMemberSpec, RunSettings) {
+            let (mut member, settings) = inputs(fixture);
+            member.placement.window_ordinal = 1;
+            member.placement.column_side = ColumnSide::Left;
+            member.window_name = format!("cafleet-{}-1", fixture.run.fleet_id);
+            member.advances_window_ordinal_from = Some(0);
+            (member, settings)
+        }
+
+        fn launch_member(
+            fixture: &mut Fixture,
+            host: &mut LaunchFixtureHost,
+            deadline: Instant,
+            member: &PendingMemberSpec,
+            settings: &RunSettings,
+        ) -> Result<LaunchOutcome, CafleetError> {
+            let spec = fixture.spec();
+            create_registered(
+                &mut fixture.conn,
+                member,
+                settings,
+                |conn, pending| {
+                    Ok((
+                        RunArtifacts::create_with_deadline(conn, pending.run.run_id, deadline)?,
+                        spec,
+                    ))
+                },
+                host,
+                deadline,
+            )
+        }
+
+        #[test]
+        fn publication_records_the_spawned_pane_and_window_with_the_chosen_window_name() {
+            let (mut fixture, mut host, deadline) = launch_case();
+            let (member, settings) = overflow_member(&fixture);
+            let outcome =
+                launch_member(&mut fixture, &mut host, deadline, &member, &settings).unwrap();
+            let window_name = format!("cafleet-{}-1", fixture.run.fleet_id);
+            let recorded = |placement: &Placement| {
+                (
+                    placement.mux_pane_id.clone(),
+                    placement.mux_window_id.clone(),
+                    placement.mux_window_name.clone(),
+                    placement.window_ordinal,
+                    placement.column_side,
+                )
+            };
+            let expected = (
+                Some("%9".to_string()),
+                Some(FIXTURE_WINDOW.to_string()),
+                Some(window_name),
+                1,
+                ColumnSide::Left,
+            );
+            assert_eq!(recorded(&outcome.placement), expected);
+            let stored = crate::broker::get_member(
+                &fixture.conn,
+                outcome.member.member_id,
+                fixture.run.fleet_id,
+            )
+            .unwrap()
+            .unwrap()
+            .placement;
+            assert_eq!(recorded(&stored), expected);
+        }
+
+        #[test]
+        fn a_director_window_member_publishes_the_director_window_name_it_was_given() {
+            let (mut fixture, mut host, deadline) = launch_case();
+            let (mut member, settings) = inputs(&fixture);
+            member.window_name = "agents".into();
+            let outcome =
+                launch_member(&mut fixture, &mut host, deadline, &member, &settings).unwrap();
+            assert_eq!(
+                (
+                    outcome.placement.mux_window_name.as_deref(),
+                    outcome.placement.window_ordinal,
+                    outcome.placement.column_side,
+                ),
+                (Some("agents"), 0, ColumnSide::Right)
+            );
+        }
+
+        #[test]
+        fn compensation_closes_the_spawned_pane_in_the_window_it_was_spawned_in() {
+            let (mut fixture, mut host, deadline) = launch_case();
+            host.fail = Some("prepared");
+            let (member, settings) = overflow_member(&fixture);
+            let error = require_launch_error(launch_member(
+                &mut fixture,
+                &mut host,
+                deadline,
+                &member,
+                &settings,
+            ));
+            assert!(
+                error.message().contains("fixture prepared failure"),
+                "{error}"
+            );
+            assert_eq!(host.closed, vec![fixture_pane()]);
+            assert_compensated(&fixture, &pending_run(&fixture));
+        }
+
+        #[test]
+        fn a_new_window_ordinal_stays_consumed_when_its_spawn_fails() {
+            let (mut fixture, mut host, deadline) = launch_case();
+            host.fail = Some("split");
+            let (member, settings) = overflow_member(&fixture);
+            assert_eq!(last_window_ordinal(&fixture), 0);
+            let error = require_launch_error(launch_member(
+                &mut fixture,
+                &mut host,
+                deadline,
+                &member,
+                &settings,
+            ));
+            assert!(error.message().contains("fixture split failure"), "{error}");
+            assert!(host.closed.is_empty(), "no pane was spawned");
+            assert_compensated(&fixture, &pending_run(&fixture));
+            assert_eq!(last_window_ordinal(&fixture), 1);
+        }
+
+        #[test]
+        fn registration_advances_the_window_ordinal_only_for_a_new_window() {
+            let mut fixture = Fixture::new();
+            let (member, settings) = inputs(&fixture);
+            register_pending_run(
+                &mut fixture.conn,
+                &member,
+                &settings,
+                Instant::now() + Duration::from_secs(10),
+            )
+            .unwrap();
+            assert_eq!(last_window_ordinal(&fixture), 0);
+
+            let mut fixture = Fixture::new();
+            let (member, settings) = overflow_member(&fixture);
+            let pending = register_pending_run(
+                &mut fixture.conn,
+                &member,
+                &settings,
+                Instant::now() + Duration::from_secs(10),
+            )
+            .unwrap();
+            assert_eq!(last_window_ordinal(&fixture), 1);
+            let placement = crate::broker::get_member(
+                &fixture.conn,
+                pending.member.member_id,
+                fixture.run.fleet_id,
+            )
+            .unwrap()
+            .unwrap()
+            .placement;
+            assert_eq!(
+                (
+                    placement.window_ordinal,
+                    placement.column_side,
+                    placement.mux_window_id,
+                    placement.mux_window_name,
+                    placement.mux_pane_id,
+                ),
+                (1, ColumnSide::Left, None, None, None)
+            );
+        }
+
+        #[test]
+        fn a_window_ordinal_changed_under_the_lock_rolls_the_registration_back() {
+            let mut fixture = Fixture::new();
+            let fleet = fixture.run.fleet_id;
+            fixture
+                .conn
+                .execute(
+                    "UPDATE fleets SET last_window_ordinal=2 WHERE fleet_id=?1",
+                    [fleet],
+                )
+                .unwrap();
+            let (members, runs) = (count(&fixture, "members"), count(&fixture, "member_runs"));
+            let (member, settings) = overflow_member(&fixture);
+            let error = register_pending_run(
+                &mut fixture.conn,
+                &member,
+                &settings,
+                Instant::now() + Duration::from_secs(10),
+            )
+            .err()
+            .expect("a changed ordinal fails registration");
+            assert_eq!(
+                error.message(),
+                format!("fleet {fleet} window ordinal changed under the layout lock")
+            );
+            assert_eq!(error.exit_code(), 1);
+            assert_eq!(count(&fixture, "members"), members);
+            assert_eq!(count(&fixture, "member_runs"), runs);
+            assert_eq!(last_window_ordinal(&fixture), 2);
+        }
     }
 }
 

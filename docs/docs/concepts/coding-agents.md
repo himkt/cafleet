@@ -77,7 +77,7 @@ Evidence of insufficient capability can trigger a replacement with a strictly st
 
 ## Backend differences
 
-The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. Only claude and pi panes display the member name, so for the other backends locate a member's pane by the `pane_id` column of `cafleet member list`.
+The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. herdr labels every member pane with the member name and tmux titles it, though an agent may retitle a tmux pane; `cafleet member list` shows each member's `window` and `pane_id`.
 
 A Hermes member's session can keep accepted work and background processes running after its pane's client exits. `cafleet member delete` stops that session's work and registered background processes, keeping the member when it cannot verify the stop; CAFleet never touches your Hermes gateway or sessions it does not own.
 

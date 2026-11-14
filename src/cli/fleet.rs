@@ -6,6 +6,7 @@ use crate::broker::MemberRecord;
 use crate::broker::PLACEMENT_COLUMNS;
 use crate::broker::Placement;
 use crate::broker::members::NewPlacement;
+use crate::broker::members::PlacementPane;
 use crate::broker::members::active_member;
 use crate::cli::emit;
 use crate::coding_agent::CodingAgent;
@@ -176,17 +177,21 @@ pub(crate) fn create_with(
             target.server
         ))
     })?;
+    let window_name = target.mux.window_name(&context.window_id)?;
     broker::create_fleet(
         conn,
         request.name,
-        &NewPlacement {
-            backend: target.backend.name().into(),
-            mux_session: context.session,
-            mux_window_id: context.window_id,
-            mux_pane_id: Some(context.pane_id),
-            coding_agent: request.agent.name().into(),
-            mux_server: target.server,
-        },
+        &NewPlacement::director(
+            target.backend.name().into(),
+            context.session,
+            request.agent.name().into(),
+            target.server,
+            PlacementPane {
+                mux_window_id: context.window_id,
+                mux_window_name: window_name,
+                mux_pane_id: context.pane_id,
+            },
+        ),
     )
 }
 
@@ -301,8 +306,8 @@ pub(crate) trait DeletionHost {
 /// settlement's budget never shortens the pane close that follows it.
 pub(crate) struct MultiplexerDeletionHost<M> {
     mux: M,
-    /// The bounded multiplexer of the last pane close; herdr's layout restoration reads the
-    /// closed tab it recorded.
+    /// The bounded multiplexer of the last pane close; layout restoration reads the window it
+    /// recorded.
     closing: Option<Box<dyn Multiplexer>>,
 }
 
@@ -335,7 +340,7 @@ impl<M: std::ops::Deref<Target: Multiplexer>> DeletionHost for MultiplexerDeleti
         Ok(self
             .closing
             .insert(self.mux.bounded(deadline))
-            .close_pane(pane)?)
+            .close_pane(pane, placement.concrete_window_id())?)
     }
 
     fn restore_layout(&mut self) -> Result<(), CafleetError> {
@@ -431,7 +436,7 @@ fn await_runner_exit(
         let run = with_database_budget(conn, deadline, |conn| {
             crate::broker::runtime::get_run(conn, run_id)
         })?;
-        if !run.status.terminal() || run.is_settled() || !run.owner_process().matches()? {
+        if !run.status.terminal() || run.is_settled() || !run.owner_process().is_alive()? {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -439,12 +444,15 @@ fn await_runner_exit(
 }
 
 /// `scope` revalidates the caller's wider deletion state, such as a fleet's
-/// placement set, before each irreversible step up to the pane close.
+/// placement set, before each irreversible step up to the pane close. The caller holds the
+/// fleet layout lock for the whole call.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn end_member(
     conn: &mut Connection,
     settings: &Settings,
     snapshot: &mut MemberRecord,
     held: &PaneLock,
+    _layout: &crate::pane_lock::LayoutLock,
     host: &mut impl DeletionHost,
     deadline: &mut Deadline,
     scope: &mut dyn FnMut(&Connection) -> Result<(), CafleetError>,
@@ -548,6 +556,32 @@ pub(crate) fn end_member(
     Ok(format!("{pane_id} (killed)"))
 }
 
+/// Acquires the fleet layout lock for a deletion of `subject` ("member" or "fleet"), moving the
+/// deletion deadline later by the wait.
+pub(crate) fn acquire_deletion_layout(
+    settings: &Settings,
+    fleet_id: i64,
+    deadline: Deadline,
+    layout_wait: std::time::Duration,
+    subject: &str,
+) -> Result<(crate::pane_lock::LayoutLock, Deadline), CafleetError> {
+    let started = std::time::Instant::now();
+    let lock = crate::pane_lock::LayoutLock::acquire_within(
+        &settings.database_url,
+        fleet_id,
+        Deadline::until(started + layout_wait),
+    )?
+    .ok_or_else(|| {
+        CafleetError::App(format!(
+            "fleet {fleet_id} pane layout remained busy for 60 seconds; {subject} was not deleted."
+        ))
+    })?;
+    Ok((
+        lock,
+        Deadline::until(deadline.instant() + started.elapsed()),
+    ))
+}
+
 pub(crate) fn delete_fleet(
     conn: &mut Connection,
     settings: &Settings,
@@ -570,7 +604,25 @@ pub(crate) fn delete_fleet_with_host(
     conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
-    mut deadline: Deadline,
+    deadline: Deadline,
+    host: &mut impl DeletionHost,
+) -> Result<DeletedFleet, CafleetError> {
+    delete_fleet_with_layout_wait(
+        conn,
+        settings,
+        fleet_id,
+        deadline,
+        crate::pane_lock::LAYOUT_LOCK_WAIT,
+        host,
+    )
+}
+
+pub(crate) fn delete_fleet_with_layout_wait(
+    conn: &mut Connection,
+    settings: &Settings,
+    fleet_id: i64,
+    deadline: Deadline,
+    layout_wait: std::time::Duration,
     host: &mut impl DeletionHost,
 ) -> Result<DeletedFleet, CafleetError> {
     with_database_budget(conn, deadline, |conn| {
@@ -613,6 +665,8 @@ pub(crate) fn delete_fleet_with_host(
             ))
         },
     )?;
+    let (layout, mut deadline) =
+        acquire_deletion_layout(settings, fleet_id, deadline, layout_wait, "fleet")?;
     let mut remaining = locked.snapshot.clone();
     let mut members = std::mem::take(&mut locked.value);
     let mut ended = Vec::new();
@@ -634,6 +688,7 @@ pub(crate) fn delete_fleet_with_host(
             settings,
             member,
             held,
+            &layout,
             host,
             &mut deadline,
             &mut scope,
@@ -660,6 +715,7 @@ pub(crate) fn delete_fleet_with_host(
         tx.commit()?;
         Ok((deregistered_count, unplaced))
     })?;
+    drop(layout);
     drop(locked);
     let deregistered_count = deregistered_count + ended.len();
     ended.extend(unplaced);
@@ -777,6 +833,7 @@ pub(crate) mod test_support {
         pub(crate) runner_gone: bool,
         pub(crate) hermes_failure: Option<String>,
         settled: Option<Duration>,
+        layout_waited: bool,
     }
 
     const SETTLEMENT_TIME: Duration = Duration::from_millis(30);
@@ -831,19 +888,26 @@ pub(crate) mod test_support {
                 runner_gone: false,
                 hermes_failure: None,
                 settled: None,
+                layout_waited: false,
             }
         }
 
-        /// Every cleanup step shares the deletion deadline, which a settlement extends by the
-        /// time it took.
+        /// Every cleanup step shares the deletion deadline, which the fleet layout lock wait
+        /// before the first step and a settlement each extend by the time they took.
         fn assert_deadline(&mut self, deadline: Instant) {
-            if let Some(settlement) = self.settled.take() {
+            let settlement = self.settled.take();
+            let first_step = !std::mem::replace(&mut self.layout_waited, true);
+            if settlement.is_some() || first_step {
+                let floor = settlement.unwrap_or_default();
                 let extension = deadline.saturating_duration_since(self.deadline);
                 assert!(
-                    extension >= settlement && extension < settlement + Duration::from_secs(1),
+                    extension >= floor && extension < floor + Duration::from_secs(1),
                     "{extension:?}"
                 );
                 self.deadline = deadline;
+                if let Mode::Recovery { host, .. } = &mut self.mode {
+                    host.deadline = deadline;
+                }
             }
             assert_eq!(deadline, self.deadline);
         }
@@ -989,7 +1053,7 @@ pub(crate) mod test_support {
                 Mutation::AfterRecovery => Self::bump_epoch(conn, expected_run.run_id),
                 Mutation::OtherPlacement(member) => {
                     conn.execute(
-                        "UPDATE member_placements SET mux_pane_id='%foreign' WHERE member_id=?1",
+                        "UPDATE member_placements SET mux_pane_id='%foreign', mux_window_id=COALESCE(mux_window_id, '@1'), mux_window_name=COALESCE(mux_window_name, 'main') WHERE member_id=?1",
                         [member],
                     )
                     .unwrap();
@@ -2232,7 +2296,10 @@ mod tests {
         let placement = crate::broker::Placement {
             backend: "tmux".into(),
             mux_session: "s".into(),
-            mux_window_id: "@1".into(),
+            mux_window_id: Some("@5".into()),
+            mux_window_name: Some("cafleet-1-2".into()),
+            window_ordinal: 2,
+            column_side: crate::multiplexer::layout::ColumnSide::Left,
             mux_pane_id: Some("%9".into()),
             coding_agent: "hermes".into(),
             created_at: "2026-11-07T00:00:00Z".into(),
@@ -2245,8 +2312,137 @@ mod tests {
             std::time::Instant::now() + std::time::Duration::from_secs(5),
         );
         host.close_pane(&placement, fresh).unwrap();
+        runner.respond(Ok("%0|0
+"
+        .into()));
         host.restore_layout().unwrap();
-        assert_eq!(runner.run_argvs().len(), 1, "{:?}", runner.run_argvs());
+        let tmux = |parts: &[&str]| {
+            let mut call = crate::multiplexer::argv(&["tmux", "-S", "/tmp/tmux-1000/default"]);
+            call.extend(crate::multiplexer::argv(parts));
+            call
+        };
+        assert_eq!(
+            runner.run_argvs(),
+            vec![
+                tmux(&["kill-pane", "-t", "%9"]),
+                tmux(&["list-panes", "-t", "@5", "-F", "#{pane_id}|#{pane_left}"]),
+            ],
+            "the close and its restoration target the recorded window"
+        );
+    }
+
+    mod layout_lock {
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use rusqlite::Connection;
+
+        use crate::broker::Placement;
+        use crate::broker::fleets::test_support::create_fleet_fixture;
+        use crate::broker::members::test_support::register;
+        use crate::broker::runtime::RunRecord;
+        use crate::cli::fleet::DeletionHost;
+        use crate::cli::fleet::delete_fleet_with_layout_wait;
+        use crate::db::test_support::migrated_conn;
+        use crate::error::CafleetError;
+        use crate::pane_lock::LayoutLock;
+        use crate::pane_lock::PaneLock;
+        use crate::runtime::ShutdownOutcome;
+        use crate::time::Deadline;
+
+        struct UntouchedHost;
+
+        impl DeletionHost for UntouchedHost {
+            fn shutdown(
+                &mut self,
+                _: &mut Connection,
+                _: &RunRecord,
+                _: Deadline,
+            ) -> Result<ShutdownOutcome, CafleetError> {
+                panic!("a refused fleet deletion shuts no runner down")
+            }
+
+            fn settle_hermes(
+                &mut self,
+                _: &Connection,
+                _: &RunRecord,
+                _: &str,
+                _: Deadline,
+            ) -> Result<(), CafleetError> {
+                panic!("a refused fleet deletion settles nothing")
+            }
+
+            fn close_pane(&mut self, _: &Placement, _: Deadline) -> Result<(), CafleetError> {
+                panic!("a refused fleet deletion closes no pane")
+            }
+
+            fn restore_layout(&mut self) -> Result<(), CafleetError> {
+                panic!("a refused fleet deletion restores no layout")
+            }
+        }
+
+        #[test]
+        fn a_busy_layout_lock_fails_fleet_delete_and_leaves_every_member_unchanged() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let settings =
+                crate::config::Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            let (fleet, director) = create_fleet_fixture(&mut conn, "layout-fleet-busy");
+            let worker = register(&mut conn, fleet, "worker", Some("%5"));
+            let pending = register(&mut conn, fleet, "pending", None);
+            let before = crate::broker::list_members(&conn, fleet).unwrap();
+            let _held = LayoutLock::try_acquire(&settings.database_url, fleet)
+                .unwrap()
+                .expect("the test holds the fleet layout");
+            let started = Instant::now();
+            let error = delete_fleet_with_layout_wait(
+                &mut conn,
+                &settings,
+                fleet,
+                Deadline::until(started + Duration::from_secs(5)),
+                Duration::from_millis(300),
+                &mut UntouchedHost,
+            )
+            .unwrap_err();
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_millis(300), "{waited:?}");
+            assert!(waited < Duration::from_secs(3), "{waited:?}");
+            assert_eq!(
+                error.message(),
+                format!(
+                    "fleet {fleet} pane layout remained busy for 60 seconds; fleet was not deleted."
+                )
+            );
+            assert_eq!(error.exit_code(), 1);
+            assert!(
+                crate::broker::get_fleet(&conn, fleet)
+                    .unwrap()
+                    .unwrap()
+                    .deleted_at
+                    .is_none()
+            );
+            let after = crate::broker::list_members(&conn, fleet).unwrap();
+            let identities = |rows: &[crate::broker::MemberActivity]| {
+                rows.iter()
+                    .map(|row| (row.member.member_id, row.member.placement.clone()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(identities(&after), identities(&before));
+            assert_eq!(
+                after
+                    .iter()
+                    .map(|row| row.member.member_id)
+                    .collect::<Vec<_>>(),
+                [director, worker, pending]
+            );
+            let worker_placement = &after[1].member.placement;
+            assert!(
+                PaneLock::acquire_released(&settings.database_url, worker_placement)
+                    .unwrap()
+                    .is_some(),
+                "the refused deletion releases its pane locks"
+            );
+        }
     }
 
     #[test]
@@ -2304,6 +2500,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn deletion_treats_an_unreaped_zombie_runner_as_exited() {
+        let mut fixture = Fixture::new();
+        let (mut runner, identity) = crate::runtime::test_support::zombie();
+        fixture
+            .conn
+            .execute(
+                "UPDATE member_runs SET status='exited', cleanup_state='incomplete', owner_pid=?1, owner_start_identity=?2 WHERE run_id=?3",
+                rusqlite::params![identity.pid, identity.start_identity, fixture.run.run_id],
+            )
+            .unwrap();
+        let started = Instant::now();
+        let waited = crate::cli::fleet::await_runner_exit(
+            &mut fixture.conn,
+            fixture.run.run_id,
+            crate::time::Deadline::until(started + Duration::from_secs(2)),
+        );
+        let elapsed = started.elapsed();
+        runner.wait().unwrap();
+        waited.unwrap();
+        assert!(elapsed < Duration::from_secs(1), "{elapsed:?}");
+    }
+
     mod create {
         use std::collections::HashMap;
         use std::rc::Rc;
@@ -2325,6 +2544,7 @@ mod tests {
         use crate::multiplexer::caller::shared_server_message;
         use crate::multiplexer::caller::unset_message;
         use crate::multiplexer::caller::unverified_message;
+        use crate::multiplexer::layout::ColumnSide;
         use crate::multiplexer::test_support::FakeRunner;
         use crate::multiplexer::test_support::argv;
         use crate::multiplexer::test_support::env;
@@ -2341,6 +2561,11 @@ mod tests {
         ];
         const CONTEXT_FORMAT: &str = "#{session_name}|#{window_id}|#{pane_id}";
         const PROCESS_FORMAT: &str = "#{pane_id}|#{pane_pid}";
+        const WINDOW_NAME_FORMAT: &str = "#{window_id}|#{window_name}";
+
+        fn tab_label(tab: &str, label: &str) -> String {
+            herdr_envelope(serde_json::json!({"tab": {"tab_id": tab, "label": label}}))
+        }
 
         /// A process table that fails the test on any read, for paths that must not walk.
         struct UnreadTable;
@@ -2466,6 +2691,7 @@ mod tests {
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("main|@1|%5\n".to_string()));
+            runner.respond(Ok("@1|main\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request(Some("%5"), Some(RERUN_SOCKET)),
@@ -2484,18 +2710,37 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
+                    placement.window_ordinal,
+                    placement.column_side,
                     placement.mux_pane_id.as_deref(),
                     placement.coding_agent.as_str(),
                 ),
-                ("tmux", RERUN_SOCKET, "main", "@1", Some("%5"), "codex")
+                (
+                    "tmux",
+                    RERUN_SOCKET,
+                    "main",
+                    Some("@1"),
+                    Some("main"),
+                    0,
+                    ColumnSide::Left,
+                    Some("%5"),
+                    "codex"
+                )
             );
             assert_eq!(
                 runner.run_argvs(),
-                vec![tmux(
-                    &["display-message", "-p", "-t", "%5", CONTEXT_FORMAT],
-                    RERUN_SOCKET
-                )]
+                vec![
+                    tmux(
+                        &["display-message", "-p", "-t", "%5", CONTEXT_FORMAT],
+                        RERUN_SOCKET
+                    ),
+                    tmux(
+                        &["display-message", "-p", "-t", "@1", WINDOW_NAME_FORMAT],
+                        RERUN_SOCKET
+                    ),
+                ]
             );
             assert_eq!(fleet_rows(&conn), (1, 1));
         }
@@ -2507,6 +2752,7 @@ mod tests {
             runner.respond(Ok(herdr_envelope(serde_json::json!({
                 "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
             }))));
+            runner.respond(Ok(tab_label("w4:t1", "agents")));
             let fleet = create_with(
                 &mut conn,
                 request(Some("w4:p3N"), Some("default")),
@@ -2521,22 +2767,33 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
                     placement.mux_pane_id.as_deref(),
                 ),
-                ("herdr", "default", "w4", "w4:t1", Some("w4:p3N"))
+                (
+                    "herdr",
+                    "default",
+                    "w4",
+                    Some("w4:t1"),
+                    Some("agents"),
+                    Some("w4:p3N")
+                )
             );
             assert_eq!(
                 runner.run_argvs(),
-                vec![argv(&[
-                    "herdr",
-                    "--session",
-                    "default",
-                    "pane",
-                    "current",
-                    "--pane",
-                    "w4:p3N",
-                ])]
+                vec![
+                    argv(&[
+                        "herdr",
+                        "--session",
+                        "default",
+                        "pane",
+                        "current",
+                        "--pane",
+                        "w4:p3N",
+                    ]),
+                    argv(&["herdr", "--session", "default", "tab", "get", "w4:t1"]),
+                ]
             );
         }
 
@@ -2606,6 +2863,7 @@ mod tests {
 
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("main|@2|%5\n".to_string()));
+            runner.respond(Ok("@2|main\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request(Some("%5"), Some(RERUN_SOCKET)),
@@ -2768,6 +3026,7 @@ mod tests {
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("%3|20\n".to_string()));
             runner.respond(Ok("main|@1|%3\n".to_string()));
+            runner.respond(Ok("@1|work window\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request(None, None),
@@ -2782,11 +3041,20 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
                     placement.mux_pane_id.as_deref(),
                     placement.coding_agent.as_str(),
                 ),
-                ("tmux", TMUX_SOCKET, "main", "@1", Some("%3"), "codex")
+                (
+                    "tmux",
+                    TMUX_SOCKET,
+                    "main",
+                    Some("@1"),
+                    Some("work window"),
+                    Some("%3"),
+                    "codex"
+                )
             );
             assert_eq!(
                 runner.run_argvs(),
@@ -2797,6 +3065,10 @@ mod tests {
                     ),
                     tmux(
                         &["display-message", "-p", "-t", "%3", CONTEXT_FORMAT],
+                        TMUX_SOCKET
+                    ),
+                    tmux(
+                        &["display-message", "-p", "-t", "@1", WINDOW_NAME_FORMAT],
                         TMUX_SOCKET
                     ),
                 ]
@@ -2814,6 +3086,7 @@ mod tests {
             runner.respond(Ok(herdr_envelope(serde_json::json!({
                 "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
             }))));
+            runner.respond(Ok(tab_label("w4:t1", "")));
             let fleet = create_with(
                 &mut conn,
                 request(None, None),
@@ -2832,18 +3105,89 @@ mod tests {
                     placement.backend.as_str(),
                     placement.mux_server.as_str(),
                     placement.mux_session.as_str(),
-                    placement.mux_window_id.as_str(),
+                    placement.mux_window_id.as_deref(),
+                    placement.mux_window_name.as_deref(),
                     placement.mux_pane_id.as_deref(),
                 ),
-                ("herdr", "work", "w4", "w4:t1", Some("w4:p3N"))
+                (
+                    "herdr",
+                    "work",
+                    "w4",
+                    Some("w4:t1"),
+                    Some(""),
+                    Some("w4:p3N")
+                )
             );
             let selector = argv(&["herdr", "--session", "work", "pane"]);
             let calls = runner.run_argvs();
-            assert_eq!(calls.len(), 2);
+            assert_eq!(calls.len(), 3);
             assert_eq!(calls[0][..4], selector);
             assert_eq!(calls[0][4], "process-info");
             assert_eq!(calls[1][..4], selector);
             assert_eq!(calls[1][4], "current");
+            assert_eq!(
+                calls[2],
+                argv(&["herdr", "--session", "work", "tab", "get", "w4:t1"])
+            );
+        }
+
+        #[test]
+        fn a_failed_tmux_window_name_read_registers_nothing() {
+            for reply in ["\n", "@1\n", "@2|main\n"] {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::with_binary("tmux");
+                runner.respond(Ok("main|@1|%5\n".to_string()));
+                runner.respond(Ok(reply.to_string()));
+                let error = refused(
+                    &mut conn,
+                    request(Some("%5"), Some(RERUN_SOCKET)),
+                    &[],
+                    &runner,
+                    &UnreadTable,
+                );
+                assert!(
+                    error
+                        .to_string()
+                        .contains("unexpected tmux display-message output: "),
+                    "{reply:?}: {error}"
+                );
+                assert_eq!(runner.run_argvs().len(), 2, "{reply:?}");
+            }
+        }
+
+        #[test]
+        fn a_failed_herdr_window_name_read_registers_nothing() {
+            for (reply, expected) in [
+                (
+                    Err(crate::multiplexer::RunError::Failed {
+                        stderr: crate::multiplexer::test_support::herdr_error_stderr(
+                            "tab_not_found",
+                        ),
+                    }),
+                    "tab_not_found",
+                ),
+                (
+                    Ok(herdr_envelope(
+                        serde_json::json!({"tab": {"tab_id": "w4:t1"}}),
+                    )),
+                    "herdr tab get missing 'label' field",
+                ),
+            ] {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(Ok(herdr_envelope(serde_json::json!({
+                    "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
+                }))));
+                runner.respond(reply);
+                let error = refused(
+                    &mut conn,
+                    request(Some("w4:p3N"), Some("default")),
+                    &[],
+                    &runner,
+                    &UnreadTable,
+                );
+                assert!(error.to_string().contains(expected), "{error}");
+            }
         }
 
         #[test]
@@ -2884,6 +3228,7 @@ mod tests {
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("main|@1|%5\n".to_string()));
+            runner.respond(Ok("@1|main\n".to_string()));
             let fleet = create_with(
                 &mut conn,
                 request,

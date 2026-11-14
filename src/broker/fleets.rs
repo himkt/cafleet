@@ -44,8 +44,10 @@ pub(crate) fn create_fleet(
     director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
     assert!(
-        director.mux_pane_id.is_some(),
-        "the Director placement records its pane"
+        director.pane.is_some()
+            && director.window_ordinal == 0
+            && director.column_side == crate::multiplexer::layout::ColumnSide::Left,
+        "the Director placement records its pane in the Director window's left column"
     );
     let now = now_stamp();
     let tx = conn.transaction()?;
@@ -228,7 +230,7 @@ pub(crate) mod test_support {
         let fleet = crate::broker::fleets::create_fleet(
             conn,
             name,
-            &crate::broker::members::test_support::placement(Some("%0")),
+            &crate::broker::members::test_support::director_new_placement("%0"),
         )
         .unwrap();
         (fleet.fleet_id, fleet.director.member_id)
@@ -240,9 +242,10 @@ mod tests {
     use crate::broker;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::fleets::*;
-    use crate::broker::members::test_support::placement;
+    use crate::broker::members::test_support::director_new_placement;
     use crate::broker::members::test_support::register;
     use crate::db::test_support::migrated_conn;
+    use crate::multiplexer::layout::ColumnSide;
 
     fn row_count(conn: &Connection, table: &str) -> i64 {
         conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
@@ -257,7 +260,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
-        let error = broker::create_fleet(&mut conn, "alpha", &placement(Some("%0"))).unwrap_err();
+        let error =
+            broker::create_fleet(&mut conn, "alpha", &director_new_placement("%0")).unwrap_err();
         assert!(error.message().contains("registration failure"));
         for table in ["fleets", "members", "member_placements"] {
             assert_eq!(row_count(&conn, table), 0);
@@ -413,13 +417,16 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet, _) = create_fleet_fixture(&mut conn, "alpha");
         register(&mut conn, fleet, "worker", Some("%5"));
-        let expected = placement(Some("%0"));
+        let expected = director_new_placement("%0");
         let recorded = director_placement(&conn, fleet).unwrap();
         assert_eq!(
             (
                 recorded.backend.as_str(),
                 recorded.mux_session.as_str(),
-                recorded.mux_window_id.as_str(),
+                recorded.mux_window_id.as_deref(),
+                recorded.mux_window_name.as_deref(),
+                recorded.window_ordinal,
+                recorded.column_side,
                 recorded.mux_pane_id.as_deref(),
                 recorded.coding_agent.as_str(),
                 recorded.mux_server.as_str(),
@@ -427,7 +434,10 @@ mod tests {
             (
                 expected.backend.as_str(),
                 expected.mux_session.as_str(),
-                expected.mux_window_id.as_str(),
+                Some("@1"),
+                Some("main"),
+                0,
+                ColumnSide::Left,
                 Some("%0"),
                 expected.coding_agent.as_str(),
                 expected.mux_server.as_str(),
@@ -436,6 +446,54 @@ mod tests {
         assert_eq!(
             director_placement(&conn, 999).unwrap_err().message(),
             "fleet 999 has no recorded Director placement; re-create the fleet with 'cafleet fleet create'."
+        );
+    }
+
+    #[test]
+    fn bootstrap_records_the_director_window_as_ordinal_zero_left_and_starts_the_ordinal_at_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let director = NewPlacement::director(
+            "herdr".into(),
+            "w4".into(),
+            "codex".into(),
+            "work".into(),
+            crate::broker::members::PlacementPane {
+                mux_window_id: "w4:t1".into(),
+                mux_window_name: "agents".into(),
+                mux_pane_id: "w4:p3N".into(),
+            },
+        );
+        assert_eq!(
+            (director.window_ordinal, director.column_side),
+            (0, ColumnSide::Left)
+        );
+        let fleet = create_fleet(&mut conn, "alpha", &director).unwrap();
+        let placement = &fleet.director.placement;
+        assert_eq!(
+            (
+                placement.window_ordinal,
+                placement.column_side,
+                placement.mux_window_id.as_deref(),
+                placement.mux_window_name.as_deref(),
+                placement.mux_pane_id.as_deref(),
+            ),
+            (
+                0,
+                ColumnSide::Left,
+                Some("w4:t1"),
+                Some("agents"),
+                Some("w4:p3N")
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT last_window_ordinal FROM fleets WHERE fleet_id=?1",
+                [fleet.fleet_id],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
         );
     }
 }
