@@ -2350,6 +2350,46 @@
       "cols": 49,
       "source_ref": "native/pi.json",
       "sha256": "88dd56d1f9982e8175ee20d9befcb6a28a1a57d1b76a1555d242f71327b5a3e6"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-paste-2057-literal-tapped-v2-tmux-120-15",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "ab5a341d23efd25411019ecb45a64bc37f608fa9b5e2c9d81cc79e98a62d020e"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-paste-2057-literal-tapped-v2-herdr-119-15",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/hermes.json",
+      "sha256": "59c6547317a26fcae4a5984d01c59a09df3db0548fdbff63dd6bea773f71389a"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-clear-backspace-rounds-v3-8192-input-pending-tapped-v2-tmux-120-56",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "f24406d69e052b17ea9c9436c480105fbdab43773a29f5ab902150ca0602121b"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-clear-backspace-rounds-v3-8192-input-pending-tapped-v2-herdr-119-53",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 40,
+      "cols": 119,
+      "source_ref": "native/hermes.json",
+      "sha256": "5bbdc92c4cd6a8d83645e495a768b5acebb465a03c57fea03b540eb778626c0d"
     }
   ],
   "profiles": [

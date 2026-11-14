@@ -215,9 +215,8 @@ pub(crate) struct NativeSession {
 trait HermesSettlementHost {
     fn client_exited(&mut self) -> Result<bool, CafleetError>;
     fn send_keys(&mut self, keys: &[&str]) -> Result<(), CafleetError>;
+    /// The native capture, preserving SGR for placeholder detection.
     fn capture(&mut self) -> Result<String, CafleetError>;
-    /// Whether the composer holds no typed text; its placeholder suggestion does not count.
-    fn composer_empty(&mut self) -> Result<bool, CafleetError>;
     fn record_session_id(&mut self, session_id: &str) -> Result<(), CafleetError>;
     fn processes_json(&mut self, home: &Path) -> Result<Option<String>, CafleetError>;
     /// Whether the registered process still runs: `pid` alive with `host_start_time`, Hermes's
@@ -235,14 +234,15 @@ trait HermesSettlementHost {
 const INTERRUPT_KEYS: [&str; 1] = ["Ctrl+C"];
 const STOP_COMMAND: [&str; 5] = ["/", "s", "t", "o", "p"];
 const EXIT_COMMAND: [&str; 5] = ["/", "e", "x", "i", "t"];
-// Escape closes an open completion menu; the composer has no line-kill key, and Ctrl+C on an
-// empty composer ends the client without stopping its session, so leftover text is erased by
-// backspacing and the composer is verified empty before each command.
-const CLEAR_KEYS: [&str; 61] = {
-    let mut keys = ["Backspace"; 61];
+// Ctrl+C on an empty composer ends the client without stopping its session. Backspace also
+// clears the multiline drafts that Hermes's line-kill shortcuts leave behind.
+const CLEAR_FIRST_BATCH: [&str; 64] = {
+    let mut keys = ["Backspace"; 64];
     keys[0] = "Escape";
     keys
 };
+const CLEAR_BACKSPACE_BATCH: [&str; 64] = ["Backspace"; 64];
+const CLEAR_BATCHES_PER_ROUND: usize = 16;
 const MENU_CLOSE_KEYS: [&str; 1] = ["Escape"];
 const SUBMIT_KEYS: [&str; 1] = ["Enter"];
 // A typed slash command opens a completion menu once it has rendered, so the menu is closed
@@ -369,13 +369,7 @@ fn submit_command<T>(
     timeout: &str,
     mut done: impl FnMut(&str) -> Option<T>,
 ) -> Result<T, CafleetError> {
-    host.send_keys(&CLEAR_KEYS)?;
-    host.pause();
-    if !host.composer_empty()? {
-        return Err(CafleetError::App(
-            "the Hermes composer still holds text after clearing".into(),
-        ));
-    }
+    clear_composer(host, until)?;
     host.send_keys(command)?;
     host.pause();
     host.send_keys(&MENU_CLOSE_KEYS)?;
@@ -393,6 +387,37 @@ fn submit_command<T>(
     wait_for(host, until, timeout, done)
 }
 
+fn clear_composer(host: &mut dyn HermesSettlementHost, until: Instant) -> Result<(), CafleetError> {
+    let failed = || CafleetError::App("the Hermes composer still holds text after clearing".into());
+    let mut screen = host.capture()?;
+    loop {
+        if host.now() >= until {
+            return Err(failed());
+        }
+        if composer_empty(&screen) {
+            return Ok(());
+        }
+        let previous = composer_region(&screen).ok_or_else(failed)?;
+        let previous = crate::output::strip_ansi(&previous.join("\n"));
+        for batch in 0..CLEAR_BATCHES_PER_ROUND {
+            if host.now() >= until {
+                return Err(failed());
+            }
+            host.send_keys(if batch == 0 {
+                &CLEAR_FIRST_BATCH
+            } else {
+                &CLEAR_BACKSPACE_BATCH
+            })?;
+        }
+        host.pause();
+        screen = host.capture()?;
+        let current = composer_region(&screen).ok_or_else(failed)?;
+        if crate::output::strip_ansi(&current.join("\n")) == previous {
+            return Err(failed());
+        }
+    }
+}
+
 fn wait_for<T>(
     host: &mut dyn HermesSettlementHost,
     until: Instant,
@@ -404,6 +429,7 @@ fn wait_for<T>(
 }
 
 fn busy(screen: &str) -> bool {
+    let screen = crate::output::strip_ansi(screen);
     let lines = screen
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -418,7 +444,7 @@ fn stop_reports(screen: &str) -> usize {
         regex::Regex::new(r"Stopped \d+ process\(es\)\.|No running background processes\.")
             .expect("the /stop report pattern is valid")
     });
-    REPORT.find_iter(screen).count()
+    REPORT.find_iter(&crate::output::strip_ansi(screen)).count()
 }
 
 fn exit_summary_session(screen: &str) -> Option<String> {
@@ -427,7 +453,7 @@ fn exit_summary_session(screen: &str) -> Option<String> {
             .expect("the exit summary pattern is valid")
     });
     SUMMARY
-        .captures_iter(screen)
+        .captures_iter(&crate::output::strip_ansi(screen))
         .last()
         .map(|captures| captures[1].to_owned())
 }
@@ -473,23 +499,42 @@ fn verify_processes(
     }
 }
 
-/// Whether the bottom-most composer row (`❯ `) of an SGR-carrying capture holds no typed text.
-/// Hermes draws its placeholder suggestion in italics and typed text without, so the row is
-/// empty when every visible character after the prefix is italic or blank.
-fn composer_row_empty(screen: &str) -> bool {
+fn composer_region(screen: &str) -> Option<Vec<&str>> {
+    let rows = screen.lines().collect::<Vec<_>>();
+    let stripped = rows
+        .iter()
+        .map(|row| crate::output::strip_ansi(row))
+        .collect::<Vec<_>>();
+    let bottom = stripped
+        .iter()
+        .rposition(|row| !row.is_empty() && row.chars().all(|character| character == '─'))?;
+    let width = stripped[bottom].chars().count();
+    let top = stripped[..bottom].iter().rposition(|row| {
+        row.starts_with('─') && row.ends_with('─') && row.chars().count() == width
+    })?;
+    Some(rows[top + 1..bottom].to_vec())
+}
+
+fn composer_empty(screen: &str) -> bool {
+    let Some(region) = composer_region(screen) else {
+        return false;
+    };
+    match region.as_slice() {
+        [row] => prompt_row_empty(row),
+        _ => false,
+    }
+}
+
+fn prompt_row_empty(row: &str) -> bool {
     static TOKEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(
             r"\x1b\[([0-9;]*)m|\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|([^\x1b])",
         )
         .expect("the capture token pattern is valid")
     });
-    let Some(row) = screen
-        .lines()
-        .rev()
-        .find(|line| crate::output::strip_ansi(line).starts_with("❯ "))
-    else {
+    if !crate::output::strip_ansi(row).starts_with("❯ ") {
         return false;
-    };
+    }
     let mut italic = false;
     let mut visible = Vec::new();
     for token in TOKEN.captures_iter(row) {
@@ -601,12 +646,7 @@ impl HermesSettlementHost for PaneSettlementHost<'_> {
         Ok(self.mux.send_keys(self.pane_id, &keys, self.deadline)?)
     }
     fn capture(&mut self) -> Result<String, CafleetError> {
-        let screen = self.mux.capture_pane(self.pane_id, CAPTURE_LINES)?;
-        Ok(crate::output::strip_ansi(&screen))
-    }
-    fn composer_empty(&mut self) -> Result<bool, CafleetError> {
-        let screen = self.mux.capture_pane(self.pane_id, CAPTURE_LINES)?;
-        Ok(composer_row_empty(&screen))
+        Ok(self.mux.capture_pane(self.pane_id, CAPTURE_LINES)?)
     }
     fn record_session_id(&mut self, session_id: &str) -> Result<(), CafleetError> {
         let mut session = crate::broker::runtime::native_session(self.conn, self.run_id)?
