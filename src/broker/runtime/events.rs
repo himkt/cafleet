@@ -3337,6 +3337,317 @@ mod tests {
     mod composer_reliability {
         use crate::broker::runtime::events::tests::*;
 
+        fn stalled_fixture(uncertain: bool) -> (Fixture, RunOwner, InputOperation, InputOperation) {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            let blocker = fixture.input(&owner, "prompt:stalled-blocker", InputKind::Prompt, None);
+            let blocker = if uncertain {
+                storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    blocker.input_id,
+                    StopCause::WriteFailed,
+                )
+                .unwrap()
+            } else {
+                storage::record_input_left_in_composer(
+                    &mut fixture.conn,
+                    &owner,
+                    blocker.input_id,
+                    StopCause::SubmitUnconfirmed,
+                    LeftStage::Submitted,
+                )
+                .unwrap()
+            };
+            let head = fixture.input(&owner, "prompt:stalled-head", InputKind::Prompt, None);
+            let head = storage::requeue_zero_byte_immediate(
+                &mut fixture.conn,
+                &owner,
+                head.input_id,
+                "earlier_input",
+            )
+            .unwrap();
+            (fixture, owner, blocker, head)
+        }
+
+        fn stalled_transition(owner: &RunOwner, head: i64, blocker: i64) -> ObservedTransition {
+            ObservedTransition {
+                kind: RuntimeEventKind::InputDeliveryStalled,
+                cause_json: Some(json!({
+                    "kind":"input_delivery_stalled", "input_id":head,
+                    "blocking_input_id":blocker, "waiting_since":NOW,
+                })),
+                ..native_exit(owner.run_id, 1)
+            }
+        }
+
+        #[test]
+        fn stalled_events_remain_readable_and_deduplicated_after_head_and_blocker_settlement() {
+            for uncertain in [false, true] {
+                for submitted in [false, true] {
+                    let (mut fixture, owner, blocker, head) = stalled_fixture(uncertain);
+                    let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
+                    let (event, inserted) = storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live,
+                    )
+                    .unwrap();
+                    assert!(inserted);
+                    if submitted {
+                        storage::begin_deferred_attempt(
+                            &mut fixture.conn,
+                            &owner,
+                            head.input_id,
+                            DeliveryMethod::Profile,
+                            None,
+                        )
+                        .unwrap();
+                        storage::test_support::settle_input(
+                            &mut fixture.conn,
+                            &owner,
+                            head.input_id,
+                            InputState::InProgress,
+                            InputDisposition::Submitted,
+                            "fixture:verified-submit",
+                        )
+                        .unwrap();
+                    } else {
+                        storage::settle_zero_byte_deferred(
+                            &mut fixture.conn,
+                            &owner,
+                            head.input_id,
+                            InputState::Ready,
+                            "target_inactive",
+                        )
+                        .unwrap();
+                    }
+                    if uncertain {
+                        storage::test_support::settle_input(
+                            &mut fixture.conn,
+                            &owner,
+                            blocker.input_id,
+                            InputState::Uncertain,
+                            InputDisposition::NotSubmitted,
+                            "fixture:composer-cleared",
+                        )
+                        .unwrap();
+                    }
+                    let before = durable_state(&fixture.reopen());
+                    let historical = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
+                    assert_eq!(historical.event.payload_json, event.payload_json);
+                    assert_eq!(
+                        historical.event.payload_json["delivery"],
+                        json!({"status":"queued","method":null,"reason":"earlier_input"})
+                    );
+                    let (same, inserted) = storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live,
+                    )
+                    .unwrap();
+                    assert!(!inserted);
+                    assert_eq!(same.event_id, event.event_id);
+                    assert_eq!(same.payload_json, event.payload_json);
+                    assert_eq!(durable_state(&fixture.reopen()), before);
+                }
+            }
+        }
+
+        #[test]
+        fn a_new_stalled_event_requires_its_head_to_be_ready_and_deferred() {
+            for state in [
+                InputState::InProgress,
+                InputState::Accepted,
+                InputState::Settled,
+            ] {
+                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                storage::begin_deferred_attempt(
+                    &mut fixture.conn,
+                    &owner,
+                    head.input_id,
+                    DeliveryMethod::Profile,
+                    None,
+                )
+                .unwrap();
+                if state == InputState::Accepted {
+                    storage::record_input_state(
+                        &mut fixture.conn,
+                        &owner,
+                        head.input_id,
+                        InputState::InProgress,
+                        InputState::Accepted,
+                    )
+                    .unwrap();
+                } else if state == InputState::Settled {
+                    storage::settle_zero_byte_deferred(
+                        &mut fixture.conn,
+                        &owner,
+                        head.input_id,
+                        InputState::InProgress,
+                        "target_inactive",
+                    )
+                    .unwrap();
+                }
+                let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
+                let before = durable_state(&fixture.reopen());
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live
+                    )
+                    .is_err(),
+                    "{state:?}"
+                );
+                assert_eq!(durable_state(&fixture.reopen()), before);
+            }
+            let (mut fixture, owner, blocker, _) = stalled_fixture(true);
+            let head = fixture.input(&owner, "prompt:unselected-head", InputKind::Prompt, None);
+            storage::record_input_state(
+                &mut fixture.conn,
+                &owner,
+                head.input_id,
+                InputState::InProgress,
+                InputState::Ready,
+            )
+            .unwrap();
+            let before = durable_state(&fixture.reopen());
+            assert!(
+                storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &stalled_transition(&owner, head.input_id, blocker.input_id),
+                    PersistenceMode::Live
+                )
+                .is_err()
+            );
+            assert_eq!(durable_state(&fixture.reopen()), before);
+        }
+
+        #[test]
+        fn a_new_stalled_event_requires_an_uncertain_or_left_blocker() {
+            for state in [
+                InputState::Ready,
+                InputState::InProgress,
+                InputState::Accepted,
+                InputState::Settled,
+            ] {
+                let (mut fixture, owner, _, head) = stalled_fixture(true);
+                let blocker =
+                    fixture.input(&owner, "prompt:ineligible-blocker", InputKind::Prompt, None);
+                match state {
+                    InputState::Ready | InputState::Accepted => {
+                        storage::record_input_state(
+                            &mut fixture.conn,
+                            &owner,
+                            blocker.input_id,
+                            InputState::InProgress,
+                            state,
+                        )
+                        .unwrap();
+                    }
+                    InputState::Settled => {
+                        storage::test_support::settle_input(
+                            &mut fixture.conn,
+                            &owner,
+                            blocker.input_id,
+                            InputState::InProgress,
+                            InputDisposition::Submitted,
+                            "fixture:already-submitted",
+                        )
+                        .unwrap();
+                    }
+                    InputState::InProgress => {}
+                    _ => unreachable!(),
+                }
+                let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
+                let before = durable_state(&fixture.reopen());
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live
+                    )
+                    .is_err(),
+                    "{state:?}"
+                );
+                assert_eq!(durable_state(&fixture.reopen()), before);
+            }
+        }
+
+        #[test]
+        fn stalled_event_head_and_blocker_are_bound_independently_to_the_publishing_run() {
+            for foreign_head in [false, true] {
+                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let sibling = fixture.running_sibling("foreign-stalled-run");
+                let foreign =
+                    fixture.input(&sibling, "prompt:foreign-stalled", InputKind::Prompt, None);
+                let transition = if foreign_head {
+                    storage::requeue_zero_byte_immediate(
+                        &mut fixture.conn,
+                        &sibling,
+                        foreign.input_id,
+                        "earlier_input",
+                    )
+                    .unwrap();
+                    stalled_transition(&owner, foreign.input_id, blocker.input_id)
+                } else {
+                    storage::record_input_uncertain(
+                        &mut fixture.conn,
+                        &sibling,
+                        foreign.input_id,
+                        StopCause::WriteFailed,
+                    )
+                    .unwrap();
+                    stalled_transition(&owner, head.input_id, foreign.input_id)
+                };
+                let before = durable_state(&fixture.reopen());
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live
+                    )
+                    .is_err()
+                );
+                assert_eq!(durable_state(&fixture.reopen()), before);
+            }
+        }
+
+        #[test]
+        fn stalled_event_readers_validate_the_historical_queued_method_and_reason() {
+            let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+            let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
+            let (event, _) = storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &transition,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            for (field, value) in [
+                ("method", json!("profile")),
+                ("method", json!("fallback")),
+                ("reason", json!("interaction_open")),
+                ("reason", Value::Null),
+            ] {
+                let mut payload = event.payload_json.clone();
+                payload["delivery"][field] = value;
+                replace_public_payload(&mut fixture.conn, &event, payload);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "tampered queued {field}"
+                );
+            }
+        }
+
         fn result(
             fixture: &mut Fixture,
             owner: &RunOwner,
@@ -3519,10 +3830,25 @@ mod tests {
                     "input",
                     "show",
                     blocked.input_id.to_string(),
-                    "--json"
+                    "--json",
+                    "--database-url",
+                    format!("sqlite:///{}", fixture.conn.path().unwrap())
                 ])
             );
-            assert!(payload["director_action"]["press_argv"].is_array());
+            assert_eq!(
+                payload["director_action"]["press_argv"],
+                json!([
+                    "cafleet",
+                    "member",
+                    "press",
+                    fixture.member.to_string(),
+                    "--from-member-id",
+                    fixture.director.to_string(),
+                    "Enter",
+                    "--database-url",
+                    format!("sqlite:///{}", fixture.conn.path().unwrap())
+                ])
+            );
             assert!(view.interaction.is_none());
         }
     }

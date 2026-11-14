@@ -2956,6 +2956,86 @@ mod tests {
         }
 
         #[test]
+        fn immediate_stopped_results_remain_unpublished_until_their_first_durable_event() {
+            for kind in [InputKind::Prompt, InputKind::Exec] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                fixture.reserve(&owner);
+                let uncertain = fixture.input(&owner, "ordinary:immediate-uncertain", kind, None);
+                storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    uncertain.input_id,
+                    StopCause::WriteFailed,
+                )
+                .unwrap();
+                let left = fixture.left_input(
+                    &owner,
+                    "ordinary:immediate-left",
+                    kind,
+                    StopCause::ManualInput,
+                    LeftStage::LiteralComplete,
+                );
+                let submitted = fixture.input(&owner, "ordinary:immediate-submitted", kind, None);
+                storage::record_input_state(
+                    &mut fixture.conn,
+                    &owner,
+                    submitted.input_id,
+                    InputState::InProgress,
+                    InputState::Accepted,
+                )
+                .unwrap();
+                let mut expected = vec![
+                    (uncertain.input_id, "unknown", Some(StopCause::WriteFailed)),
+                    (
+                        left.input_id,
+                        "literal_complete",
+                        Some(StopCause::ManualInput),
+                    ),
+                ];
+                assert_eq!(
+                    storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap(),
+                    expected
+                );
+                for (index, (input_id, stage, cause)) in expected.clone().into_iter().enumerate() {
+                    let transition = ObservedTransition {
+                        run_id: owner.run_id,
+                        event_seq: i64::try_from(index).unwrap() + 1,
+                        episode_seq: None,
+                        kind: RuntimeEventKind::InputDeliveryResult,
+                        classification: None,
+                        observed_at: NOW.into(),
+                        evidence_json: storage::test_support::metadata(),
+                        close_reason: None,
+                        cause_json: Some(storage::input_delivery_result_cause(
+                            input_id, stage, cause,
+                        )),
+                    };
+                    let (event, inserted) = storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live,
+                    )
+                    .unwrap();
+                    assert!(inserted);
+                    assert_eq!(
+                        storage::get_event(&fixture.conn, event.event_id)
+                            .unwrap()
+                            .event
+                            .payload_json["input_id"],
+                        input_id
+                    );
+                    expected.remove(0);
+                    assert_eq!(
+                        storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap(),
+                        expected
+                    );
+                }
+            }
+        }
+
+        #[test]
         fn unpublished_delivery_results_return_the_receipt_cause() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
