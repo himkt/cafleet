@@ -1074,37 +1074,32 @@ mod tests {
             let mut fixture = storage::test_support::Fixture::new();
             fixture.activate();
             let requested = message(&mut fixture, "requested run");
-            let sibling = fixture.running_sibling("other-run");
-            let run = storage::get_run(&fixture.conn, sibling.run_id).unwrap();
-            let other = broker::send_message(
-                &mut fixture.conn,
+            let previous = preview(&mut fixture, &requested);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET status='exited',ended_at=?1 WHERE run_id=?2",
+                    rusqlite::params![crate::time::now_stamp(), fixture.run.run_id],
+                )
+                .unwrap();
+            let mut replacement = storage::test_support::Fixture::spec(
+                &fixture.conn,
+                fixture.fleet,
                 fixture.director,
-                run.member_id,
-                "other run preview",
-            )
-            .unwrap();
-            let request = crate::runtime::SubmitInput {
-                operation_key: storage::preview_operation_key(sibling.run_id, other.message_id, 1)
-                    .unwrap(),
-                input_kind: storage::InputKind::Preview,
-                message_id: Some(other.message_id),
-                literal: crate::delivery::canonical_preview_line(&other),
-            };
-            let other_input = storage::test_support::reserve_input(
-                &mut fixture.conn,
-                &sibling,
-                &storage::NewInput {
-                    operation_key: request.operation_key.clone(),
-                    kind: request.input_kind,
-                    payload_digest: storage::input_payload_digest(sibling.run_id, &request),
-                    message_id: request.message_id,
-                },
-            )
-            .unwrap();
+                fixture.member,
+            );
+            replacement.launch_nonce = "b".repeat(64);
+            replacement.runtime_path.push_str("-replacement");
+            fixture.run =
+                storage::test_support::create_run(&mut fixture.conn, &replacement).unwrap();
+            fixture.activate();
+            assert_ne!(fixture.run.run_id, previous.run_id);
+            assert_eq!(previous.kind, storage::InputKind::Preview);
+            assert_eq!(previous.message_id, Some(requested.message_id));
             let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
             outcome
                 .attempted_inputs
-                .insert(requested.message_id, Some(other_input.input_id));
+                .insert(requested.message_id, Some(previous.input_id));
             assert!(send_delivery(&fixture.conn, &requested, Some(&outcome)).is_err());
         }
     }

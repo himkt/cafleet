@@ -4852,6 +4852,191 @@ mod tests {
             const OPEN: &[u8] = b"\x1b[200~";
             const CLOSE: &[u8] = b"\x1b[201~";
 
+            fn after_native_submit(fixture_id: &str, body: impl FnOnce(&mut Host)) {
+                use crate::coding_agent::catalog::LiteralFraming;
+                use crate::coding_agent::catalog::test_support::bundled_definitions;
+                use crate::coding_agent::detector::test_support::bundled_screen;
+                use crate::coding_agent::detector::test_support::native_fixture_bytes;
+                use crate::coding_agent::{CodingAgent, ComposerOperation};
+
+                let definitions = bundled_definitions();
+                let fixtures = definitions["fixtures"].as_array().unwrap();
+                let fixture = fixtures
+                    .iter()
+                    .find(|entry| entry["id"] == fixture_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "the authoritative retained/working fixture is registered: {fixture_id}"
+                        )
+                    });
+                let backend: CodingAgent =
+                    serde_json::from_value(fixture["backend"].clone()).unwrap();
+                let native_version = fixture["native_version"].as_str().unwrap();
+                let idle = fixtures
+                    .iter()
+                    .find(|candidate| {
+                        candidate["backend"] == fixture["backend"]
+                            && candidate["native_version"] == fixture["native_version"]
+                            && candidate["rows"] == fixture["rows"]
+                            && candidate["cols"] == fixture["cols"]
+                            && candidate["id"]
+                                .as_str()
+                                .unwrap()
+                                .contains("-composer-prompt-idle-mode-2004-")
+                    })
+                    .expect(
+                        "each measured backend/geometry has its captured initial empty composer",
+                    );
+                let operation = if fixture_id.contains("-composer-exec-") {
+                    ComposerOperation::Exec
+                } else {
+                    assert!(fixture_id.contains("-composer-prompt-"), "{fixture_id}");
+                    ComposerOperation::Prompt
+                };
+                let literal = "printf native-verification";
+                let catalog = ProfileCatalog::bundled().clone();
+                let plan = catalog
+                    .composer_plan(backend, native_version, operation)
+                    .unwrap();
+                assert!(plan.plain_literal_allowed(literal));
+                let expected = plan
+                    .stages(literal, LiteralFraming::Plain)
+                    .unwrap()
+                    .concat();
+                with_profile_host(
+                    catalog,
+                    expected.clone(),
+                    HostProfile {
+                        backend,
+                        native_version,
+                        size: TerminalSize {
+                            rows: u16::try_from(fixture["rows"].as_u64().unwrap()).unwrap(),
+                            cols: u16::try_from(fixture["cols"].as_u64().unwrap()).unwrap(),
+                        },
+                        screen: native_fixture_bytes(&bundled_screen(idle["id"].as_str().unwrap())),
+                        ..HostProfile::metadata()
+                    },
+                    |host| {
+                        host.confirm_submissions = false;
+                        assert!(
+                            !host.transport.bracketed_paste(),
+                            "native screen replay leaves mode 2004 off"
+                        );
+                        let mut request = host.request("native:verification");
+                        let input = SubmitInput {
+                            operation_key: "native:verification".into(),
+                            input_kind: if operation == ComposerOperation::Exec {
+                                storage::InputKind::Exec
+                            } else {
+                                storage::InputKind::Prompt
+                            },
+                            message_id: None,
+                            literal: literal.into(),
+                        };
+                        request.operation = if operation == ComposerOperation::Exec {
+                            InputControlOperation::SubmitExec(input)
+                        } else {
+                            InputControlOperation::SubmitPrompt(input)
+                        };
+                        assert!(host.handle(request).unwrap().is_none());
+                        until_written(host, expected.len());
+                        assert_eq!(host.pty.written, expected, "{fixture_id}");
+                        assert!(
+                            host.coordinator.pending.is_some(),
+                            "the complete submit key awaits native confirmation: {fixture_id}"
+                        );
+                        body(host);
+                    },
+                );
+            }
+
+            fn native_verification_reply(host: &mut Host) -> SubmissionResult {
+                for _ in 0..256 {
+                    if let Some(reply) = turn(host) {
+                        return reply;
+                    }
+                }
+                panic!("native verification completes within bounded real coordinator turns");
+            }
+
+            #[test]
+            fn every_authoritative_retained_native_snapshot_leaves_submit_unconfirmed() {
+                use crate::coding_agent::detector::test_support::{
+                    bundled_screen, native_fixture_bytes,
+                };
+                for fixture_id in [
+                    "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+                    "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
+                    "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+                    "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+                    "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
+                    "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
+                    "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-99",
+                    "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-100",
+                    "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-herdr-119-49",
+                    "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-tmux-120-50",
+                    "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
+                    "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
+                    "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+                    "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+                    "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
+                    "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+                    "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+                    "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-tmux-120-37",
+                    "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-herdr-119-37",
+                    "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-tmux-120-37",
+                    "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-herdr-119-37",
+                    "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
+                    "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43",
+                    "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-tmux-120-94",
+                    "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93",
+                    "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
+                    "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
+                    "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
+                ] {
+                    after_native_submit(fixture_id, |host| {
+                        host.show(native_fixture_bytes(&bundled_screen(fixture_id)));
+                        assert_ne!(
+                            host.controller.health(&host.writer).eligibility,
+                            InputEligibility::ComposerEmpty,
+                            "{fixture_id}"
+                        );
+                        host.coordinator
+                            .set_post_submit_verification_until(Instant::now());
+                        let reply = native_verification_reply(host);
+                        assert_left(
+                            host,
+                            &reply,
+                            storage::StopCause::SubmitUnconfirmed,
+                            storage::LeftStage::Submitted,
+                        );
+                        assert_eq!(reply.stage, SubmissionStage::Submitted, "{fixture_id}");
+                    });
+                }
+            }
+
+            #[test]
+            fn measured_working_composers_and_claude_ghost_hint_confirm_written_submit_keys() {
+                use crate::coding_agent::detector::test_support::{
+                    bundled_screen, native_fixture_bytes,
+                };
+                for fixture_id in [
+                    "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61",
+                    "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61",
+                    "hermes-2026.9.24-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7",
+                    "hermes-2026.9.24-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7",
+                    "claude-2.1.319-composer-prompt-key-probe-before-tapped-v2-tmux-120-1",
+                ] {
+                    after_native_submit(fixture_id, |host| {
+                        host.show(native_fixture_bytes(&bundled_screen(fixture_id)));
+                        let reply = native_verification_reply(host);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted, "{fixture_id}");
+                        assert_eq!(reply.stage, SubmissionStage::Submitted, "{fixture_id}");
+                        assert_eq!(stored(host, &reply).stop_cause, None, "{fixture_id}");
+                    });
+                }
+            }
+
             fn configured(framing: &str, limit: Value) -> ProfileCatalog {
                 let mut value = catalog_definition();
                 for operation in ["prompt", "exec"] {
@@ -8422,18 +8607,18 @@ mod tests {
                     .unwrap()
             }
 
-            pub(in crate::runtime::input) struct HostProfile {
+            pub(in crate::runtime::input) struct HostProfile<'a> {
                 pub(crate) policy: storage::evidence::EvidencePolicy,
                 pub(crate) event_evidence: &'static str,
                 pub(crate) backend: crate::coding_agent::CodingAgent,
-                pub(crate) native_version: &'static str,
+                pub(crate) native_version: &'a str,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
                 pub(crate) stage_settle: Duration,
             }
             pub(in crate::runtime::input) const TEST_STAGE_SETTLE: Duration =
                 Duration::from_millis(50);
-            impl HostProfile {
+            impl HostProfile<'_> {
                 pub(crate) fn synthetic(
                     policy: storage::evidence::EvidencePolicy,
                     event_evidence: &'static str,
@@ -8625,9 +8810,9 @@ mod tests {
                 }
             }
 
-            pub(in crate::runtime::input) struct RunSelection {
+            pub(in crate::runtime::input) struct RunSelection<'a> {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
-                pub(crate) native_version: &'static str,
+                pub(crate) native_version: &'a str,
                 pub(crate) event_evidence: &'static str,
             }
 
@@ -13314,7 +13499,14 @@ mod tests {
                 .operations
                 .get(&template)
                 .expect("real completed template");
-            let RetainedSelection::Composer { method, stages, .. } = &real.selection else {
+            let RetainedSelection::Composer {
+                method,
+                stages,
+                offset,
+                closing,
+                ..
+            } = &real.selection
+            else {
                 panic!("an ordinary prompt retains its composer selection")
             };
             let fillers = (0..count)
@@ -13332,6 +13524,8 @@ mod tests {
                                 method: *method,
                                 stages: stages.clone(),
                                 next_stage: stages.len(),
+                                offset: *offset,
+                                closing: *closing,
                             },
                             stage: real.stage,
                             written_bytes: real.written_bytes,
