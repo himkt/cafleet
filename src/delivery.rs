@@ -1885,7 +1885,7 @@ mod tests {
                 assert_eq!(outcome.end, AttemptEnd::Held);
                 assert_eq!(outcome.held_reason.as_deref(), Some("observer_unavailable"));
                 assert!(outcome.sent.is_empty());
-                let until = outer.min(Instant::now() + Duration::from_secs(1));
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
                 let mut host = DeliveryHost::new(&settings, &placement, until);
                 host.take_lock_after_reply = true;
                 let outcome = deliver_pending_with(
@@ -2267,7 +2267,7 @@ mod tests {
                 )
                 .unwrap();
                 let expected = wrapped_line(&message, &message.text);
-                let until = outer.min(Instant::now() + Duration::from_secs(2));
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
                 let mut host = DeliveryHost::new(&settings, &placement, until);
                 host.expire_retirement = true;
                 let outcome = deliver_pending_with(

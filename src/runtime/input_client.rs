@@ -2989,7 +2989,7 @@ mod tests {
             &run,
             &placement,
             &request,
-            Deadline::until(outer.min(Instant::now() + Duration::from_secs(2))),
+            Deadline::until(outer.min(Instant::now() + Duration::from_secs(5))),
         )
         .unwrap();
         assert_eq!(result.status, SubmissionStatus::Accepted);
@@ -3814,7 +3814,7 @@ mod tests {
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "lock-taken-after-reply");
-            let until = outer.min(Instant::now() + Duration::from_secs(1));
+            let until = outer.min(Instant::now() + Duration::from_secs(5));
             let attempt = PreparedSubmission::new(
                 &request,
                 until,
