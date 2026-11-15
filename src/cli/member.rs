@@ -3164,7 +3164,7 @@ mod tests {
             let before = member_rows(&conn);
             let config = dir.path().join("claude config");
             std::fs::create_dir(&config).unwrap();
-            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' -t @1 #{window_height} '*) printf '50\\n' ;;\n  *' #{window_height} '*) printf '\\n' ;;\n  *) exit 1 ;;\nesac";
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' -t @1 #{window_height} '*) printf '25\\n' ;;\n  *' #{window_height} '*) printf '\\n' ;;\n  *) exit 1 ;;\nesac";
             let claude = "printf '2.1.302 (Claude Code)\\n'";
             let fleet_arg = fleet.to_string();
             let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(

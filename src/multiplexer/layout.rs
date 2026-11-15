@@ -1,6 +1,6 @@
 use crate::broker::stored_enum;
 
-pub(crate) const MIN_PANE_HEIGHT: i64 = 30;
+pub(crate) const MIN_PANE_HEIGHT: i64 = 15;
 pub(crate) const MAX_PANES_PER_COLUMN: i64 = 8;
 
 stored_enum!(ColumnSide, "member_placements.column_side", { Left => "left", Right => "right" });
@@ -143,23 +143,24 @@ mod tests {
     }
 
     #[test]
-    fn layout_constants_are_thirty_rows_and_eight_panes() {
-        assert_eq!(MIN_PANE_HEIGHT, 30);
+    fn layout_constants_are_fifteen_rows_and_eight_panes() {
+        assert_eq!(MIN_PANE_HEIGHT, 15);
         assert_eq!(MAX_PANES_PER_COLUMN, 8);
     }
 
     #[test]
-    fn capacity_is_the_window_height_over_thirty_rows_capped_at_eight() {
+    fn capacity_is_the_window_height_over_fifteen_rows_capped_at_eight() {
         for (height, expected) in [
             (0, 0),
-            (29, 0),
-            (30, 1),
-            (50, 1),
-            (59, 1),
-            (60, 2),
-            (120, 4),
-            (239, 7),
-            (240, 8),
+            (14, 0),
+            (15, 1),
+            (25, 1),
+            (29, 1),
+            (30, 2),
+            (50, 3),
+            (60, 4),
+            (119, 7),
+            (120, 8),
             (1000, 8),
         ] {
             assert_eq!(capacity(height), expected, "height {height}");
@@ -170,17 +171,17 @@ mod tests {
     fn the_director_window_right_column_fills_up_to_its_capacity() {
         for members in 0..4 {
             assert_eq!(
-                choose_slot(FLEET, &[director_window(120, members)], 0),
+                choose_slot(FLEET, &[director_window(60, members)], 0),
                 existing(0, ColumnSide::Right),
                 "{members} members"
             );
         }
         assert_eq!(
-            choose_slot(FLEET, &[director_window(120, 4)], 0),
+            choose_slot(FLEET, &[director_window(60, 4)], 0),
             new_window(1)
         );
         assert_eq!(
-            choose_slot(FLEET, &[director_window(50, 1)], 0),
+            choose_slot(FLEET, &[director_window(25, 1)], 0),
             new_window(1)
         );
     }
@@ -188,13 +189,13 @@ mod tests {
     #[test]
     fn a_director_window_shorter_than_one_slot_is_skipped() {
         assert_eq!(
-            choose_slot(FLEET, &[director_window(29, 0)], 0),
+            choose_slot(FLEET, &[director_window(14, 0)], 0),
             new_window(1)
         );
         assert_eq!(
             choose_slot(
                 FLEET,
-                &[director_window(20, 0), overflow_window(1, 120, 1, 0)],
+                &[director_window(10, 0), overflow_window(1, 30, 1, 0)],
                 1
             ),
             existing(1, ColumnSide::Left)
@@ -211,7 +212,7 @@ mod tests {
         ] {
             let choice = choose_slot(
                 FLEET,
-                &[director_window(60, 2), overflow_window(1, 60, left, right)],
+                &[director_window(30, 2), overflow_window(1, 30, left, right)],
                 1,
             );
             let expected = match expected {
@@ -247,13 +248,13 @@ mod tests {
         assert_eq!(
             choose_slot(
                 FLEET,
-                &[director_window(60, 2), overflow_window(2, 60, 2, 2)],
+                &[director_window(30, 2), overflow_window(2, 30, 2, 2)],
                 5
             ),
             new_window(6)
         );
         assert_eq!(
-            choose_slot(42, &[director_window(60, 2)], 0),
+            choose_slot(42, &[director_window(30, 2)], 0),
             SlotChoice::NewWindow {
                 ordinal: 1,
                 window_name: "cafleet-42-1".into(),
@@ -267,10 +268,10 @@ mod tests {
             choose_slot(
                 FLEET,
                 &[
-                    director_window(60, 2),
-                    overflow_window(1, 60, 2, 2),
-                    overflow_window(3, 60, 2, 1),
-                    overflow_window(4, 60, 0, 0),
+                    director_window(30, 2),
+                    overflow_window(1, 30, 2, 2),
+                    overflow_window(3, 30, 2, 1),
+                    overflow_window(4, 30, 0, 0),
                 ],
                 4
             ),
@@ -283,7 +284,7 @@ mod tests {
         assert_eq!(
             choose_slot(
                 FLEET,
-                &[director_window(120, 3), overflow_window(1, 120, 1, 0)],
+                &[director_window(60, 3), overflow_window(1, 30, 1, 0)],
                 1
             ),
             existing(0, ColumnSide::Right)
@@ -295,7 +296,7 @@ mod tests {
         assert_eq!(
             choose_slot(
                 FLEET,
-                &[director_window(60, 2), overflow_window(1, 60, 0, 1)],
+                &[director_window(30, 2), overflow_window(1, 30, 0, 1)],
                 1
             ),
             existing(1, ColumnSide::Left)
@@ -305,7 +306,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn choose_slot_requires_the_director_window_first() {
-        choose_slot(FLEET, &[overflow_window(1, 60, 0, 0)], 1);
+        choose_slot(FLEET, &[overflow_window(1, 30, 0, 0)], 1);
     }
 
     #[test]
@@ -320,9 +321,9 @@ mod tests {
         choose_slot(
             FLEET,
             &[
-                director_window(60, 2),
-                overflow_window(2, 60, 0, 0),
-                overflow_window(1, 60, 0, 0),
+                director_window(30, 2),
+                overflow_window(2, 30, 0, 0),
+                overflow_window(1, 30, 0, 0),
             ],
             2,
         );
@@ -334,9 +335,9 @@ mod tests {
         choose_slot(
             FLEET,
             &[
-                director_window(60, 2),
-                overflow_window(1, 60, 2, 2),
-                overflow_window(1, 60, 0, 0),
+                director_window(30, 2),
+                overflow_window(1, 30, 2, 2),
+                overflow_window(1, 30, 0, 0),
             ],
             1,
         );

@@ -1566,19 +1566,20 @@ A fleet spreads its member panes across several windows. Every `member create` t
 
 | Constant | Value |
 |---|---|
-| `MIN_PANE_HEIGHT` | 30 rows |
+| `MIN_PANE_HEIGHT` | 15 rows |
 | `MAX_PANES_PER_COLUMN` | 8 |
 | `LAYOUT_LOCK_WAIT` | 60 seconds |
 
-The constants are fixed; no flag or configuration changes them. A column in a window whose live height is `H` rows has capacity `capacity(H) = min(MAX_PANES_PER_COLUMN, floor(H / MIN_PANE_HEIGHT))`. `H` is the tmux `#{window_height}`, which excludes the status line, or the herdr `layout.area.height`; the 30-row minimum is a per-slot budget that includes the tmux pane separator. The Director window's right column holds `capacity(H)` members and is skipped when that is 0. An overflow column holds `max(1, capacity(H))` members, so a new overflow window always makes progress.
+The constants are fixed; no flag or configuration changes them. A column in a window whose live height is `H` rows has capacity `capacity(H) = min(MAX_PANES_PER_COLUMN, floor(H / MIN_PANE_HEIGHT))`. `H` is the tmux `#{window_height}`, which excludes the status line, or the herdr `layout.area.height`; the 15-row minimum is a per-slot budget that includes the tmux pane separator. The Director window's right column holds `capacity(H)` members and is skipped when that is 0. An overflow column holds `max(1, capacity(H))` members, so a new overflow window always makes progress.
 
 | Window height `H` | Capacity per column | Director window members | Overflow window members |
 |---|---|---|---|
-| < 30 | 0 | 0 (skipped) | 2 (one per column, by the overflow minimum) |
-| 50 | 1 | 1 | 2 |
-| 60 | 2 | 2 | 4 |
-| 120 | 4 | 4 | 8 |
-| ≥ 240 | 8 | 8 | 16 |
+| < 15 | 0 | 0 (skipped) | 2 (one per column, by the overflow minimum) |
+| 15 | 1 | 1 | 2 |
+| 30 | 2 | 2 | 4 |
+| 50 | 3 | 3 | 6 |
+| 60 | 4 | 4 | 8 |
+| ≥ 120 | 8 | 8 | 16 |
 
 ##### Slot selection
 
