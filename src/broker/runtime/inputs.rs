@@ -38,6 +38,30 @@ impl InputOperation {
     pub(crate) fn delivery(&self) -> Option<DeliveryProjection> {
         delivery_projection(self).expect("validated input receipts project their delivery")
     }
+
+    pub(crate) fn has_stalled_blocker_provenance(&self) -> bool {
+        if self.kind == InputKind::PermissionResponse || self.delivery_method.is_none() {
+            return false;
+        }
+        match (self.state, self.disposition) {
+            (InputState::InProgress | InputState::Uncertain, None) => true,
+            (InputState::Settled, Some(InputDisposition::LeftInComposer)) => {
+                self.left_stage != Some(LeftStage::EscapeOnly)
+            }
+            (
+                InputState::Settled,
+                Some(
+                    InputDisposition::Submitted
+                    | InputDisposition::NotSubmitted
+                    | InputDisposition::AbandonedUncertain,
+                ),
+            ) => self
+                .evidence_ref
+                .as_deref()
+                .is_some_and(|evidence| !evidence.trim().is_empty()),
+            _ => false,
+        }
+    }
 }
 
 const FALLBACK_REASONS: [&str; 2] = ["submission_plan_unavailable", "idle_timeout"];

@@ -692,10 +692,9 @@ fn stalled_delivery(
             "a new stalled head must be ready",
         )?;
         require(
-            blocking.state == InputState::Uncertain
-                || blocking.disposition == Some(InputDisposition::LeftInComposer),
+            blocking.has_stalled_blocker_provenance(),
             "blocking_input_id",
-            "a new stalled blocker must be uncertain or left in the composer",
+            "a new stalled blocker retains its selected ordinary attempt provenance",
         )?;
     }
     let expected_delivery = DeliveryProjection {

@@ -1989,9 +1989,27 @@ impl InputCoordinator {
             })
     }
 
+    fn consumed_held_blocker(&self) -> Option<i64> {
+        let (input_id, _) = self.held_composer?;
+        let retained = self.operations.get(&input_id)?;
+        (retained.operation.has_stalled_blocker_provenance()
+            && (retained.stage != SubmissionStage::ZeroBytes || retained.written_bytes > 0)
+            && !retained.leased
+            && !retained.attempt_available
+            && !self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.input_id() == Some(input_id)))
+        .then_some(input_id)
+    }
+
     fn unresolved_ordinary(&self, conn: &Connection, operation: ComposerOperation) -> Result<bool> {
         if self.verified_composer(operation) {
-            Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state='in_progress')", [self.run.run_id], |row| row.get(0))?)
+            Ok(conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state='in_progress' AND input_id IS NOT ?2)",
+                rusqlite::params![self.run.run_id, self.consumed_held_blocker()],
+                |row| row.get(0),
+            )?)
         } else {
             storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
         }
@@ -2596,6 +2614,7 @@ impl InputCoordinator {
             Err(cause) => return Err(cause),
         }
         let blocker = ordinary_blocker(&observation.status());
+        let consumed_held_blocker = self.consumed_held_blocker();
         let head = self
             .queue
             .front_mut()
@@ -2625,11 +2644,12 @@ impl InputCoordinator {
                         blocking.run_id == self.run.run_id,
                         "held composer blocker belongs to its run",
                     )?;
-                    if blocking.state != storage::InputState::Uncertain
-                        && blocking.disposition != Some(storage::InputDisposition::LeftInComposer)
-                    {
-                        return Ok(());
-                    }
+                    ensure(
+                        blocking.has_stalled_blocker_provenance()
+                            && (blocking.state != storage::InputState::InProgress
+                                || consumed_held_blocker == Some(blocking_input_id)),
+                        "held composer blocker retains its selected consumed attempt provenance",
+                    )?;
                     head.stalled = true;
                     observation.publish_delivery_stalled(serde_json::json!({
                         "kind":"input_delivery_stalled", "input_id":input_id,
