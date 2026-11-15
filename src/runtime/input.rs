@@ -7,6 +7,7 @@ use crate::broker::runtime::RunStatus;
 use crate::coding_agent::AnswerMatch;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::AnswerStage;
+use crate::coding_agent::CodingAgent;
 use crate::coding_agent::ComposerOperation;
 use crate::coding_agent::ProfileCatalog;
 use crate::coding_agent::StageGate;
@@ -81,6 +82,7 @@ pub(crate) struct InputServices {
 
 pub(crate) struct InputCoordinator {
     run: RunRecord,
+    backend: CodingAgent,
     lock: Arc<RunLock>,
     services: InputServices,
     manual_generation: u64,
@@ -1967,14 +1969,12 @@ impl InputCoordinator {
             && status.diagnostic.is_none()
     }
 
-    fn verified_composer(&self, operation: ComposerOperation) -> Result<bool> {
-        let backend =
-            coding_agent(&self.run.backend).ok_or_else(|| error("unknown input backend"))?;
-        Ok(self.services.catalog.verified_composer(
-            backend,
+    fn verified_composer(&self, operation: ComposerOperation) -> bool {
+        self.services.catalog.verified_composer(
+            self.backend,
             self.run.native_version.as_deref(),
             operation,
-        ))
+        )
     }
 
     fn attempt_requirement(&self, operation: ComposerOperation, stages: usize) -> Result<Duration> {
@@ -1982,7 +1982,7 @@ impl InputCoordinator {
             .expect("a delivery has bounded stages");
         Ok(self.stage_settle() * settles
             + STAGE_WRITE_MARGIN
-            + if self.verified_composer(operation)? {
+            + if self.verified_composer(operation) {
                 POST_SUBMIT_VERIFICATION
             } else {
                 Duration::ZERO
@@ -1990,7 +1990,7 @@ impl InputCoordinator {
     }
 
     fn unresolved_ordinary(&self, conn: &Connection, operation: ComposerOperation) -> Result<bool> {
-        if self.verified_composer(operation)? {
+        if self.verified_composer(operation) {
             Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state='in_progress')", [self.run.run_id], |row| row.get(0))?)
         } else {
             storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
@@ -2176,7 +2176,7 @@ impl InputCoordinator {
                             )));
                         }
                         DeliveryChoice::Ready(selection)
-                            if self.verified_composer(composer_operation)?
+                            if self.verified_composer(composer_operation)
                                 && deadline.saturating_duration_since(Instant::now())
                                     < self.attempt_requirement(
                                         composer_operation,
@@ -2474,6 +2474,39 @@ impl InputCoordinator {
         Ok(None)
     }
 
+    fn hold_possible_ordinary_input(&mut self, input_id: i64) {
+        let retained = self
+            .operations
+            .get(&input_id)
+            .expect("released input retains its receipt");
+        let operation = match retained.operation.kind {
+            storage::InputKind::Prompt | storage::InputKind::Preview => ComposerOperation::Prompt,
+            storage::InputKind::Exec => ComposerOperation::Exec,
+            storage::InputKind::PermissionResponse => return,
+        };
+        if !self.verified_composer(operation)
+            || retained.stage == SubmissionStage::ZeroBytes && retained.written_bytes == 0
+            || retained.operation.state == storage::InputState::Accepted
+            || retained.operation.disposition == Some(storage::InputDisposition::Submitted)
+            || retained.operation.disposition == Some(storage::InputDisposition::LeftInComposer)
+                && retained.operation.left_stage == Some(storage::LeftStage::EscapeOnly)
+            || self
+                .held_composer
+                .is_some_and(|(blocker, _)| blocker == input_id)
+        {
+            return;
+        }
+        assert!(
+            !retained.leased,
+            "a held ordinary input has released its writer exclusion"
+        );
+        self.held_composer = Some((input_id, self.output_seq));
+        if let Some(head) = self.queue.front_mut() {
+            head.composer_busy_since = None;
+            head.attempt_deadline = None;
+        }
+    }
+
     fn clear_verified_hold(&mut self, observation: &ObservationController) {
         if self
             .held_composer
@@ -2577,6 +2610,26 @@ impl InputCoordinator {
                 let since = *head.composer_busy_since.get_or_insert(now);
                 head.attempt_deadline = None;
                 if now.duration_since(since) >= COMPOSER_BUSY_BOUND && !head.stalled {
+                    let blocking =
+                        match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+                            storage::get_input(conn, blocking_input_id)
+                        }) {
+                            Ok(blocking) => blocking,
+                            Err(cause) if storage_failure(&cause) => {
+                                head.obstacle = "storage_unavailable";
+                                return Ok(());
+                            }
+                            Err(cause) => return Err(cause),
+                        };
+                    ensure(
+                        blocking.run_id == self.run.run_id,
+                        "held composer blocker belongs to its run",
+                    )?;
+                    if blocking.state != storage::InputState::Uncertain
+                        && blocking.disposition != Some(storage::InputDisposition::LeftInComposer)
+                    {
+                        return Ok(());
+                    }
                     head.stalled = true;
                     observation.publish_delivery_stalled(serde_json::json!({
                         "kind":"input_delivery_stalled", "input_id":input_id,
@@ -2894,7 +2947,7 @@ impl InputCoordinator {
             return Ok(None);
         }
         let status = observation.status();
-        let insufficient_budget = self.verified_composer(composer.operation)?
+        let insufficient_budget = self.verified_composer(composer.operation)
             && pending.deadline.saturating_duration_since(Instant::now())
                 < self.attempt_requirement(composer.operation, composer.stages.len())?;
         let defer_reason = match ordinary_blocker(&status) {
@@ -3431,6 +3484,13 @@ impl InputCoordinator {
             }
         })();
         result.map_err(|source| {
+            if let Some(id) = self
+                .pending
+                .as_ref()
+                .and_then(PendingInput::installed_input_id)
+            {
+                self.hold_possible_ordinary_input(id);
+            }
             let source = match self
                 .pending
                 .as_mut()
@@ -3786,7 +3846,7 @@ impl InputCoordinator {
         let remaining = pending.deadline.saturating_duration_since(Instant::now());
         if (between_chunks && remaining <= PASTE_CLOSE_RESERVE)
             || (*next_stage + 1 == stages.len()
-                && self.verified_composer(composer.operation)?
+                && self.verified_composer(composer.operation)
                 && remaining < POST_SUBMIT_VERIFICATION + STAGE_WRITE_MARGIN)
         {
             return Ok(Some(storage::StopCause::DeadlineExpired));
@@ -4103,7 +4163,7 @@ impl InputCoordinator {
         if matches!(&write, Ok(ProgrammaticWrite::Complete { .. }))
             && point.stage == SubmissionStage::Submitted
             && let Some(composer) = self.pending.as_ref().and_then(PendingInput::composer)
-            && self.verified_composer(composer.operation)?
+            && self.verified_composer(composer.operation)
         {
             let verification = PostSubmitVerification {
                 until: Instant::now() + POST_SUBMIT_VERIFICATION,
@@ -4184,6 +4244,7 @@ impl InputCoordinator {
                 .get_mut(&id)
                 .expect("input retained")
                 .operation = operation.clone();
+            self.hold_possible_ordinary_input(id);
         }
         let completed = match (write, persisted) {
             (Ok(_), Ok(operation)) => Ok(operation),
@@ -4242,6 +4303,7 @@ impl InputCoordinator {
         cause: storage::StopCause,
         deadline: Instant,
     ) -> Result<storage::InputOperation> {
+        self.hold_possible_ordinary_input(id);
         let current = with_database_deadline(conn, deadline, |conn| storage::get_input(conn, id))?;
         let operation = if current.state == storage::InputState::InProgress {
             with_database_deadline(conn, deadline, |conn| {
@@ -4273,6 +4335,7 @@ impl InputCoordinator {
         if !written {
             return;
         }
+        self.hold_possible_ordinary_input(id);
         self.pending = None;
         match self.record_deferred_uncertain(
             conn,
@@ -4313,7 +4376,7 @@ impl InputCoordinator {
         let literal = composer.literal.clone();
         let composer_operation = composer.operation;
         let deferred = composer.deferred.is_some();
-        let verified = self.verified_composer(composer_operation)?;
+        let verified = self.verified_composer(composer_operation);
         let left = verified && stop.complete_prefix && stop.cause.permits_left_in_composer();
         let bookkeeping = if effective > Instant::now() {
             effective
@@ -4361,13 +4424,7 @@ impl InputCoordinator {
         } else {
             retained.stage
         };
-        if verified && stop.stage != storage::LeftStage::EscapeOnly {
-            self.held_composer = Some((id, self.output_seq));
-            if let Some(head) = self.queue.front_mut() {
-                head.composer_busy_since = None;
-                head.attempt_deadline = None;
-            }
-        }
+        self.hold_possible_ordinary_input(id);
         if let Some(next) = successor {
             self.queue.push_front(QueuedInput {
                 input_id: next.input_id,
@@ -4626,6 +4683,7 @@ impl InputCoordinator {
             .as_ref()
             .and_then(PendingInput::installed_input_id)
         {
+            self.hold_possible_ordinary_input(id);
             let retained = self
                 .operations
                 .get_mut(&id)
@@ -4685,11 +4743,13 @@ impl InputCoordinator {
             )?;
             Ok(member.placement)
         })?;
+        let backend = coding_agent(&run.backend).ok_or_else(|| error("unknown input backend"))?;
         Ok(Self {
             placement,
             operations: BTreeMap::new(),
             pending: None,
             run,
+            backend,
             lock,
             services,
             manual_generation: 0,
