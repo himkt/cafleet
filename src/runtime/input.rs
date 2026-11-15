@@ -6920,16 +6920,7 @@ mod tests {
                     .unwrap()
                     .input_id()
                     .unwrap();
-                let failure = (0..64)
-                    .find_map(|_| {
-                        host.drain();
-                        match host.try_advance() {
-                            Err(failure) => Some(failure),
-                            Ok(None) => None,
-                            Ok(Some(_)) => panic!("the later checkpoint retains its primary error"),
-                        }
-                    })
-                    .expect("a later pre-write checkpoint fails after actual positive bytes");
+                let failure = later_checkpoint_failure(host);
                 assert!(
                     matches!(failure.source, CafleetError::DeadlineExceeded),
                     "{failure:?}"
@@ -7321,6 +7312,21 @@ mod tests {
                 }
             }
 
+            fn later_checkpoint_failure(host: &mut Host) -> InputFailure {
+                loop {
+                    assert!(
+                        Instant::now() < host.until,
+                        "a later pre-write checkpoint fails after actual positive bytes"
+                    );
+                    host.drain();
+                    match host.try_advance() {
+                        Err(failure) => return failure,
+                        Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+                        Ok(Some(_)) => panic!("the later checkpoint retains its primary error"),
+                    }
+                }
+            }
+
             fn exceptional_literal_stage(kind: storage::InputKind) -> Vec<u8> {
                 let mut bytes = Vec::new();
                 if kind == storage::InputKind::Exec {
@@ -7387,16 +7393,7 @@ mod tests {
                     request(host, "prompt:after-exceptional-literal", LITERAL),
                     "earlier_input",
                 );
-                let failure = (0..64)
-                    .find_map(|_| {
-                        host.drain();
-                        match host.try_advance() {
-                            Err(failure) => Some(failure),
-                            Ok(None) => None,
-                            Ok(Some(_)) => panic!("a deferred checkpoint failure keeps its error"),
-                        }
-                    })
-                    .expect("the next pre-write checkpoint fails after actual literal bytes");
+                let failure = later_checkpoint_failure(host);
                 assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
                 assert_eq!(failure.context.input_id, Some(id));
                 assert_eq!(failure.context.run_id, Some(host.fixture.run.run_id));
