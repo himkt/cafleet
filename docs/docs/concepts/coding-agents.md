@@ -79,6 +79,8 @@ Evidence of insufficient capability can trigger a replacement with a strictly st
 
 The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. herdr labels every member pane with the member name and tmux titles it, though an agent may retitle a tmux pane; `cafleet member list` shows each member's `window` and `pane_id`.
 
+A backend whose measured plain-input limit is below the longest preview receives long previews by bracketed paste or a short pointer to the full message; the [bundled profile contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the measured values.
+
 A Hermes member's session can keep accepted work and background processes running after its pane's client exits. `cafleet member delete` stops that session's work and registered background processes, keeping the member when it cannot verify the stop; CAFleet never touches your Hermes gateway or sessions it does not own.
 
 A pi member has no OS-level sandbox: the CAFleet member gate decides which tools and shell commands it runs, but its file reads reach any path, and `.env` contents stay readable through directory searches and allowed commands.

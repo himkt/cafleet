@@ -308,8 +308,32 @@ struct RawSubmissions {
 struct RawSubmission {
     prefix_hex: String,
     submit_hex: String,
+    literal_framing: LiteralFraming,
+    #[serde(deserialize_with = "Option::deserialize")]
+    plain_literal_limit: Option<PlainLiteralLimit>,
     #[serde(rename = "fixture_ids")]
     _fixture_ids: IgnoredAny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LiteralFraming {
+    Plain,
+    BracketedPaste,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LiteralUnit {
+    Bytes,
+    Scalars,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlainLiteralLimit {
+    unit: LiteralUnit,
+    max: std::num::NonZeroU64,
 }
 
 #[derive(Deserialize)]
@@ -876,7 +900,11 @@ fn composer_submission(
     let submit = lower_hex_bytes(&raw.submit_hex, 32)
         .filter(|submit| !submit.is_empty())
         .ok_or_else(|| invalid("composer submit requires 1–32 lowercase hexadecimal bytes"))?;
-    Ok(ComposerSubmission { submit })
+    Ok(ComposerSubmission {
+        submit,
+        literal_framing: raw.literal_framing,
+        plain_literal_limit: raw.plain_literal_limit,
+    })
 }
 
 fn compile_answer(
@@ -1171,7 +1199,8 @@ impl ProfileCatalog {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum ComposerOperation {
     Prompt,
     Exec,
@@ -1197,14 +1226,61 @@ impl ComposerOperation {
 #[derive(Clone)]
 pub(super) struct ComposerSubmission {
     pub(crate) submit: Vec<u8>,
+    literal_framing: LiteralFraming,
+    plain_literal_limit: Option<PlainLiteralLimit>,
 }
 
 pub(crate) struct ComposerPlan {
     operation: ComposerOperation,
     submit: Vec<u8>,
+    literal_framing: LiteralFraming,
+    plain_literal_limit: Option<PlainLiteralLimit>,
 }
 
 impl ComposerPlan {
+    pub(crate) fn literal_framing(&self) -> LiteralFraming {
+        self.literal_framing
+    }
+
+    pub(crate) fn plain_literal_allowed(&self, literal: &str) -> bool {
+        self.plain_literal_limit.is_none_or(|limit| {
+            let size = match limit.unit {
+                LiteralUnit::Bytes => self.operation.prefix().len().checked_add(literal.len()),
+                LiteralUnit::Scalars => self
+                    .operation
+                    .prefix()
+                    .len()
+                    .checked_add(literal.chars().count()),
+            };
+            size.is_some_and(|size| u64::try_from(size).is_ok_and(|size| size <= limit.max.get()))
+        })
+    }
+
+    pub(crate) fn plain_limit_refusal(&self, literal: &str, backend: &str) -> String {
+        let limit = self
+            .plain_literal_limit
+            .expect("a refused plain literal has its limit");
+        let (size, unit) = match limit.unit {
+            LiteralUnit::Bytes => (literal.len(), "bytes"),
+            LiteralUnit::Scalars => (literal.chars().count(), "characters"),
+        };
+        let size = size
+            .checked_add(self.operation.prefix().len())
+            .expect("a bounded input size fits");
+        let reason = match self.literal_framing {
+            LiteralFraming::Plain => {
+                format!("the {backend} profile has no bracketed-paste delivery")
+            }
+            LiteralFraming::BracketedPaste => {
+                "the native CLI has not enabled bracketed paste".into()
+            }
+        };
+        format!(
+            "the input is {size} {unit}, above the {backend} plain-input limit of {} {unit}, and {reason}",
+            limit.max
+        )
+    }
+
     fn encode(&self, literal: &str) -> std::result::Result<Vec<u8>, CafleetError> {
         let prefix = self.operation.prefix();
         let size = prefix
@@ -1222,14 +1298,50 @@ impl ComposerPlan {
         Ok(bytes)
     }
 
-    pub(crate) fn stages(&self, literal: &str) -> std::result::Result<[Vec<u8>; 2], CafleetError> {
+    pub(crate) fn stages(
+        &self,
+        literal: &str,
+        framing: LiteralFraming,
+    ) -> std::result::Result<[Vec<u8>; 2], CafleetError> {
         let mut encoded = self.encode(literal)?;
+        if framing == LiteralFraming::BracketedPaste {
+            if self.literal_framing() != LiteralFraming::BracketedPaste {
+                return Err(CafleetError::App(
+                    "native composer plan requires plain literal framing".into(),
+                ));
+            }
+            if encoded
+                .len()
+                .checked_add(12)
+                .is_none_or(|size| size > 65536)
+            {
+                return Err(CafleetError::App(
+                    "native composer payload exceeds 65536 bytes".into(),
+                ));
+            }
+            let submit_offset = encoded.len() - self.submit.len();
+            encoded.splice(submit_offset..submit_offset, b"\x1b[201~".iter().copied());
+            let prefix_offset = self.operation.prefix().len();
+            encoded.splice(prefix_offset..prefix_offset, b"\x1b[200~".iter().copied());
+        }
         let submit = encoded.split_off(encoded.len() - self.submit.len());
         Ok([encoded, submit])
     }
 }
 
 impl ProfileCatalog {
+    pub(crate) fn verified_composer(
+        &self,
+        backend: CodingAgent,
+        native_version: Option<&str>,
+        operation: ComposerOperation,
+    ) -> bool {
+        self.matching(backend, native_version)
+            .is_some_and(|profile| {
+                profile.composer.is_some() && profile.submissions[operation.index()].is_some()
+            })
+    }
+
     pub(crate) fn composer_plan(
         &self,
         backend: CodingAgent,
@@ -1241,6 +1353,8 @@ impl ProfileCatalog {
         Some(ComposerPlan {
             operation,
             submit: submission.submit.clone(),
+            literal_framing: submission.literal_framing,
+            plain_literal_limit: submission.plain_literal_limit,
         })
     }
 }
@@ -1513,6 +1627,89 @@ pub(crate) mod test_support {
         #[serde(rename = "source_ref")]
         _source_ref: NonBlank,
         sha256: NonBlank,
+        #[serde(default, deserialize_with = "present")]
+        composer_evidence: Option<Vec<ComposerEvidence>>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum EvidenceMultiplexer {
+        Tmux,
+        Herdr,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum ComposerEvidenceKind {
+        Framing,
+        PlainLimit,
+        PostSubmit,
+        UnsubmittedLiteral,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+    enum ComposerEvidence {
+        Framing {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+            literal_framing: LiteralFraming,
+        },
+        PlainLimit {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+            #[serde(deserialize_with = "Option::deserialize")]
+            plain_literal_limit: Option<PlainLiteralLimit>,
+        },
+        PostSubmit {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+        },
+        UnsubmittedLiteral {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+        },
+    }
+
+    impl ComposerEvidence {
+        fn identity(&self) -> (ComposerOperation, EvidenceMultiplexer, ComposerEvidenceKind) {
+            match self {
+                Self::Framing {
+                    operation,
+                    multiplexer,
+                    ..
+                } => (*operation, *multiplexer, ComposerEvidenceKind::Framing),
+                Self::PlainLimit {
+                    operation,
+                    multiplexer,
+                    ..
+                } => (*operation, *multiplexer, ComposerEvidenceKind::PlainLimit),
+                Self::PostSubmit {
+                    operation,
+                    multiplexer,
+                } => (*operation, *multiplexer, ComposerEvidenceKind::PostSubmit),
+                Self::UnsubmittedLiteral {
+                    operation,
+                    multiplexer,
+                } => (
+                    *operation,
+                    *multiplexer,
+                    ComposerEvidenceKind::UnsubmittedLiteral,
+                ),
+            }
+        }
+
+        fn matches_plan(&self, plan: &ProvenanceSubmission) -> bool {
+            match self {
+                Self::Framing {
+                    literal_framing, ..
+                } => *literal_framing == plan.literal_framing,
+                Self::PlainLimit {
+                    plain_literal_limit,
+                    ..
+                } => *plain_literal_limit == plan.plain_literal_limit,
+                Self::PostSubmit { .. } | Self::UnsubmittedLiteral { .. } => true,
+            }
+        }
     }
 
     #[derive(Deserialize)]
@@ -1525,6 +1722,8 @@ pub(crate) mod test_support {
 
     #[derive(Deserialize)]
     struct ProvenanceRule {
+        id: NonBlank,
+        observation: ObservationKind,
         fixture_ids: Option<Ids>,
     }
 
@@ -1538,14 +1737,68 @@ pub(crate) mod test_support {
 
     #[derive(Deserialize)]
     struct ProvenanceCapability {
+        rule_ids: Ids,
         fixture_ids: Ids,
         submission: Option<ProvenanceSubmissions>,
     }
 
     #[derive(Deserialize)]
     struct ProvenanceSubmissions {
-        prompt: Option<Cited>,
-        exec: Option<Cited>,
+        prompt: Option<ProvenanceSubmission>,
+        exec: Option<ProvenanceSubmission>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceSubmission {
+        fixture_ids: Ids,
+        literal_framing: LiteralFraming,
+        #[serde(deserialize_with = "Option::deserialize")]
+        plain_literal_limit: Option<PlainLiteralLimit>,
+    }
+
+    impl ProvenanceSubmission {
+        fn validate_evidence(
+            &self,
+            operation: ComposerOperation,
+            fixtures: &[ProvenanceFixture],
+        ) -> Result<()> {
+            let mut coverage = BTreeSet::new();
+            for id in &self.fixture_ids.0 {
+                let fixture = fixtures
+                    .iter()
+                    .find(|fixture| &fixture.id.0 == id)
+                    .ok_or_else(|| invalid("unknown fixture"))?;
+                for record in fixture.composer_evidence.iter().flatten() {
+                    let (observed_operation, multiplexer, kind) = record.identity();
+                    if observed_operation != operation {
+                        continue;
+                    }
+                    require(
+                        record.matches_plan(self),
+                        &format!(
+                            "composer evidence {id} for {operation:?}/{multiplexer:?}/{kind:?} must match its selected plan"
+                        ),
+                    )?;
+                    coverage.insert((multiplexer, kind));
+                }
+            }
+            for multiplexer in [EvidenceMultiplexer::Tmux, EvidenceMultiplexer::Herdr] {
+                for kind in [
+                    ComposerEvidenceKind::Framing,
+                    ComposerEvidenceKind::PlainLimit,
+                    ComposerEvidenceKind::PostSubmit,
+                    ComposerEvidenceKind::UnsubmittedLiteral,
+                ] {
+                    require(
+                        coverage.contains(&(multiplexer, kind)),
+                        &format!(
+                            "composer {operation:?}/{multiplexer:?}/{kind:?} evidence required"
+                        ),
+                    )?;
+                }
+            }
+            Ok(())
+        }
     }
 
     #[derive(Deserialize)]
@@ -1567,9 +1820,6 @@ pub(crate) mod test_support {
         }
     }
 
-    /// The bundled-catalog build guard's provenance rules: unique fixture ids with lowercase
-    /// 32-byte digests, and non-empty citations of known fixtures of the profile's backend whose
-    /// capture version lies in the profile's interval; continuations cite native fixtures.
     pub(crate) fn validate_provenance(definitions: &Value) -> Result<()> {
         let raw = ProvenanceCatalog::deserialize(definitions)
             .map_err(|cause| invalid(cause.to_string()))?;
@@ -1580,6 +1830,19 @@ pub(crate) mod test_support {
                 lower_hex_bytes(&fixture.sha256.0, 32).is_some_and(|hash| hash.len() == 32),
                 "lowercase source digest required",
             )?;
+            if let Some(evidence) = &fixture.composer_evidence {
+                require(
+                    !evidence.is_empty(),
+                    "present composer evidence must be nonempty",
+                )?;
+                let mut claims = BTreeSet::new();
+                for record in evidence {
+                    require(
+                        claims.insert(record.identity()),
+                        "duplicate operation/multiplexer/evidence kind",
+                    )?;
+                }
+            }
         }
         let thresholds = raw
             .profiles
@@ -1630,6 +1893,17 @@ pub(crate) mod test_support {
                 )?;
             }
             let capabilities = &profile.capabilities;
+            if let Some(composer) = &capabilities.composer
+                && composer.submission.is_some()
+            {
+                require(
+                    profile.rules.iter().any(|rule| {
+                        rule.observation == ObservationKind::ComposerEmpty
+                            && composer.rule_ids.0.contains(&rule.id.0)
+                    }),
+                    "executable composer plans require empty-composer observation",
+                )?;
+            }
             for capability in [
                 &capabilities.detection,
                 &capabilities.composer,
@@ -1640,8 +1914,14 @@ pub(crate) mod test_support {
             {
                 cite(&capability.fixture_ids)?;
                 if let Some(submission) = &capability.submission {
-                    for cited in [&submission.prompt, &submission.exec].into_iter().flatten() {
-                        cite(&cited.fixture_ids)?;
+                    for (operation, plan) in [
+                        (ComposerOperation::Prompt, submission.prompt.as_ref()),
+                        (ComposerOperation::Exec, submission.exec.as_ref()),
+                    ] {
+                        if let Some(plan) = plan {
+                            cite(&plan.fixture_ids)?;
+                            plan.validate_evidence(operation, &raw.fixtures)?;
+                        }
                     }
                 }
             }
@@ -1652,10 +1932,80 @@ pub(crate) mod test_support {
         Ok(())
     }
 
+    pub(crate) fn composer_evidence_records(
+        operation: &str,
+        multiplexer: &str,
+        framing: &Value,
+        limit: &Value,
+    ) -> [Value; 4] {
+        [
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"framing","literal_framing":framing}),
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"plain_limit","plain_literal_limit":limit}),
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"post_submit"}),
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"unsubmitted_literal"}),
+        ]
+    }
+
+    pub(crate) fn with_synthetic_composer_evidence(definitions: &Value) -> Result<Value> {
+        let mut decorated = definitions.clone();
+        let fixtures = decorated["fixtures"]
+            .as_array_mut()
+            .ok_or_else(|| invalid("fixture registry array required"))?;
+        let mut claims = std::collections::BTreeMap::<String, Vec<Value>>::new();
+        for profile in definitions["profiles"].as_array().expect("parsed profiles") {
+            let submission = &profile["capabilities"]["composer"]["submission"];
+            for operation in ["prompt", "exec"] {
+                let plan = &submission[operation];
+                if plan.is_null() {
+                    continue;
+                }
+                let cited: Ids = serde_json::from_value(plan["fixture_ids"].clone())
+                    .map_err(|cause| invalid(cause.to_string()))?;
+                for id in cited.0 {
+                    let fixture = fixtures
+                        .iter()
+                        .find(|fixture| fixture["id"] == id)
+                        .ok_or_else(|| invalid("unknown fixture"))?;
+                    if fixture["kind"] != "synthetic" || fixture.get("composer_evidence").is_some()
+                    {
+                        continue;
+                    }
+                    for multiplexer in ["tmux", "herdr"] {
+                        for record in composer_evidence_records(
+                            operation,
+                            multiplexer,
+                            plan.get("literal_framing").expect("parsed literal framing"),
+                            plan.get("plain_literal_limit").expect("parsed plain limit"),
+                        ) {
+                            let records = claims.entry(id.clone()).or_default();
+                            if let Some(existing) = records.iter().find(|existing| {
+                                existing["operation"] == record["operation"]
+                                    && existing["multiplexer"] == record["multiplexer"]
+                                    && existing["kind"] == record["kind"]
+                            }) {
+                                require(existing == &record, "synthetic evidence conflicts")?;
+                            } else {
+                                records.push(record);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (id, records) in claims {
+            let fixture = fixtures
+                .iter_mut()
+                .find(|fixture| fixture["id"] == id)
+                .expect("a cited synthetic fixture remains in the registry");
+            fixture["composer_evidence"] = json!(records);
+        }
+        Ok(decorated)
+    }
+
     /// A test catalog: production loading followed by the provenance build guard.
     pub(crate) fn load(definitions: &Value) -> Result<ProfileCatalog> {
         let catalog = ProfileCatalog::from_definitions(definitions)?;
-        validate_provenance(definitions)?;
+        validate_provenance(&with_synthetic_composer_evidence(definitions)?)?;
         Ok(catalog)
     }
 
@@ -1713,8 +2063,8 @@ pub(crate) mod test_support {
             capabilities["composer"] = json!({
                 "rule_ids":["synthetic-composer_empty"],"fixture_ids":[id],
                 "submission":{
-                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[id]},
-                    "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[id]}
+                    "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[id]},
+                    "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[id]}
                 }
             });
             capabilities["answers"] = json!([{
@@ -2072,8 +2422,8 @@ pub(crate) mod test_support {
         value["profiles"][0]["capabilities"] = if kind.starts_with("composer_") {
             let mut composer = declaration;
             composer["submission"] = json!({
-                "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
-                "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[FIXTURE]}
+                "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
+                "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[FIXTURE]}
             });
             json!({"detection":null,"composer":composer,"annotations":null,"answers":[]})
         } else {
@@ -2160,8 +2510,8 @@ pub(crate) mod test_support {
             fixture["id"] = json!(id);
             value["fixtures"].as_array_mut().unwrap().push(fixture);
         }
-        let prompt = json!({"prefix_hex":"","submit_hex":prompt.unwrap_or("0d"),"fixture_ids":[PROMPT_FIXTURE]});
-        let exec = json!({"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
+        let prompt = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":prompt.unwrap_or("0d"),"fixture_ids":[PROMPT_FIXTURE]});
+        let exec = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
         value["profiles"][0]["capabilities"]["composer"] = json!({
             "rule_ids":[EMPTY],"fixture_ids":[FIXTURE],
             "submission":{"prompt":prompt,"exec":exec}
@@ -2288,6 +2638,756 @@ mod tests {
     use serde_json::Value;
     use serde_json::json;
     use std::collections::BTreeSet;
+
+    mod verified_composer {
+        use crate::coding_agent::catalog::tests::*;
+
+        #[test]
+        fn verified_composer_requires_an_executable_plan_for_the_selected_operation() {
+            for (prompt, exec) in [(true, true), (true, false), (false, true), (false, false)] {
+                let catalog = composer_catalog(prompt.then_some("0d"), exec.then_some("0d"));
+                assert_eq!(
+                    catalog.verified_composer(
+                        CodingAgent::Codex,
+                        Some(VERSION),
+                        ComposerOperation::Prompt
+                    ),
+                    prompt
+                );
+                assert_eq!(
+                    catalog.verified_composer(
+                        CodingAgent::Codex,
+                        Some(VERSION),
+                        ComposerOperation::Exec
+                    ),
+                    exec
+                );
+            }
+        }
+
+        #[test]
+        fn verified_composer_requires_a_selected_composer_declaration() {
+            let catalog = load(&definitions()).unwrap();
+            assert!(
+                catalog
+                    .composer_plan(CodingAgent::Codex, VERSION, ComposerOperation::Prompt)
+                    .is_none()
+            );
+            assert!(!catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+            assert!(!catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Exec
+            ));
+        }
+
+        #[test]
+        fn verified_composer_uses_the_recorded_backend_and_native_version() {
+            let catalog = composer_catalog(Some("0d"), Some("0d"));
+            assert!(catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+            for version in [None, Some("not-a-native-version"), Some("0.0.0")] {
+                assert!(
+                    !catalog.verified_composer(
+                        CodingAgent::Codex,
+                        version,
+                        ComposerOperation::Prompt
+                    ),
+                    "{version:?}"
+                );
+            }
+            assert!(!catalog.verified_composer(
+                CodingAgent::Claude,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+            let absent = load(&simple_definition("permission_request", false)).unwrap();
+            assert!(!absent.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Prompt
+            ));
+        }
+
+        #[test]
+        fn verified_composer_uses_only_the_profile_selected_for_the_recorded_version() {
+            let definition = thresholds(&[("first", VERSION), ("second", VERSION_TWO)]);
+            let mut catalog = load(&definition).unwrap();
+            let later = catalog
+                .profiles
+                .iter_mut()
+                .find(|profile| profile.min_version_text == VERSION_TWO)
+                .expect("the synthetic later profile exists");
+            later.submissions[ComposerOperation::Exec.index()] = None;
+            assert!(catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION),
+                ComposerOperation::Exec
+            ));
+            assert!(!catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION_TWO),
+                ComposerOperation::Exec
+            ));
+            assert!(catalog.verified_composer(
+                CodingAgent::Codex,
+                Some(VERSION_TWO),
+                ComposerOperation::Prompt
+            ));
+        }
+    }
+
+    mod composer_reliability {
+        use crate::coding_agent::catalog::tests::*;
+
+        fn framed_definition(framing: &str, limit: Value) -> Value {
+            let mut value = definition(Some("0d"), Some("0d"));
+            for operation in ["prompt", "exec"] {
+                let plan =
+                    &mut value["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                plan["literal_framing"] = json!(framing);
+                plan["plain_literal_limit"] = limit.clone();
+            }
+            value
+        }
+
+        #[test]
+        fn byte_plain_limit_diagnostics_include_the_prefix_and_measured_maximum_for_both_refusals()
+        {
+            for (operation, literal, size, maximum) in [
+                (
+                    ComposerOperation::Prompt,
+                    format!("{}é", "あ".repeat(341)),
+                    1025,
+                    1024,
+                ),
+                (ComposerOperation::Exec, "あ".repeat(333), 1001, 1000),
+            ] {
+                for (framing, cause) in [
+                    ("plain", "the codex profile has no bracketed-paste delivery"),
+                    (
+                        "bracketed_paste",
+                        "the native CLI has not enabled bracketed paste",
+                    ),
+                ] {
+                    let catalog = load(&framed_definition(
+                        framing,
+                        json!({"unit":"bytes","max":maximum}),
+                    ))
+                    .unwrap();
+                    let plan = plan(&catalog, operation);
+                    assert!(!plan.plain_literal_allowed(&literal));
+                    assert_eq!(
+                        plan.plain_limit_refusal(&literal, "codex"),
+                        format!(
+                            "the input is {size} bytes, above the codex plain-input limit of {maximum} bytes, and {cause}"
+                        ),
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn scalar_plain_limit_diagnostics_include_the_prefix_and_use_characters_for_both_refusals()
+        {
+            for (operation, literal) in [
+                (ComposerOperation::Prompt, "あ".repeat(1025)),
+                (ComposerOperation::Exec, "あ".repeat(1023)),
+            ] {
+                for (framing, cause) in [
+                    (
+                        "plain",
+                        "the hermes profile has no bracketed-paste delivery",
+                    ),
+                    (
+                        "bracketed_paste",
+                        "the native CLI has not enabled bracketed paste",
+                    ),
+                ] {
+                    let catalog = load(&framed_definition(
+                        framing,
+                        json!({"unit":"scalars","max":1024}),
+                    ))
+                    .unwrap();
+                    let plan = plan(&catalog, operation);
+                    assert!(!plan.plain_literal_allowed(&literal));
+                    assert_eq!(
+                        plan.plain_limit_refusal(&literal, "hermes"),
+                        format!(
+                            "the input is 1025 characters, above the hermes plain-input limit of 1024 characters, and {cause}"
+                        ),
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn composer_plans_require_explicit_framing_and_plain_limit_declarations() {
+            for operation in ["prompt", "exec"] {
+                for key in ["literal_framing", "plain_literal_limit"] {
+                    let mut value = framed_definition("plain", Value::Null);
+                    value["profiles"][0]["capabilities"]["composer"]["submission"][operation]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(key);
+                    assert!(load(&value).is_err(), "{operation}: {key}");
+                }
+            }
+        }
+
+        #[test]
+        fn composer_plans_accept_plain_or_bracketed_framing_and_positive_byte_or_scalar_limits() {
+            for framing in ["plain", "bracketed_paste"] {
+                for limit in [
+                    Value::Null,
+                    json!({"unit":"bytes","max":1}),
+                    json!({"unit":"scalars","max":1024}),
+                ] {
+                    assert!(
+                        load(&framed_definition(framing, limit.clone())).is_ok(),
+                        "{framing}: {limit}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn composer_plans_reject_unknown_framing_and_malformed_plain_limits() {
+            for framing in [
+                Value::Null,
+                json!(true),
+                json!(1),
+                json!(""),
+                json!("paste"),
+            ] {
+                let mut value = framed_definition("plain", Value::Null);
+                value["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["literal_framing"] =
+                    framing.clone();
+                assert!(load(&value).is_err(), "{framing}");
+            }
+            for limit in [
+                json!({}),
+                json!({"unit":"bytes"}),
+                json!({"max":1}),
+                json!({"unit":"cells","max":1}),
+                json!({"unit":"bytes","max":0}),
+                json!({"unit":"scalars","max":-1}),
+                json!({"unit":"bytes","max":1.5}),
+                json!({"unit":"bytes","max":"1"}),
+                json!({"unit":"bytes","max":true}),
+                json!({"unit":"bytes","max":1,"extra":true}),
+                json!(false),
+                json!([]),
+            ] {
+                assert!(
+                    load(&framed_definition("plain", limit.clone())).is_err(),
+                    "{limit}"
+                );
+            }
+        }
+
+        #[test]
+        fn bracketed_literal_stages_preserve_the_plain_operation_prefix_and_utf8_literal() {
+            let catalog = load(&framed_definition(
+                "bracketed_paste",
+                json!({"unit":"bytes","max":1024}),
+            ))
+            .unwrap();
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                let plan = plan(&catalog, operation);
+                let [literal, submit] = plan
+                    .stages("literal あ", LiteralFraming::BracketedPaste)
+                    .unwrap();
+                let mut expected = operation.prefix().to_vec();
+                expected.extend_from_slice(b"\x1b[200~");
+                expected.extend_from_slice("literal あ".as_bytes());
+                expected.extend_from_slice(b"\x1b[201~");
+                assert_eq!(literal, expected);
+                assert_eq!(submit, b"\r");
+            }
+        }
+
+        #[test]
+        fn plain_literal_stages_omit_framing_and_keep_the_selected_submit_key() {
+            let catalog = load(&framed_definition("bracketed_paste", Value::Null)).unwrap();
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                let plan = plan(&catalog, operation);
+                let [literal, submit] = plan.stages("literal あ", LiteralFraming::Plain).unwrap();
+                let mut expected = operation.prefix().to_vec();
+                expected.extend_from_slice("literal あ".as_bytes());
+                assert_eq!(literal, expected);
+                assert_eq!(submit, b"\r");
+            }
+        }
+
+        #[test]
+        fn bracketed_payload_limit_counts_both_markers_prefix_and_submit_bytes() {
+            let catalog = load(&framed_definition("bracketed_paste", Value::Null)).unwrap();
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                let plan = plan(&catalog, operation);
+                let maximum = 65536 - operation.prefix().len() - 12 - 1;
+                let stages = plan
+                    .stages(&"a".repeat(maximum), LiteralFraming::BracketedPaste)
+                    .unwrap();
+                assert_eq!(stages.iter().map(Vec::len).sum::<usize>(), 65536);
+                assert!(
+                    plan.stages(&"a".repeat(maximum + 1), LiteralFraming::BracketedPaste)
+                        .is_err()
+                );
+            }
+        }
+
+        #[test]
+        fn bundled_guard_requires_an_empty_composer_rule_for_executable_plans() {
+            let mut value = bundled_definitions();
+            let profile = value["profiles"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|profile| !profile["capabilities"]["composer"].is_null())
+                .expect("a bundled executable composer profile");
+            let ids = profile["capabilities"]["composer"]["rule_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect::<Vec<_>>();
+            for rule in profile["rules"].as_array_mut().unwrap() {
+                if ids
+                    .iter()
+                    .any(|id| rule["id"].as_str() == Some(id.as_str()))
+                {
+                    rule["observation"] = json!("composer_visible");
+                }
+            }
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn bundled_guard_requires_plan_fixture_citations_for_measured_delivery() {
+            let mut value = bundled_definitions();
+            let profile = value["profiles"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|profile| !profile["capabilities"]["composer"].is_null())
+                .expect("a bundled executable composer profile");
+            profile["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] = json!([]);
+            assert!(validate_provenance(&value).is_err());
+        }
+    }
+
+    mod composer_evidence {
+        use crate::coding_agent::catalog::tests::*;
+
+        fn measured() -> Value {
+            let mut value = definition(Some("0d"), Some("0d"));
+            let unrelated = value["fixtures"][0]["id"].clone();
+            let template = value["fixtures"][0].clone();
+            let mut sequence = 0;
+            for operation in ["prompt", "exec"] {
+                let framing = if operation == "prompt" {
+                    json!("bracketed_paste")
+                } else {
+                    json!("plain")
+                };
+                let limit = if operation == "prompt" {
+                    json!({"unit":"bytes","max":1024})
+                } else {
+                    json!({"unit":"scalars","max":1024})
+                };
+                let plan =
+                    &mut value["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                plan["literal_framing"] = framing.clone();
+                plan["plain_literal_limit"] = limit.clone();
+                let mut ids = vec![unrelated.clone()];
+                for multiplexer in ["tmux", "herdr"] {
+                    for record in
+                        composer_evidence_records(operation, multiplexer, &framing, &limit)
+                    {
+                        sequence += 1;
+                        let id = format!("witness-{sequence}");
+                        let mut fixture = template.clone();
+                        fixture["id"] = json!(id);
+                        fixture["kind"] = json!("native");
+                        fixture["composer_evidence"] = json!([record]);
+                        value["fixtures"].as_array_mut().unwrap().push(fixture);
+                        ids.push(json!(id));
+                    }
+                }
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!(ids);
+            }
+            value
+        }
+
+        fn witness_mut<'a>(
+            value: &'a mut Value,
+            operation: &str,
+            multiplexer: &str,
+            kind: &str,
+        ) -> &'a mut Value {
+            value["fixtures"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|fixture| {
+                    fixture.get("composer_evidence").is_some_and(|records| {
+                        records.as_array().unwrap().iter().any(|record| {
+                            record["operation"] == operation
+                                && record["multiplexer"] == multiplexer
+                                && record["kind"] == kind
+                        })
+                    })
+                })
+                .expect("the explicit operation/multiplexer/category witness exists")
+        }
+
+        fn missing_category(kind: &str) {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for multiplexer in ["tmux", "herdr"] {
+                    let mut value = baseline.clone();
+                    let id = witness_mut(&mut value, operation, multiplexer, kind)["id"].clone();
+                    let unrelated = value["fixtures"][0]["id"].clone();
+                    let ids = value["profiles"][0]["capabilities"]["composer"]["submission"]
+                        [operation]["fixture_ids"]
+                        .as_array_mut()
+                        .unwrap();
+                    ids.retain(|cited| cited != &id);
+                    assert!(ids.contains(&unrelated));
+                    assert!(ids.len() > 1);
+                    assert!(
+                        validate_provenance(&value).is_err(),
+                        "{operation}/{multiplexer}/{kind}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn complete_operation_and_multiplexer_evidence_accepts_unrelated_additional_citations() {
+            validate_provenance(&measured()).unwrap();
+        }
+
+        #[test]
+        fn framing_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("framing");
+        }
+
+        #[test]
+        fn plain_limit_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("plain_limit");
+        }
+
+        #[test]
+        fn post_submit_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("post_submit");
+        }
+
+        #[test]
+        fn unsubmitted_literal_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("unsubmitted_literal");
+        }
+
+        #[test]
+        fn unrelated_valid_native_citations_cannot_establish_an_executable_plan() {
+            let mut value = definition(Some("0d"), Some("0d"));
+            for fixture in value["fixtures"].as_array_mut().unwrap() {
+                fixture["kind"] = json!("native");
+            }
+            let unrelated = &mut value["fixtures"][0];
+            let id = unrelated["id"].clone();
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!([id]);
+            }
+            ProfileCatalog::from_definitions(&value).unwrap();
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn another_operations_claim_cannot_replace_the_selected_operations_witness() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for multiplexer in ["tmux", "herdr"] {
+                for kind in [
+                    "framing",
+                    "plain_limit",
+                    "post_submit",
+                    "unsubmitted_literal",
+                ] {
+                    let mut value = baseline.clone();
+                    witness_mut(&mut value, "prompt", multiplexer, kind)["composer_evidence"][0]
+                        ["operation"] = json!("exec");
+                    assert!(validate_provenance(&value).is_err(), "{multiplexer}/{kind}");
+                }
+            }
+        }
+
+        #[test]
+        fn another_multiplexers_claim_cannot_replace_the_selected_multiplexers_witness() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for kind in [
+                    "framing",
+                    "plain_limit",
+                    "post_submit",
+                    "unsubmitted_literal",
+                ] {
+                    let mut value = baseline.clone();
+                    witness_mut(&mut value, operation, "tmux", kind)["composer_evidence"][0]["multiplexer"] =
+                        json!("herdr");
+                    assert!(validate_provenance(&value).is_err(), "{operation}/{kind}");
+                }
+            }
+        }
+
+        #[test]
+        fn framing_evidence_matches_each_selected_plan_value() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for multiplexer in ["tmux", "herdr"] {
+                    let mut value = baseline.clone();
+                    witness_mut(&mut value, operation, multiplexer, "framing")["composer_evidence"]
+                        [0]["literal_framing"] = if operation == "prompt" {
+                        json!("plain")
+                    } else {
+                        json!("bracketed_paste")
+                    };
+                    assert!(validate_provenance(&value).is_err());
+                }
+            }
+        }
+
+        #[test]
+        fn plain_limit_evidence_matches_the_unit_bound_and_null_declaration() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for multiplexer in ["tmux", "herdr"] {
+                    let (unit, other_unit) = if operation == "prompt" {
+                        ("bytes", "scalars")
+                    } else {
+                        ("scalars", "bytes")
+                    };
+                    for limit in [
+                        json!({"unit":unit,"max":512}),
+                        json!({"unit":other_unit,"max":1024}),
+                        Value::Null,
+                    ] {
+                        let mut value = baseline.clone();
+                        witness_mut(&mut value, operation, multiplexer, "plain_limit")["composer_evidence"]
+                            [0]["plain_literal_limit"] = limit;
+                        assert!(validate_provenance(&value).is_err());
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn additional_selected_operation_claims_must_match_despite_complete_valid_coverage() {
+            let mut baseline = measured();
+            baseline["fixtures"][0]["kind"] = json!("native");
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                let plan =
+                    &baseline["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                let framing = plan["literal_framing"].as_str().unwrap();
+                let unit = plan["plain_literal_limit"]["unit"].as_str().unwrap();
+                let other_framing = if framing == "plain" {
+                    "bracketed_paste"
+                } else {
+                    "plain"
+                };
+                let other_unit = if unit == "bytes" { "scalars" } else { "bytes" };
+                for multiplexer in ["tmux", "herdr"] {
+                    let matching = composer_evidence_records(
+                        operation,
+                        multiplexer,
+                        &plan["literal_framing"],
+                        &plan["plain_literal_limit"],
+                    );
+                    let mut valid_extra = baseline.clone();
+                    valid_extra["fixtures"][0]["composer_evidence"] = json!(matching);
+                    validate_provenance(&valid_extra).unwrap();
+                    let mut wrong_framing = matching[0].clone();
+                    wrong_framing["literal_framing"] = json!(other_framing);
+                    let mut mismatched = vec![wrong_framing];
+                    for limit in [
+                        json!({"unit":unit,"max":512}),
+                        json!({"unit":other_unit,"max":1024}),
+                        Value::Null,
+                    ] {
+                        let mut record = matching[1].clone();
+                        record["plain_literal_limit"] = limit;
+                        mismatched.push(record);
+                    }
+                    for record in mismatched {
+                        let mut value = baseline.clone();
+                        value["fixtures"][0]["composer_evidence"] = json!([record]);
+                        assert!(
+                            validate_provenance(&value).is_err(),
+                            "the additional selected claim contradicts its plan: {record}"
+                        );
+                    }
+                }
+            }
+        }
+
+        fn unlimited() -> Value {
+            let mut value = measured();
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
+                    Value::Null;
+                for multiplexer in ["tmux", "herdr"] {
+                    witness_mut(&mut value, operation, multiplexer, "plain_limit")["composer_evidence"]
+                        [0]["plain_literal_limit"] = Value::Null;
+                }
+            }
+            value
+        }
+
+        #[test]
+        fn explicitly_measured_null_plain_limits_are_valid() {
+            validate_provenance(&unlimited()).unwrap();
+        }
+
+        #[test]
+        fn one_fixture_can_carry_distinct_operation_multiplexer_and_category_claims() {
+            let mut value = measured();
+            let records = value["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|fixture| fixture.get("composer_evidence"))
+                .flat_map(|records| records.as_array().unwrap().iter().cloned())
+                .collect::<Vec<_>>();
+            let fixture = &mut value["fixtures"][0];
+            fixture["kind"] = json!("native");
+            fixture["composer_evidence"] = json!(records);
+            let id = fixture["id"].clone();
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!([id]);
+            }
+            validate_provenance(&value).unwrap();
+        }
+
+        #[test]
+        fn missing_plain_limit_key_is_rejected_even_when_the_plan_is_unlimited() {
+            let mut value = unlimited();
+            validate_provenance(&value).unwrap();
+            value["fixtures"][0]["composer_evidence"] =
+                json!([{"operation":"prompt","multiplexer":"tmux","kind":"plain_limit"}]);
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn evidence_records_have_strict_required_fields_and_value_domains() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            let framing = json!({"operation":"prompt","multiplexer":"tmux","kind":"framing","literal_framing":"bracketed_paste"});
+            let mut malformed = Vec::new();
+            for field in ["operation", "multiplexer", "kind", "literal_framing"] {
+                let mut record = framing.clone();
+                record.as_object_mut().unwrap().remove(field).unwrap();
+                malformed.push(record);
+            }
+            for (field, value) in [
+                ("operation", json!("preview")),
+                ("multiplexer", json!("screen")),
+                ("kind", json!("idle")),
+                ("literal_framing", json!("automatic")),
+                ("unexpected", json!(true)),
+            ] {
+                let mut record = framing.clone();
+                record[field] = value;
+                malformed.push(record);
+            }
+            for limit in [
+                json!({"unit":"bytes","max":0}),
+                json!({"unit":"characters","max":1}),
+                json!({"unit":"bytes","max":1,"extra":true}),
+            ] {
+                malformed.push(json!({"operation":"prompt","multiplexer":"tmux","kind":"plain_limit","plain_literal_limit":limit}));
+            }
+            for kind in ["post_submit", "unsubmitted_literal"] {
+                malformed.push(json!({"operation":"prompt","multiplexer":"tmux","kind":kind,"literal_framing":"plain"}));
+            }
+            for record in malformed {
+                let mut value = baseline.clone();
+                value["fixtures"][0]["composer_evidence"] = json!([record]);
+                assert!(validate_provenance(&value).is_err(), "{record}");
+            }
+        }
+
+        #[test]
+        fn duplicate_operation_multiplexer_category_records_on_one_fixture_are_rejected() {
+            let mut value = measured();
+            validate_provenance(&value).unwrap();
+            let fixture = witness_mut(&mut value, "prompt", "tmux", "post_submit");
+            let duplicate = fixture["composer_evidence"][0].clone();
+            fixture["composer_evidence"]
+                .as_array_mut()
+                .unwrap()
+                .push(duplicate);
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn a_present_empty_evidence_array_is_rejected_without_affecting_other_valid_citations() {
+            let mut value = measured();
+            validate_provenance(&value).unwrap();
+            value["fixtures"][0]["composer_evidence"] = json!([]);
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn synthetic_test_helper_populates_absent_evidence_for_dynamic_plan_values() {
+            let mut value = definition(Some("0d"), Some("0d"));
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["literal_framing"] =
+                    json!("bracketed_paste");
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
+                    json!({"unit":"bytes","max":3});
+            }
+            validate_provenance(&with_synthetic_composer_evidence(&value).unwrap()).unwrap();
+        }
+
+        #[test]
+        fn synthetic_test_helper_preserves_explicit_and_native_evidence_gaps() {
+            let mut baseline = measured();
+            baseline["fixtures"][0]["kind"] = json!("native");
+            validate_provenance(&baseline).unwrap();
+            for explicit in [false, true] {
+                let mut value = baseline.clone();
+                let fixture = witness_mut(&mut value, "prompt", "tmux", "post_submit");
+                if explicit {
+                    fixture["kind"] = json!("synthetic");
+                    fixture["composer_evidence"] =
+                        json!([{"operation":"exec","multiplexer":"tmux","kind":"post_submit"}]);
+                } else {
+                    fixture
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("composer_evidence")
+                        .unwrap();
+                }
+                assert!(load(&value).is_err());
+            }
+        }
+    }
 
     mod panel_separator {
         use crate::coding_agent::catalog::tests::*;
@@ -5689,7 +6789,10 @@ mod tests {
                 let plan = bundled
                     .composer_plan(CodingAgent::Hermes, "2026.9.24", operation)
                     .unwrap_or_else(|| panic!("{name} plan"));
-                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
+                assert_eq!(
+                    plan.stages(literal, LiteralFraming::Plain).unwrap(),
+                    [typed, b"\r".to_vec()]
+                );
             }
         }
 
@@ -5713,7 +6816,10 @@ mod tests {
                 let plan = bundled
                     .composer_plan(CodingAgent::Pi, "1.5.0", operation)
                     .unwrap_or_else(|| panic!("{name} plan"));
-                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
+                assert_eq!(
+                    plan.stages(literal, LiteralFraming::Plain).unwrap(),
+                    [typed, b"\r".to_vec()]
+                );
             }
         }
 

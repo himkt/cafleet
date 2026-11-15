@@ -60,7 +60,8 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
         "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
         "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
         "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
-        "uncertain_cause":row.uncertain_cause.map(|cause| cause.as_str())}})
+        "stop_cause":row.stop_cause.map(|cause| cause.as_str()),
+        "left_stage":row.left_stage.map(|stage| stage.as_str())}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
@@ -186,6 +187,51 @@ pub(crate) fn permission_inspection(row: &crate::runtime::PermissionInspection) 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    mod composer_reliability {
+        use crate::broker::runtime as storage;
+        use crate::broker::runtime::test_support::Fixture;
+
+        #[test]
+        fn input_json_presents_left_stage_immediately_after_its_stop_cause() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for (stage, cause) in [
+                (
+                    storage::LeftStage::EscapeOnly,
+                    storage::StopCause::ManualInput,
+                ),
+                (
+                    storage::LeftStage::Partial,
+                    storage::StopCause::PointerInput,
+                ),
+                (
+                    storage::LeftStage::LiteralComplete,
+                    storage::StopCause::DeadlineExpired,
+                ),
+                (
+                    storage::LeftStage::Submitted,
+                    storage::StopCause::SubmitUnconfirmed,
+                ),
+            ] {
+                let input = fixture.left_input(
+                    &owner,
+                    stage.as_str(),
+                    storage::InputKind::Prompt,
+                    cause,
+                    stage,
+                );
+                let output = crate::output::json::input_operation(&input);
+                let row = output["input"].as_object().unwrap();
+                let keys = row.keys().map(String::as_str).collect::<Vec<_>>();
+                assert_eq!(&keys[keys.len() - 2..], ["stop_cause", "left_stage"]);
+                assert_eq!(row["stop_cause"], cause.as_str());
+                assert_eq!(row["left_stage"], stage.as_str());
+                assert_eq!(row["disposition"], "left_in_composer");
+                assert_eq!(row["delivery"]["status"], "left_in_composer");
+            }
+        }
+    }
 
     use crate::broker::runtime::RunStatus;
     use crate::runtime::RecoveryOutcome;
@@ -500,7 +546,7 @@ mod tests {
             "child_start_identity",
             "effective_policy",
         ];
-        const INPUT_KEYS: [&str; 16] = [
+        const INPUT_KEYS: [&str; 17] = [
             "input_id",
             "run_id",
             "operation_key",
@@ -516,7 +562,8 @@ mod tests {
             "delivery",
             "deferred_at",
             "defer_reason",
-            "uncertain_cause",
+            "stop_cause",
+            "left_stage",
         ];
 
         #[test]
@@ -802,7 +849,7 @@ mod tests {
         }
 
         #[test]
-        fn input_presentation_reports_the_recorded_uncertain_cause_and_keeps_the_text_line() {
+        fn input_presentation_reports_the_recorded_stop_cause_and_keeps_the_text_line() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let caused = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
@@ -810,11 +857,11 @@ mod tests {
                 &mut fixture.conn,
                 &owner,
                 caused.input_id,
-                UncertainCause::ManualInput,
+                StopCause::ManualInput,
             )
             .unwrap();
             let output = crate::output::json::input_operation(&caused);
-            assert_eq!(output["input"]["uncertain_cause"], "manual_input");
+            assert_eq!(output["input"]["stop_cause"], "manual_input");
             assert_eq!(
                 crate::output::format_input_operation(&caused),
                 format!(
@@ -832,13 +879,13 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                crate::output::json::input_operation(&settled)["input"]["uncertain_cause"],
+                crate::output::json::input_operation(&settled)["input"]["stop_cause"],
                 "manual_input",
                 "reconciliation keeps the recorded cause"
             );
             let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt, None);
             assert_eq!(
-                crate::output::json::input_operation(&plain)["input"]["uncertain_cause"],
+                crate::output::json::input_operation(&plain)["input"]["stop_cause"],
                 Value::Null
             );
         }

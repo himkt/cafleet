@@ -1231,7 +1231,7 @@ mod tests {
                 key: "prompt:uncertain",
                 state: "uncertain",
                 delivery_method: Some("profile"),
-                uncertain_cause: Some("runner_stopped"),
+                stop_cause: Some("runner_stopped"),
                 deferred: true,
                 ..InputRow::default()
             }
@@ -1672,7 +1672,7 @@ mod tests {
                 &mut case.fixture.conn,
                 &owner,
                 input.input_id,
-                storage::UncertainCause::WriteFailed,
+                storage::StopCause::WriteFailed,
             )
             .unwrap();
             let capability = AnswerCapability::fixture(
@@ -2512,7 +2512,7 @@ mod tests {
                 key,
                 state: "uncertain",
                 delivery_method: Some("profile"),
-                uncertain_cause: cause,
+                stop_cause: cause,
                 deferred: true,
                 ..InputRow::default()
             }
@@ -2564,8 +2564,8 @@ mod tests {
                 assert_eq!(
                     storage::get_input(&case.fixture.conn, reconciled)
                         .unwrap()
-                        .uncertain_cause,
-                    Some(storage::UncertainCause::WriteFailed),
+                        .stop_cause,
+                    Some(storage::StopCause::WriteFailed),
                     "{disposition}: reconciliation keeps the recorded cause"
                 );
                 let report = case.recover(&mut new_host()).unwrap();
@@ -4615,7 +4615,7 @@ pub(crate) mod test_support {
         pub(crate) disposition: Option<&'a str>,
         pub(crate) delivery_reason: Option<&'a str>,
         pub(crate) delivery_method: Option<&'a str>,
-        pub(crate) uncertain_cause: Option<&'a str>,
+        pub(crate) stop_cause: Option<&'a str>,
         pub(crate) deferred: bool,
     }
 
@@ -4624,7 +4624,7 @@ pub(crate) mod test_support {
             case.fixture
                 .conn
                 .execute(
-                    "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,disposition,delivery_reason,delivery_method,uncertain_cause,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'prompt',?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",
+                    "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,disposition,delivery_reason,delivery_method,stop_cause,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'prompt',?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",
                     rusqlite::params![
                         case.fixture.run.run_id,
                         self.key,
@@ -4633,7 +4633,7 @@ pub(crate) mod test_support {
                         self.disposition,
                         self.delivery_reason,
                         self.delivery_method,
-                        self.uncertain_cause,
+                        self.stop_cause,
                         NOW,
                         self.deferred.then_some(NOW),
                         self.deferred.then_some("interaction_open"),

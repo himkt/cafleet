@@ -180,7 +180,7 @@ fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()>
     match request.input_kind {
         InputKind::Preview => usage(
             request.message_id.is_some_and(|id| {
-                id > 0 && request.operation_key == format!("preview:{run_id}:{id}")
+                storage::preview_attempt_from_key(run_id, id, &request.operation_key).is_ok()
             }),
             "preview requires its run-bound message key",
         )?,
@@ -249,6 +249,21 @@ pub(super) fn durable_outcome(
             SubmissionStage::Unknown,
             uncertain_reason(input),
         )),
+        (InputState::Settled, Some(InputDisposition::LeftInComposer)) => Some((
+            SubmissionStatus::LeftInComposer,
+            match input
+                .left_stage
+                .expect("a left input has its durable stage")
+            {
+                crate::broker::runtime::LeftStage::EscapeOnly => SubmissionStage::EscapeOnly,
+                crate::broker::runtime::LeftStage::Partial => SubmissionStage::Partial,
+                crate::broker::runtime::LeftStage::LiteralComplete => {
+                    SubmissionStage::LiteralComplete
+                }
+                crate::broker::runtime::LeftStage::Submitted => SubmissionStage::Submitted,
+            },
+            uncertain_reason(input),
+        )),
         (InputState::Settled, _) => Some((
             SubmissionStatus::Rejected,
             SubmissionStage::ZeroBytes,
@@ -258,7 +273,7 @@ pub(super) fn durable_outcome(
 }
 
 fn uncertain_reason(input: &InputOperation) -> Option<String> {
-    input.uncertain_cause.map(|cause| cause.as_str().to_owned())
+    input.stop_cause.map(|cause| cause.as_str().to_owned())
 }
 
 fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
@@ -324,6 +339,11 @@ fn validate_reply_against_durable(
                 SubmissionStatus::Uncertain => {
                     matches!(input.state, InputState::InProgress | InputState::Uncertain)
                         && reply.reason == uncertain_reason(input)
+                }
+                SubmissionStatus::LeftInComposer => {
+                    durable_outcome(input).is_some_and(|(status, stage, reason)| {
+                        reply.status == status && reply.stage == stage && reply.reason == reason
+                    })
                 }
                 SubmissionStatus::Held | SubmissionStatus::Rejected => {
                     reply.stage == SubmissionStage::ZeroBytes
@@ -904,6 +924,9 @@ pub(super) fn projection(
                 SubmissionStage::ZeroBytes,
                 Some("operation key is consumed".into()),
             ),
+            InputDisposition::LeftInComposer => {
+                return Err(error("permission responses require uncertain settlement"));
+            }
         },
         InputState::Ready => (
             SubmissionStatus::Held,
@@ -1488,7 +1511,7 @@ pub(crate) mod test_support {
                         &mut fixture.conn,
                         &owner,
                         input_id,
-                        storage::UncertainCause::WriteFailed,
+                        storage::StopCause::WriteFailed,
                     )
                     .unwrap();
                 }
@@ -2986,7 +3009,7 @@ mod tests {
             &run,
             &placement,
             &request,
-            Deadline::until(outer.min(Instant::now() + Duration::from_secs(2))),
+            Deadline::until(outer.min(Instant::now() + Duration::from_secs(5))),
         )
         .unwrap();
         assert_eq!(result.status, SubmissionStatus::Accepted);
@@ -3312,7 +3335,7 @@ mod tests {
                     &mut fixture.conn,
                     &owner,
                     row.input_id,
-                    storage::UncertainCause::WriteFailed,
+                    storage::StopCause::WriteFailed,
                 )
                 .unwrap();
             } else if state != InputState::InProgress {
@@ -3811,7 +3834,7 @@ mod tests {
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "lock-taken-after-reply");
-            let until = outer.min(Instant::now() + Duration::from_secs(1));
+            let until = outer.min(Instant::now() + Duration::from_secs(5));
             let attempt = PreparedSubmission::new(
                 &request,
                 until,
@@ -4190,6 +4213,25 @@ mod tests {
             assert_eq!(
                 failure.context.operation_key.as_deref(),
                 Some(request.operation_key.as_str())
+            );
+            assert!(
+                matches!(&failure.source, CafleetError::App(cause) if cause == "owned reply consumer closed")
+            );
+            let presented: CafleetError = failure.into();
+            let CafleetError::WithDiagnostics { cause, diagnostics } = presented else {
+                panic!("a possible submission retains its original failure and context")
+            };
+            assert_eq!(cause.exit_code(), 1);
+            assert!(
+                matches!(*cause, CafleetError::App(ref message) if message == "owned reply consumer closed")
+            );
+            assert_eq!(
+                diagnostics,
+                vec![format!(
+                    "run_id={} operation_key={}",
+                    run.run_id,
+                    serde_json::to_string(&request.operation_key).unwrap()
+                )]
             );
             let identity = PermissionReceiptIdentity {
                 database_identity_json: run.database_identity_json.clone(),
@@ -5262,13 +5304,110 @@ mod tests {
         }
     }
 
+    mod composer_reliability {
+        use crate::broker::runtime::test_support::Fixture as StorageFixture;
+        use crate::runtime::input_client::tests::*;
+
+        #[test]
+        fn durable_left_receipts_project_their_recorded_stage_and_cause() {
+            let mut fixture = StorageFixture::new();
+            let owner = fixture.activate();
+            for (left_stage, stage, cause) in [
+                (
+                    storage::LeftStage::EscapeOnly,
+                    SubmissionStage::EscapeOnly,
+                    storage::StopCause::ManualInput,
+                ),
+                (
+                    storage::LeftStage::Partial,
+                    SubmissionStage::Partial,
+                    storage::StopCause::PointerInput,
+                ),
+                (
+                    storage::LeftStage::LiteralComplete,
+                    SubmissionStage::LiteralComplete,
+                    storage::StopCause::DeadlineExpired,
+                ),
+                (
+                    storage::LeftStage::Submitted,
+                    SubmissionStage::Submitted,
+                    storage::StopCause::SubmitUnconfirmed,
+                ),
+            ] {
+                let input = fixture.left_input(
+                    &owner,
+                    left_stage.as_str(),
+                    InputKind::Prompt,
+                    cause,
+                    left_stage,
+                );
+                assert_eq!(
+                    durable_outcome(&input),
+                    Some((
+                        SubmissionStatus::LeftInComposer,
+                        stage,
+                        Some(cause.as_str().into())
+                    ))
+                );
+                let reply = SubmissionResult {
+                    status: SubmissionStatus::LeftInComposer,
+                    input_id: Some(input.input_id),
+                    stage,
+                    output_seq: None,
+                    reason: Some(cause.as_str().into()),
+                    delivery: input.delivery(),
+                };
+                validate_reply_against_durable(
+                    &reply,
+                    Some(&input),
+                    ["identity", "contradiction", "missing", "unmatched"],
+                )
+                .unwrap();
+            }
+        }
+
+        #[test]
+        fn a_left_reply_must_match_the_durable_stage_and_cause() {
+            let mut fixture = StorageFixture::new();
+            let owner = fixture.activate();
+            let input = fixture.left_input(
+                &owner,
+                "prompt:left-reply",
+                InputKind::Prompt,
+                storage::StopCause::SubmitUnconfirmed,
+                storage::LeftStage::Submitted,
+            );
+            let reply = |stage, reason: &str| SubmissionResult {
+                status: SubmissionStatus::LeftInComposer,
+                input_id: Some(input.input_id),
+                stage,
+                output_seq: None,
+                reason: Some(reason.into()),
+                delivery: input.delivery(),
+            };
+            for reply in [
+                reply(SubmissionStage::LiteralComplete, "submit_unconfirmed"),
+                reply(SubmissionStage::Submitted, "manual_input"),
+            ] {
+                assert!(
+                    validate_reply_against_durable(
+                        &reply,
+                        Some(&input),
+                        ["identity", "contradiction", "missing", "unmatched"]
+                    )
+                    .is_err()
+                );
+            }
+        }
+    }
+
     mod uncertain_reason {
         use crate::broker::runtime::test_support::Fixture as StorageFixture;
         use crate::runtime::input_client::tests::*;
 
         const MESSAGES: [&str; 4] = ["identity", "contradiction", "missing", "unmatched"];
 
-        fn uncertain(cause: Option<storage::UncertainCause>) -> storage::InputOperation {
+        fn uncertain(cause: Option<storage::StopCause>) -> storage::InputOperation {
             let mut fixture = StorageFixture::new();
             let owner = fixture.activate();
             let input = fixture.input(&owner, "prompt:reason", InputKind::Prompt, None);
@@ -5297,7 +5436,7 @@ mod tests {
 
         #[test]
         fn durable_outcome_reports_the_recorded_cause_as_the_uncertain_reason() {
-            let cause = storage::UncertainCause::ShortWrite;
+            let cause = storage::StopCause::ShortWrite;
             let input = uncertain(Some(cause));
             assert_eq!(
                 durable_outcome(&input),
@@ -5321,7 +5460,7 @@ mod tests {
 
         #[test]
         fn uncertain_reply_must_carry_the_receipt_cause() {
-            let input = uncertain(Some(storage::UncertainCause::ManualInput));
+            let input = uncertain(Some(storage::StopCause::ManualInput));
             validate_reply_against_durable(
                 &reply(&input, Some("manual_input")),
                 Some(&input),

@@ -152,6 +152,9 @@ pub(crate) fn run(
                     &std::collections::BTreeSet::new(),
                 ) {
                     Ok(outcome) => {
+                        for error in &outcome.notification_errors {
+                            eprintln!("Message {message_id} was persisted. {}", error.error);
+                        }
                         if let AttemptEnd::Failed(error) = &outcome.end {
                             eprintln!("Message {message_id} was persisted. {}", error.error);
                         }
@@ -191,15 +194,19 @@ pub(crate) fn run(
             json,
         } => {
             let mut receiver = BrokerReceiver::new(conn, settings, member_id);
-            let messages = &crate::delivery::wait(
+            let outcome = crate::delivery::wait(
                 &SystemClock,
                 &mut receiver,
                 std::time::Duration::from_secs(timeout),
             )?;
+            let messages = &outcome.messages;
             let payload = serde_json::json!({
                 "member_id":member_id,
                 "outcome":if messages.is_empty() { "timeout" } else { "messages" },
                 "messages":messages.iter().map(crate::output::json::message).collect::<Vec<_>>(),
+                "notification_errors":outcome.notification_errors.iter().map(|error| serde_json::json!({
+                    "member_id":error.member_id,"message_id":error.message_id,"error":error.error
+                })).collect::<Vec<_>>(),
             });
             emit(json, &payload, || format_message_wait(member_id, messages))
         }
@@ -266,9 +273,29 @@ fn send_delivery(
         ));
     }
     if let Some(runtime) = &recipient.runtime {
-        let key = format!("preview:{}:{}", runtime.run.run_id, message.message_id);
-        if let Some(input) = crate::broker::runtime::find_input(conn, runtime.run.run_id, &key)?
-            && let Some(delivery) = input.delivery()
+        if let Some(attempted) =
+            outcome.and_then(|outcome| outcome.attempted_inputs.get(&message.message_id))
+        {
+            if let Some(input_id) = attempted {
+                let input = crate::broker::runtime::get_input(conn, *input_id)?;
+                if input.run_id != runtime.run.run_id
+                    || input.kind != crate::broker::runtime::InputKind::Preview
+                    || input.message_id != Some(message.message_id)
+                {
+                    return Err(CafleetError::App(
+                        "invocation preview receipt association changed".into(),
+                    ));
+                }
+                let delivery = input.delivery().ok_or_else(|| {
+                    CafleetError::App("invocation preview has no delivery projection".into())
+                })?;
+                return Ok((Some(*input_id), delivery));
+            }
+        } else if let Some(input) = crate::broker::runtime::find_latest_preview_input(
+            conn,
+            runtime.run.run_id,
+            message.message_id,
+        )? && let Some(delivery) = input.delivery()
         {
             return Ok((Some(input.input_id), delivery));
         }
@@ -926,6 +953,182 @@ mod tests {
     use crate::cli::message::*;
     use crate::db::test_support::migrated_conn;
 
+    mod composer_reliability {
+        use crate::broker::runtime as storage;
+        use crate::cli::message::tests::*;
+
+        fn preview(
+            fixture: &mut storage::test_support::Fixture,
+            message: &MessageRecord,
+        ) -> storage::InputOperation {
+            let owner = fixture.run.owner();
+            let request = crate::runtime::SubmitInput {
+                operation_key: storage::preview_operation_key(owner.run_id, message.message_id, 1)
+                    .unwrap(),
+                input_kind: storage::InputKind::Preview,
+                message_id: Some(message.message_id),
+                literal: crate::delivery::canonical_preview_line(message),
+            };
+            storage::test_support::reserve_input(
+                &mut fixture.conn,
+                &owner,
+                &storage::NewInput {
+                    operation_key: request.operation_key.clone(),
+                    kind: request.input_kind,
+                    payload_digest: storage::input_payload_digest(owner.run_id, &request),
+                    message_id: request.message_id,
+                },
+            )
+            .unwrap()
+        }
+
+        fn message(fixture: &mut storage::test_support::Fixture, text: &str) -> MessageRecord {
+            broker::send_message(&mut fixture.conn, fixture.director, fixture.member, text).unwrap()
+        }
+
+        #[test]
+        fn send_projects_this_invocations_left_attempt_instead_of_its_ready_successor() {
+            let mut fixture = storage::test_support::Fixture::new();
+            let owner = fixture.activate();
+            let message = message(&mut fixture, "private left preview");
+            let input = preview(&mut fixture, &message);
+            let (left, next) = storage::settle_left_and_queue_redelivery(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                storage::StopCause::SubmitUnconfirmed,
+                storage::LeftStage::Submitted,
+            )
+            .unwrap();
+            let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
+            outcome
+                .attempted_inputs
+                .insert(message.message_id, Some(left.input_id));
+            let (id, delivery) = send_delivery(&fixture.conn, &message, Some(&outcome)).unwrap();
+            assert_eq!(id, Some(left.input_id));
+            assert_eq!(
+                delivery,
+                projection(
+                    DeliveryStatus::LeftInComposer,
+                    Some(DeliveryMethod::Profile),
+                    None
+                )
+            );
+            let json = crate::output::json::send_outcome(&message, false, id, &delivery);
+            assert_eq!(json["input_id"], left.input_id);
+            assert_eq!(json["delivery"]["status"], "left_in_composer");
+            assert_ne!(json["input_id"], next.input_id);
+        }
+
+        #[test]
+        fn unattempted_messages_project_their_latest_ready_successor() {
+            let mut fixture = storage::test_support::Fixture::new();
+            let owner = fixture.activate();
+            let message = message(&mut fixture, "unattempted latest preview");
+            let input = preview(&mut fixture, &message);
+            let (_, next) = storage::settle_left_and_queue_redelivery(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                storage::StopCause::ManualInput,
+                storage::LeftStage::LiteralComplete,
+            )
+            .unwrap();
+            let outcome = AttemptOutcome::ended(AttemptEnd::Held);
+            assert_eq!(
+                send_delivery(&fixture.conn, &message, Some(&outcome)).unwrap(),
+                (
+                    Some(next.input_id),
+                    projection(DeliveryStatus::Queued, None, Some("redelivery")),
+                )
+            );
+        }
+
+        #[test]
+        fn an_attempt_with_no_receipt_keeps_its_own_hold_instead_of_a_later_receipt() {
+            let mut fixture = storage::test_support::Fixture::new();
+            let owner = fixture.activate();
+            let message = message(&mut fixture, "receipt created after a held invocation");
+            let input = preview(&mut fixture, &message);
+            let mut outcome = AttemptOutcome::ended(AttemptEnd::Held);
+            outcome.held_reason = Some("observer_unavailable".into());
+            outcome.attempted_inputs.insert(message.message_id, None);
+            storage::requeue_zero_byte_immediate(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                "interaction_open",
+            )
+            .unwrap();
+            assert_eq!(
+                send_delivery(&fixture.conn, &message, Some(&outcome)).unwrap(),
+                (
+                    None,
+                    projection(DeliveryStatus::Held, None, Some("observer_unavailable")),
+                )
+            );
+        }
+
+        #[test]
+        fn recorded_input_ids_require_the_exact_preview_message_and_kind() {
+            let mut fixture = storage::test_support::Fixture::new();
+            let owner = fixture.activate();
+            let requested = message(&mut fixture, "requested message");
+            let other = message(&mut fixture, "other message");
+            let other_preview = preview(&mut fixture, &other);
+            let prompt = fixture.input(
+                &owner,
+                "prompt:wrong-kind",
+                storage::InputKind::Prompt,
+                None,
+            );
+            for input_id in [other_preview.input_id, prompt.input_id, i64::MAX] {
+                let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
+                outcome
+                    .attempted_inputs
+                    .insert(requested.message_id, Some(input_id));
+                assert!(
+                    send_delivery(&fixture.conn, &requested, Some(&outcome)).is_err(),
+                    "recorded input {input_id} must bind this preview"
+                );
+            }
+        }
+
+        #[test]
+        fn recorded_input_ids_require_the_current_recipient_run() {
+            let mut fixture = storage::test_support::Fixture::new();
+            fixture.activate();
+            let requested = message(&mut fixture, "requested run");
+            let previous = preview(&mut fixture, &requested);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET status='exited',ended_at=?1 WHERE run_id=?2",
+                    rusqlite::params![crate::time::now_stamp(), fixture.run.run_id],
+                )
+                .unwrap();
+            let mut replacement = storage::test_support::Fixture::spec(
+                &fixture.conn,
+                fixture.fleet,
+                fixture.director,
+                fixture.member,
+            );
+            replacement.launch_nonce = "b".repeat(64);
+            replacement.runtime_path.push_str("-replacement");
+            fixture.run =
+                storage::test_support::create_run(&mut fixture.conn, &replacement).unwrap();
+            fixture.activate();
+            assert_ne!(fixture.run.run_id, previous.run_id);
+            assert_eq!(previous.kind, storage::InputKind::Preview);
+            assert_eq!(previous.message_id, Some(requested.message_id));
+            let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
+            outcome
+                .attempted_inputs
+                .insert(requested.message_id, Some(previous.input_id));
+            assert!(send_delivery(&fixture.conn, &requested, Some(&outcome)).is_err());
+        }
+    }
+
     fn projection(
         status: DeliveryStatus,
         method: Option<DeliveryMethod>,
@@ -979,10 +1182,10 @@ mod tests {
         fixture
             .conn
             .execute(
-                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,message_id,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'preview',?3,'ready',?4,?5,?5,?5,'interaction_open')",
+                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,message_id,preview_attempt,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'preview',?3,'ready',?4,1,?5,?5,?5,'interaction_open')",
                 rusqlite::params![
                     run.run_id,
-                    format!("preview:{}:{}", run.run_id, message.message_id),
+                    crate::broker::runtime::preview_operation_key(run.run_id, message.message_id, 1).unwrap(),
                     "d".repeat(64),
                     message.message_id,
                     "2026-10-30T10:00:00Z",

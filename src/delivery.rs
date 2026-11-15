@@ -71,6 +71,17 @@ pub(crate) fn canonical_preview_line(message: &broker::MessageRecord) -> String 
     )
 }
 
+pub(crate) fn pointer_preview_line(message: &broker::MessageRecord) -> String {
+    format!(
+        "[cafleet msg {} from {} {}] Body is {} characters; run cafleet message show {} --json to read it. {RESUME_CLAUSE}",
+        message.message_id,
+        message.from_member_id,
+        message.created_at,
+        message.text.chars().count(),
+        message.message_id
+    )
+}
+
 pub(crate) fn notification_error(
     member_id: i64,
     message_id: i64,
@@ -189,6 +200,85 @@ fn deliver_pending_with(
     })
 }
 
+fn scoped_preview_error(
+    conn: &Connection,
+    run: &storage::RunRecord,
+    message: &MessageRecord,
+    input: &storage::InputOperation,
+) -> Result<NotificationError, CafleetError> {
+    if input.run_id != run.run_id
+        || input.kind != InputKind::Preview
+        || input.message_id != Some(message.message_id)
+    {
+        return Err(CafleetError::App(
+            "preview diagnostic receipt association changed".into(),
+        ));
+    }
+    let member = run.member_id;
+    let id = input.input_id;
+    let message_id = message.message_id;
+    let text = if input.disposition == Some(InputDisposition::LeftInComposer) {
+        let attempt = input
+            .preview_attempt
+            .expect("a left preview has its attempt")
+            .checked_add(1)
+            .ok_or_else(|| CafleetError::App("preview attempt exhausted".into()))?;
+        let key = storage::preview_operation_key(run.run_id, message_id, attempt)?;
+        let next = storage::find_input(conn, run.run_id, &key)?.ok_or_else(|| {
+            CafleetError::App(format!(
+                "preview input {id} was left in the composer without a re-delivery attempt"
+            ))
+        })?;
+        let effect = match input.left_stage.expect("a left receipt has its stage") {
+            storage::LeftStage::EscapeOnly => format!(
+                "was not typed: Escape was sent to member {member} but the input was not typed"
+            ),
+            storage::LeftStage::Partial => {
+                format!("was partly typed into member {member}'s composer and not submitted")
+            }
+            storage::LeftStage::LiteralComplete => {
+                format!("was typed into member {member}'s composer but not submitted")
+            }
+            storage::LeftStage::Submitted => format!(
+                "was typed into member {member}'s composer and its submit key sent, but the submission was not confirmed"
+            ),
+        };
+        let cause = input
+            .stop_cause
+            .expect("a left receipt has its cause")
+            .as_str();
+        format!(
+            "message {message_id} {effect}: {cause} (input_id={id}, redelivery input_id={}); the runner re-delivers it once the composer is empty.",
+            next.input_id
+        )
+    } else if input.state == InputState::InProgress {
+        format!(
+            "message {message_id} was not notified to member {member}: input {id} is in progress; inspect it with cafleet input show {id} --json."
+        )
+    } else if input.state == InputState::Uncertain {
+        let cause = input
+            .stop_cause
+            .expect("an uncertain receipt has its cause")
+            .as_str();
+        format!(
+            "message {message_id} was not notified to member {member}: input {id} is uncertain ({cause}); inspect it with cafleet input show {id} --json and reconcile it with cafleet input reconcile."
+        )
+    } else if input.disposition == Some(InputDisposition::AbandonedUncertain) {
+        format!(
+            "message {message_id} was not notified to member {member}: input {id} was abandoned as uncertain; send its content again as a new message if it is still needed."
+        )
+    } else {
+        return Err(CafleetError::App(
+            "scoped preview diagnostics require a stopped or held receipt".into(),
+        ));
+    };
+    Ok(NotificationError {
+        member_id: member,
+        message_id,
+        error: text,
+    })
+}
+
 fn deliver_wrapped_pending(
     conn: &mut Connection,
     settings: &Settings,
@@ -210,13 +300,41 @@ fn deliver_wrapped_pending(
     let mut guard = None;
     let mut sent = Vec::new();
     let mut held_reason = None;
+    let mut notification_errors = Vec::new();
+    let mut attempted_inputs = std::collections::BTreeMap::new();
+    let backend = crate::coding_agent::coding_agent(&run.backend)
+        .ok_or_else(|| CafleetError::App("unknown preview backend".into()))?;
+    let verified = crate::coding_agent::ProfileCatalog::bundled().verified_composer(
+        backend,
+        run.native_version.as_deref(),
+        crate::coding_agent::ComposerOperation::Prompt,
+    );
     let mut skipped = attempted.clone();
-    let mut operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
+    let mut operation_key =
+        broker::runtime::preview_operation_key(run.run_id, message.message_id, 1)?;
     let mut known_input_id = None;
     let mut stage = Stage::Submission;
     let result = (|| {
         let end = 'drain: loop {
             deadline.remaining()?;
+            let latest = storage::find_latest_preview_input(conn, run.run_id, message.message_id)?;
+            let attempt_number = match latest.as_ref() {
+                None => 1,
+                Some(input) if input.disposition == Some(InputDisposition::LeftInComposer) => {
+                    return Err(CafleetError::App(format!(
+                        "preview input {} was left in the composer without a re-delivery attempt",
+                        input.input_id
+                    )));
+                }
+                Some(input) if input.disposition == Some(InputDisposition::NotSubmitted) => input
+                    .preview_attempt
+                    .expect("a preview has its attempt")
+                    .checked_add(1)
+                    .ok_or_else(|| CafleetError::App("preview attempt exhausted".into()))?,
+                Some(input) => input.preview_attempt.expect("a preview has its attempt"),
+            };
+            operation_key =
+                storage::preview_operation_key(run.run_id, message.message_id, attempt_number)?;
             let request = SubmitInput {
                 operation_key: operation_key.clone(),
                 input_kind: InputKind::Preview,
@@ -226,16 +344,27 @@ fn deliver_wrapped_pending(
             let retained =
                 find_submission(conn, &identity, &request, deadline).map_err(CafleetError::from)?;
             known_input_id = retained.as_ref().map(|input| input.input_id);
-            if retained.as_ref().is_some_and(|input| {
+            attempted_inputs.insert(message.message_id, known_input_id);
+            let scoped_hold = retained.as_ref().is_some_and(|input| {
                 matches!(input.state, InputState::InProgress | InputState::Uncertain)
                     || (input.state == InputState::Settled
-                        && input.disposition != Some(InputDisposition::Submitted))
-            }) {
+                        && input.disposition == Some(InputDisposition::AbandonedUncertain))
+            });
+            if scoped_hold && !verified {
                 break AttemptEnd::Held;
             }
             let attempt =
                 PreparedSubmission::new(&request, deadline.instant(), &mut RealInputDeadlineClock)?;
             let accepted = 'submit: {
+                if scoped_hold {
+                    notification_errors.push(scoped_preview_error(
+                        conn,
+                        &run,
+                        &message,
+                        retained.as_ref().expect("a scoped hold has its receipt"),
+                    )?);
+                    break 'submit None;
+                }
                 if retained.as_ref().is_some_and(|input| {
                     input.state == InputState::Ready && input.deferred_at.is_some()
                 }) {
@@ -267,6 +396,7 @@ fn deliver_wrapped_pending(
                             conn, settings, &run, placement, held, &attempt, deadline, host,
                         )
                         .map_err(CafleetError::from)?;
+                        attempted_inputs.insert(message.message_id, result.input_id);
                         match result.status {
                             SubmissionStatus::Accepted => {}
                             SubmissionStatus::Queued => break 'submit None,
@@ -274,7 +404,20 @@ fn deliver_wrapped_pending(
                                 held_reason = result.reason;
                                 break 'drain AttemptEnd::Held;
                             }
-                            SubmissionStatus::Rejected | SubmissionStatus::Uncertain => {
+                            SubmissionStatus::Uncertain | SubmissionStatus::LeftInComposer
+                                if verified =>
+                            {
+                                let input = storage::get_input(
+                                    conn,
+                                    result.input_id.expect("a stopped preview has its receipt"),
+                                )?;
+                                notification_errors
+                                    .push(scoped_preview_error(conn, &run, &message, &input)?);
+                                break 'submit None;
+                            }
+                            SubmissionStatus::Rejected
+                            | SubmissionStatus::Uncertain
+                            | SubmissionStatus::LeftInComposer => {
                                 break 'drain AttemptEnd::Held;
                             }
                         }
@@ -340,7 +483,8 @@ fn deliver_wrapped_pending(
                 break AttemptEnd::Held;
             }
             message = next;
-            operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
+            operation_key =
+                broker::runtime::preview_operation_key(run.run_id, message.message_id, 1)?;
             known_input_id = None;
             stage = Stage::Submission;
         };
@@ -348,7 +492,7 @@ fn deliver_wrapped_pending(
     })();
     let end = match result {
         Ok(end) => end,
-        Err(source) if sent.is_empty() => return Err(source),
+        Err(source) if sent.is_empty() && notification_errors.is_empty() => return Err(source),
         Err(source) => {
             let cause = CafleetError::from(
                 InputContext {
@@ -387,6 +531,8 @@ fn deliver_wrapped_pending(
         sent,
         end,
         held_reason,
+        notification_errors,
+        attempted_inputs,
     })
 }
 
@@ -400,6 +546,7 @@ pub(crate) struct PendingPreview {
 pub(crate) struct ReceiveSnapshot {
     pub(crate) messages: Vec<MessageRecord>,
     pub(crate) pending: Vec<PendingPreview>,
+    pub(crate) pending_notifications: Vec<PendingPreview>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -415,6 +562,14 @@ pub(crate) struct AttemptOutcome {
     pub(crate) end: AttemptEnd,
     /// The recipient runner's reason when it held the preview without accepting it.
     pub(crate) held_reason: Option<String>,
+    pub(crate) notification_errors: Vec<NotificationError>,
+    pub(crate) attempted_inputs: std::collections::BTreeMap<i64, Option<i64>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WaitOutcome {
+    pub(crate) messages: Vec<MessageRecord>,
+    pub(crate) notification_errors: Vec<NotificationError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -430,6 +585,8 @@ impl AttemptOutcome {
             sent: Vec::new(),
             end,
             held_reason: None,
+            notification_errors: Vec::new(),
+            attempted_inputs: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -448,13 +605,14 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
     clock: &C,
     io: &mut I,
     timeout: Duration,
-) -> Result<Vec<MessageRecord>, CafleetError> {
+) -> Result<WaitOutcome, CafleetError> {
     let started = clock.now();
     let expires = started + timeout;
     let mut next_check = started;
     let mut last_interval = None;
     let mut cursor = None;
     let mut messages = Vec::new();
+    let mut notification_errors: Vec<NotificationError> = Vec::new();
     let mut attempted = BTreeSet::new();
     loop {
         let now = clock.now();
@@ -478,6 +636,11 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
             }
             Err(error) => return Err(error),
         };
+        notification_errors.retain(|error| {
+            snapshot.pending_notifications.iter().any(|pending| {
+                pending.member_id == error.member_id && pending.message_id == error.message_id
+            })
+        });
         messages = snapshot.messages;
         let now = clock.now();
         if !messages.is_empty() || now >= expires {
@@ -515,23 +678,36 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     )),
                     Err(error) => return Err(error),
                 };
+            notification_errors.retain(|error| !outcome.sent.contains(&error.message_id));
+            let mut diagnostics = outcome.notification_errors;
             if let AttemptEnd::Failed(error) = outcome.end {
+                diagnostics.push(error);
+            }
+            for error in diagnostics {
                 assert_eq!(
                     error.member_id, member,
                     "the owned attempt reports its selected member"
                 );
-                assert!(
-                    attempted.insert(error.message_id),
-                    "one invocation attempts each failed message at most once"
-                );
+                attempted.insert(error.message_id);
                 eprintln!("{}", error.error);
+                if let Some(previous) = notification_errors.iter_mut().find(|previous| {
+                    previous.member_id == error.member_id && previous.message_id == error.message_id
+                }) {
+                    *previous = error;
+                } else {
+                    notification_errors.push(error);
+                }
             }
             next_check = clock.now();
         } else {
             next_check = started + Duration::from_secs(interval + 1);
         }
     }
-    Ok(messages)
+    notification_errors.sort_by_key(|error| error.message_id);
+    Ok(WaitOutcome {
+        messages,
+        notification_errors,
+    })
 }
 
 pub(crate) struct BrokerReceiver<'a> {
@@ -577,8 +753,23 @@ impl ReceiveIo for BrokerReceiver<'_> {
                     message_id,
                 })
                 .collect();
+            let pending_notifications =
+                broker::messaging::pending_notifications(&tx, fleet, self.member_id)?
+                    .into_iter()
+                    .map(|(member_id, message_id)| PendingPreview {
+                        member_id,
+                        message_id,
+                    })
+                    .collect();
             tx.commit()?;
-            Ok((ReceiveSnapshot { messages, pending }, fleet))
+            Ok((
+                ReceiveSnapshot {
+                    messages,
+                    pending,
+                    pending_notifications,
+                },
+                fleet,
+            ))
         })?;
         self.fleet_id = Some(fleet);
         Ok(snapshot)
@@ -625,6 +816,1023 @@ mod tests {
     use std::collections::BTreeSet;
     use std::time::Duration;
     use std::time::Instant;
+
+    mod composer_reliability {
+        use crate::delivery::tests::*;
+        use crate::runtime::{SubmissionResult, SubmissionStage};
+        use std::collections::VecDeque;
+
+        enum Reply {
+            Accepted,
+            Queued,
+            Left(storage::LeftStage),
+            Uncertain,
+            Held,
+            Rejected,
+            Failed,
+        }
+
+        struct PreviewHost {
+            database_url: String,
+            replies: VecDeque<Reply>,
+            requests: Vec<SubmitInput>,
+            retired: Vec<i64>,
+        }
+
+        impl InputCommandHost for PreviewHost {
+            fn lock(
+                &mut self,
+                settings: &Settings,
+                placement: &broker::Placement,
+                deadline: Deadline,
+            ) -> Result<Option<PaneLock>, CafleetError> {
+                PaneLock::acquire_within(&settings.database_url, placement, deadline)
+            }
+
+            fn health(
+                &mut self,
+                run: &storage::RunRecord,
+                _: Instant,
+            ) -> Result<HealthSnapshot, CafleetError> {
+                Ok(HealthSnapshot {
+                    identity: ControlIdentity::from_run(run),
+                    runner: crate::runtime::ProcessIdentity::current().unwrap(),
+                    child: None,
+                    output_seq: 0,
+                    observation: None,
+                })
+            }
+
+            fn exchange(
+                &mut self,
+                run: &storage::RunRecord,
+                request: &InputControlRequest,
+                deadline: Instant,
+            ) -> Result<InputControlReply, CafleetError> {
+                let InputControlOperation::SubmitPrompt(input) = &request.operation else {
+                    let InputControlOperation::Receipt(ReceiptAction::Retire { input_id }) =
+                        request.operation
+                    else {
+                        panic!("the preview host receives a submit or retirement request")
+                    };
+                    self.retired.push(input_id);
+                    return Ok(InputControlReply::Receipt(ReceiptReply::Retired {
+                        input_id,
+                    }));
+                };
+                self.requests.push(input.clone());
+                let reply = self
+                    .replies
+                    .pop_front()
+                    .expect("every live preview has a scripted reply");
+                if matches!(reply, Reply::Failed) {
+                    return Err(CafleetError::App("owned later preview failure".into()));
+                }
+                if matches!(reply, Reply::Held | Reply::Rejected) {
+                    let mut result = SubmissionResult::held("observer_unavailable");
+                    if matches!(reply, Reply::Rejected) {
+                        result.status = SubmissionStatus::Rejected;
+                    }
+                    return Ok(InputControlReply::Submission(result));
+                }
+                let database_url = &self.database_url;
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| {
+                            let mut conn = crate::db::connect(database_url)?;
+                            crate::db::with_database_budget(
+                                &mut conn,
+                                Deadline::until(deadline),
+                                |conn| {
+                                    let owner = run.owner();
+                                    let mut row = storage::test_support::reserve_input(
+                                        conn,
+                                        &owner,
+                                        &storage::NewInput {
+                                            operation_key: input.operation_key.clone(),
+                                            kind: InputKind::Preview,
+                                            payload_digest: storage::input_payload_digest(
+                                                run.run_id, input,
+                                            ),
+                                            message_id: input.message_id,
+                                        },
+                                    )
+                                    .unwrap();
+                                    if row.state == InputState::Ready {
+                                        assert!(row.deferred_at.is_none());
+                                        assert_eq!(
+                                            conn.execute(
+                                                "UPDATE member_input_operations SET state='in_progress',delivery_method='profile',updated_at=?1 WHERE input_id=?2 AND state='ready' AND deferred_at IS NULL",
+                                                rusqlite::params![crate::time::now_stamp(), row.input_id],
+                                            ).unwrap(),
+                                            1,
+                                        );
+                                        row = storage::get_input(conn, row.input_id).unwrap();
+                                    }
+                                    let (row, status, stage, reason) = match reply {
+                                        Reply::Accepted => (
+                                            storage::record_input_state(
+                                                conn,
+                                                &owner,
+                                                row.input_id,
+                                                InputState::InProgress,
+                                                InputState::Accepted,
+                                            )
+                                            .unwrap(),
+                                            SubmissionStatus::Accepted,
+                                            SubmissionStage::Submitted,
+                                            None,
+                                        ),
+                                        Reply::Queued => (
+                                            storage::requeue_zero_byte_immediate(
+                                                conn,
+                                                &owner,
+                                                row.input_id,
+                                                "interaction_open",
+                                            )
+                                            .unwrap(),
+                                            SubmissionStatus::Queued,
+                                            SubmissionStage::ZeroBytes,
+                                            Some("interaction_open".into()),
+                                        ),
+                                        Reply::Uncertain => (
+                                            storage::record_input_uncertain(
+                                                conn,
+                                                &owner,
+                                                row.input_id,
+                                                storage::StopCause::WriteFailed,
+                                            )
+                                            .unwrap(),
+                                            SubmissionStatus::Uncertain,
+                                            SubmissionStage::Partial,
+                                            Some("write_failed".into()),
+                                        ),
+                                        Reply::Left(stage) => {
+                                            if stage == storage::LeftStage::EscapeOnly {
+                                                storage::requeue_zero_byte_immediate(
+                                                    conn,
+                                                    &owner,
+                                                    row.input_id,
+                                                    "composer_busy",
+                                                )
+                                                .unwrap();
+                                                storage::begin_deferred_attempt(
+                                                    conn,
+                                                    &owner,
+                                                    row.input_id,
+                                                    storage::DeliveryMethod::Fallback,
+                                                    Some("idle_timeout"),
+                                                )
+                                                .unwrap();
+                                            }
+                                            let cause = if stage == storage::LeftStage::Submitted {
+                                                storage::StopCause::SubmitUnconfirmed
+                                            } else {
+                                                storage::StopCause::ManualInput
+                                            };
+                                            let (row, _) =
+                                                storage::settle_left_and_queue_redelivery(
+                                                    conn,
+                                                    &owner,
+                                                    row.input_id,
+                                                    cause,
+                                                    stage,
+                                                )
+                                                .unwrap();
+                                            let stage = match stage {
+                                                storage::LeftStage::EscapeOnly => {
+                                                    SubmissionStage::EscapeOnly
+                                                }
+                                                storage::LeftStage::Partial => {
+                                                    SubmissionStage::Partial
+                                                }
+                                                storage::LeftStage::LiteralComplete => {
+                                                    SubmissionStage::LiteralComplete
+                                                }
+                                                storage::LeftStage::Submitted => {
+                                                    SubmissionStage::Submitted
+                                                }
+                                            };
+                                            (
+                                                row,
+                                                SubmissionStatus::LeftInComposer,
+                                                stage,
+                                                Some(cause.as_str().into()),
+                                            )
+                                        }
+                                        Reply::Held | Reply::Rejected | Reply::Failed => {
+                                            unreachable!()
+                                        }
+                                    };
+                                    Ok(InputControlReply::Submission(SubmissionResult {
+                                        status,
+                                        input_id: Some(row.input_id),
+                                        stage,
+                                        output_seq: Some(0),
+                                        reason,
+                                        delivery: row.delivery(),
+                                    }))
+                                },
+                            )
+                        })
+                        .join()
+                        .expect("the simulated runner thread completes")
+                })
+            }
+        }
+
+        fn with_target(
+            verified: bool,
+            body: impl FnOnce(&mut crate::runtime::test_support::Fixture, &mut PreviewHost),
+        ) {
+            let mut fixture = crate::runtime::test_support::Fixture::new();
+            let (_artifacts, _lock, _) = fixture.running_owner();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_version=?1 WHERE run_id=?2",
+                    rusqlite::params![verified.then_some("0.167.0"), fixture.run.run_id],
+                )
+                .unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let mut host = PreviewHost {
+                database_url: settings_for(&fixture.conn).database_url,
+                replies: VecDeque::new(),
+                requests: Vec::new(),
+                retired: Vec::new(),
+            };
+            body(&mut fixture, &mut host);
+        }
+
+        fn message(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            text: &str,
+        ) -> MessageRecord {
+            broker::send_message(
+                &mut fixture.conn,
+                fixture.run.director_member_id,
+                fixture.run.member_id,
+                text,
+            )
+            .unwrap()
+        }
+
+        fn reserve(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            message: &MessageRecord,
+            attempt: i64,
+        ) -> storage::InputOperation {
+            storage::test_support::reserve_input(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                &storage::NewInput {
+                    operation_key: storage::preview_operation_key(
+                        fixture.run.run_id,
+                        message.message_id,
+                        attempt,
+                    )
+                    .unwrap(),
+                    kind: InputKind::Preview,
+                    payload_digest: preview_digest(
+                        fixture.run.run_id,
+                        message.message_id,
+                        &canonical_preview_line(message),
+                    ),
+                    message_id: Some(message.message_id),
+                },
+            )
+            .unwrap()
+        }
+
+        fn deliver(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            host: &mut PreviewHost,
+        ) -> Result<AttemptOutcome, CafleetError> {
+            let settings = settings_for(&fixture.conn);
+            deliver_pending_with(
+                &mut fixture.conn,
+                &settings,
+                fixture.run.member_id,
+                Some(fixture.run.fleet_id),
+                Deadline::new(),
+                &BTreeSet::new(),
+                host,
+            )
+        }
+
+        fn not_submitted(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            input: &storage::InputOperation,
+        ) {
+            storage::record_input_state(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                input.input_id,
+                InputState::InProgress,
+                InputState::Ready,
+            )
+            .unwrap();
+            storage::test_support::settle_input(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                input.input_id,
+                InputState::Ready,
+                InputDisposition::NotSubmitted,
+                "fixture:proved-zero-byte",
+            )
+            .unwrap();
+        }
+
+        fn left_diagnostic(
+            member: i64,
+            message: i64,
+            input: i64,
+            next: i64,
+            stage: storage::LeftStage,
+        ) -> String {
+            let (effect, cause) = match stage {
+                storage::LeftStage::EscapeOnly => (
+                    format!(
+                        "was not typed: Escape was sent to member {member} but the input was not typed"
+                    ),
+                    "manual_input",
+                ),
+                storage::LeftStage::Partial => (
+                    format!("was partly typed into member {member}'s composer and not submitted"),
+                    "manual_input",
+                ),
+                storage::LeftStage::LiteralComplete => (
+                    format!("was typed into member {member}'s composer but not submitted"),
+                    "manual_input",
+                ),
+                storage::LeftStage::Submitted => (
+                    format!(
+                        "was typed into member {member}'s composer and its submit key sent, but the submission was not confirmed"
+                    ),
+                    "submit_unconfirmed",
+                ),
+            };
+            format!(
+                "message {message} {effect}: {cause} (input_id={input}, redelivery input_id={next}); the runner re-delivers it once the composer is empty."
+            )
+        }
+
+        #[test]
+        fn verified_own_unresolved_and_abandoned_attempts_skip_only_their_message() {
+            for state in [
+                InputState::InProgress,
+                InputState::Uncertain,
+                InputState::Settled,
+            ] {
+                with_target(true, |fixture, host| {
+                    let first = message(fixture, "private retained preview");
+                    let input = reserve(fixture, &first, 1);
+                    if state != InputState::InProgress {
+                        storage::record_input_uncertain(
+                            &mut fixture.conn,
+                            &fixture.run.owner(),
+                            input.input_id,
+                            storage::StopCause::WriteFailed,
+                        )
+                        .unwrap();
+                    }
+                    if state == InputState::Settled {
+                        storage::test_support::settle_input(
+                            &mut fixture.conn,
+                            &fixture.run.owner(),
+                            input.input_id,
+                            InputState::Uncertain,
+                            InputDisposition::AbandonedUncertain,
+                            "fixture:ended-retries",
+                        )
+                        .unwrap();
+                    }
+                    let second = message(fixture, "later preview");
+                    host.replies.push_back(Reply::Accepted);
+                    let outcome = deliver(fixture, host).unwrap();
+                    assert_eq!(outcome.end, AttemptEnd::NoPending);
+                    assert_eq!(outcome.sent, [second.message_id]);
+                    assert_eq!(
+                        host.requests
+                            .iter()
+                            .map(|request| request.message_id.unwrap())
+                            .collect::<Vec<_>>(),
+                        [second.message_id]
+                    );
+                    assert_eq!(
+                        outcome.attempted_inputs[&first.message_id],
+                        Some(input.input_id)
+                    );
+                    assert_eq!(outcome.notification_errors.len(), 1);
+                    let diagnostic = &outcome.notification_errors[0];
+                    assert_eq!(
+                        (diagnostic.member_id, diagnostic.message_id),
+                        (fixture.run.member_id, first.message_id)
+                    );
+                    if state == InputState::Settled {
+                        assert_eq!(
+                            diagnostic.error,
+                            format!(
+                                "message {} was not notified to member {}: input {} was abandoned as uncertain; send its content again as a new message if it is still needed.",
+                                first.message_id, fixture.run.member_id, input.input_id
+                            )
+                        );
+                    } else if state == InputState::Uncertain {
+                        assert_eq!(
+                            diagnostic.error,
+                            format!(
+                                "message {} was not notified to member {}: input {} is uncertain (write_failed); inspect it with cafleet input show {} --json and reconcile it with cafleet input reconcile.",
+                                first.message_id,
+                                fixture.run.member_id,
+                                input.input_id,
+                                input.input_id
+                            )
+                        );
+                    } else {
+                        assert_eq!(
+                            diagnostic.error,
+                            format!(
+                                "message {} was not notified to member {}: input {} is in progress; inspect it with cafleet input show {} --json.",
+                                first.message_id,
+                                fixture.run.member_id,
+                                input.input_id,
+                                input.input_id
+                            )
+                        );
+                    }
+                    assert_eq!(preview_stamp(&fixture.conn, first.message_id), None);
+                    assert!(preview_stamp(&fixture.conn, second.message_id).is_some());
+                });
+            }
+        }
+
+        #[test]
+        fn nonverified_own_uncertain_and_abandoned_attempts_keep_the_member_wide_hold() {
+            for abandoned in [false, true] {
+                with_target(false, |fixture, host| {
+                    let first = message(fixture, "legacy held preview");
+                    let input = reserve(fixture, &first, 1);
+                    storage::record_input_uncertain(
+                        &mut fixture.conn,
+                        &fixture.run.owner(),
+                        input.input_id,
+                        storage::StopCause::WriteFailed,
+                    )
+                    .unwrap();
+                    if abandoned {
+                        storage::test_support::settle_input(
+                            &mut fixture.conn,
+                            &fixture.run.owner(),
+                            input.input_id,
+                            InputState::Uncertain,
+                            InputDisposition::AbandonedUncertain,
+                            "fixture:legacy-hold",
+                        )
+                        .unwrap();
+                    }
+                    message(fixture, "later legacy preview");
+                    let outcome = deliver(fixture, host).unwrap();
+                    assert_eq!(outcome.end, AttemptEnd::Held);
+                    assert!(outcome.sent.is_empty());
+                    assert!(host.requests.is_empty());
+                });
+            }
+        }
+
+        #[test]
+        fn deferred_latest_attempt_is_skipped_and_its_key_is_preserved() {
+            with_target(true, |fixture, host| {
+                let first = message(fixture, "queued latest attempt");
+                let previous = reserve(fixture, &first, 1);
+                not_submitted(fixture, &previous);
+                let latest = reserve(fixture, &first, 2);
+                storage::requeue_zero_byte_immediate(
+                    &mut fixture.conn,
+                    &fixture.run.owner(),
+                    latest.input_id,
+                    "interaction_open",
+                )
+                .unwrap();
+                let second = message(fixture, "later unqueued preview");
+                host.replies.push_back(Reply::Accepted);
+                let outcome = deliver(fixture, host).unwrap();
+                assert_eq!(outcome.sent, [second.message_id]);
+                assert!(outcome.notification_errors.is_empty());
+                assert_eq!(
+                    outcome.attempted_inputs[&first.message_id],
+                    Some(latest.input_id)
+                );
+                assert_eq!(
+                    storage::find_latest_preview_input(
+                        &fixture.conn,
+                        fixture.run.run_id,
+                        first.message_id
+                    )
+                    .unwrap()
+                    .unwrap()
+                    .input_id,
+                    latest.input_id
+                );
+                assert_eq!(host.requests.len(), 1);
+            });
+        }
+
+        #[test]
+        fn a_ready_attempt_without_deferred_metadata_reuses_its_key_and_id() {
+            for verified in [false, true] {
+                with_target(verified, |fixture, host| {
+                    let first = message(fixture, "retry the zero-byte key");
+                    let input = reserve(fixture, &first, 1);
+                    storage::record_input_state(
+                        &mut fixture.conn,
+                        &fixture.run.owner(),
+                        input.input_id,
+                        InputState::InProgress,
+                        InputState::Ready,
+                    )
+                    .unwrap();
+                    host.replies.push_back(Reply::Accepted);
+                    let outcome = deliver(fixture, host).unwrap();
+                    assert_eq!(outcome.sent, [first.message_id]);
+                    assert_eq!(host.requests[0].operation_key, input.operation_key);
+                    assert_eq!(
+                        outcome.attempted_inputs[&first.message_id],
+                        Some(input.input_id)
+                    );
+                    assert_eq!(
+                        storage::find_latest_preview_input(
+                            &fixture.conn,
+                            fixture.run.run_id,
+                            first.message_id
+                        )
+                        .unwrap()
+                        .unwrap()
+                        .preview_attempt,
+                        Some(1)
+                    );
+                });
+            }
+        }
+
+        #[test]
+        fn a_not_submitted_latest_attempt_starts_the_next_key_on_every_run() {
+            for verified in [false, true] {
+                with_target(verified, |fixture, host| {
+                    let first = message(fixture, "retry under a fresh attempt");
+                    let old = reserve(fixture, &first, 1);
+                    not_submitted(fixture, &old);
+                    host.replies.push_back(Reply::Accepted);
+                    let outcome = deliver(fixture, host).unwrap();
+                    assert_eq!(outcome.sent, [first.message_id]);
+                    let latest = storage::find_latest_preview_input(
+                        &fixture.conn,
+                        fixture.run.run_id,
+                        first.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    assert_eq!(latest.preview_attempt, Some(2));
+                    assert_ne!(latest.input_id, old.input_id);
+                    assert_eq!(latest.payload_digest, old.payload_digest);
+                    assert_eq!(host.requests[0].operation_key, latest.operation_key);
+                    assert_eq!(
+                        outcome.attempted_inputs[&first.message_id],
+                        Some(latest.input_id)
+                    );
+                });
+            }
+        }
+
+        #[test]
+        fn immediate_left_attempts_report_each_stage_and_continue_past_their_successor() {
+            for stage in [
+                storage::LeftStage::EscapeOnly,
+                storage::LeftStage::Partial,
+                storage::LeftStage::LiteralComplete,
+                storage::LeftStage::Submitted,
+            ] {
+                with_target(true, |fixture, host| {
+                    let first = message(fixture, "private left preview");
+                    let second = message(fixture, "later accepted preview");
+                    host.replies.extend([Reply::Left(stage), Reply::Accepted]);
+                    let outcome = deliver(fixture, host).unwrap();
+                    let old_id = outcome.attempted_inputs[&first.message_id].unwrap();
+                    let latest = storage::find_latest_preview_input(
+                        &fixture.conn,
+                        fixture.run.run_id,
+                        first.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    assert_ne!(old_id, latest.input_id);
+                    assert_eq!(latest.preview_attempt, Some(2));
+                    assert_eq!(latest.defer_reason.as_deref(), Some("redelivery"));
+                    assert_eq!(outcome.sent, [second.message_id]);
+                    assert_eq!(outcome.end, AttemptEnd::NoPending);
+                    assert_eq!(
+                        outcome.notification_errors,
+                        [NotificationError {
+                            member_id: fixture.run.member_id,
+                            message_id: first.message_id,
+                            error: left_diagnostic(
+                                fixture.run.member_id,
+                                first.message_id,
+                                old_id,
+                                latest.input_id,
+                                stage
+                            ),
+                        }]
+                    );
+                    assert_eq!(host.requests.len(), 2);
+                    assert_eq!(preview_stamp(&fixture.conn, first.message_id), None);
+                });
+            }
+        }
+
+        #[test]
+        fn a_runner_uncertain_reply_holds_only_its_message_on_a_verified_run() {
+            with_target(true, |fixture, host| {
+                let first = message(fixture, "uncertain now");
+                let second = message(fixture, "continues now");
+                host.replies.extend([Reply::Uncertain, Reply::Accepted]);
+                let outcome = deliver(fixture, host).unwrap();
+                assert_eq!(outcome.sent, [second.message_id]);
+                assert_eq!(outcome.notification_errors.len(), 1);
+                assert_eq!(outcome.notification_errors[0].message_id, first.message_id);
+                assert!(
+                    outcome.notification_errors[0]
+                        .error
+                        .contains("is uncertain (write_failed)")
+                );
+                assert_eq!(host.requests.len(), 2);
+            });
+        }
+
+        #[test]
+        fn runner_holds_and_rejections_end_the_drain_without_a_receipt() {
+            for reply in [Reply::Held, Reply::Rejected] {
+                with_target(true, |fixture, host| {
+                    let first = message(fixture, "runner-wide refusal");
+                    message(fixture, "later untouched preview");
+                    host.replies.push_back(reply);
+                    let outcome = deliver(fixture, host).unwrap();
+                    assert_eq!(outcome.end, AttemptEnd::Held);
+                    assert!(outcome.sent.is_empty());
+                    assert_eq!(host.requests.len(), 1);
+                    assert_eq!(outcome.attempted_inputs[&first.message_id], None);
+                    assert!(outcome.notification_errors.is_empty());
+                });
+            }
+        }
+
+        #[test]
+        fn a_successorless_left_preview_fails_at_the_receipt_invariant() {
+            with_target(true, |fixture, host| {
+                let first = message(fixture, "orphaned left attempt");
+                let input = reserve(fixture, &first, 1);
+                let (_, successor) = storage::settle_left_and_queue_redelivery(
+                    &mut fixture.conn,
+                    &fixture.run.owner(),
+                    input.input_id,
+                    storage::StopCause::ManualInput,
+                    storage::LeftStage::LiteralComplete,
+                )
+                .unwrap();
+                assert_eq!(
+                    fixture
+                        .conn
+                        .execute(
+                            "DELETE FROM member_input_operations WHERE input_id=?1",
+                            [successor.input_id],
+                        )
+                        .unwrap(),
+                    1,
+                );
+                let error = deliver(fixture, host).unwrap_err();
+                assert_eq!(
+                    error.message(),
+                    format!(
+                        "preview input {} was left in the composer without a re-delivery attempt",
+                        input.input_id
+                    )
+                );
+                assert!(host.requests.is_empty());
+            });
+        }
+
+        #[test]
+        fn multiple_scoped_diagnostics_preserve_order_before_a_later_terminal_failure() {
+            with_target(true, |fixture, host| {
+                let left = message(fixture, "left first");
+                let uncertain = message(fixture, "uncertain second");
+                let accepted = message(fixture, "accepted third");
+                let failed = message(fixture, "failed fourth");
+                host.replies.extend([
+                    Reply::Left(storage::LeftStage::LiteralComplete),
+                    Reply::Uncertain,
+                    Reply::Accepted,
+                    Reply::Failed,
+                ]);
+                let outcome = deliver(fixture, host).unwrap();
+                assert_eq!(outcome.sent, [accepted.message_id]);
+                assert_eq!(
+                    outcome
+                        .notification_errors
+                        .iter()
+                        .map(|error| error.message_id)
+                        .collect::<Vec<_>>(),
+                    [left.message_id, uncertain.message_id]
+                );
+                let AttemptEnd::Failed(error) = outcome.end else {
+                    panic!("the last attempt retains its terminal warning")
+                };
+                assert_eq!(error.message_id, failed.message_id);
+                assert!(error.error.contains("owned later preview failure"));
+            });
+        }
+
+        #[test]
+        fn newly_queued_previews_have_no_scoped_diagnostic_and_allow_the_next_message() {
+            with_target(true, |fixture, host| {
+                let first = message(fixture, "queued first");
+                let second = message(fixture, "accepted second");
+                host.replies.extend([Reply::Queued, Reply::Accepted]);
+                let outcome = deliver(fixture, host).unwrap();
+                assert_eq!(outcome.sent, [second.message_id]);
+                assert!(outcome.notification_errors.is_empty());
+                let queued = storage::find_latest_preview_input(
+                    &fixture.conn,
+                    fixture.run.run_id,
+                    first.message_id,
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(
+                    outcome.attempted_inputs[&first.message_id],
+                    Some(queued.input_id)
+                );
+                assert_eq!(queued.defer_reason.as_deref(), Some("interaction_open"));
+            });
+        }
+    }
+
+    mod wait_composer_reliability {
+        use crate::delivery::tests::*;
+
+        fn outcome(errors: Vec<NotificationError>, sent: Vec<i64>) -> AttemptOutcome {
+            let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
+            outcome
+                .attempted_inputs
+                .extend(errors.iter().map(|error| (error.message_id, None)));
+            outcome
+                .attempted_inputs
+                .extend(sent.iter().map(|id| (*id, None)));
+            outcome.notification_errors = errors;
+            outcome.sent = sent;
+            outcome
+        }
+
+        #[test]
+        fn wait_collects_scoped_and_terminal_diagnostics_once_in_message_order() {
+            let clock = TestClock::new();
+            let mut attempts = Vec::new();
+            let mut io = RecordingIo {
+                check: |_| Ok(snapshot(&[(2, 20), (2, 21), (5, 50)])),
+                attempt: |member, _, excluded: &BTreeSet<i64>| {
+                    attempts.push((member, excluded.clone()));
+                    if member == 2 {
+                        Ok(outcome(
+                            vec![
+                                notification_error(2, 21, "left second"),
+                                notification_error(2, 20, "left first"),
+                            ],
+                            Vec::new(),
+                        ))
+                    } else {
+                        Ok(AttemptOutcome::ended(AttemptEnd::Failed(
+                            notification_error(5, 50, "terminal failure"),
+                        )))
+                    }
+                },
+            };
+            let result = wait(&clock, &mut io, Duration::from_secs(4)).unwrap();
+            assert!(result.messages.is_empty());
+            assert_eq!(
+                attempts,
+                [(2, BTreeSet::new()), (5, BTreeSet::from([20, 21]))]
+            );
+            assert_eq!(
+                result.notification_errors,
+                [
+                    notification_error(2, 20, "left first"),
+                    notification_error(2, 21, "left second"),
+                    notification_error(5, 50, "terminal failure"),
+                ]
+            );
+        }
+
+        #[test]
+        fn a_placement_only_hold_retains_the_message_diagnostic() {
+            let clock = TestClock::new();
+            let attempted = Cell::new(false);
+            let mut io = RecordingIo {
+                check: |_| {
+                    let mut view = snapshot(&[(2, 20)]);
+                    if attempted.get() {
+                        view.pending.clear();
+                    }
+                    Ok(view)
+                },
+                attempt: |_, _, _: &BTreeSet<i64>| {
+                    assert!(!attempted.replace(true));
+                    Ok(outcome(
+                        vec![notification_error(2, 20, "left in composer")],
+                        Vec::new(),
+                    ))
+                },
+            };
+            let result = wait(&clock, &mut io, Duration::from_secs(3)).unwrap();
+            assert_eq!(
+                result.notification_errors,
+                [notification_error(2, 20, "left in composer")]
+            );
+            assert_eq!(clock.elapsed.get(), Duration::from_secs(3));
+        }
+
+        #[test]
+        fn a_successful_snapshot_removes_diagnostics_for_messages_no_longer_pending() {
+            let clock = TestClock::new();
+            let attempted = Cell::new(false);
+            let mut io = RecordingIo {
+                check: |_| {
+                    if attempted.get() {
+                        let mut view = snapshot(&[]);
+                        view.messages = vec![super::message(7)];
+                        Ok(view)
+                    } else {
+                        Ok(snapshot(&[(2, 20)]))
+                    }
+                },
+                attempt: |_, _, _: &BTreeSet<i64>| {
+                    attempted.set(true);
+                    Ok(outcome(
+                        vec![notification_error(2, 20, "old failure")],
+                        Vec::new(),
+                    ))
+                },
+            };
+            let result = wait(&clock, &mut io, Duration::from_secs(3)).unwrap();
+            assert_eq!(result.messages, [super::message(7)]);
+            assert!(result.notification_errors.is_empty());
+        }
+
+        #[test]
+        fn an_inflight_notification_preserves_another_members_diagnostic_without_a_tail_snapshot() {
+            let clock = TestClock::new();
+            let checks = Cell::new(0);
+            let mut io = RecordingIo {
+                check: |_| {
+                    let current = checks.get() + 1;
+                    checks.set(current);
+                    assert!(current <= 3, "final reconciliation starts no new I/O");
+                    Ok(snapshot(&[(2, 20), (5, 50)]))
+                },
+                attempt: |member, _, _: &BTreeSet<i64>| {
+                    if member == 2 {
+                        Ok(outcome(
+                            vec![notification_error(2, 20, "earlier failed attempt")],
+                            Vec::new(),
+                        ))
+                    } else {
+                        clock.advance(Duration::from_secs(5));
+                        Ok(outcome(Vec::new(), vec![50]))
+                    }
+                },
+            };
+            let result = wait(&clock, &mut io, Duration::from_secs(2)).unwrap();
+            assert_eq!(
+                result.notification_errors,
+                [notification_error(2, 20, "earlier failed attempt")]
+            );
+            assert_eq!(checks.get(), 3);
+            assert_eq!(clock.elapsed.get(), Duration::from_secs(6));
+        }
+
+        #[test]
+        fn an_inflight_failure_at_expiry_keeps_its_diagnostic_without_a_tail_snapshot() {
+            let clock = TestClock::new();
+            let mut checks = 0;
+            let mut io = RecordingIo {
+                check: |_| {
+                    checks += 1;
+                    assert_eq!(checks, 1);
+                    Ok(snapshot(&[(2, 20)]))
+                },
+                attempt: |_, _, _: &BTreeSet<i64>| {
+                    clock.advance(Duration::from_secs(5));
+                    Ok(outcome(
+                        vec![notification_error(2, 20, "left after the receive deadline")],
+                        Vec::new(),
+                    ))
+                },
+            };
+            let result = wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
+            assert_eq!(checks, 1);
+            assert_eq!(
+                result.notification_errors,
+                [notification_error(2, 20, "left after the receive deadline")]
+            );
+        }
+
+        #[test]
+        fn snapshot_contention_until_expiry_keeps_the_last_observed_diagnostic() {
+            let clock = TestClock::new();
+            let attempted = Cell::new(false);
+            let mut io = RecordingIo {
+                check: |_| {
+                    if attempted.get() {
+                        clock.advance(Duration::from_secs(2));
+                        Err(CafleetError::DatabaseBusy(
+                            "owned receive snapshot contention".into(),
+                        ))
+                    } else {
+                        Ok(snapshot(&[(2, 20)]))
+                    }
+                },
+                attempt: |_, _, _: &BTreeSet<i64>| {
+                    attempted.set(true);
+                    Ok(outcome(
+                        vec![notification_error(2, 20, "retained failure")],
+                        Vec::new(),
+                    ))
+                },
+            };
+            let result = wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
+            assert_eq!(
+                result.notification_errors,
+                [notification_error(2, 20, "retained failure")]
+            );
+        }
+
+        #[test]
+        fn broker_snapshots_track_unnotified_messages_independently_of_concrete_panes() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "notification-observations");
+            let concrete = register(&mut conn, fleet, "concrete", Some("%2"));
+            let pending = register(&mut conn, fleet, "pending", None);
+            let first =
+                broker::send_message(&mut conn, director, concrete, "concrete target").unwrap();
+            let second =
+                broker::send_message(&mut conn, director, pending, "target without a pane")
+                    .unwrap();
+            let settings = settings_for(&conn);
+            let check = |conn: &mut Connection| {
+                BrokerReceiver::new(conn, &settings, director)
+                    .check(Deadline::new())
+                    .unwrap()
+            };
+            let initial = check(&mut conn);
+            assert_eq!(
+                initial.pending,
+                [PendingPreview {
+                    member_id: concrete,
+                    message_id: first.message_id
+                }]
+            );
+            assert_eq!(
+                initial.pending_notifications,
+                [
+                    PendingPreview {
+                        member_id: concrete,
+                        message_id: first.message_id
+                    },
+                    PendingPreview {
+                        member_id: pending,
+                        message_id: second.message_id
+                    },
+                ]
+            );
+            broker::ack_message(&mut conn, first.message_id).unwrap();
+            let after_ack = check(&mut conn);
+            assert_eq!(
+                after_ack.pending_notifications,
+                [PendingPreview {
+                    member_id: pending,
+                    message_id: second.message_id
+                }]
+            );
+            conn.execute(
+                "UPDATE messages SET notified_at=?1 WHERE message_id=?2",
+                rusqlite::params![crate::time::now_stamp(), second.message_id],
+            )
+            .unwrap();
+            assert!(check(&mut conn).pending_notifications.is_empty());
+            broker::send_message(&mut conn, director, pending, "removed target").unwrap();
+            assert!(broker::members::test_support::deregister_member(&mut conn, pending).unwrap());
+            assert!(check(&mut conn).pending_notifications.is_empty());
+        }
+    }
 
     fn settings_for(conn: &Connection) -> Settings {
         Settings::for_database(std::path::Path::new(conn.path().unwrap()))
@@ -866,7 +2074,7 @@ mod tests {
                 assert_eq!(outcome.end, AttemptEnd::Held);
                 assert_eq!(outcome.held_reason.as_deref(), Some("observer_unavailable"));
                 assert!(outcome.sent.is_empty());
-                let until = outer.min(Instant::now() + Duration::from_secs(1));
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
                 let mut host = DeliveryHost::new(&settings, &placement, until);
                 host.take_lock_after_reply = true;
                 let outcome = deliver_pending_with(
@@ -1145,7 +2353,12 @@ mod tests {
             &mut fixture.conn,
             &run.owner(),
             &storage::NewInput {
-                operation_key: format!("preview:{}:{}", run.run_id, message.message_id),
+                operation_key: crate::broker::runtime::preview_operation_key(
+                    run.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap(),
                 kind: InputKind::Preview,
                 payload_digest: preview_digest(run.run_id, message.message_id, &literal),
                 message_id: Some(message.message_id),
@@ -1165,7 +2378,7 @@ mod tests {
                     &mut fixture.conn,
                     &run.owner(),
                     original.input_id,
-                    storage::UncertainCause::WriteFailed,
+                    storage::StopCause::WriteFailed,
                 )
                 .unwrap();
             } else if state == InputState::Settled {
@@ -1193,7 +2406,8 @@ mod tests {
             )
             .unwrap();
             assert!(no_live.calls.is_empty(), "{:?}", no_live.calls);
-            assert_eq!(result, AttemptOutcome::ended(AttemptEnd::Held));
+            assert_eq!(result.end, AttemptEnd::Held);
+            assert!(result.sent.is_empty());
             assert_eq!(fixture.conn.total_changes(), changes);
             assert_eq!(
                 storage::get_input(&fixture.conn, original.input_id).unwrap(),
@@ -1242,7 +2456,7 @@ mod tests {
                 )
                 .unwrap();
                 let expected = wrapped_line(&message, &message.text);
-                let until = outer.min(Instant::now() + Duration::from_secs(2));
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
                 let mut host = DeliveryHost::new(&settings, &placement, until);
                 host.expire_retirement = true;
                 let outcome = deliver_pending_with(
@@ -1305,8 +2519,12 @@ mod tests {
         run_id: i64,
         message_id: i64,
     ) -> Option<broker::runtime::InputOperation> {
-        broker::runtime::find_input(conn, run_id, &format!("preview:{run_id}:{message_id}"))
-            .unwrap()
+        broker::runtime::find_input(
+            conn,
+            run_id,
+            &crate::broker::runtime::preview_operation_key(run_id, message_id, 1).unwrap(),
+        )
+        .unwrap()
     }
 
     fn preview_stamp(conn: &Connection, message_id: i64) -> Option<String> {
@@ -1322,7 +2540,8 @@ mod tests {
         storage::input_payload_digest(
             run_id,
             &crate::runtime::SubmitInput {
-                operation_key: format!("preview:{run_id}:{message_id}"),
+                operation_key: crate::broker::runtime::preview_operation_key(run_id, message_id, 1)
+                    .unwrap(),
                 input_kind: InputKind::Preview,
                 message_id: Some(message_id),
                 literal: literal.into(),
@@ -1760,7 +2979,12 @@ mod tests {
                     )
                     .unwrap();
                     assert!(outcome.sent.is_empty(), "{body}: {outcome:?}");
-                    let key = format!("preview:{}:{}", run.run_id, message.message_id);
+                    let key = crate::broker::runtime::preview_operation_key(
+                        run.run_id,
+                        message.message_id,
+                        1,
+                    )
+                    .unwrap();
                     let queued = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
                         .unwrap()
                         .unwrap_or_else(|| panic!("{body}: a durable queued receipt"));
@@ -1844,6 +3068,13 @@ mod tests {
     fn snapshot(pending: &[(i64, i64)]) -> ReceiveSnapshot {
         ReceiveSnapshot {
             messages: Vec::new(),
+            pending_notifications: pending
+                .iter()
+                .map(|&(member_id, message_id)| PendingPreview {
+                    member_id,
+                    message_id,
+                })
+                .collect(),
             pending: pending
                 .iter()
                 .map(|&(member_id, message_id)| PendingPreview {
@@ -1870,13 +3101,16 @@ mod tests {
             check: |_| {
                 Ok(ReceiveSnapshot {
                     messages: expected.clone(),
+                    pending_notifications: snapshot(&[(2, 3)]).pending_notifications,
                     pending: snapshot(&[(2, 3)]).pending,
                 })
             },
             attempt: no_attempt,
         };
         assert_eq!(
-            wait(&clock, &mut io, Duration::from_secs(30)).unwrap(),
+            wait(&clock, &mut io, Duration::from_secs(30))
+                .unwrap()
+                .messages,
             expected
         );
         assert_eq!(clock.elapsed.get(), Duration::ZERO);
@@ -1896,6 +3130,7 @@ mod tests {
         assert!(
             wait(&clock, &mut io, Duration::from_millis(6500))
                 .unwrap()
+                .messages
                 .is_empty()
         );
         assert_eq!(clock.elapsed.get(), Duration::from_millis(6500));
@@ -1960,6 +3195,7 @@ mod tests {
                 Ok(if attempted.get() {
                     ReceiveSnapshot {
                         messages: vec![message(7)],
+                        pending_notifications: snapshot(&[(5, 50)]).pending_notifications,
                         pending: snapshot(&[(5, 50)]).pending,
                     }
                 } else {
@@ -1973,7 +3209,9 @@ mod tests {
             },
         };
         assert_eq!(
-            wait(&clock, &mut io, Duration::from_secs(10)).unwrap(),
+            wait(&clock, &mut io, Duration::from_secs(10))
+                .unwrap()
+                .messages,
             vec![message(7)]
         );
         assert_eq!(clock.elapsed.get(), Duration::ZERO);
@@ -2048,6 +3286,7 @@ mod tests {
                 } else {
                     Ok(ReceiveSnapshot {
                         messages: vec![message(3)],
+                        pending_notifications: Vec::new(),
                         pending: Vec::new(),
                     })
                 }
@@ -2055,7 +3294,9 @@ mod tests {
             attempt: no_attempt,
         };
         assert_eq!(
-            wait(&clock, &mut io, Duration::from_secs(3)).unwrap(),
+            wait(&clock, &mut io, Duration::from_secs(3))
+                .unwrap()
+                .messages,
             vec![message(3)]
         );
         assert_eq!(clock.elapsed.get(), Duration::from_secs(1));

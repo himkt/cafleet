@@ -909,10 +909,40 @@ fn wrapped_delivery_refusal(
     result: &crate::runtime::SubmissionResult,
 ) -> String {
     use crate::runtime::SubmissionStatus;
+    if result.status == SubmissionStatus::Rejected
+        && result.stage == crate::runtime::SubmissionStage::ZeroBytes
+    {
+        let cause = result
+            .reason
+            .as_deref()
+            .expect("a pre-write rejection has its cause");
+        return format!("{label} was not dispatched to member {member_id}: {cause}");
+    }
+    if result.status == SubmissionStatus::LeftInComposer {
+        let cause = result
+            .reason
+            .as_deref()
+            .expect("a left input has its stop cause");
+        let method = result
+            .delivery
+            .as_ref()
+            .and_then(|delivery| delivery.method)
+            .expect("a left input has its delivery method");
+        let text = if result.stage == crate::runtime::SubmissionStage::EscapeOnly {
+            "Escape was sent but no text was typed."
+        } else {
+            "the typed text stays in the member's composer."
+        };
+        return format!(
+            "{label} delivery to member {member_id} was not submitted: {cause} (method={}); {text} Inspect the pane before retrying.",
+            method.as_str()
+        );
+    }
     let description = match result.status {
         SubmissionStatus::Held => "held",
         SubmissionStatus::Rejected => "rejected",
         SubmissionStatus::Uncertain => "uncertain",
+        SubmissionStatus::LeftInComposer => unreachable!("left inputs have their scoped refusal"),
         SubmissionStatus::Accepted | SubmissionStatus::Queued => {
             unreachable!("submitted and queued results are not refusals")
         }
@@ -1945,6 +1975,60 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_left_prompt_and_exec_errors_describe_the_retained_text_and_escape_only_stage() {
+        use crate::runtime::{SubmissionResult, SubmissionStage, SubmissionStatus};
+        for label in ["prompt", "native command"] {
+            for stage in [
+                SubmissionStage::Partial,
+                SubmissionStage::LiteralComplete,
+                SubmissionStage::Submitted,
+            ] {
+                let cause = if stage == SubmissionStage::Submitted {
+                    "submit_unconfirmed"
+                } else {
+                    "manual_input"
+                };
+                let result = SubmissionResult {
+                    status: SubmissionStatus::LeftInComposer,
+                    input_id: Some(9),
+                    stage,
+                    output_seq: Some(4),
+                    reason: Some(cause.into()),
+                    delivery: Some(DeliveryProjection {
+                        status: DeliveryStatus::LeftInComposer,
+                        method: Some(DeliveryMethod::Profile),
+                        reason: None,
+                    }),
+                };
+                assert_eq!(
+                    wrapped_delivery_refusal(label, 110, &result),
+                    format!(
+                        "{label} delivery to member 110 was not submitted: {cause} (method=profile); the typed text stays in the member's composer. Inspect the pane before retrying."
+                    )
+                );
+            }
+            let result = SubmissionResult {
+                status: SubmissionStatus::LeftInComposer,
+                input_id: Some(9),
+                stage: SubmissionStage::EscapeOnly,
+                output_seq: Some(4),
+                reason: Some("manual_input".into()),
+                delivery: Some(DeliveryProjection {
+                    status: DeliveryStatus::LeftInComposer,
+                    method: Some(DeliveryMethod::Fallback),
+                    reason: None,
+                }),
+            };
+            assert_eq!(
+                wrapped_delivery_refusal(label, 110, &result),
+                format!(
+                    "{label} delivery to member 110 was not submitted: manual_input (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying."
+                )
+            );
+        }
+    }
+
+    #[test]
     fn wrapped_uncertain_prompt_and_exec_errors_name_the_recorded_cause_and_method() {
         use crate::runtime::SubmissionResult;
         use crate::runtime::SubmissionStage;
@@ -1986,6 +2070,136 @@ mod tests {
             "prompt delivery to member 110 is uncertain",
             "a cause-less receipt without a recorded method adds neither"
         );
+    }
+
+    fn assert_over_limit_dispatch(action: &str, framing: &str) {
+        use crate::runtime::service::test_support::input_service::*;
+
+        let (unit, display_unit, literal, prompt_size) = if framing == "plain" {
+            ("bytes", "bytes", "ああ", 6)
+        } else {
+            assert_eq!(framing, "bracketed_paste");
+            ("scalars", "characters", "ああああ", 4)
+        };
+        with_input_service_catalog(
+            |catalog| {
+                for operation in ["prompt", "exec"] {
+                    let plan = &mut catalog["profiles"][0]["capabilities"]["composer"]["submission"]
+                        [operation];
+                    plan["literal_framing"] = json!(framing);
+                    plan["plain_literal_limit"] = json!({"unit":unit,"max":3});
+                }
+            },
+            |fixture, outer| {
+                let run = &fixture.fixture.run;
+                let (run_id, member_id) = (run.run_id, run.member_id);
+                let before = external_member_input_ids(&fixture.fixture.conn, run_id);
+                let (status, stdout, stderr) =
+                    external_member_invoke(fixture, action, literal, true, false, None, outer);
+                assert_eq!(status.code(), Some(1), "{stdout:?}; {stderr:?}");
+                assert_eq!(
+                    stdout, "\nrunning 1 test\n",
+                    "only the child test harness writes stdout"
+                );
+                assert_eq!(
+                    external_member_input_ids(&fixture.fixture.conn, run_id),
+                    before,
+                    "an immediate limit refusal reserves no input"
+                );
+                input_service_barrier(fixture, outer);
+                let records = input_service_records(fixture);
+                assert_eq!(records.len(), 1, "{records:?}");
+                assert_eq!(records[0]["line"], "barrier");
+                let (label, size) = match action {
+                    "prompt" => ("prompt", prompt_size),
+                    "exec" => ("native command", prompt_size + 2),
+                    _ => panic!("an ordinary dispatch operation is required"),
+                };
+                let reason = if framing == "plain" {
+                    "the codex profile has no bracketed-paste delivery"
+                } else {
+                    "the native CLI has not enabled bracketed paste"
+                };
+                let mut lines = stderr.lines();
+                assert_eq!(
+                    lines.next(),
+                    Some(format!(
+                        "Error: {label} was not dispatched to member {member_id}: the input is {size} {display_unit}, above the codex plain-input limit of 3 {display_unit}, and {reason}"
+                    ).as_str()),
+                    "{stderr}"
+                );
+                let context = lines
+                    .next()
+                    .expect("a dispatch refusal retains run and operation context");
+                let prefix = format!("run_id={run_id} operation_key=\"{action}:{run_id}:");
+                let random = context
+                    .strip_prefix(&prefix)
+                    .expect("the actual command supplies its scoped input context")
+                    .strip_suffix('"')
+                    .expect("the operation key is JSON quoted");
+                assert_eq!(random.len(), 64);
+                assert!(random.bytes().all(|byte| byte.is_ascii_hexdigit()));
+                assert_eq!(lines.next(), None);
+            },
+        );
+    }
+
+    #[test]
+    fn over_limit_dispatch_prompt_plain_names_the_command_before_the_complete_cause() {
+        assert_over_limit_dispatch("prompt", "plain");
+    }
+
+    #[test]
+    fn over_limit_dispatch_exec_plain_counts_its_prefix_and_names_the_command() {
+        assert_over_limit_dispatch("exec", "plain");
+    }
+
+    #[test]
+    fn over_limit_dispatch_prompt_disabled_paste_names_the_command_and_character_limit() {
+        assert_over_limit_dispatch("prompt", "bracketed_paste");
+    }
+
+    #[test]
+    fn over_limit_dispatch_exec_disabled_paste_counts_its_prefix_in_the_character_limit() {
+        assert_over_limit_dispatch("exec", "bracketed_paste");
+    }
+
+    #[test]
+    fn possible_io_refusals_keep_their_category_instead_of_claiming_no_dispatch() {
+        use crate::runtime::{SubmissionResult, SubmissionStage, SubmissionStatus};
+
+        let cause = "the input is 6 bytes, above the codex plain-input limit of 3 bytes, and the codex profile has no bracketed-paste delivery";
+        for label in ["prompt", "native command"] {
+            for (status, description) in [
+                (SubmissionStatus::Uncertain, "uncertain"),
+                (SubmissionStatus::Rejected, "rejected"),
+            ] {
+                for stage in [
+                    SubmissionStage::Unknown,
+                    SubmissionStage::Partial,
+                    SubmissionStage::Submitted,
+                ] {
+                    let result = SubmissionResult {
+                        status,
+                        input_id: Some(9),
+                        stage,
+                        output_seq: Some(4),
+                        reason: Some(cause.into()),
+                        delivery: Some(DeliveryProjection {
+                            status: DeliveryStatus::Uncertain,
+                            method: Some(DeliveryMethod::Profile),
+                            reason: None,
+                        }),
+                    };
+                    assert_eq!(
+                        wrapped_delivery_refusal(label, 110, &result),
+                        format!(
+                            "{label} delivery to member 110 is {description}: {cause} (method=profile)"
+                        )
+                    );
+                }
+            }
+        }
     }
 
     #[test]

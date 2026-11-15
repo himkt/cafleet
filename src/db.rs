@@ -866,12 +866,24 @@ mod tests {
     }
 
     #[test]
+    fn composer_receipt_required_columns_are_checked_without_modifying_the_selected_database() {
+        for column in ["stop_cause", "preview_attempt", "left_stage"] {
+            assert_incompatible_and_untouched("missing-composer-receipt-column.db", |conn| {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE member_input_operations RENAME COLUMN {column} TO missing_{column}"
+                ))
+                .unwrap();
+            });
+        }
+    }
+
+    #[test]
     fn a_v8_family_file_is_incompatible_and_left_byte_identical() {
         const V8_APPLICATION_ID: i64 = 0x4341_4638;
         for (name, damage) in [
             (
                 "cafleet_v8.db",
-                "UPDATE refinery_schema_history SET version=8, name='uncertain_cause'",
+                "UPDATE refinery_schema_history SET version=8, name='stop_cause'",
             ),
             (
                 "cafleet_0.0.0.db",
@@ -1613,8 +1625,26 @@ mod tests {
                 );
             }
             for disposition in crate::broker::runtime::InputDisposition::VALUES {
-                fixture.conn.execute("UPDATE member_input_operations SET state='settled',disposition=?1 WHERE input_id=?2",params![disposition,input]).unwrap();
+                let left = *disposition == "left_in_composer";
+                fixture.conn.execute("UPDATE member_input_operations SET state='settled',disposition=?1,stop_cause=?2,left_stage=?3 WHERE input_id=?4",params![disposition,left.then_some("manual_input"),left.then_some("literal_complete"),input]).unwrap();
             }
+        }
+
+        #[test]
+        fn runtime_event_schema_accepts_and_retains_an_input_delivery_stalled_kind() {
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            let event = fixture.archived_event(run, 1).unwrap();
+            fixture.conn.execute("UPDATE member_runtime_events SET kind='input_delivery_stalled' WHERE event_id=?1", [event]).unwrap();
+            let kind: String = fixture
+                .conn
+                .query_row(
+                    "SELECT kind FROM member_runtime_events WHERE event_id=?1",
+                    [event],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(kind, "input_delivery_stalled");
         }
 
         #[test]

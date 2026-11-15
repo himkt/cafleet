@@ -2168,8 +2168,8 @@ pub(crate) mod test_support {
             catalog["profiles"][0]["capabilities"] = json!({"detection":null,"annotations":null,"answers":[],"composer":{
                 "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
                 "submission":{
-                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]},
-                    "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
+                    "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]},
+                    "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
                 }
             }});
             let coverage = if detecting {
@@ -2387,6 +2387,13 @@ pub(crate) mod test_support {
             with_configured_input_service(false, 0, body);
         }
 
+        pub(crate) fn with_input_service_catalog(
+            configure_catalog: impl FnOnce(&mut Value),
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            with_configured_input_service_catalog(false, 0, configure_catalog, body);
+        }
+
         pub(crate) fn with_detecting_input_service(
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
@@ -2407,9 +2414,23 @@ pub(crate) mod test_support {
             exit_code: i32,
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
+            with_configured_input_service_catalog(detecting, exit_code, |_| {}, body);
+        }
+
+        fn with_configured_input_service_catalog(
+            detecting: bool,
+            exit_code: i32,
+            configure_catalog: impl FnOnce(&mut Value),
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
             let until = Instant::now() + Duration::from_secs(10);
             let mut fixture = ServiceFixture::configured_until(false, until, |fixture, spec| {
-                configure_with(fixture, spec, until, detecting)
+                configure_with(fixture, spec, until, detecting);
+                let path = fixture._dir.path().join("observation-services.json");
+                let mut config: Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                configure_catalog(&mut config["catalog"]);
+                std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
             });
             fixture.cleanup_deadline = Some(until);
             let primary = catch_unwind(AssertUnwindSafe(|| {
@@ -3411,10 +3432,12 @@ mod tests {
                     "disconnected preview λ",
                 )
                 .unwrap();
-                let key = format!(
-                    "preview:{}:{}",
-                    fixture.fixture.run.run_id, message.message_id
-                );
+                let key = crate::broker::runtime::preview_operation_key(
+                    fixture.fixture.run.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap();
                 let accepted_until = until.min(Instant::now() + Duration::from_secs(3));
                 let literal = crate::delivery::canonical_preview_line(&message);
                 let value = request(
@@ -3724,7 +3747,7 @@ mod tests {
             let input = storage::get_input(&fixture.fixture.conn, input_id).unwrap();
             assert_eq!(input.disposition, Some(InputDisposition::NotSubmitted));
             assert_eq!(input.delivery_reason.as_deref(), Some("runner_stopped"));
-            assert_eq!(input.uncertain_cause, None);
+            assert_eq!(input.stop_cause, None);
             let published_cause: Option<String> = fixture
                 .fixture
                 .conn

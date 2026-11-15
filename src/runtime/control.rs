@@ -164,10 +164,13 @@ stored_enum!(SubmissionStatus, "submission.status", {
     Held => "held",
     Rejected => "rejected",
     Uncertain => "uncertain",
+    LeftInComposer => "left_in_composer",
 });
 stored_enum!(SubmissionStage, "submission.stage", {
     ZeroBytes => "zero_bytes",
+    EscapeOnly => "escape_only",
     Partial => "partial",
+    LiteralComplete => "literal_complete",
     Submitted => "submitted",
     Unknown => "unknown",
 });
@@ -183,6 +186,17 @@ pub(crate) struct SubmissionResult {
     pub(crate) delivery: Option<DeliveryProjection>,
 }
 impl SubmissionResult {
+    pub(crate) fn rejected_before_write(reason: String) -> Self {
+        Self {
+            status: SubmissionStatus::Rejected,
+            input_id: None,
+            stage: SubmissionStage::ZeroBytes,
+            output_seq: None,
+            reason: Some(reason),
+            delivery: None,
+        }
+    }
+
     pub(crate) fn held(reason: &str) -> Self {
         Self {
             status: SubmissionStatus::Held,
@@ -924,7 +938,17 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
         (
             InputControlOperation::SubmitPrompt(_) | InputControlOperation::SubmitExec(_),
             InputControlReply::Submission(submission),
-        ) => submission.delivery.is_some(),
+        ) => {
+            submission.delivery.is_some()
+                || submission.status == SubmissionStatus::Rejected
+                    && submission.stage == SubmissionStage::ZeroBytes
+                    && submission.input_id.is_none()
+                    && submission.output_seq.is_none()
+                    && submission
+                        .reason
+                        .as_ref()
+                        .is_some_and(|reason| !reason.trim().is_empty())
+        }
         (
             InputControlOperation::PermissionInspect(input),
             InputControlReply::Inspection(result),
