@@ -305,6 +305,19 @@ mod tests {
     }
 
     #[test]
+    fn listen_pending_names_the_member_then_the_message_ids_in_the_given_order() {
+        let value = crate::output::json::listen_pending(4, &[12, 10, 11]);
+        crate::broker::runtime::test_support::assert_key_order(
+            &value,
+            &["event", "member_id", "message_ids"],
+        );
+        assert_eq!(
+            value,
+            json!({"event":"pending","member_id":4,"message_ids":[12,10,11]})
+        );
+    }
+
+    #[test]
     fn member_press_json_is_the_canonical_acknowledgment_without_effect_counts() {
         let keys = crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
         let value = crate::runtime::KeyAcknowledgment {

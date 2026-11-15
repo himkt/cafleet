@@ -1238,6 +1238,7 @@ mod tests {
     use crate::broker::messaging::InboxClosure;
     use crate::broker::messaging::InboxSnapshot;
     use crate::broker::messaging::test_support::broker_fixture;
+    use crate::cli::message::Delivery;
     use crate::cli::message::ListenIo;
     use crate::cli::message::ListenOutput;
     use crate::cli::message::listen;
@@ -1266,18 +1267,26 @@ mod tests {
             self.snapshots
                 .push((now, deadline.remaining_at(self.clock.now())?));
             assert!(
-                self.snapshots.len() < 30,
-                "pending emitted IDs must allow idle sleeps"
+                self.snapshots.len() < 1_000,
+                "a held notice must allow idle sleeps"
             );
             (self.script)(now, self.snapshots.len())
         }
     }
 
+    /// Records every delivered record with the clock time it was delivered at. A `pending`
+    /// attempt is refused when its index in `pending_refusals` is `true`; any other record
+    /// is refused when its event is `refused_event`.
     struct RecordingOutput<'a> {
         clock: &'a TestClock,
         records: Vec<Value>,
+        delivered_at: Vec<Duration>,
         budgets: Vec<Duration>,
         fail_at: Option<usize>,
+        pending_refusals: Vec<bool>,
+        pending_attempts: usize,
+        refused: Vec<(Duration, Value)>,
+        refused_event: Option<&'static str>,
     }
 
     impl<'a> RecordingOutput<'a> {
@@ -1285,25 +1294,56 @@ mod tests {
             Self {
                 clock,
                 records: Vec::new(),
+                delivered_at: Vec::new(),
                 budgets: Vec::new(),
                 fail_at: None,
+                pending_refusals: Vec::new(),
+                pending_attempts: 0,
+                refused: Vec::new(),
+                refused_event: None,
+            }
+        }
+
+        fn refusing_pending(clock: &'a TestClock, refusals: &[bool]) -> Self {
+            Self {
+                pending_refusals: refusals.to_vec(),
+                ..Self::new(clock)
             }
         }
     }
 
     impl ListenOutput for RecordingOutput<'_> {
-        fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<(), CafleetError> {
+        fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<Delivery, CafleetError> {
             self.budgets.push(deadline.remaining_at(self.clock.now())?);
             if self.fail_at == Some(self.records.len()) {
                 return Err(CafleetError::App("injected output failure".into()));
             }
+            let refuse = if record["event"] == "pending" {
+                self.pending_attempts += 1;
+                self.pending_refusals
+                    .get(self.pending_attempts - 1)
+                    .copied()
+                    .unwrap_or(false)
+            } else {
+                self.refused_event == record["event"].as_str()
+            };
+            if refuse {
+                self.refused
+                    .push((self.clock.elapsed.get(), record.clone()));
+                return Ok(Delivery::Refused);
+            }
             self.records.push(record.clone());
-            Ok(())
+            self.delivered_at.push(self.clock.elapsed.get());
+            Ok(Delivery::Delivered)
         }
     }
 
     fn message(id: i64) -> MessageRecord {
         MessageRecord::fixture(id, 2, 1, &format!("original body {id}"))
+    }
+
+    fn messages(ids: &[i64]) -> Vec<MessageRecord> {
+        ids.iter().copied().map(message).collect()
     }
 
     fn open(messages: Vec<MessageRecord>) -> InboxSnapshot {
@@ -1313,28 +1353,85 @@ mod tests {
         }
     }
 
-    fn event_ids(output: &RecordingOutput<'_>) -> Vec<i64> {
-        output
-            .records
+    fn notice_ids(record: &Value) -> Vec<i64> {
+        assert_eq!(record["event"], "pending", "{record}");
+        record["message_ids"]
+            .as_array()
+            .unwrap_or_else(|| panic!("a pending record lists its message IDs: {record}"))
             .iter()
-            .filter(|record| record["event"] == "message")
-            .map(|record| record["message"]["message_id"].as_i64().unwrap())
+            .map(|id| id.as_i64().unwrap())
             .collect()
     }
 
+    /// The ID list of every delivered `pending` notice, in delivery order.
+    fn notices(output: &RecordingOutput<'_>) -> Vec<Vec<i64>> {
+        output
+            .records
+            .iter()
+            .filter(|record| record["event"] == "pending")
+            .map(notice_ids)
+            .collect()
+    }
+
+    /// The whole second at which each delivered `pending` notice was delivered.
+    fn notice_times(output: &RecordingOutput<'_>) -> Vec<u64> {
+        output
+            .records
+            .iter()
+            .zip(&output.delivered_at)
+            .filter(|(record, _)| record["event"] == "pending")
+            .map(|(_, at)| at.as_secs())
+            .collect()
+    }
+
+    /// The whole second and ID list of every refused `pending` attempt.
+    fn refusals(output: &RecordingOutput<'_>) -> Vec<(u64, Vec<i64>)> {
+        output
+            .refused
+            .iter()
+            .map(|(at, record)| (at.as_secs(), notice_ids(record)))
+            .collect()
+    }
+
+    /// Runs one listener over `script`, which maps each snapshot's whole second to the
+    /// pending IDs it returns, until the lease of `lease_secs` expires.
+    fn listen_over<'a>(
+        clock: &'a TestClock,
+        output: &mut RecordingOutput<'a>,
+        lease_secs: u64,
+        script: impl Fn(u64) -> Vec<i64>,
+    ) {
+        let mut io = ScriptedInbox {
+            clock,
+            snapshots: Vec::new(),
+            script: |at: Duration, _| Ok(open(messages(&script(at.as_secs())))),
+        };
+        listen(
+            clock,
+            &mut io,
+            output,
+            1,
+            Some(Duration::from_secs(lease_secs)),
+        )
+        .unwrap();
+        assert_eq!(
+            output.records.last().unwrap(),
+            &json!({"event":"closed", "member_id":1, "reason":"timeout"})
+        );
+    }
+
     #[test]
-    fn an_unacked_a_allows_one_second_idle_sleeps_before_b_arrives_without_repeating_a() {
+    fn a_held_notice_blocks_a_new_arrival_and_allows_one_second_idle_sleeps() {
         let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
             script: |at, _| {
-                let messages = if at < Duration::from_secs(2) {
-                    vec![message(10)]
+                Ok(open(if at < Duration::from_secs(2) {
+                    messages(&[10])
                 } else {
-                    vec![message(10), message(11)]
-                };
-                Ok(open(messages))
+                    messages(&[10, 11])
+                }))
             },
         };
         let mut output = RecordingOutput::new(&clock);
@@ -1346,23 +1443,236 @@ mod tests {
             Some(Duration::from_secs(3)),
         )
         .unwrap();
-        assert_eq!(event_ids(&output), [10, 11]);
+        assert_eq!(
+            output.records,
+            [
+                json!({"event":"ready", "member_id":1, "fleet_id":7}),
+                json!({"event":"pending", "member_id":1, "message_ids":[10]}),
+                json!({"event":"closed", "member_id":1, "reason":"timeout"}),
+            ]
+        );
         assert_eq!(*clock.sleeps.borrow(), vec![Duration::from_secs(1); 3]);
         assert_eq!(
             io.snapshots
                 .iter()
                 .map(|(at, _)| at.as_secs())
                 .collect::<Vec<_>>(),
-            [0, 0, 1, 2, 2]
+            [0, 0, 1, 2],
+            "a delivered notice rechecks at once and every quiet snapshot sleeps"
         );
-        assert_eq!(
-            output.records[0],
-            json!({"event":"ready", "member_id":1, "fleet_id":7})
-        );
-        assert_eq!(
-            output.records.last().unwrap(),
-            &json!({"event":"closed", "member_id":1, "reason":"timeout"})
-        );
+    }
+
+    mod notice_hold {
+        use crate::cli::message::tests::*;
+
+        #[test]
+        fn a_backlog_burst_coalesces_into_one_notice_in_snapshot_order() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 3, |_| vec![12, 10, 11]);
+            assert_eq!(
+                output.records[1],
+                json!({"event":"pending", "member_id":1, "message_ids":[12, 10, 11]})
+            );
+            assert_eq!(notices(&output), [vec![12, 10, 11]]);
+        }
+
+        #[test]
+        fn a_burst_arriving_while_a_notice_is_held_produces_no_further_notice() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 5, |at| {
+                if at < 2 {
+                    vec![10]
+                } else {
+                    std::iter::once(10).chain(11..=160).collect()
+                }
+            });
+            assert_eq!(notices(&output), [vec![10]]);
+        }
+
+        #[test]
+        fn acking_every_held_id_releases_the_hold_and_the_next_notice_names_the_full_pending_set() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 6, |at| match at {
+                0..2 => vec![10],
+                2..4 => vec![10, 11, 12],
+                _ => vec![11, 12, 13],
+            });
+            assert_eq!(notices(&output), [vec![10], vec![11, 12, 13]]);
+            assert_eq!(notice_times(&output), [0, 4]);
+        }
+
+        #[test]
+        fn a_partial_ack_keeps_the_hold_until_the_last_held_id_is_acked() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 6, |at| match at {
+                0..2 => vec![10, 11],
+                2..4 => vec![11, 12],
+                _ => vec![12],
+            });
+            assert_eq!(notices(&output), [vec![10, 11], vec![12]]);
+            assert_eq!(notice_times(&output), [0, 4]);
+        }
+
+        #[test]
+        fn a_released_hold_with_nothing_pending_emits_no_notice_until_a_message_arrives() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 6, |at| match at {
+                0..2 => vec![10],
+                2..4 => Vec::new(),
+                _ => vec![11],
+            });
+            assert_eq!(notices(&output), [vec![10], vec![11]]);
+            assert_eq!(notice_times(&output), [0, 4]);
+        }
+
+        #[test]
+        fn an_empty_inbox_emits_no_pending_record() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 3, |_| Vec::new());
+            assert_eq!(
+                output.records,
+                [
+                    json!({"event":"ready", "member_id":1, "fleet_id":7}),
+                    json!({"event":"closed", "member_id":1, "reason":"timeout"}),
+                ]
+            );
+        }
+
+        #[test]
+        fn the_hold_ceiling_re_notices_the_full_pending_set_at_300_s_when_fresh_ids_are_pending() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 400, |at| {
+                if at < 10 { vec![10] } else { vec![10, 11] }
+            });
+            assert_eq!(notices(&output), [vec![10], vec![10, 11]]);
+            assert_eq!(notice_times(&output), [0, 300]);
+        }
+
+        #[test]
+        fn the_hold_ceiling_never_re_notices_without_fresh_ids() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 700, |at| {
+                if at < 5 { vec![10, 11] } else { vec![11] }
+            });
+            assert_eq!(notices(&output), [vec![10, 11]]);
+        }
+
+        #[test]
+        fn the_next_hold_ceiling_is_measured_from_the_re_notice() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut output, 700, |at| match at {
+                0..10 => vec![10],
+                10..350 => vec![10, 11],
+                _ => vec![10, 11, 12],
+            });
+            assert_eq!(notices(&output), [vec![10], vec![10, 11], vec![10, 11, 12]]);
+            assert_eq!(notice_times(&output), [0, 300, 600]);
+        }
+
+        #[test]
+        fn a_restarted_listener_first_notices_every_pending_id_right_after_ready() {
+            let first_clock = test_clock();
+            let mut first = RecordingOutput::new(&first_clock);
+            listen_over(&first_clock, &mut first, 2, |_| vec![10, 11]);
+            assert_eq!(notices(&first), [vec![10, 11]]);
+
+            let clock = test_clock();
+            let mut restarted = RecordingOutput::new(&clock);
+            listen_over(&clock, &mut restarted, 2, |_| vec![10, 11, 12]);
+            assert_eq!(restarted.records[0]["event"], "ready");
+            assert_eq!(notice_ids(&restarted.records[1]), [10, 11, 12]);
+            assert_eq!(notices(&restarted), [vec![10, 11, 12]]);
+        }
+
+        #[test]
+        fn a_refused_notice_is_rebuilt_from_the_current_pending_set_and_only_delivery_commits_the_hold()
+         {
+            let clock = test_clock();
+            let mut output = RecordingOutput::refusing_pending(&clock, &[true, true]);
+            listen_over(&clock, &mut output, 6, |at| match at {
+                0 => vec![10],
+                1 => vec![10, 11],
+                2 | 3 => vec![11, 12],
+                _ => vec![11, 12, 13],
+            });
+            assert_eq!(
+                refusals(&output),
+                [(0, vec![10]), (1, vec![10, 11])],
+                "each retry follows a one-second idle sleep and a fresh snapshot"
+            );
+            assert_eq!(notices(&output), [vec![11, 12]]);
+            assert_eq!(notice_times(&output), [2]);
+        }
+
+        #[test]
+        fn a_refused_re_notice_keeps_the_held_instant_so_the_retry_follows_one_idle_sleep() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::refusing_pending(&clock, &[false, true]);
+            listen_over(&clock, &mut output, 400, |at| {
+                if at < 5 { vec![10] } else { vec![10, 11] }
+            });
+            assert_eq!(refusals(&output), [(300, vec![10, 11])]);
+            assert_eq!(notices(&output), [vec![10], vec![10, 11]]);
+            assert_eq!(notice_times(&output), [0, 301]);
+        }
+
+        #[test]
+        fn a_released_hold_whose_pending_set_empties_during_refusals_emits_nothing() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::refusing_pending(&clock, &[true; 100]);
+            listen_over(&clock, &mut output, 5, |at| {
+                if at < 2 { vec![10] } else { Vec::new() }
+            });
+            assert_eq!(refusals(&output), [(0, vec![10]), (1, vec![10])]);
+            assert!(notices(&output).is_empty());
+        }
+
+        #[test]
+        fn a_refused_re_notice_is_abandoned_once_its_fresh_ids_are_acked() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::refusing_pending(&clock, &[false, true, true]);
+            listen_over(&clock, &mut output, 400, |at| match at {
+                0..5 => vec![10],
+                5..=300 => vec![10, 11],
+                _ => vec![10],
+            });
+            assert_eq!(refusals(&output), [(300, vec![10, 11])]);
+            assert_eq!(notices(&output), [vec![10]]);
+        }
+
+        #[test]
+        #[should_panic(expected = "only a pending notice may be refused")]
+        fn a_refused_ready_record_panics() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            output.refused_event = Some("ready");
+            listen_over(&clock, &mut output, 2, |_| Vec::new());
+        }
+
+        #[test]
+        #[should_panic(expected = "only a pending notice may be refused")]
+        fn a_refused_closed_record_panics() {
+            let clock = test_clock();
+            let mut output = RecordingOutput::new(&clock);
+            output.refused_event = Some("closed");
+            listen_over(&clock, &mut output, 2, |_| Vec::new());
+        }
+
+        #[test]
+        #[should_panic]
+        fn committing_an_empty_hold_panics() {
+            let mut hold = NoticeHold(None);
+            hold.commit(Vec::new(), Instant::now());
+        }
     }
 
     #[test]
@@ -1425,7 +1735,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(clock.elapsed.get(), Duration::from_secs(8));
-        assert_eq!(event_ids(&output), (0..8).collect::<Vec<_>>());
+        assert_eq!(
+            notices(&output),
+            (0..8).map(|id| vec![id]).collect::<Vec<_>>(),
+            "each second acks the held ID, so the release notices the new arrival"
+        );
         assert!(
             io.snapshots
                 .iter()
@@ -1570,7 +1884,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ack_output_race_preserves_the_snapshot_record() {
+    fn an_ack_output_race_preserves_the_snapshot_notice() {
         let clock = test_clock();
         let acknowledged = Cell::new(false);
         let mut io = ScriptedInbox {
@@ -1578,9 +1892,9 @@ mod tests {
             snapshots: Vec::new(),
             script: |_, _| {
                 Ok(open(if acknowledged.get() {
-                    vec![message(11)]
+                    messages(&[11])
                 } else {
-                    vec![message(10), message(11)]
+                    messages(&[10, 11])
                 }))
             },
         };
@@ -1589,15 +1903,19 @@ mod tests {
             acknowledged: &'a Cell<bool>,
         }
         impl ListenOutput for AckDuringReady<'_> {
-            fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<(), CafleetError> {
-                self.output.emit(record, deadline)?;
+            fn emit(
+                &mut self,
+                record: &Value,
+                deadline: Deadline,
+            ) -> Result<Delivery, CafleetError> {
+                let delivery = self.output.emit(record, deadline)?;
                 if record["event"] == "ready" {
                     self.acknowledged.set(true);
                 }
-                if record["event"] == "message" {
+                if record["event"] == "pending" {
                     assert!(self.acknowledged.get());
                 }
-                Ok(())
+                Ok(delivery)
             }
         }
         let mut output = AckDuringReady {
@@ -1612,7 +1930,11 @@ mod tests {
             Some(Duration::from_secs(1)),
         )
         .unwrap();
-        assert_eq!(event_ids(&output.output), [10, 11]);
+        assert_eq!(
+            notices(&output.output),
+            [vec![10, 11]],
+            "the notice names the snapshot that produced it"
+        );
     }
 
     #[test]
@@ -1690,7 +2012,7 @@ mod tests {
     #[test]
     fn a_record_continues_partial_writes_from_the_byte_offset_and_flushes_the_lf() {
         let mut output = writer();
-        let record = json!({"event":"message", "message":{"text":"界\n\t🙂"}});
+        let record = json!({"event":"closed", "member_id":1, "reason":"界\n\t🙂"});
         write_json_line(&mut output, &record, Deadline::new()).unwrap();
         let mut expected = serde_json::to_vec(&record).unwrap();
         expected.push(b'\n');
@@ -1736,14 +2058,16 @@ mod tests {
     #[test]
     fn real_pipe_backpressure_and_broken_consumers_restore_flags_and_preserve_pending_rows() {
         let (_dir, mut conn, _, director, worker) = broker_fixture();
-        let pending =
-            broker::send_message(&mut conn, worker, director, &"雪".repeat(1024 * 1024)).unwrap();
+        let pending = broker::send_message(&mut conn, worker, director, "pending").unwrap();
         for (broken, nonblocking) in [(false, true), (true, false)] {
             let (read_end, write_end, retained, original) = primed_pipe(nonblocking);
             let mut read_end = Some(read_end);
-            if broken {
+            let filled = if broken {
                 drop(read_end.take());
-            }
+                0
+            } else {
+                fill_pipe(&write_end)
+            };
             let started = Instant::now();
             let error = run_on_descriptor(
                 &mut conn,
@@ -1762,21 +2086,44 @@ mod tests {
             if let Some(read_end) = read_end {
                 let flags = OFlag::from_bits_retain(fcntl(&read_end, FcntlArg::F_GETFL).unwrap());
                 fcntl(&read_end, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK)).unwrap();
+                let mut drained = Vec::new();
                 let mut bytes = [0; 4096];
-                let count = nix::unistd::read(&read_end, &mut bytes).unwrap();
-                let ready = bytes[..count].split(|byte| *byte == b'\n').next().unwrap();
-                let ready: Value = serde_json::from_slice(ready).unwrap();
-                assert_eq!(ready["event"], "ready");
+                loop {
+                    match nix::unistd::read(&read_end, &mut bytes) {
+                        Ok(0) | Err(nix::errno::Errno::EAGAIN) => break,
+                        Ok(count) => drained.extend_from_slice(&bytes[..count]),
+                        Err(error) => panic!("draining the primed pipe: {error}"),
+                    }
+                }
+                assert_eq!(drained.len(), filled);
+                assert!(
+                    drained.iter().all(|byte| *byte == b'x'),
+                    "the blocked listener wrote no partial record"
+                );
             }
         }
+    }
+
+    /// Fills a nonblocking pipe until the kernel refuses another byte; returns the byte count.
+    fn fill_pipe(write_end: &OwnedFd) -> usize {
+        let mut filled = 0;
+        for chunk in [4096, 1] {
+            loop {
+                match nix::unistd::write(write_end, &vec![b'x'; chunk]) {
+                    Ok(count) => filled += count,
+                    Err(nix::errno::Errno::EAGAIN) => break,
+                    Err(error) => panic!("filling the pipe: {error}"),
+                }
+            }
+        }
+        filled
     }
 
     #[test]
     fn a_drained_native_pipe_emits_full_jsonl_and_restores_its_shared_flags() {
         use std::io::Read;
         let (_dir, mut conn, _, director, worker) = broker_fixture();
-        let pending =
-            broker::send_message(&mut conn, worker, director, &"雪\n\t".repeat(32 * 1024)).unwrap();
+        let pending = broker::send_message(&mut conn, worker, director, "雪\n\t").unwrap();
         let (read_end, write_end, retained, original) = primed_pipe(false);
         let consumer = std::thread::spawn(move || {
             let mut bytes = Vec::new();
@@ -1803,7 +2150,10 @@ mod tests {
             .collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0]["event"], "ready");
-        assert_eq!(records[1]["message"]["text"], pending.text);
+        assert_eq!(
+            records[1],
+            crate::output::json::listen_pending(director, &[pending.message_id])
+        );
         assert_eq!(records[2]["reason"], "timeout");
         assert_eq!(broker::poll_messages(&conn, director).unwrap(), [pending]);
         assert!(conn.is_autocommit());
@@ -1840,9 +2190,6 @@ mod tests {
         const SESSION_CONFIG: &str = "CAFLEET_TEST_CODEX_SESSION";
         const THREAD: &str = "019a5c3e-7f21-7c11-9d3b-2b6f0c8e4a10";
         const RECORD_PREFIX: &str = "[cafleet listen record] ";
-        const RECORD_LIMIT: usize = 65_536;
-        /// Whole seconds that replace the 600 s full-queue limit in a test-built listener.
-        const FULL_QUEUE_LIMIT_SECS: &str = "CAFLEET_TEST_CODEX_FULL_QUEUE_LIMIT_SECS";
         const QUEUE_BUDGET_MS: &str = "CAFLEET_TEST_CODEX_QUEUE_BUDGET_MS";
         const RETRY_MS: &str = "CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS";
         const QUEUE_BUDGET: Duration = Duration::from_millis(1000);
@@ -2116,14 +2463,13 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                     .unwrap()
                     .message_id
             }
+        }
 
-            fn record_text(&self, message_id: i64) -> String {
-                let message = broker::get_message(&self.conn, message_id).unwrap();
-                format!(
-                    "{RECORD_PREFIX}{}",
-                    crate::output::json::listen_message(&message)
-                )
-            }
+        fn pending_text(member_id: i64, message_ids: &[i64]) -> String {
+            format!(
+                "{RECORD_PREFIX}{}",
+                crate::output::json::listen_pending(member_id, message_ids)
+            )
         }
 
         fn listen_args(member_id: i64, timeout: Option<u64>) -> Vec<String> {
@@ -2241,7 +2587,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         }
 
         #[test]
-        fn forwarding_queues_each_message_then_the_closing_record_and_stdout_keeps_only_ready_and_closed()
+        fn forwarding_queues_one_notice_per_hold_then_the_closing_record_and_stdout_keeps_only_ready_and_closed()
          {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
@@ -2249,25 +2595,37 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 ["first", "second", "third"].map(|body| broker.send(worker, director, body));
             let forwarder = start(
                 &broker,
-                &listen_args(director, Some(2)),
+                &listen_args(director, Some(5)),
                 Some(&accepting_codex()),
                 Launch::Session,
             );
-            forwarder.wait_forwarded(3);
-            let later = broker.send(worker, director, "fourth");
+            forwarder.wait_forwarded(1);
+            let held = broker.send(worker, director, "fourth");
+            let later = broker.send(worker, director, "fifth");
+            std::thread::sleep(Duration::from_millis(1500));
+            assert_eq!(
+                forwarder.forwarded(),
+                [queued(&pending_text(director, &backlog))],
+                "arrivals while the notice is held are not forwarded"
+            );
+            for id in backlog {
+                broker::ack_message(&mut broker.conn, id).unwrap();
+            }
             assert_eq!(
                 forwarder.wait_exit(Duration::from_secs(15)),
                 0,
                 "{}",
                 forwarder.stderr()
             );
-            let mut expected = backlog
-                .iter()
-                .chain([&later])
-                .map(|id| queued(&broker.record_text(*id)))
-                .collect::<Vec<_>>();
-            expected.push(queued(&closed_text(director, "timeout")));
-            assert_eq!(forwarder.forwarded(), expected, "ready is never forwarded");
+            assert_eq!(
+                forwarder.forwarded(),
+                [
+                    queued(&pending_text(director, &backlog)),
+                    queued(&pending_text(director, &[held, later])),
+                    queued(&closed_text(director, "timeout")),
+                ],
+                "ready is never forwarded"
+            );
             assert_eq!(
                 forwarder.stdout_records(),
                 [
@@ -2277,7 +2635,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             );
             assert_eq!(
                 broker::poll_messages(&broker.conn, director).unwrap().len(),
-                4,
+                2,
                 "forwarding consumes nothing"
             );
         }
@@ -2313,57 +2671,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                     crate::output::json::listen_ready(worker, broker.fleet),
                     crate::output::json::listen_closed(worker, "member_inactive"),
                 ]
-            );
-        }
-
-        #[test]
-        fn a_record_text_above_the_argument_limit_is_forwarded_as_a_message_reference() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            let probe = broker.send(worker, director, &"x".repeat(1000));
-            let overhead = broker.record_text(probe).len() - 1000;
-            broker::ack_message(&mut broker.conn, probe).unwrap();
-            let fits = broker.send(worker, director, &"x".repeat(RECORD_LIMIT - overhead));
-            let exceeds = broker.send(worker, director, &"x".repeat(RECORD_LIMIT + 1 - overhead));
-            assert_eq!(broker.record_text(fits).len(), RECORD_LIMIT);
-            assert_eq!(broker.record_text(exceeds).len(), RECORD_LIMIT + 1);
-            let forwarder = start(
-                &broker,
-                &listen_args(director, Some(2)),
-                Some(&accepting_codex()),
-                Launch::Session,
-            );
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(15)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            let forwarded = forwarder.forwarded();
-            assert_eq!(forwarded.len(), 3, "{forwarded:?}");
-            assert_eq!(forwarded[0], queued(&broker.record_text(fits)));
-            assert_eq!(forwarded[2], queued(&closed_text(director, "timeout")));
-            assert_eq!(forwarded[1][..4], queued("")[..4]);
-            let reference = forwarded[1][4]
-                .strip_prefix(RECORD_PREFIX)
-                .and_then(|rest| {
-                    rest.strip_suffix(&format!(
-                        " — read it with: cafleet message show {exceeds} --json"
-                    ))
-                })
-                .unwrap_or_else(|| panic!("{}", forwarded[1][4]));
-            let reference: Value = serde_json::from_str(reference).unwrap();
-            crate::broker::runtime::test_support::assert_key_order(
-                &reference,
-                &["event", "message_id", "from_member_id", "bytes"],
-            );
-            assert_eq!(reference["event"], "message_ref");
-            assert_eq!(reference["message_id"], exceeds);
-            assert_eq!(reference["from_member_id"], worker);
-            assert_eq!(
-                reference["bytes"].as_u64(),
-                Some(broker.record_text(exceeds).len() as u64),
-                "bytes is the length of the text the reference replaces"
             );
         }
 
@@ -2440,41 +2747,84 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         }
 
         #[test]
-        fn full_queue_refusals_retry_the_same_record_each_second_until_accepted_and_later_records_keep_their_order()
-         {
+        fn a_refused_notice_is_retried_each_second_from_the_current_pending_set_until_accepted() {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
-            let records =
-                ["first", "second", "third"].map(|body| broker.send(worker, director, body));
+            let backlog = ["first", "second"].map(|body| broker.send(worker, director, body));
             let forwarder = start(
                 &broker,
-                &listen_args(director, Some(1)),
+                &listen_args(director, Some(5)),
                 Some(&full_queue_codex(Some(2), "exit 0")),
                 Launch::Session,
             );
+            forwarder.wait_forwarded(1);
+            let arrival = broker.send(worker, director, "third");
             assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(10)),
+                forwarder.wait_exit(Duration::from_secs(15)),
                 0,
                 "{}",
                 forwarder.stderr()
             );
-            let first = queued(&broker.record_text(records[0]));
-            let mut expected = vec![first; 3];
-            expected.extend(
-                records[1..]
-                    .iter()
-                    .map(|id| queued(&broker.record_text(*id))),
-            );
-            expected.push(queued(&closed_text(director, "timeout")));
+            let rebuilt = queued(&pending_text(director, &[backlog[0], backlog[1], arrival]));
             assert_eq!(
                 forwarder.forwarded(),
-                expected,
-                "two refusals, one acceptance, then the later records in order"
+                [
+                    queued(&pending_text(director, &backlog)),
+                    rebuilt.clone(),
+                    rebuilt,
+                    queued(&closed_text(director, "timeout")),
+                ],
+                "two refusals rebuilt from fresh snapshots, one acceptance, then the closing record"
             );
             let gaps = forwarder.invocation_gaps();
             assert!(
-                gaps[..2].iter().all(|gap| *gap >= RETRY),
-                "each retry waits the retry interval: {gaps:?}"
+                gaps[..2].iter().all(|gap| *gap >= Duration::from_secs(1)),
+                "a refused notice waits the listener's one-second idle interval: {gaps:?}"
+            );
+            assert_eq!(
+                forwarder.stdout_records(),
+                [
+                    crate::output::json::listen_ready(director, broker.fleet),
+                    crate::output::json::listen_closed(director, "timeout"),
+                ]
+            );
+        }
+
+        /// Answers every `pending` notice with Codex's full-queue refusal and accepts the rest.
+        fn codex_refusing_notices() -> String {
+            format!(
+                "{LOG_ARGV}\ncase \"$*\" in\n  *'\"event\":\"pending\"'*)\n{FULL_QUEUE_REFUSAL}\n;;\nesac\nexit 0"
+            )
+        }
+
+        #[test]
+        fn a_refused_notice_whose_ids_are_acked_during_refusals_is_abandoned() {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            let message = broker.send(worker, director, "acked while refused");
+            let forwarder = start(
+                &broker,
+                &listen_args(director, Some(5)),
+                Some(&codex_refusing_notices()),
+                Launch::Session,
+            );
+            forwarder.wait_forwarded(2);
+            broker::ack_message(&mut broker.conn, message).unwrap();
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(15)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            let notice = queued(&pending_text(director, &[message]));
+            assert_eq!(
+                forwarder.forwarded(),
+                [
+                    notice.clone(),
+                    notice,
+                    queued(&closed_text(director, "timeout")),
+                ],
+                "no notice is attempted once the pending set is empty"
             );
             assert_eq!(
                 forwarder.stdout_records(),
@@ -2518,11 +2868,11 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                     crate::output::json::listen_closed(director, "session_exited"),
                 ]
             );
-            let record = queued(&broker.record_text(message));
+            let notice = queued(&pending_text(director, &[message]));
             let forwarded = forwarder.forwarded();
             assert!(
-                forwarded.iter().all(|invocation| *invocation == record),
-                "only the waiting record is attempted, with no closed notice: {forwarded:?}"
+                forwarded.iter().all(|invocation| *invocation == notice),
+                "only the refused notice is attempted, with no closed notice: {forwarded:?}"
             );
         }
 
@@ -2552,7 +2902,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             assert_closed_with_session_exited(&forwarder, &broker, director);
             assert_eq!(
                 forwarder.forwarded(),
-                [queued(&broker.record_text(message))],
+                [queued(&pending_text(director, &[message]))],
                 "no closed notice goes to the exited session"
             );
         }
@@ -2592,44 +2942,99 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             );
         }
 
-        #[test]
-        fn full_queue_refusals_past_the_limit_exit_one_after_a_single_closed_notice_attempt() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "never accepted");
-            let started = Instant::now();
-            let forwarder = start_with_env(
-                &broker,
-                &listen_args(director, None),
-                Some(&full_queue_codex(None, "exit 0")),
-                Launch::Session,
-                &[(FULL_QUEUE_LIMIT_SECS, "2")],
-            );
-            assert_eq!(forwarder.wait_exit(Duration::from_secs(15)), 1);
-            let elapsed = started.elapsed();
-            assert!(elapsed >= Duration::from_secs(2), "{elapsed:?}");
-            let diagnostic = format!("codex thread {THREAD} queue stayed full for 2 s");
-            let stderr = forwarder.stderr();
-            assert!(stderr.contains(&diagnostic), "{stderr}");
+        /// Deregisters `worker` under a running forwarder and waits until its closing record has
+        /// been refused for more than the five-second closing output budget.
+        fn refuse_the_closing_record_past_five_seconds(forwarder: &Forwarder, broker: &mut Broker) {
+            forwarder.wait_ready();
             assert!(
-                stderr.contains(&format!(
-                    "failed to forward the closed notice to codex thread {THREAD}: "
-                )) && stderr.contains("queue cannot contain more than 100 submissions"),
-                "the notice met the full queue too: {stderr}"
+                crate::broker::members::test_support::deregister_member(
+                    &mut broker.conn,
+                    broker.worker
+                )
+                .unwrap()
             );
-            let forwarded = forwarder.forwarded();
-            let (notice, attempts) = forwarded.split_last().unwrap();
+            let closed = Instant::now();
+            forwarder.wait_for(
+                "closing-record refusals past 6 s",
+                Duration::from_secs(20),
+                |forwarder| {
+                    closed.elapsed() >= Duration::from_secs(6) && forwarder.forwarded().len() >= 2
+                },
+            );
             assert_eq!(
-                notice,
-                &queued(&format!("[cafleet listen closed] exit 1: {diagnostic}")),
-                "the closed notice is attempted once: {forwarded:?}"
+                forwarder.status(),
+                None,
+                "a refused closing record keeps the forwarder alive: {}",
+                forwarder.stderr()
             );
-            let record = queued(&broker.record_text(message));
+        }
+
+        fn assert_only_the_closing_record_was_retried(forwarder: &Forwarder, worker: i64) {
+            let closing = queued(&closed_text(worker, "member_inactive"));
+            let forwarded = forwarder.forwarded();
             assert!(
-                attempts.len() >= 2 && attempts.iter().all(|attempt| *attempt == record),
+                forwarded.len() >= 10 && forwarded.iter().all(|attempt| *attempt == closing),
                 "{forwarded:?}"
             );
-            assert_stdout_has_no_forwarded_records(&forwarder, &broker);
+            let gaps = forwarder.invocation_gaps();
+            assert!(
+                gaps.iter().all(|gap| *gap >= RETRY),
+                "each closing retry waits the retry interval: {gaps:?}"
+            );
+        }
+
+        #[test]
+        fn a_refused_closing_record_retries_until_the_pinned_session_ends_and_closes_with_session_exited()
+         {
+            let mut broker = broker();
+            let worker = broker.worker;
+            let mut forwarder = start(
+                &broker,
+                &listen_args(worker, None),
+                Some(&full_queue_codex(None, "exit 0")),
+                Launch::Session,
+            );
+            refuse_the_closing_record_past_five_seconds(&forwarder, &mut broker);
+            forwarder.end_session();
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(5)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            assert_closed_with_session_exited(&forwarder, &broker, worker);
+            assert_only_the_closing_record_was_retried(&forwarder, worker);
+        }
+
+        #[test]
+        fn a_closing_record_refused_for_more_than_five_seconds_is_written_to_stdout_after_acceptance()
+         {
+            let mut broker = broker();
+            let worker = broker.worker;
+            let forwarder = start(
+                &broker,
+                &listen_args(worker, None),
+                Some(&format!(
+                    "{LOG_ARGV}\ndate +%s%N >>\"$CAFLEET_TEST_CODEX_LOG.times\"\nif [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; then\n{FULL_QUEUE_REFUSAL}\nfi\nexit 0"
+                )),
+                Launch::Session,
+            );
+            refuse_the_closing_record_past_five_seconds(&forwarder, &mut broker);
+            std::fs::write(forwarder.file(RELEASE), "").unwrap();
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(5)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            assert_eq!(
+                forwarder.stdout_records(),
+                [
+                    crate::output::json::listen_ready(worker, broker.fleet),
+                    crate::output::json::listen_closed(worker, "member_inactive"),
+                ]
+            );
+            assert_only_the_closing_record_was_retried(&forwarder, worker);
         }
 
         #[test]
@@ -2637,7 +3042,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
             let message = broker.send(worker, director, "refused");
-            let wait = Duration::from_millis(500);
+            let wait = Duration::from_secs(3);
             let forwarder = start_with_env(
                 &broker,
                 &listen_args(director, None),
@@ -2664,10 +3069,10 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 diagnostic.contains(&format!("thread {THREAD} not found")),
                 "{stderr}"
             );
-            let record = queued(&broker.record_text(message));
+            let notice = queued(&pending_text(director, &[message]));
             let forwarded = forwarder.forwarded();
             assert_eq!(forwarded.len(), 3, "{forwarded:?}");
-            assert_eq!(forwarded[..2], [record.clone(), record]);
+            assert_eq!(forwarded[..2], [notice.clone(), notice]);
             assert!(
                 forwarded[2][4].starts_with(&format!(
                     "[cafleet listen closed] exit 1: failed to forward record to codex thread {THREAD}: "
@@ -2676,7 +3081,11 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             );
             let gaps = forwarder.invocation_gaps();
             assert!(
-                gaps[0] >= wait && gaps[1] < wait,
+                gaps[0] >= Duration::from_secs(1) && gaps[0] < wait,
+                "a refused notice waits the listener's idle interval, not the closing retry interval: {gaps:?}"
+            );
+            assert!(
+                gaps[1] < Duration::from_secs(1),
                 "only the full-queue refusal waits: {gaps:?}"
             );
             assert_stdout_has_no_forwarded_records(&forwarder, &broker);
