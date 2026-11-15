@@ -96,7 +96,7 @@ Reception ends with the fleet: after `closed` `fleet_deleted`, verify task/sourc
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `native` (2.1.296); `listen` `native` `subscribe` through one Monitor task running `cafleet message listen` (2.1.312) |
+| Director | `yes` | `goal` `native` (2.1.296); `listen` `native` `subscribe` through one Monitor task running `cafleet message listen` (2.1.316, checked 2026-11-15) |
 | Member | `yes` | Omitted `auto` automatic review; the Claude profile from `2.1.302` |
 
 ## codex
@@ -160,7 +160,7 @@ The forwarder's stdout, record forwarding and exit with its pinned Codex session
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `native` (0.162.1); `listen` `native` `subscribe` through `codex queue` on the escalated path (0.165.0); the sandboxed path is unverified |
+| Director | `yes` | `goal` `native` (0.162.1); `listen` `native` `subscribe` through `codex queue` on the escalated path (0.167.0, checked 2026-11-15); the sandboxed path is unverified |
 | Member | `yes` | Omitted `--approve-for-me` automatic review; the Codex profile from `0.163.0` |
 
 ## opencode
@@ -359,7 +359,7 @@ After a restart on the same session, re-arm with `cafleet_listen` on the first t
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `extension` through the `cafleet` plugin and `listen` `extension` `subscribe` through `cafleet_listen`, both under `opencode mini --standalone` (2.2.0 minimum) |
+| Director | `yes` | `goal` `extension` through the `cafleet` plugin and `listen` `extension` `subscribe` through `cafleet_listen`, both under `opencode mini --standalone` (2.2.0 minimum; `listen` 2.2.5, checked 2026-11-15) |
 | Member | `yes` | The omitted `cafleet-ask` preset, whose shell permission form the OpenCode profile from `2.1.4` detects and answers; runner acceptance on herdr only |
 
 ## hermes
@@ -425,7 +425,7 @@ Reception makes no pane input and leaves `/goal` authority with the host.
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `native` `/goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both on the TUI client (2026.9.24) |
+| Director | `yes` | `goal` `native` `/goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both on the TUI client (2026.9.24; `listen` checked 2026-11-15) |
 | Member | `yes` | Default `smart` approval-prompt coverage (ESCALATE and override); the Hermes profile from `2026.9.24` |
 
 ## pi
@@ -484,5 +484,5 @@ After a restart on the same session (`pi --continue`), re-arm with `cafleet_list
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `extension` `/cafleet-goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both from the CAFleet pi extension under plain `pi` (1.5.0); re-arm reception after `/reload`, `/new`, `/resume`, `/fork` or `pi --continue` |
+| Director | `yes` | `goal` `extension` `/cafleet-goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both from the CAFleet pi extension under plain `pi` (1.5.0; `listen` checked 2026-11-15); re-arm reception after `/reload`, `/new`, `/resume`, `/fork` or `pi --continue` |
 | Member | `yes` | The omitted `cafleet-ask` gate mode, whose approval form the pi profile from `1.5.0` detects and answers |

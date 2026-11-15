@@ -1,7 +1,7 @@
 # Coalesced ID-only inbox notices for `message listen`
 
 **Status**: Approved
-**Progress**: 40/48 tasks complete
+**Progress**: 47/48 tasks complete
 **Last Updated**: 2026-11-15
 
 ## Overview
@@ -334,13 +334,13 @@ Replacing the shared install (`mise //:all-install` and `cafleet setup` under th
 
 ### Step 9: Live verification on every backend
 
-- [ ] Build the isolated install under `<BASE>/.probe/` (§ Live verification environment): copy the release binary, create the isolated `HOME` and backend config roots seeded with copied authentication/config files, and select the probe database <!-- completed: -->
-- [ ] Run `cafleet setup` for every bundled backend with the isolated binary and environment. Confirm that `command -v cafleet` names the isolated copy, that `cafleet doctor` reports every extension check `ok`, and that every resolved config directory lies under the probe root. <!-- completed: -->
-- [ ] Run the redefined subscribe probe (idle, busy, 150-message burst, hold ceiling, owner exit) on an isolated `claude` Director through Monitor <!-- completed: -->
-- [ ] Run the same probe on an isolated `codex` Director through `--codex-thread` on the escalated path, confirming the forwarder stays alive and the queue never refuses during the burst <!-- completed: -->
-- [ ] Run the same probe on isolated `opencode` (`opencode mini --standalone`), `hermes` (TUI client) and `pi` (plain `pi`) Directors through `cafleet_listen` with the probe `database_url` <!-- completed: -->
-- [ ] Record each run's evidence (backend, native version, mechanism, IDs, send/notice/ACK timestamps, receiver exit) in a hidden BASE evidence note <!-- completed: -->
-- [ ] Update every SPEC § Role eligibility `listen` row and each backend's skill Role eligibility Basis cell with the new evidence and check date <!-- completed: -->
+- [x] Build the isolated install under `<BASE>/.probe/` (§ Live verification environment): copy the release binary, create the isolated `HOME` and backend config roots seeded with copied authentication/config files, and select the probe database <!-- completed: 2026-11-15T17:06 -->
+- [x] Run `cafleet setup` for every bundled backend with the isolated binary and environment. Confirm that `command -v cafleet` names the isolated copy, that `cafleet doctor` reports every extension check `ok`, and that every resolved config directory lies under the probe root. <!-- completed: 2026-11-15T17:06 -->
+- [x] Run the redefined subscribe probe (idle, busy, 150-message burst, hold ceiling, owner exit) on an isolated `claude` Director through Monitor <!-- completed: 2026-11-15T17:06 -->
+- [x] Run the same probe on an isolated `codex` Director through `--codex-thread` on the escalated path, confirming the forwarder stays alive and the queue never refuses during the burst <!-- completed: 2026-11-15T17:06 -->
+- [x] Run the same probe on isolated `opencode` (`opencode mini --standalone`), `hermes` (TUI client) and `pi` (plain `pi`) Directors through `cafleet_listen` with the probe `database_url` <!-- completed: 2026-11-15T17:06 -->
+- [x] Record each run's evidence (backend, native version, mechanism, IDs, send/notice/ACK timestamps, receiver exit) in a hidden BASE evidence note <!-- completed: 2026-11-15T17:06 -->
+- [x] Update every SPEC § Role eligibility `listen` row and each backend's skill Role eligibility Basis cell with the new evidence and check date <!-- completed: 2026-11-15T17:06 -->
 
 ### Step 10: Replace the shared install
 
