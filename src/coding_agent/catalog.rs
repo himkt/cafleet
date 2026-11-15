@@ -1852,7 +1852,7 @@ pub(crate) mod test_support {
     /// A test catalog: production loading followed by the provenance build guard.
     pub(crate) fn load(definitions: &Value) -> Result<ProfileCatalog> {
         let catalog = ProfileCatalog::from_definitions(definitions)?;
-        validate_provenance(definitions)?;
+        validate_provenance(&with_synthetic_composer_evidence(definitions)?)?;
         Ok(catalog)
     }
 
