@@ -1779,6 +1779,76 @@ pub(crate) mod test_support {
         Ok(())
     }
 
+    pub(crate) fn composer_evidence_records(
+        operation: &str,
+        multiplexer: &str,
+        framing: &Value,
+        limit: &Value,
+    ) -> [Value; 4] {
+        [
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"framing","literal_framing":framing}),
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"plain_limit","plain_literal_limit":limit}),
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"post_submit"}),
+            json!({"operation":operation,"multiplexer":multiplexer,"kind":"unsubmitted_literal"}),
+        ]
+    }
+
+    pub(crate) fn with_synthetic_composer_evidence(definitions: &Value) -> Result<Value> {
+        let mut decorated = definitions.clone();
+        let fixtures = decorated["fixtures"]
+            .as_array_mut()
+            .ok_or_else(|| invalid("fixture registry array required"))?;
+        let mut claims = std::collections::BTreeMap::<String, Vec<Value>>::new();
+        for profile in definitions["profiles"].as_array().expect("parsed profiles") {
+            let submission = &profile["capabilities"]["composer"]["submission"];
+            for operation in ["prompt", "exec"] {
+                let plan = &submission[operation];
+                if plan.is_null() {
+                    continue;
+                }
+                let cited: Ids = serde_json::from_value(plan["fixture_ids"].clone())
+                    .map_err(|cause| invalid(&cause.to_string()))?;
+                for id in cited.0 {
+                    let fixture = fixtures
+                        .iter()
+                        .find(|fixture| fixture["id"] == id)
+                        .ok_or_else(|| invalid("unknown fixture"))?;
+                    if fixture["kind"] != "synthetic" || fixture.get("composer_evidence").is_some()
+                    {
+                        continue;
+                    }
+                    for multiplexer in ["tmux", "herdr"] {
+                        for record in composer_evidence_records(
+                            operation,
+                            multiplexer,
+                            plan.get("literal_framing").expect("parsed literal framing"),
+                            plan.get("plain_literal_limit").expect("parsed plain limit"),
+                        ) {
+                            let records = claims.entry(id.clone()).or_default();
+                            if let Some(existing) = records.iter().find(|existing| {
+                                existing["operation"] == record["operation"]
+                                    && existing["multiplexer"] == record["multiplexer"]
+                                    && existing["kind"] == record["kind"]
+                            }) {
+                                require(existing == &record, "synthetic evidence conflicts")?;
+                            } else {
+                                records.push(record);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (id, records) in claims {
+            let fixture = fixtures
+                .iter_mut()
+                .find(|fixture| fixture["id"] == id)
+                .expect("a cited synthetic fixture remains in the registry");
+            fixture["composer_evidence"] = json!(records);
+        }
+        Ok(decorated)
+    }
+
     /// A test catalog: production loading followed by the provenance build guard.
     pub(crate) fn load(definitions: &Value) -> Result<ProfileCatalog> {
         let catalog = ProfileCatalog::from_definitions(definitions)?;
@@ -2758,6 +2828,361 @@ mod tests {
                 .expect("a bundled executable composer profile");
             profile["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] = json!([]);
             assert!(validate_provenance(&value).is_err());
+        }
+    }
+
+    mod composer_evidence {
+        use crate::coding_agent::catalog::tests::*;
+
+        fn measured() -> Value {
+            let mut value = definition(Some("0d"), Some("0d"));
+            let unrelated = value["fixtures"][0]["id"].clone();
+            let template = value["fixtures"][0].clone();
+            let mut sequence = 0;
+            for operation in ["prompt", "exec"] {
+                let framing = if operation == "prompt" {
+                    json!("bracketed_paste")
+                } else {
+                    json!("plain")
+                };
+                let limit = if operation == "prompt" {
+                    json!({"unit":"bytes","max":1024})
+                } else {
+                    json!({"unit":"scalars","max":1024})
+                };
+                let plan =
+                    &mut value["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                plan["literal_framing"] = framing.clone();
+                plan["plain_literal_limit"] = limit.clone();
+                let mut ids = vec![unrelated.clone()];
+                for multiplexer in ["tmux", "herdr"] {
+                    for record in
+                        composer_evidence_records(operation, multiplexer, &framing, &limit)
+                    {
+                        sequence += 1;
+                        let id = format!("witness-{sequence}");
+                        let mut fixture = template.clone();
+                        fixture["id"] = json!(id);
+                        fixture["kind"] = json!("native");
+                        fixture["composer_evidence"] = json!([record]);
+                        value["fixtures"].as_array_mut().unwrap().push(fixture);
+                        ids.push(json!(id));
+                    }
+                }
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!(ids);
+            }
+            value
+        }
+
+        fn witness_mut<'a>(
+            value: &'a mut Value,
+            operation: &str,
+            multiplexer: &str,
+            kind: &str,
+        ) -> &'a mut Value {
+            value["fixtures"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|fixture| {
+                    fixture.get("composer_evidence").is_some_and(|records| {
+                        records.as_array().unwrap().iter().any(|record| {
+                            record["operation"] == operation
+                                && record["multiplexer"] == multiplexer
+                                && record["kind"] == kind
+                        })
+                    })
+                })
+                .expect("the explicit operation/multiplexer/category witness exists")
+        }
+
+        fn missing_category(kind: &str) {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for multiplexer in ["tmux", "herdr"] {
+                    let mut value = baseline.clone();
+                    let id = witness_mut(&mut value, operation, multiplexer, kind)["id"].clone();
+                    let unrelated = value["fixtures"][0]["id"].clone();
+                    let ids = value["profiles"][0]["capabilities"]["composer"]["submission"]
+                        [operation]["fixture_ids"]
+                        .as_array_mut()
+                        .unwrap();
+                    ids.retain(|cited| cited != &id);
+                    assert!(ids.contains(&unrelated));
+                    assert!(ids.len() > 1);
+                    assert!(
+                        validate_provenance(&value).is_err(),
+                        "{operation}/{multiplexer}/{kind}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn complete_operation_and_multiplexer_evidence_accepts_unrelated_additional_citations() {
+            validate_provenance(&measured()).unwrap();
+        }
+
+        #[test]
+        fn framing_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("framing");
+        }
+
+        #[test]
+        fn plain_limit_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("plain_limit");
+        }
+
+        #[test]
+        fn post_submit_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("post_submit");
+        }
+
+        #[test]
+        fn unsubmitted_literal_witness_is_required_for_each_operation_on_each_multiplexer() {
+            missing_category("unsubmitted_literal");
+        }
+
+        #[test]
+        fn unrelated_valid_native_citations_cannot_establish_an_executable_plan() {
+            let mut value = definition(Some("0d"), Some("0d"));
+            for fixture in value["fixtures"].as_array_mut().unwrap() {
+                fixture["kind"] = json!("native");
+            }
+            let unrelated = &mut value["fixtures"][0];
+            let id = unrelated["id"].clone();
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!([id]);
+            }
+            ProfileCatalog::from_definitions(&value).unwrap();
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn another_operations_claim_cannot_replace_the_selected_operations_witness() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for multiplexer in ["tmux", "herdr"] {
+                for kind in [
+                    "framing",
+                    "plain_limit",
+                    "post_submit",
+                    "unsubmitted_literal",
+                ] {
+                    let mut value = baseline.clone();
+                    witness_mut(&mut value, "prompt", multiplexer, kind)["composer_evidence"][0]
+                        ["operation"] = json!("exec");
+                    assert!(validate_provenance(&value).is_err(), "{multiplexer}/{kind}");
+                }
+            }
+        }
+
+        #[test]
+        fn another_multiplexers_claim_cannot_replace_the_selected_multiplexers_witness() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for kind in [
+                    "framing",
+                    "plain_limit",
+                    "post_submit",
+                    "unsubmitted_literal",
+                ] {
+                    let mut value = baseline.clone();
+                    witness_mut(&mut value, operation, "tmux", kind)["composer_evidence"][0]["multiplexer"] =
+                        json!("herdr");
+                    assert!(validate_provenance(&value).is_err(), "{operation}/{kind}");
+                }
+            }
+        }
+
+        #[test]
+        fn framing_evidence_matches_each_selected_plan_value() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for multiplexer in ["tmux", "herdr"] {
+                    let mut value = baseline.clone();
+                    witness_mut(&mut value, operation, multiplexer, "framing")["composer_evidence"]
+                        [0]["literal_framing"] = if operation == "prompt" {
+                        json!("plain")
+                    } else {
+                        json!("bracketed_paste")
+                    };
+                    assert!(validate_provenance(&value).is_err());
+                }
+            }
+        }
+
+        #[test]
+        fn plain_limit_evidence_matches_the_unit_bound_and_null_declaration() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                for multiplexer in ["tmux", "herdr"] {
+                    let (unit, other_unit) = if operation == "prompt" {
+                        ("bytes", "scalars")
+                    } else {
+                        ("scalars", "bytes")
+                    };
+                    for limit in [
+                        json!({"unit":unit,"max":512}),
+                        json!({"unit":other_unit,"max":1024}),
+                        Value::Null,
+                    ] {
+                        let mut value = baseline.clone();
+                        witness_mut(&mut value, operation, multiplexer, "plain_limit")["composer_evidence"]
+                            [0]["plain_literal_limit"] = limit;
+                        assert!(validate_provenance(&value).is_err());
+                    }
+                }
+            }
+        }
+
+        fn unlimited() -> Value {
+            let mut value = measured();
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
+                    Value::Null;
+                for multiplexer in ["tmux", "herdr"] {
+                    witness_mut(&mut value, operation, multiplexer, "plain_limit")["composer_evidence"]
+                        [0]["plain_literal_limit"] = Value::Null;
+                }
+            }
+            value
+        }
+
+        #[test]
+        fn explicitly_measured_null_plain_limits_are_valid() {
+            validate_provenance(&unlimited()).unwrap();
+        }
+
+        #[test]
+        fn one_fixture_can_carry_distinct_operation_multiplexer_and_category_claims() {
+            let mut value = measured();
+            let records = value["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|fixture| fixture.get("composer_evidence"))
+                .flat_map(|records| records.as_array().unwrap().iter().cloned())
+                .collect::<Vec<_>>();
+            let fixture = &mut value["fixtures"][0];
+            fixture["kind"] = json!("native");
+            fixture["composer_evidence"] = json!(records);
+            let id = fixture["id"].clone();
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!([id]);
+            }
+            validate_provenance(&value).unwrap();
+        }
+
+        #[test]
+        fn missing_plain_limit_key_is_rejected_even_when_the_plan_is_unlimited() {
+            let mut value = unlimited();
+            validate_provenance(&value).unwrap();
+            value["fixtures"][0]["composer_evidence"] =
+                json!([{"operation":"prompt","multiplexer":"tmux","kind":"plain_limit"}]);
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn evidence_records_have_strict_required_fields_and_value_domains() {
+            let baseline = measured();
+            validate_provenance(&baseline).unwrap();
+            let framing = json!({"operation":"prompt","multiplexer":"tmux","kind":"framing","literal_framing":"bracketed_paste"});
+            let mut malformed = Vec::new();
+            for field in ["operation", "multiplexer", "kind", "literal_framing"] {
+                let mut record = framing.clone();
+                record.as_object_mut().unwrap().remove(field).unwrap();
+                malformed.push(record);
+            }
+            for (field, value) in [
+                ("operation", json!("preview")),
+                ("multiplexer", json!("screen")),
+                ("kind", json!("idle")),
+                ("literal_framing", json!("automatic")),
+                ("unexpected", json!(true)),
+            ] {
+                let mut record = framing.clone();
+                record[field] = value;
+                malformed.push(record);
+            }
+            for limit in [
+                json!({"unit":"bytes","max":0}),
+                json!({"unit":"characters","max":1}),
+                json!({"unit":"bytes","max":1,"extra":true}),
+            ] {
+                malformed.push(json!({"operation":"prompt","multiplexer":"tmux","kind":"plain_limit","plain_literal_limit":limit}));
+            }
+            for kind in ["post_submit", "unsubmitted_literal"] {
+                malformed.push(json!({"operation":"prompt","multiplexer":"tmux","kind":kind,"literal_framing":"plain"}));
+            }
+            for record in malformed {
+                let mut value = baseline.clone();
+                value["fixtures"][0]["composer_evidence"] = json!([record]);
+                assert!(validate_provenance(&value).is_err(), "{record}");
+            }
+        }
+
+        #[test]
+        fn duplicate_operation_multiplexer_category_records_on_one_fixture_are_rejected() {
+            let mut value = measured();
+            validate_provenance(&value).unwrap();
+            let fixture = witness_mut(&mut value, "prompt", "tmux", "post_submit");
+            let duplicate = fixture["composer_evidence"][0].clone();
+            fixture["composer_evidence"]
+                .as_array_mut()
+                .unwrap()
+                .push(duplicate);
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn a_present_empty_evidence_array_is_rejected_without_affecting_other_valid_citations() {
+            let mut value = measured();
+            validate_provenance(&value).unwrap();
+            value["fixtures"][0]["composer_evidence"] = json!([]);
+            assert!(validate_provenance(&value).is_err());
+        }
+
+        #[test]
+        fn synthetic_test_helper_populates_absent_evidence_for_dynamic_plan_values() {
+            let mut value = definition(Some("0d"), Some("0d"));
+            for operation in ["prompt", "exec"] {
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["literal_framing"] =
+                    json!("bracketed_paste");
+                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
+                    json!({"unit":"bytes","max":3});
+            }
+            validate_provenance(&with_synthetic_composer_evidence(&value).unwrap()).unwrap();
+        }
+
+        #[test]
+        fn synthetic_test_helper_preserves_explicit_and_native_evidence_gaps() {
+            let mut baseline = measured();
+            baseline["fixtures"][0]["kind"] = json!("native");
+            validate_provenance(&baseline).unwrap();
+            for explicit in [false, true] {
+                let mut value = baseline.clone();
+                let fixture = witness_mut(&mut value, "prompt", "tmux", "post_submit");
+                if explicit {
+                    fixture["kind"] = json!("synthetic");
+                    fixture["composer_evidence"] =
+                        json!([{"operation":"exec","multiplexer":"tmux","kind":"post_submit"}]);
+                } else {
+                    fixture
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("composer_evidence")
+                        .unwrap();
+                }
+                assert!(load(&value).is_err());
+            }
         }
     }
 
