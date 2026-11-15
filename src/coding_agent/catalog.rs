@@ -1807,7 +1807,7 @@ pub(crate) mod test_support {
                     continue;
                 }
                 let cited: Ids = serde_json::from_value(plan["fixture_ids"].clone())
-                    .map_err(|cause| invalid(&cause.to_string()))?;
+                    .map_err(|cause| invalid(cause.to_string()))?;
                 for id in cited.0 {
                     let fixture = fixtures
                         .iter()
