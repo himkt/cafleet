@@ -6874,6 +6874,295 @@ mod tests {
                 });
             }
 
+            fn held_blocker_for_stalled_heads(host: &mut Host, immediate: bool) -> i64 {
+                host.coordinator.services.hooks = Arc::new(FailLaterBeforeWrite {
+                    inner: host.hooks.clone(),
+                    armed: std::sync::atomic::AtomicBool::new(true),
+                });
+                host.pty.short = Some(3);
+                let input = request(host, "prompt:reconciled-stalled-blocker", LITERAL);
+                if immediate {
+                    assert!(host.handle(input).unwrap().is_none());
+                } else {
+                    form(host);
+                    queued(host, input, "interaction_open");
+                    host.show(SCREEN.to_vec());
+                }
+                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
+                    host,
+                    |host| host.pty.written.len() == 3,
+                );
+                assert_eq!(host.pty.written, LITERAL.as_bytes()[..3]);
+                let id = host
+                    .coordinator
+                    .pending
+                    .as_ref()
+                    .unwrap()
+                    .input_id()
+                    .unwrap();
+                let failure = (0..64)
+                    .find_map(|_| {
+                        host.drain();
+                        match host.try_advance() {
+                            Err(failure) => Some(failure),
+                            Ok(None) => None,
+                            Ok(Some(_)) => panic!("the later checkpoint retains its primary error"),
+                        }
+                    })
+                    .expect("a later pre-write checkpoint fails after actual positive bytes");
+                assert!(
+                    matches!(failure.source, CafleetError::DeadlineExceeded),
+                    "{failure:?}"
+                );
+                assert_eq!(failure.context.input_id, Some(id));
+                if immediate {
+                    host.coordinator.finish_pending_attempt();
+                    assert_eq!(row(host, id).state, storage::InputState::InProgress);
+                } else {
+                    assert_eq!(row(host, id).state, storage::InputState::Uncertain);
+                    assert_eq!(
+                        row(host, id).stop_cause,
+                        Some(storage::StopCause::WriteFailed)
+                    );
+                }
+                assert!(host.coordinator.pending.is_none());
+                assert_eq!(host.pty.offers, [LITERAL.as_bytes().to_vec()]);
+                host.pty.short = None;
+                host.show(DRAFT.to_vec());
+                host.confirm_after_programs([encoded()]);
+                id
+            }
+
+            fn reconcile_stalled_blocker(
+                host: &mut Host,
+                id: i64,
+                disposition: storage::InputDisposition,
+            ) -> storage::InputOperation {
+                let before = row(host, id);
+                let result = host
+                    .receipt(ReceiptAction::Reconcile {
+                        input_id: id,
+                        expected: before.state,
+                        disposition,
+                        evidence_ref:
+                            "synthetic:operator-reconciled-positive-literal-held-composer".into(),
+                    })
+                    .unwrap();
+                assert!(
+                    matches!(result, InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
+                );
+                let after = row(host, id);
+                assert_eq!(after.state, storage::InputState::Settled);
+                assert_eq!(after.disposition, Some(disposition));
+                assert_eq!(after.stop_cause, before.stop_cause);
+                after
+            }
+
+            fn drain_stalled_events(host: &mut Host) {
+                for _ in 0..4 {
+                    for _ in 0..8 {
+                        let _ = turn(host);
+                    }
+                    loop {
+                        host.drain();
+                        let writer = host.writer.status();
+                        let health = host.controller.health(&host.writer);
+                        assert!(
+                            writer.diagnostic.is_none(),
+                            "writer={writer:?}; health={health:?}"
+                        );
+                        assert_eq!(writer.gap_count, 0, "writer={writer:?}; health={health:?}");
+                        if !health.degraded && health.pending_count == 0 && !health.pending_evidence
+                        {
+                            break;
+                        }
+                        assert!(
+                            Instant::now() < host.until,
+                            "writer={writer:?}; health={health:?}"
+                        );
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+            }
+
+            fn readable_stalled_head(host: &Host, head: i64, blocker: i64) -> Value {
+                let ids = host.fixture.conn.prepare(
+                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2 ORDER BY event_id",
+                ).unwrap().query_map(rusqlite::params![host.fixture.run.run_id, head], |row| row.get::<_, i64>(0))
+                    .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+                assert_eq!(
+                    ids.len(),
+                    1,
+                    "head={:?}; blocker={:?}; writer={:?}; health={:?}",
+                    row(host, head),
+                    row(host, blocker),
+                    host.writer.status(),
+                    host.controller.health(&host.writer)
+                );
+                let event = storage::get_event(&host.fixture.conn, ids[0]).unwrap();
+                assert_eq!(event.event.run_id, host.fixture.run.run_id);
+                assert_eq!(row(host, head).run_id, event.event.run_id);
+                assert_eq!(row(host, blocker).run_id, event.event.run_id);
+                let payload = event.event.payload_json;
+                assert_eq!(payload["input_id"], head);
+                assert_eq!(payload["blocking_input_id"], blocker);
+                assert_eq!(payload["message_id"], json!(row(host, head).message_id));
+                assert_eq!(payload["director_action"]["kind"], "review_stalled_input");
+                payload
+            }
+
+            #[test]
+            fn reconciled_held_blocker_before_first_stalled_publication_keeps_the_signal() {
+                for immediate in [false, true] {
+                    for disposition in [
+                        storage::InputDisposition::NotSubmitted,
+                        storage::InputDisposition::AbandonedUncertain,
+                        storage::InputDisposition::Submitted,
+                    ] {
+                        crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
+                            permission_configured("plain", Value::Null), encoded(), |host| {
+                                let blocker = held_blocker_for_stalled_heads(host, immediate);
+                                let head = queued(host, request(host, "prompt:stalled-after-reconcile", LITERAL), "earlier_input");
+                                host.coordinator.set_queued_composer_busy_since(head, &old_wait());
+                                let since = host.coordinator.queue.front().unwrap().composer_busy_since;
+                                let reconciled = reconcile_stalled_blocker(host, blocker, disposition);
+                                assert_eq!(host.coordinator.queue.front().unwrap().composer_busy_since, since);
+                                let offers = host.pty.offers.clone();
+                                let written = host.pty.written.clone();
+                                drain_stalled_events(host);
+                                assert_eq!(row(host, head).state, storage::InputState::Ready);
+                                assert_eq!(host.pty.offers, offers);
+                                assert_eq!(host.pty.written, written);
+                                let event = readable_stalled_head(host, head, blocker);
+                                drain_stalled_events(host);
+                                assert_eq!(readable_stalled_head(host, head, blocker), event);
+                                assert_eq!(row(host, blocker), reconciled);
+                                finish_after_exceptional_clear(host, blocker, head);
+                                assert_eq!(readable_stalled_head(host, head, blocker), event);
+                                assert_eq!(row(host, blocker), reconciled);
+                            },
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn reconciled_already_notified_blocker_notifies_the_later_head_after_ack_cancellation()
+            {
+                for disposition in [
+                    storage::InputDisposition::NotSubmitted,
+                    storage::InputDisposition::AbandonedUncertain,
+                    storage::InputDisposition::Submitted,
+                ] {
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
+                        permission_configured("plain", Value::Null),
+                        encoded(),
+                        |host| {
+                            let blocker = held_blocker_for_stalled_heads(host, false);
+                            let message = host.message(
+                                "waiting preview cancelled after its stalled notification",
+                            );
+                            let literal = canonical_preview(&message);
+                            let first = queued(
+                                host,
+                                preview_request(host, &message, &literal),
+                                "earlier_input",
+                            );
+                            let later = queued(
+                                host,
+                                request(host, "prompt:later-stalled-head", LITERAL),
+                                "earlier_input",
+                            );
+                            host.coordinator
+                                .set_queued_composer_busy_since(first, &old_wait());
+                            let offers = host.pty.offers.clone();
+                            let written = host.pty.written.clone();
+                            drain_stalled_events(host);
+                            let original = readable_stalled_head(host, first, blocker);
+                            let since = host.coordinator.queue.front().unwrap().composer_busy_since;
+                            let reconciled = reconcile_stalled_blocker(host, blocker, disposition);
+                            assert_eq!(
+                                host.coordinator.queue.front().unwrap().composer_busy_since,
+                                since
+                            );
+                            crate::broker::ack_message(&mut host.fixture.conn, message.message_id)
+                                .unwrap();
+                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(host, |host| row(host, first).state == storage::InputState::Settled);
+                            assert_eq!(
+                                row(host, first).disposition,
+                                Some(storage::InputDisposition::NotSubmitted)
+                            );
+                            assert_eq!(
+                                row(host, first).delivery_reason.as_deref(),
+                                Some("message_consumed")
+                            );
+                            assert_eq!(host.coordinator.queue.front().unwrap().input_id, later);
+                            assert_eq!(readable_stalled_head(host, first, blocker), original);
+                            drain_stalled_events(host);
+                            let later_events: i64 = host.fixture.conn.query_row(
+                                "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
+                                rusqlite::params![host.fixture.run.run_id, later], |row| row.get(0),
+                            ).unwrap();
+                            assert_eq!(
+                                later_events, 0,
+                                "the later head starts its own composer-only bound"
+                            );
+                            host.coordinator
+                                .set_queued_composer_busy_since(later, &old_wait());
+                            drain_stalled_events(host);
+                            assert_eq!(host.pty.offers, offers);
+                            assert_eq!(host.pty.written, written);
+                            assert_eq!(row(host, later).state, storage::InputState::Ready);
+                            let next = readable_stalled_head(host, later, blocker);
+                            drain_stalled_events(host);
+                            assert_eq!(readable_stalled_head(host, later, blocker), next);
+                            assert_eq!(readable_stalled_head(host, first, blocker), original);
+                            finish_after_exceptional_clear(host, blocker, later);
+                            assert_eq!(row(host, blocker), reconciled);
+                            assert_eq!(readable_stalled_head(host, later, blocker), next);
+                            assert_eq!(readable_stalled_head(host, first, blocker), original);
+                        },
+                    );
+                }
+            }
+
+            #[test]
+            fn consumed_exceptional_in_progress_blocker_stalls_until_reconciliation_and_fresh_empty()
+             {
+                crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
+                    permission_configured("plain", Value::Null),
+                    encoded(),
+                    |host| {
+                        let blocker = held_blocker_for_stalled_heads(host, true);
+                        let head = queued(
+                            host,
+                            request(host, "prompt:behind-consumed-in-progress", LITERAL),
+                            "earlier_input",
+                        );
+                        host.coordinator
+                            .set_queued_composer_busy_since(head, &old_wait());
+                        let offers = host.pty.offers.clone();
+                        let written = host.pty.written.clone();
+                        drain_stalled_events(host);
+                        assert_eq!(row(host, blocker).state, storage::InputState::InProgress);
+                        assert_eq!(row(host, head).state, storage::InputState::Ready);
+                        assert_eq!(host.pty.offers, offers);
+                        assert_eq!(host.pty.written, written);
+                        let original = readable_stalled_head(host, head, blocker);
+                        let reconciled = reconcile_stalled_blocker(
+                            host,
+                            blocker,
+                            storage::InputDisposition::AbandonedUncertain,
+                        );
+                        drain_stalled_events(host);
+                        assert_eq!(readable_stalled_head(host, head, blocker), original);
+                        finish_after_exceptional_clear(host, blocker, head);
+                        assert_eq!(row(host, blocker), reconciled);
+                        assert_eq!(readable_stalled_head(host, head, blocker), original);
+                    },
+                );
+            }
+
             #[test]
             fn a_newly_opened_interaction_confirms_the_written_submit_key() {
                 with_catalog_host(
@@ -6888,6 +7177,71 @@ mod tests {
                             .expect("the new interaction confirms the submitted input");
                         assert_eq!(reply.status, SubmissionStatus::Accepted);
                         assert_eq!(stored(host, &reply).stop_cause, None);
+                    },
+                );
+            }
+
+            #[test]
+            fn consumed_held_blocker_exclusion_preserves_an_unrelated_in_progress_barrier() {
+                crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
+                    permission_configured("plain", Value::Null),
+                    encoded(),
+                    |host| {
+                        let blocker = held_blocker_for_stalled_heads(host, true);
+                        let owner = host.fixture.run.owner();
+                        let unrelated = storage::test_support::reserve_input(
+                            &mut host.fixture.conn,
+                            &owner,
+                            &storage::NewInput {
+                                operation_key: "prompt:unrelated-in-progress-barrier".into(),
+                                kind: storage::InputKind::Prompt,
+                                payload_digest: "f".repeat(64),
+                                message_id: None,
+                            },
+                        )
+                        .unwrap();
+                        assert_eq!(unrelated.state, storage::InputState::InProgress);
+                        let head = queued(
+                            host,
+                            request(host, "prompt:behind-two-in-progress-inputs", LITERAL),
+                            "earlier_input",
+                        );
+                        host.coordinator
+                            .set_queued_composer_busy_since(head, &old_wait());
+                        let offers = host.pty.offers.clone();
+                        let written = host.pty.written.clone();
+                        drain_stalled_events(host);
+                        let events: i64 = host.fixture.conn.query_row(
+                            "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
+                            rusqlite::params![host.fixture.run.run_id, head], |row| row.get(0),
+                        ).unwrap();
+                        assert_eq!(
+                            events, 0,
+                            "an unrelated active writer still blocks held-only progress"
+                        );
+                        assert_eq!(row(host, head).state, storage::InputState::Ready);
+                        assert_eq!(row(host, unrelated.input_id), unrelated);
+                        assert_eq!(host.pty.offers, offers);
+                        assert_eq!(host.pty.written, written);
+                        reconcile_stalled_blocker(
+                            host,
+                            unrelated.input_id,
+                            storage::InputDisposition::NotSubmitted,
+                        );
+                        host.coordinator
+                            .set_queued_composer_busy_since(head, &old_wait());
+                        drain_stalled_events(host);
+                        let event = readable_stalled_head(host, head, blocker);
+                        assert_eq!(host.pty.offers, offers);
+                        assert_eq!(host.pty.written, written);
+                        let reconciled = reconcile_stalled_blocker(
+                            host,
+                            blocker,
+                            storage::InputDisposition::AbandonedUncertain,
+                        );
+                        finish_after_exceptional_clear(host, blocker, head);
+                        assert_eq!(row(host, blocker), reconciled);
+                        assert_eq!(readable_stalled_head(host, head, blocker), event);
                     },
                 );
             }
