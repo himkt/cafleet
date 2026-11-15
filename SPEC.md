@@ -3471,7 +3471,7 @@ Build argv from validated stored identities and append `--database-url URL` for 
 
 ##### Input delivery stalled event
 
-After the head waits 3 minutes solely on a held composer (§ Runner-owned deferred delivery), publish one `input_delivery_stalled` event per run/head input. Time blocked by an interaction or before the hold does not count. It creates no interaction and stores no literal:
+After the head waits 3 minutes solely on a held composer (§ Runner-owned deferred delivery), publish one `input_delivery_stalled` event per run/head input. Preserve this signal and the original blocking input after receipt reconciliation, for each subsequent head that waits on the same hold. Time blocked by an interaction or before the hold does not count. It creates no interaction and stores no literal:
 
 | Field | Value |
 |---|---|
@@ -3721,7 +3721,7 @@ A queued request outlives the originating CLI connection and command deadline. E
 | An attempt records `uncertain` on a verified-composer run | Advance past the head and set the held composer with that input as blocker | The uncertain result; later input waits for verified empty composer |
 | An attempt records `uncertain` on another run | Keep the FIFO stopped until reconciliation | The uncertain result |
 
-The held composer is set by a `left_in_composer` input whose `left_stage` is not `escape_only`, and by advancing past an uncertain head on a verified-composer run. A fresh verified empty composer clears it. While set, every head requires verified-empty profile delivery and is exempt from rule 4's `idle_timeout`, including a re-delivery head and ordinary input behind uncertain bytes; new bytes therefore remain queued while CAFleet text is retained. Rule 4 applies again after the hold clears, including for a human draft.
+The held composer is set by a `left_in_composer` input whose `left_stage` is not `escape_only`, and by advancing past an uncertain head on a verified-composer run. Releasing an ordinary writer after exceptional positive or unknown I/O also retains the hold, even when its receipt remains `in_progress`. A fresh verified empty composer clears it. Receipt reconciliation preserves the physical hold and its original blocking input; its recorded disposition describes delivery independently of the remaining native text. While set, every head requires verified-empty profile delivery and is exempt from rule 4's `idle_timeout`, including a re-delivery head and ordinary input behind uncertain bytes; new bytes therefore remain queued while CAFleet text is retained. Rule 4 applies again after the hold clears, including for a human draft.
 
 A head waiting 3 minutes solely on a held composer publishes one `input_delivery_stalled` event (§ Input delivery stalled event). Time behind an interaction or before the held composer was set does not count. The event names the head and blocking input and supplies inspection/recovery instructions. Each head is deduplicated by run/input identity through orderly shutdown and recovery.
 
