@@ -1,6 +1,6 @@
 # Coalesced ID-only inbox notices for `message listen`
 
-**Status**: Approved
+**Status**: In Progress
 **Progress**: 47/48 tasks complete
 **Last Updated**: 2026-11-15
 
