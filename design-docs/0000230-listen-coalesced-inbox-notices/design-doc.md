@@ -1,7 +1,7 @@
 # Coalesced ID-only inbox notices for `message listen`
 
 **Status**: Approved
-**Progress**: 21/48 tasks complete
+**Progress**: 40/48 tasks complete
 **Last Updated**: 2026-11-15
 
 ## Overview
@@ -303,34 +303,34 @@ Replacing the shared install (`mise //:all-install` and `cafleet setup` under th
 
 ### Step 5: Implement the notice and hold in listen
 
-- [ ] Replace `listen_message` with `listen_pending(member_id, &[i64])` in `src/output/json.rs`, key order `event`, `member_id`, `message_ids` <!-- completed: -->
-- [ ] Add the `Delivery` enum and change `ListenOutput::emit` to return `Result<Delivery, CafleetError>`; `DescriptorOutput` returns `Delivered` <!-- completed: -->
-- [ ] Replace `EmittedMessages` with `NoticeHold(Option<Held>)` (reconcile, notice decision, commit) and `HOLD_CEILING = 300 s` <!-- completed: -->
-- [ ] Rewrite the `listen` loop: one notice decision per snapshot, commit only on `Delivered`, sleep `IDLE_INTERVAL` after an emit-nothing or `Refused` snapshot, and assert a non-empty ID list <!-- completed: -->
-- [ ] Assert `Delivery::Delivered` for the ready emit and in `close()` <!-- completed: -->
+- [x] Replace `listen_message` with `listen_pending(member_id, &[i64])` in `src/output/json.rs`, key order `event`, `member_id`, `message_ids` <!-- completed: 2026-11-15T14:53 -->
+- [x] Add the `Delivery` enum and change `ListenOutput::emit` to return `Result<Delivery, CafleetError>`; `DescriptorOutput` returns `Delivered` <!-- completed: 2026-11-15T14:53 -->
+- [x] Replace `EmittedMessages` with `NoticeHold(Option<Held>)` (reconcile, notice decision, commit) and `HOLD_CEILING = 300 s` <!-- completed: 2026-11-15T14:53 -->
+- [x] Rewrite the `listen` loop: one notice decision per snapshot, commit only on `Delivered`, sleep `IDLE_INTERVAL` after an emit-nothing or `Refused` snapshot, and assert a non-empty ID list <!-- completed: 2026-11-15T14:53 -->
+- [x] Assert `Delivery::Delivered` for the ready emit and in `close()` <!-- completed: 2026-11-15T14:53 -->
 
 ### Step 6: Implement Codex forwarding changes
 
-- [ ] `CodexForwarding::emit` for `pending`: one `codex queue` attempt; full-queue refusal → `Refused`; other failures keep their existing errors and `session_exited` paths <!-- completed: -->
-- [ ] Keep the in-output retry for forwarded `closed` records at `full_queue_retry_interval()`, with `FULL_QUEUE_RETRY_INTERVAL` and its `CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS` override, and remove its time limit <!-- completed: -->
-- [ ] Write the stdout `closed` record, and its `session_exited` substitute, under a fresh `work_deadline(Instant::now(), None)` taken after `forward_record` returns <!-- completed: -->
-- [ ] Remove `FORWARDED_TEXT_LIMIT`, the `message_ref` text, `FULL_QUEUE_LIMIT`, `full_queue_limit()` and the `CAFLEET_TEST_CODEX_FULL_QUEUE_LIMIT_SECS` override <!-- completed: -->
+- [x] `CodexForwarding::emit` for `pending`: one `codex queue` attempt; full-queue refusal → `Refused`; other failures keep their existing errors and `session_exited` paths <!-- completed: 2026-11-15T14:53 -->
+- [x] Keep the in-output retry for forwarded `closed` records at `full_queue_retry_interval()`, with `FULL_QUEUE_RETRY_INTERVAL` and its `CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS` override, and remove its time limit <!-- completed: 2026-11-15T14:53 -->
+- [x] Write the stdout `closed` record, and its `session_exited` substitute, under a fresh `work_deadline(Instant::now(), None)` taken after `forward_record` returns <!-- completed: 2026-11-15T14:53 -->
+- [x] Remove `FORWARDED_TEXT_LIMIT`, the `message_ref` text, `FULL_QUEUE_LIMIT`, `full_queue_limit()` and the `CAFLEET_TEST_CODEX_FULL_QUEUE_LIMIT_SECS` override <!-- completed: 2026-11-15T14:53 -->
 
 ### Step 7: Update extension descriptions
 
-- [ ] Replace the `cafleet_listen` description string in the Hermes, OpenCode and pi extensions with the texts in § Extensions and Claude Monitor, leaving all other extension code unchanged <!-- completed: -->
+- [x] Replace the `cafleet_listen` description string in the Hermes, OpenCode and pi extensions with the texts in § Extensions and Claude Monitor, leaving all other extension code unchanged <!-- completed: 2026-11-15T14:54 -->
 
 ### Step 8: Unit tests in src/cli/message.rs
 
-- [ ] Rewrite the scripted-inbox `listen` tests for `pending`: burst coalescing, the hold blocking new notices, release emitting the full pending set, partial ACK keeping the hold, and no notice for an empty set <!-- completed: -->
-- [ ] Add hold-ceiling tests with the test clock: a re-notice at 300 s only with fresh IDs, none without fresh IDs, and the next ceiling measured from the re-notice <!-- completed: -->
-- [ ] Add a restart-replay test: a fresh listener's first notice names every pending ID <!-- completed: -->
-- [ ] Add a scripted-output test that returns `Refused` and then `Delivered`, with the inbox changing between them. Assert that the retried notice is rebuilt from the then-current pending set and that the hold commits only on `Delivered`. Also assert that a released hold whose pending set empties during refusals emits nothing. <!-- completed: -->
-- [ ] Add a test that a scripted output returning `Refused` for `ready` or `closed` panics with `only a pending notice may be refused` <!-- completed: -->
-- [ ] Rewrite the `codex_forwarding` subprocess tests: a forwarded `pending` text, refusal retry rebuilding from the current pending set, abandonment after the pending set is ACKed during refusals, and indefinite `closed` retry ending with `session_exited` when the session ends. The `pending` refusal tests run at the real 1 s loop interval, because `IDLE_INTERVAL` has no test override. <!-- completed: -->
-- [ ] Add a `codex_forwarding` test: a forwarded `closed` refused for longer than 5 s is still written to stdout after acceptance <!-- completed: -->
-- [ ] Delete `a_record_text_above_the_argument_limit_is_forwarded_as_a_message_reference` and `full_queue_refusals_past_the_limit_exit_one_after_a_single_closed_notice_attempt` <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` and fix every failure <!-- completed: -->
+- [x] Rewrite the scripted-inbox `listen` tests for `pending`: burst coalescing, the hold blocking new notices, release emitting the full pending set, partial ACK keeping the hold, and no notice for an empty set <!-- completed: 2026-11-15T14:54 -->
+- [x] Add hold-ceiling tests with the test clock: a re-notice at 300 s only with fresh IDs, none without fresh IDs, and the next ceiling measured from the re-notice <!-- completed: 2026-11-15T14:54 -->
+- [x] Add a restart-replay test: a fresh listener's first notice names every pending ID <!-- completed: 2026-11-15T14:54 -->
+- [x] Add a scripted-output test that returns `Refused` and then `Delivered`, with the inbox changing between them. Assert that the retried notice is rebuilt from the then-current pending set and that the hold commits only on `Delivered`. Also assert that a released hold whose pending set empties during refusals emits nothing. <!-- completed: 2026-11-15T14:54 -->
+- [x] Add a test that a scripted output returning `Refused` for `ready` or `closed` panics with `only a pending notice may be refused` <!-- completed: 2026-11-15T14:54 -->
+- [x] Rewrite the `codex_forwarding` subprocess tests: a forwarded `pending` text, refusal retry rebuilding from the current pending set, abandonment after the pending set is ACKed during refusals, and indefinite `closed` retry ending with `session_exited` when the session ends. The `pending` refusal tests run at the real 1 s loop interval, because `IDLE_INTERVAL` has no test override. <!-- completed: 2026-11-15T14:54 -->
+- [x] Add a `codex_forwarding` test: a forwarded `closed` refused for longer than 5 s is still written to stdout after acceptance <!-- completed: 2026-11-15T14:54 -->
+- [x] Delete `a_record_text_above_the_argument_limit_is_forwarded_as_a_message_reference` and `full_queue_refusals_past_the_limit_exit_one_after_a_single_closed_notice_attempt` <!-- completed: 2026-11-15T14:54 -->
+- [x] Run `mise //:test` and `mise //:lint` and fix every failure <!-- completed: 2026-11-15T14:54 -->
 
 ### Step 9: Live verification on every backend
 

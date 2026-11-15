@@ -34,6 +34,7 @@ use nix::poll::PollTimeout;
 use nix::poll::poll;
 use rusqlite::Connection;
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io;
 use std::io::Write;
@@ -327,8 +328,14 @@ pub(crate) trait ListenIo {
     }
 }
 
+pub(crate) enum Delivery {
+    Delivered,
+    /// The receiver declined the record for now; the listener retries from a fresh snapshot.
+    Refused,
+}
+
 pub(crate) trait ListenOutput {
-    fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<(), CafleetError>;
+    fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<Delivery, CafleetError>;
     /// Whether the owning session ended while a record was being delivered.
     fn session_exited(&self) -> bool {
         false
@@ -351,18 +358,57 @@ impl ListenIo for BrokerListener<'_> {
     }
 }
 
-#[derive(Default)]
-struct EmittedMessages(HashSet<i64>);
+const HOLD_CEILING: Duration = Duration::from_secs(300);
 
-impl EmittedMessages {
-    fn reconcile(&mut self, messages: &[MessageRecord]) {
-        let live: HashSet<i64> = messages.iter().map(|m| m.message_id).collect();
-        self.0.retain(|id| live.contains(id));
+struct Held {
+    ids: BTreeSet<i64>,
+    at: Instant,
+}
+
+/// The IDs of the last delivered notice that are still pending; while any remain, later
+/// arrivals wait for their release or the hold ceiling. Every notice names the full pending
+/// set, so the held IDs are exactly the notified IDs still pending.
+struct NoticeHold(Option<Held>);
+
+impl NoticeHold {
+    fn reconcile(&mut self, pending: &[MessageRecord]) {
+        if let Some(held) = &mut self.0 {
+            let live: HashSet<i64> = pending.iter().map(|m| m.message_id).collect();
+            held.ids.retain(|id| live.contains(id));
+            if held.ids.is_empty() {
+                self.0 = None;
+            }
+        }
     }
 
-    fn contains(&self, message_id: i64) -> bool {
-        self.0.contains(&message_id)
+    fn notice(&self, pending: &[MessageRecord], now: Instant) -> Option<Vec<i64>> {
+        if pending.is_empty() {
+            return None;
+        }
+        let ids = || pending.iter().map(|m| m.message_id).collect();
+        match &self.0 {
+            None => Some(ids()),
+            Some(held) => {
+                let fresh = pending.iter().any(|m| !held.ids.contains(&m.message_id));
+                (fresh && now.duration_since(held.at) >= HOLD_CEILING).then(ids)
+            }
+        }
     }
+
+    fn commit(&mut self, ids: Vec<i64>, now: Instant) {
+        assert!(!ids.is_empty(), "a notice names at least one message");
+        self.0 = Some(Held {
+            ids: ids.into_iter().collect(),
+            at: now,
+        });
+    }
+}
+
+fn assert_delivered(delivery: Delivery) {
+    assert!(
+        matches!(delivery, Delivery::Delivered),
+        "only a pending notice may be refused"
+    );
 }
 
 fn work_deadline(now: Instant, expiry: Option<Instant>) -> Deadline {
@@ -380,10 +426,11 @@ fn close(
     member_id: i64,
     reason: &str,
 ) -> Result<(), CafleetError> {
-    output.emit(
+    assert_delivered(output.emit(
         &crate::output::json::listen_closed(member_id, reason),
         work_deadline(clock.now(), None),
-    )
+    )?);
+    Ok(())
 }
 
 pub(crate) fn listen(
@@ -402,13 +449,13 @@ pub(crate) fn listen(
     let fleet_id = *fleet_id;
     let ready_deadline = work_deadline(clock.now(), expiry);
     ready_deadline.remaining_at(clock.now())?;
-    output.emit(
+    assert_delivered(output.emit(
         &crate::output::json::listen_ready(member_id, fleet_id),
         ready_deadline,
-    )?;
-    let mut emitted = EmittedMessages::default();
+    )?);
+    let mut hold = NoticeHold(None);
     loop {
-        let mut new_messages = 0;
+        let mut delivered = false;
         match snapshot {
             InboxSnapshot::Closed {
                 fleet_id: current,
@@ -430,24 +477,21 @@ pub(crate) fn listen(
                 messages,
             } => {
                 assert_eq!(current, fleet_id, "the listener retains its pinned fleet");
-                emitted.reconcile(&messages);
-                for message in messages {
+                hold.reconcile(&messages);
+                if let Some(ids) = hold.notice(&messages, clock.now()) {
+                    drop(messages);
                     if expired(clock.now(), expiry) {
                         return close(clock, output, member_id, "timeout");
                     }
-                    if emitted.contains(message.message_id) {
-                        continue;
-                    }
-                    let message_id = message.message_id;
-                    let output_deadline = work_deadline(clock.now(), expiry);
-                    let record = crate::output::json::listen_message(&message);
-                    drop(message);
-                    output.emit(&record, output_deadline)?;
+                    let record = crate::output::json::listen_pending(member_id, &ids);
+                    let delivery = output.emit(&record, work_deadline(clock.now(), expiry))?;
                     if output.session_exited() {
                         return close(clock, output, member_id, "session_exited");
                     }
-                    emitted.0.insert(message_id);
-                    new_messages += 1;
+                    if let Delivery::Delivered = delivery {
+                        hold.commit(ids, clock.now());
+                        delivered = true;
+                    }
                 }
             }
         }
@@ -455,7 +499,7 @@ pub(crate) fn listen(
         if expired(now, expiry) {
             return close(clock, output, member_id, "timeout");
         }
-        if new_messages == 0 {
+        if !delivered {
             clock.sleep(expiry.map_or(IDLE_INTERVAL, |expiry| {
                 IDLE_INTERVAL.min(expiry.duration_since(now))
             }));
@@ -536,7 +580,7 @@ impl Write for DescriptorWriter<'_> {
 struct DescriptorOutput<'a>(BorrowedFd<'a>);
 
 impl ListenOutput for DescriptorOutput<'_> {
-    fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<(), CafleetError> {
+    fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<Delivery, CafleetError> {
         write_json_line(
             &mut DescriptorWriter {
                 fd: self.0,
@@ -544,7 +588,8 @@ impl ListenOutput for DescriptorOutput<'_> {
             },
             record,
             deadline,
-        )
+        )?;
+        Ok(Delivery::Delivered)
     }
 }
 
@@ -598,17 +643,10 @@ fn with_nonblocking(
     CafleetError::merge_cleanup(result, cleanup)
 }
 
-const FORWARDED_TEXT_LIMIT: usize = 65_536;
 const CODEX_QUEUE_BUDGET: Duration = Duration::from_secs(10);
 const LISTEN_RECORD_PREFIX: &str = "[cafleet listen record] ";
 const FULL_QUEUE_REFUSAL: &str = "queue cannot contain more than";
 const FULL_QUEUE_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-const FULL_QUEUE_LIMIT: Duration = Duration::from_secs(600);
-
-#[cfg(not(test))]
-fn full_queue_limit() -> Duration {
-    FULL_QUEUE_LIMIT
-}
 
 #[cfg(not(test))]
 fn codex_queue_budget() -> Duration {
@@ -618,14 +656,6 @@ fn codex_queue_budget() -> Duration {
 #[cfg(not(test))]
 fn full_queue_retry_interval() -> Duration {
     FULL_QUEUE_RETRY_INTERVAL
-}
-
-/// A test-built listener takes a shortened limit, in whole seconds, from its environment.
-#[cfg(test)]
-fn full_queue_limit() -> Duration {
-    std::env::var("CAFLEET_TEST_CODEX_FULL_QUEUE_LIMIT_SECS").map_or(FULL_QUEUE_LIMIT, |secs| {
-        Duration::from_secs(secs.parse().expect("the test limit is whole seconds"))
-    })
 }
 
 /// A test-built listener takes a shortened queue budget, in milliseconds, from its environment.
@@ -650,8 +680,8 @@ fn millis_override(name: &str, production: Duration) -> Duration {
     })
 }
 
-/// Streams `member_id`'s inbox into a Codex thread: every record goes through `codex queue`, and
-/// stdout keeps only the `ready` and final `closed` records.
+/// Notifies `member_id`'s pending messages into a Codex thread: every notice and closing record
+/// goes through `codex queue`, and stdout keeps only the `ready` and final `closed` records.
 fn run_forwarder(
     conn: &mut Connection,
     member_id: i64,
@@ -749,33 +779,41 @@ struct CodexForwarding<'a> {
 }
 
 impl ListenOutput for CodexForwarding<'_> {
-    fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<(), CafleetError> {
+    fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<Delivery, CafleetError> {
         match record["event"].as_str() {
             Some("ready") => {
-                self.stdout.emit(record, deadline)?;
+                let delivery = self.stdout.emit(record, deadline)?;
                 self.ready = true;
-                Ok(())
+                Ok(delivery)
             }
-            Some("message") => {
-                self.session_exited =
-                    self.queue.forward_record(record)? == Forwarding::SessionExited;
-                Ok(())
-            }
+            Some("pending") => match self.queue.attempt(record)? {
+                Attempt::Accepted => Ok(Delivery::Delivered),
+                Attempt::FullQueue => Ok(Delivery::Refused),
+                Attempt::SessionExited => {
+                    self.session_exited = true;
+                    Ok(Delivery::Refused)
+                }
+            },
             Some("closed") => {
-                if record["reason"] != "session_exited"
-                    && self.queue.forward_record(record)? == Forwarding::SessionExited
-                {
+                let session_ended = record["reason"] != "session_exited"
+                    && self.queue.forward_closing(record)? == Forwarding::SessionExited;
+                let substitute;
+                let record = if session_ended {
                     let member_id = record["member_id"]
                         .as_i64()
                         .expect("a closed record names its member");
-                    let record = crate::output::json::listen_closed(member_id, "session_exited");
-                    self.stdout.emit(&record, deadline).ok();
-                    return Ok(());
-                }
-                // The final record may target the exited session's PTY; the exit status
-                // reflects reception, never this write.
-                self.stdout.emit(record, deadline).ok();
-                Ok(())
+                    substitute = crate::output::json::listen_closed(member_id, "session_exited");
+                    &substitute
+                } else {
+                    record
+                };
+                // Forwarding may outlast the closing budget, so the write takes a fresh one. The
+                // final record may target the exited session's PTY; the exit status reflects
+                // reception, never this write.
+                self.stdout
+                    .emit(record, work_deadline(Instant::now(), None))
+                    .ok();
+                Ok(Delivery::Delivered)
             }
             other => unreachable!("the listener emits no {other:?} record"),
         }
@@ -793,6 +831,13 @@ enum Forwarding {
     SessionExited,
 }
 
+enum Attempt {
+    Accepted,
+    FullQueue,
+    /// The attempt failed after the pinned session ended, so the record has no reader.
+    SessionExited,
+}
+
 enum QueueFailure {
     Exit(String),
     FullQueue(String),
@@ -806,62 +851,38 @@ struct CodexQueue<'a> {
 }
 
 impl CodexQueue<'_> {
-    /// Queues `record`, retrying it while the thread's queue is full so later records keep
-    /// their order behind it.
-    fn forward_record(&self, record: &Value) -> Result<Forwarding, CafleetError> {
-        let text = Self::forwarded_text(record);
-        let mut full_since = None;
+    fn attempt(&self, record: &Value) -> Result<Attempt, CafleetError> {
+        match self.queue(&format!("{LISTEN_RECORD_PREFIX}{record}")) {
+            Ok(()) => Ok(Attempt::Accepted),
+            Err(QueueFailure::FullQueue(_)) => Ok(Attempt::FullQueue),
+            Err(QueueFailure::Deadline | QueueFailure::Exit(_))
+                if pinned_session_exited(self.session)? =>
+            {
+                Ok(Attempt::SessionExited)
+            }
+            Err(QueueFailure::Deadline) => Err(CafleetError::App(self.deadline_diagnostic())),
+            Err(QueueFailure::Exit(cause)) => Err(CafleetError::App(format!(
+                "failed to forward record to codex thread {}: {cause}",
+                self.thread
+            ))),
+        }
+    }
+
+    /// Queues a closing record, retrying it while the thread's queue is full for as long as
+    /// the pinned session lives.
+    fn forward_closing(&self, record: &Value) -> Result<Forwarding, CafleetError> {
         loop {
-            match self.queue(&text) {
-                Ok(()) => return Ok(Forwarding::Accepted),
-                Err(QueueFailure::FullQueue(_)) => {
-                    let limit = full_queue_limit();
-                    if full_since.get_or_insert_with(Instant::now).elapsed() >= limit {
-                        return Err(CafleetError::App(format!(
-                            "codex thread {} queue stayed full for {} s",
-                            self.thread,
-                            limit.as_secs()
-                        )));
-                    }
+            match self.attempt(record)? {
+                Attempt::Accepted => return Ok(Forwarding::Accepted),
+                Attempt::SessionExited => return Ok(Forwarding::SessionExited),
+                Attempt::FullQueue => {
                     std::thread::sleep(full_queue_retry_interval());
                     if pinned_session_exited(self.session)? {
                         return Ok(Forwarding::SessionExited);
                     }
                 }
-                Err(QueueFailure::Deadline | QueueFailure::Exit(_))
-                    if pinned_session_exited(self.session)? =>
-                {
-                    return Ok(Forwarding::SessionExited);
-                }
-                Err(QueueFailure::Deadline) => {
-                    return Err(CafleetError::App(self.deadline_diagnostic()));
-                }
-                Err(QueueFailure::Exit(cause)) => {
-                    return Err(CafleetError::App(format!(
-                        "failed to forward record to codex thread {}: {cause}",
-                        self.thread
-                    )));
-                }
             }
         }
-    }
-
-    fn forwarded_text(record: &Value) -> String {
-        let mut text = format!("{LISTEN_RECORD_PREFIX}{record}");
-        if text.len() > FORWARDED_TEXT_LIMIT {
-            let message = &record["message"];
-            text = format!(
-                "{LISTEN_RECORD_PREFIX}{} — read it with: cafleet message show {} --json",
-                serde_json::json!({
-                    "event": "message_ref",
-                    "message_id": message["message_id"],
-                    "from_member_id": message["from_member_id"],
-                    "bytes": text.len(),
-                }),
-                message["message_id"],
-            );
-        }
-        text
     }
 
     /// Makes one bounded attempt to tell the session that reception ended, keeping `error`.
