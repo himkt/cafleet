@@ -19,12 +19,12 @@ Run the root Director on a backend whose Director verdict is `yes` and members o
 
 ## Director requirements
 
-A Director backend needs two capabilities, checked independently: goal lifecycle controls, from the backend itself or a CAFleet extension supporting the full goal lifecycle across compaction and restarts, and reception of its broker records. Reception preferably pushes each record into the session, natively or through a CAFleet plugin, starting a turn when idle; a model reading the listener's output ranks far below both ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and their probes). Each bundled backend supplies them as follows, and [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records which requirements its evidence establishes:
+A Director backend needs two capabilities, checked independently: goal lifecycle controls, from the backend itself or a CAFleet extension supporting the full goal lifecycle across compaction and restarts, and reception of notices naming its pending messages. Reception preferably pushes each pending notice into the session, natively or through a CAFleet plugin, starting a turn when idle; a model reading the listener's output ranks far below both ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and their probes). Each bundled backend supplies them as follows, and [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records which requirements its evidence establishes:
 
 | Backend | Director launch | Reception | Goal |
 |---|---|---|---|
 | `claude` | Your usual Claude Code session | The native Monitor tool | Native `/goal` |
-| `codex` | Your usual Codex session | `cafleet message listen --codex-thread` hands each record to the session as a queued turn | Native `/goal` |
+| `codex` | Your usual Codex session | `cafleet message listen --codex-thread` hands each pending notice to the session as a queued turn | Native `/goal` |
 | `opencode` | OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory, with the default agent | The CAFleet plugin's `cafleet_listen` tool | The CAFleet plugin's `/cafleet-goal` command |
 | `hermes` | The TUI client, `hermes chat --tui` | The CAFleet plugin's `cafleet_listen` tool | Native `/goal` |
 | `pi` | Plain `pi` from the project directory | The CAFleet pi extension's `cafleet_listen` tool | The CAFleet pi extension's `/cafleet-goal` command |
@@ -154,7 +154,7 @@ Hermes members use your existing Hermes configuration: your configured default p
 
 `cafleet setup --coding-agent hermes` installs the CAFleet plugin into `plugins/cafleet/` of the Hermes home that `hermes config path` reports, including an active profile's home, with an `executable` file naming the `cafleet` it runs. It then edits the reported file, keeping the rest of it: it adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain `cafleet setup` on a host without `hermes` installs the skills and skips the plugin.
 
-Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so registering a Hermes Director always asks you for its pane ID and server ([Director pane verification](members.md#director-pane-verification)). Each broker record arrives as its own turn, in the broker's delivery order.
+Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so registering a Hermes Director always asks you for its pane ID and server ([Director pane verification](members.md#director-pane-verification)). Each pending notice arrives as its own turn, in the listener's emission order. Reception alone fills the Hermes gateway's input queue only when the Director ACKs notices in more separate rounds within one busy turn than that queue holds; otherwise a full queue comes from other injections.
 
 Under `approvals.mode: smart`, the default, commands Hermes does not consider dangerous run without review and its guardian model reviews the rest; a guardian escalation shows an approval prompt in the member's pane, which the Director answers. CAFleet needs no `approvals.deny` entries.
 

@@ -10,7 +10,7 @@ Reproduce the documented command/option/exit surface, configuration defaults, cu
 
 ## 2. Architecture stance
 
-The core is synchronous. A send previews pending ordinary-member messages within its budget; finite receive owns bounded waits and notification retries. A persistent read-only listener emits pending inbox records through JSONL without pane operations. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools own receiver handles and collect native results; consumed deliveries are explicitly ACKed, and deferred actions and native handles remain in host-owned state. Automatic Director reception sends no Escape, text, Enter or queued composer input.
+The core is synchronous. A send previews pending ordinary-member messages within its budget; finite receive owns bounded waits and notification retries. A persistent read-only listener notifies pending message IDs through JSONL without pane operations. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools own receiver handles and collect native results; consumed deliveries are explicitly ACKed, and deferred actions and native handles remain in host-owned state. Automatic Director reception sends no Escape, text, Enter or queued composer input.
 
 ## 3. Module layout
 
@@ -131,7 +131,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
-| `message listen` | Stream pending inbox records through stdout | `MEMBER_ID` | JSONL only |
+| `message listen` | Notify pending message IDs through stdout | `MEMBER_ID` | JSONL only |
 | `message ack` / `message show` | Consume / read one message | `MESSAGE_ID` | yes |
 
 #### Database selection
@@ -171,7 +171,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `message ack` | `Message acknowledged.` then envelope | `{message}` |
 | `message show` | Envelope | `{message}` |
 | `message wait` | Availability/timeout line and any messages | `{member_id, outcome, messages, notification_errors}` |
-| `message listen` | — | Tagged `ready`, `message`, `closed` JSONL records; no `--json` flag |
+| `message listen` | — | Tagged `ready`, `pending`, `closed` JSONL records; no `--json` flag |
 | `member create` | `ID NAME backend=AGENT pane=PANE window=WINDOW` plus runtime line | Member with placement and runtime |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
 | `member show` | `ID NAME STATUS window=WINDOW` plus wrapped runtime line | Detail including kind, placement and runtime |
@@ -838,7 +838,7 @@ Text is `Messages available for member ID.` plus normal messages, or `Timed out 
 
 `cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
 
-Stream any active member's pending inbox as UTF-8 JSONL. Derive and pin its fleet at startup through the configured database and the ordinary schema-version guard. Require a live root Director with a concrete registered placement, without resolving a multiplexer or checking its executable/physical pane; the subject's own placement may be absent. Unknown/inactive startup subjects use `Member ID not found`, exit 1.
+Notify any active member's pending message IDs as UTF-8 JSONL. Derive and pin its fleet at startup through the configured database and the ordinary schema-version guard. Require a live root Director with a concrete registered placement, without resolving a multiplexer or checking its executable/physical pane; the subject's own placement may be absent. Unknown/inactive startup subjects use `Member ID not found`, exit 1.
 
 | Surface | Contract |
 |---|---|
@@ -846,7 +846,7 @@ Stream any active member's pending inbox as UTF-8 JSONL. Derive and pin its flee
 | Expiry | One monotonic lease from startup; activity leaves expiry unchanged |
 | Output | Compact tagged JSON object plus LF, flushed per record; JSON strings escape controls/newlines |
 | Startup | Validate/pin identity, then emit and flush `ready` before replay |
-| Idle | Check immediately, then wait one second after a snapshot emits zero new IDs, shortened by the lease |
+| Idle | Check immediately, then wait one second after a snapshot that emits nothing or whose notice is refused, shortened by the lease |
 | Completion | Flush `closed`, then exit 0 for expiry or normal subject/fleet closure |
 | Failure | Diagnostic on stderr and exit 1; parser usage errors retain exit 2 |
 
@@ -854,47 +854,77 @@ The command always emits JSONL; text mode and `--json` are absent. Stdout contai
 
 ```json
 {"event":"ready","member_id":1,"fleet_id":1}
-{"event":"message","message":{"message_id":12,"from_member_id":2,"to_member_id":1,"created_at":"2026-10-25T00:50:00.000000+00:00","status_state":"input_required","status_timestamp":"2026-10-25T00:50:00.000000+00:00","text":"complete (doc)\nFull original body"}}
+{"event":"pending","member_id":1,"message_ids":[51,52,53]}
 {"event":"closed","member_id":1,"reason":"timeout"}
 ```
 
-The inner message is exactly the full message record (§6.4 Persisted shape), preserving original text beyond CLI/pane limits. `closed.reason` is `timeout`, `member_inactive`, `fleet_deleted` or, only in forwarding mode (§ Codex forwarding), `session_exited`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
+A `pending` record is an ID-only notice; it carries no message body, and the receiver reads full records through `message poll`, `message show` or `message wait`:
 
-Each short read transaction validates identity and selects every `input_required` record for the pinned subject ordered by `(created_at ASC, message_id ASC)`, committing before output or sleep; a later commit with an earlier timestamp emits when first observed. A process-local set holds emitted IDs still pending in successful snapshots: an ID enters only after its complete record and LF flush succeed, a failed snapshot leaves the set unchanged, and a set member is not emitted again. A snapshot that emits nothing waits one second; one that emits rechecks immediately.
+| Field | Type | Contract |
+|---|---|---|
+| `event` | string | `"pending"` |
+| `member_id` | integer | The listened subject (the pinned recipient) |
+| `message_ids` | array of integers, length ≥ 1 | The full `input_required` set for the subject at the snapshot that produced the notice, in snapshot order `(created_at ASC, message_id ASC)` |
 
-Listening leaves consumption and `notified_at` unchanged and performs no pane retry, lock or dispatch; stamped pending self-sends remain stream-eligible. Concurrent listeners are independent read-only observers with no consumer lock, and a restart replays every pending ID. ACK before a snapshot removes a message, while ACK racing with buffered output may leave a stale pending envelope.
+Key order is `event`, `member_id`, `message_ids`. A `pending` record is never empty: an empty pending set emits nothing. `closed.reason` is `timeout`, `member_inactive`, `fleet_deleted` or, only in forwarding mode (§ Codex forwarding), `session_exited`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
+
+Each short read transaction validates identity and selects every `input_required` record for the pinned subject ordered by `(created_at ASC, message_id ASC)`, committing before output or sleep; a later commit with an earlier timestamp joins the pending set when first observed.
+
+**Notice hold.** The listener's only emission state is the *hold*. A hold exists exactly while some ID named by the last delivered notice is still pending; it carries the *held set* `H` (those IDs, never empty) and `held_at`, the monotonic instant that notice was delivered. The listener starts with no hold. `HOLD_CEILING` is 300 s. On every successful snapshot with ordered pending set `P`, in order:
+
+1. **Reconcile:** `H ← H ∩ P`. ACKed IDs leave the hold; when `H` becomes empty, the hold and its `held_at` end.
+2. **Fresh IDs:** `F ← P \ H`.
+3. **Decide** by the table below.
+4. **Commit:** when the output reports the notice delivered (stdout: the complete record plus LF flushed; forwarding: § Codex forwarding), the hold becomes `H ← P` with `held_at` set to now. A refused notice leaves the hold exactly as step 1 left it, and the next snapshot decides again. An output failure ends the listener with exit 1.
+
+| Condition | Action |
+|---|---|
+| `P` empty | Emit nothing |
+| No hold and `P` non-empty (hold released) | Emit `pending(P)` |
+| A hold, `F` non-empty and at least `HOLD_CEILING` since `held_at` | Emit `pending(P)`, the stall-guard re-notice |
+| Otherwise (a hold with `F` empty, or the ceiling not reached) | Emit nothing |
+
+Every notice carries the full pending set, so every pending ID an earlier notice named is in `H`; that one set separates notified from fresh IDs, and the listener keeps no per-ID history. A failed snapshot leaves the hold unchanged. A snapshot that emits nothing, or whose notice is refused, waits one second (shortened by the lease) before the next snapshot; one whose notice is delivered rechecks immediately.
+
+**Notice bound.** Notices are bounded by receiver activity, not by arrivals: a hold release emits at most one notice, at the first later snapshot whose `P` is non-empty; a hold-ceiling firing emits at most one notice and restarts the ceiling; no other event emits a notice. At most one new notice therefore follows each hold release and each ceiling firing. A receiver that ACKs every held ID in k separate rounds during one long turn while messages keep arriving can queue up to k notices behind that turn, plus one per 300 s of the turn; a notice that arrives after its IDs were handled costs one empty or partial poll. Without a release or a ceiling firing, a burst of any size adds no notice beyond the one outstanding.
+
+| Situation | Behavior |
+|---|---|
+| The receiver handled a notice's IDs through a mid-turn poll before the queued notice arrived | The stale notice costs one empty or partial poll |
+| Listener restart | The new process emits one notice naming every pending ID right after `ready`, including IDs a previous listener notified |
+| The receiver polls and ACKs IDs before any notice names them | Those IDs are never notified |
+| A message, including a runtime event such as `interaction_opened`, arrives while a notice is held | No notice until the held IDs are ACKed or the ceiling re-notice fires; the ID is visible to any `poll` immediately |
+| The receiver leaves a notified ID unACKed and nothing new arrives | No re-notice; the ceiling fires only for fresh IDs |
+
+Listening leaves consumption and `notified_at` unchanged and performs no pane retry, lock or dispatch; stamped pending self-sends remain notice-eligible. Concurrent listeners are independent read-only observers with no consumer lock, each with its own hold.
 
 Each snapshot has a fresh database deadline at most five seconds away, shortened by the remaining lease. Scoped busy waiting and an execution progress handler every 1,000 VM instructions bound lock/SQL work, checking the deadline before/after prepare and execution, before/after decoding each row and before commit. Expiry discards a partial snapshot; interrupted SQL maps to deadline exceeded only when that deadline expired. Every path restores busy handling and removes the listener-owned progress handler, preserving cleanup failures alongside the original cause. These cooperative boundaries cover row collection but give no hard real-time preemption of one allocation or SQL operation.
 
-Output writes one serialized record at a time and applies backpressure before selecting more messages. Nonblocking filesystem/poll output preserves/restores descriptor flags on normal return, resumes partial writes at their byte offset and checks every write/flush, under a five-second deadline shortened by the lease. Broken pipe, write-zero, flush failure or output-deadline exhaustion exits 1 visibly, even after partial records; normal lease expiry between records writes `closed` with a separate bounded final write. Complete records survive a later error; an incomplete final line stays unconsumed and recovers through broker replay. Listener memory holds only the current snapshot, one record and the pending emitted IDs.
+Output writes one serialized record at a time and applies backpressure before selecting more messages. Nonblocking filesystem/poll output preserves/restores descriptor flags on normal return, resumes partial writes at their byte offset and checks every write/flush, under a five-second deadline shortened by the lease. Broken pipe, write-zero, flush failure or output-deadline exhaustion exits 1 visibly, even after partial records; normal lease expiry between records writes `closed` with a separate bounded final write. Complete records survive a later error; an incomplete final line stays unconsumed and recovers through broker replay. Listener memory holds only the current snapshot, one record and the held IDs.
 
 Database contention retries stay inside the snapshot budget; exhaustion or another fatal error ends the stream. The listener keeps its connection/PID across healthy events and ordinary signal behavior outside pane termination deferral; host cancellation may end it without `closed`. Native owners retain one handle, reconcile durable state after failure and establish old-process termination before replacement. Installed backend instructions own concrete native tool recipes and their evidence limits.
 
 ###### Codex forwarding
 
-`--codex-thread THREAD` selects forwarding mode, which keeps the record, ordering, replay, lease and idle contracts and changes the output:
+`--codex-thread THREAD` selects forwarding mode, which keeps the record, notice-hold, replay, lease and idle contracts and changes the output:
 
 - **Stdout** carries only the `ready` record and the final `closed` record, so an unread PTY never stalls the five-second output deadline. Writing that `closed` record, with any reason including `session_exited`, is the listener's last action before exit; a write failure leaves the exit status unchanged.
-- **Forwarded events.** Each `message` record, and each `closed` record whose reason is `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in emission order. `ready` and `closed` `session_exited` are never forwarded.
+- **Forwarded events.** Each `pending` notice, and each `closed` record whose reason is `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in emission order. `ready` and `closed` `session_exited` are never forwarded.
 - **Forwarding command:** `codex queue --thread THREAD --message <text>`, where the text is `[cafleet listen record] <compact record JSON>`.
-- **Large records.** When that text exceeds 65,536 bytes, the forwarded text is the reference below instead:
-
-  ```
-  [cafleet listen record] {"event":"message_ref","message_id":<id>,"from_member_id":<id>,"bytes":<n>} — read it with: cafleet message show <id> --json
-  ```
-
-  `bytes` is the byte length of the text the reference replaces.
 - **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded.
-- **Full queue.** Codex refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure: the listener keeps the same record, waits 1 s, checks the pinned session (§ Liveness) and retries it. Later records wait behind it, so emission order holds and no record is dropped. The pinned session's exit during the wait ends the listener with `session_exited`.
-- **Full-queue limit.** When one record meets full-queue refusals for 600 s without being accepted, the listener fails.
+- **Full-queue refusal.** Codex refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure.
+- **Refused notice.** A `pending` notice gets one `codex queue` attempt. Exit 0 delivers it and commits the hold; a full-queue refusal refuses it immediately, leaving the hold as reconcile left it (§ `message listen`). The listener then waits one second, checks the pinned session (§ Liveness) and takes a fresh snapshot, so the retry is rebuilt from the then-current pending set, and a notice whose set has become empty, or whose re-notice no longer has fresh IDs, is abandoned. The pinned session's exit ends the listener with `session_exited`.
+- **Refused `closed` record.** A forwarded `closed` record is retried in place on every full-queue refusal after 1 s, checking the pinned session before each retry, with no time limit; the pinned session's exit ends the listener with `session_exited`. After acceptance the record is written to stdout under a fresh five-second output deadline taken when forwarding returns, so a refusal of any length still leaves the stdout `closed` record. The `session_exited` record written after a refused closing record meets the pinned session's exit uses the same fresh deadline.
+- **Argument size.** A notice's forwarded text grows by about one ID's digits plus a comma per pending message and is bounded only by the platform's single-argument limit (131,072 bytes on Linux, roughly 16,000 seven-digit IDs). A spawn failure such as `E2BIG` takes the `failed to forward record to codex thread <THREAD>: could not start codex: …` row below.
 - **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of §6.9 Native executable resolution.
 
 | Condition | Behavior |
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex session ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
+| Full-queue refusal of a `pending` notice | Not an error: retried from a fresh snapshot after 1 s while the pinned session lives |
+| Full-queue refusal of a forwarded `closed` record | Not an error: the same record is retried every 1 s while the pinned session lives |
 | `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
-| Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice, exit 1 |
 | `codex queue` exceeds 10 s while the pinned session is alive | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
 | Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, closed notice, exit 1 |
 | The pinned Codex process exits, including when the listener checks it first after a `codex queue` exits non-zero or exceeds 10 s | stdout `closed` with reason `session_exited`, exit 0; no diagnostic, no closed notice and nothing forwarded |
@@ -1321,7 +1351,7 @@ The ordered public record is:
 
 #### Rendered shape
 
-§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records; show/ACK wrap one record as `message`; send adds `notification_sent`; wait returns full poll records inside its finite receive result; listen emits the full record inside a tagged `message` envelope, with separate `ready`/`closed` lifecycle records and explicit ACK consumption. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
+§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records; show/ACK wrap one record as `message`; send adds `notification_sent`; wait returns full poll records inside its finite receive result; listen carries message IDs, not the full record, in tagged `pending` notices, with separate `ready`/`closed` lifecycle records and explicit ACK consumption. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
 
 ##### Text-mode projection
 
@@ -1821,16 +1851,36 @@ A backend records the highest tier its evidence establishes, and tier 3 only tog
 - **Tier 2 negative evidence:** no extension surface (plugins, hooks, extensions, MCP notifications, any client/server protocol an extension can call) lets an extension do the same, checked in the native source at that version's tag or the official extension documentation.
 - **Recording:** each source is named with its version, plus `checked YYYY-MM-DD`.
 
-**Subscribe probe** (tier 1 or 2, on an installed native version). The candidate Director starts the receiver through its tier's mechanism while another member sends broker records:
+Both probes are stated in message-ID terms. A probe message ID is *observed in a notice* when a `pending` record (§6.3 `message listen`) in the listener's output, as delivered through the mechanism under test, names it.
 
-1. One record while the session is idle: a new turn starts without user input and consumes it.
-2. Two records while the session runs a foreground command of at least 60 s: the command is not interrupted, and each record arrives no later than the end of that turn, without input.
-3. Three records back to back: all arrive, in order.
-4. The receiver ends when its owning session ends.
+| Probe | Pass condition | Invalidation rule |
+|---|---|---|
+| Subscribe | Each probe message ID is first observed in a notice; the Director then consumes it through the poll that notice prompts | A `poll`, `wait` or `show` run without a preceding notice turn that first reveals a probe ID invalidates the run; a notice-prompted `poll` is part of consumption |
+| Stream | Each probe message ID is first observed in a notice in the running listener's output and is ACKed while the same listener process still runs | Any `poll`, `wait` or `show` invalidates the run; the Director ACKs IDs directly from the notice |
 
-**Stream probe** (tier 3, on an installed native version). The candidate Director starts `cafleet message listen` through its native background-execution facility and continues unrelated work in the same session. The facility must deliver each record the running listener emits without waiting for the process to exit, at the latest at the session's next turn boundary, whether the host pushes records into the session or the model reads the running process's accumulated output on demand. The probe passes when broker records another member sends at separate times during that work are each first observed in the listener's output through that facility and consumed without user input while the same listener process still runs. Output that reaches the session only when the process exits, including a completion notification for a finite receive, fails the probe. Mid-turn delivery and waking an idle session are not required.
+**Subscribe probe** (tier 1 or 2, on an installed native version). The candidate Director starts the receiver through its tier's mechanism while another member sends broker messages. After it consumes the probe member's ready, the Director runs under this instruction:
 
-A record discovered through a foreground `poll`, `wait` or `show` invalidates a subscribe or stream probe run. Each run records the mechanism, native version and check date.
+> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, run `cafleet message poll <director-id> --json`, then ACK every listed message except one whose body is exactly `hold-probe keep`; run no other `poll`, `wait` or `show`. When I tell you to release the hold, ACK the `hold-probe keep` message.
+
+| Step | Procedure | Pass condition |
+|---|---|---|
+| Idle | Send one message to the idle Director | A notice naming it starts a turn without input; the Director polls and ACKs it |
+| Busy | During a foreground command of at least 60 s, send two messages | The command is not interrupted; a notice arrives no later than the end of that turn, and the poll it prompts returns both IDs |
+| Burst | During a foreground command of at least 60 s and under 300 s, send 150 messages back to back | At most two notice turns arrive for the burst, and every ID is consumed through a notice-prompted poll. On Codex the forwarder stays alive and no `codex queue` refusal occurs. |
+| Hold ceiling | With the Director idle, send `hold-probe keep` and record t1, the time its notice turn starts. After that turn ends and 60 s have passed since t1, send `hold-probe 2`. | No notice arrives before t1 + 285 s. One notice naming both IDs arrives between t1 + 285 s and t1 + 315 s. The Director ACKs `hold-probe 2` and, when told, `hold-probe keep`. |
+| Owner exit | End the Director session | No `cafleet message listen` survives (`ps`) |
+
+t1 observes the held notice's delivery from the session side. The listener sets `held_at` when delivery succeeds, which precedes t1 by the receiver latency, and checks the ceiling once per one-second idle interval; the ±15 s tolerance around t1 + 300 s covers both.
+
+**Stream probe** (tier 3, on an installed native version). The candidate Director starts `cafleet message listen` through its native background-execution facility and continues unrelated work in the same session under the task prompt "Learn about broker messages only from that listener's output; run no `cafleet message poll`, `wait` or `show`. When a `pending` record appears there, ACK each message ID it names with `cafleet message ack <message-id>` and continue." The facility must deliver each record the running listener emits without waiting for the process to exit, at the latest at the session's next turn boundary, whether the host pushes records into the session or the model reads the running process's accumulated output on demand. Another member sends probe messages at separate times during that work. Output that reaches the session only when the process exits, including a completion notification for a finite receive, does not count as observation. Mid-turn delivery and waking an idle session are not required.
+
+| Stream-probe run | Classification |
+|---|---|
+| A probe ID first observed outside a notice, or any `poll`, `wait` or `show` | Invalid |
+| Every probe ID first observed in a notice and ACKed before the listener exited | Pass |
+| A probe ID first observed only after the listener exited, or never observed in a notice | Fail |
+
+Each run records the mechanism, native version and check date.
 
 ##### Goal requirement
 
@@ -2261,13 +2311,13 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 
 #### Host evidence and native-input authorization
 
-**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Director inbox records arrive through one native Monitor task (§ Role eligibility); the installed CAFleet skill's [Claude native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#claude-native-director-reception) owns discovery, invocation, renewal and evidence limits, and manual finite reception remains available when Monitor is unavailable or denied.
+**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Director pending notices arrive through one native Monitor task (§ Role eligibility); the installed CAFleet skill's [Claude native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#claude-native-director-reception) owns discovery, invocation, renewal and evidence limits, and manual finite reception remains available when Monitor is unavailable or denied.
 
 Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
 CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, which receives no automatic pane input, or a detected one in a runner-managed member's pane, where input queues while the interaction is open (§6.9 Delivery method and interaction priority). A runner-managed member's Escape-first input (delivery fallback for previews, `member prompt` and `member exec`) can cancel an open prompt the runner did not detect, and Claude Code then reports a user rejection before the input arrives. A rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause is delivery-caused: the member re-asks the question or re-issues the call. A profile-delivered preview ends with the resume clause only and sends no Escape, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch.
 
-**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. Director reception is `cafleet message listen <director-id> --codex-thread "$CODEX_THREAD_ID"`, started once through native `exec_command` (§6.3 Codex forwarding); Codex injects `CODEX_THREAD_ID` into every exec shell. Each forwarded record arrives as a queued user turn: it starts a turn on an idle session, waits for the end of a running turn otherwise, and interleaves with native goal continuation turns at turn boundaries. Where the sandbox cannot start the forwarder, for example when bwrap cannot create namespaces, it runs on the escalated path under the host's approval rules. The installed CAFleet skill's [Codex native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#codex-native-director-reception) owns the tool call, consumption and recovery.
+**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. Director reception is `cafleet message listen <director-id> --codex-thread "$CODEX_THREAD_ID"`, started once through native `exec_command` (§6.3 Codex forwarding); Codex injects `CODEX_THREAD_ID` into every exec shell. Each forwarded `pending` notice arrives as a queued user turn: it starts a turn on an idle session, waits for the end of a running turn otherwise, and interleaves with native goal continuation turns at turn boundaries. Where the sandbox cannot start the forwarder, for example when bwrap cannot create namespaces, it runs on the escalated path under the host's approval rules. The installed CAFleet skill's [Codex native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#codex-native-director-reception) owns the tool call, consumption and recovery.
 
 Codex 0.167.0 and later start or reuse the shared `codex app-server` daemon (openai/codex#58940 retired `daemon_auto_start`), and Director reception through `codex queue` needs that daemon, so a Codex Director cannot launch with `--no-daemon`. Its tool commands then run under the daemon, and its `fleet create` without `--pane` usually refuses at the shared-server check (§6.3 Caller pane verification).
 
@@ -2275,13 +2325,21 @@ A native shell probe displayed the actual command, exit code, duration and outpu
 
 **opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication; the Director coordinates next steps and routed native shell commands and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`; its effective permission boundary and any second member-tool permission check remain unestablished, so the preset's member-tool permissions and the Director's command authorization stay in force. An OpenCode Director runs OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory with the default agent, so plugins load in its private server with the launcher's environment; the shared background service passes no client environment to plugins and is not a supported Director launch. The `cafleet` plugin supplies reception and the goal extension (§ Director extensions). OpenCode 2.2.0 gives every agent a base policy whose first rule allows every action, so the plugin's `cafleet` action resolves to allow on a default Director; a configuration whose broad `ask` or `deny` rule overrides that base allow restores it with `{ "action": "cafleet", "resource": "*", "effect": "allow" }`.
 
-**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected through the gateway run without rendering in the classic CLI; members keep `--cli`. The Director receives inbox records through the `cafleet` plugin's `cafleet_listen` tool, which runs the listener inside the per-home gateway (§ Director extensions): each record becomes its own turn, and a record injected during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. A Hermes Director's terminal tools run in the per-home gateway (`hermes gateway run`), so its `fleet create` without `--pane` always refuses at the shared-server check (§6.3 Caller pane verification). CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
+**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected through the gateway run without rendering in the classic CLI; members keep `--cli`. The Director receives pending notices through the `cafleet` plugin's `cafleet_listen` tool, which runs the listener inside the per-home gateway (§ Director extensions): each notice becomes its own turn, and a notice injected during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. A Hermes Director's terminal tools run in the per-home gateway (`hermes gateway run`), so its `fleet create` without `--pane` always refuses at the shared-server check (§6.3 Caller pane verification). CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
 
 **pi**: pi 1.5.0 has no native goal, no native facility that pushes external text into a session and no per-tool approval; the CAFleet pi extension supplies reception, the goal extension and the `cafleet_ask` decision surface (§ Director extensions), and the member gate (§ pi member gate). A pi Director runs plain `pi` (the fullscreen TUI) from the project directory, so the extension auto-loads; pi's bash tool runs under the pane's `pi` process, so `fleet create` verifies and registers the pane without `--pane`. A pi Director runs its own tool calls without approval, and the member gate is inert in its session. The installed CAFleet skill's [pi native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#pi-native-director-reception) owns the tool calls, consumption and recovery. Leading-`!` input runs a shell command as `user_bash` outside the member gate, stores its output for the next prompt and starts no turn, so after `member exec` the Director sends an explicit continuation; the Director authorizes each routed command under its host rules. Enter while a member works queues the text as a steering message.
 
 #### Director extensions
 
 The extensions §6.3 Asset installation installs supply Director reception for `hermes`, `opencode` and `pi`, and the `opencode` and `pi` goal extensions. Each runs only the `cafleet` executable its executable record names, never a path from a tool argument, as `<recorded cafleet> message listen <director_id>` without `--timeout`, adding `--database-url <url>` when the tool received a `database_url` (§6.3 Database selection). The plugins replace no receiver automatically; every replacement belongs to the Director's receiver recovery.
+
+**Pass-through.** Each receiver delivers every listener stdout line verbatim as `[cafleet listen record] <line>`, so each `pending` notice (§6.3 `message listen`) reaches the session as one delivery; the receivers inspect only the `{"event":"closed"` prefix, which ends the receiver. Each `cafleet_listen` tool carries this model-facing description:
+
+| Extension | `cafleet_listen` description |
+|---|---|
+| Hermes plugin | `Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' carries a pending notice naming unACKed message IDs; run 'cafleet message poll <director_id> --json' and ACK each consumed message.` |
+| OpenCode plugin | The Hermes text |
+| pi extension | The Hermes text with `each turn beginning` replaced by `each message beginning` |
 
 **Director verification.** `message listen` accepts any active member, so each Director-only tool verifies its `director_id` itself: it runs `<recorded cafleet> member show <director_id> --json`, adding `--database-url <url>` when given, and requires exit 0 with `"kind": "director"`; any other outcome returns the tool's member-refusal error with the CLI's stderr appended. Like the Director-only command guard (§6.3 Director-only command guard), the check is cooperative: it stops a member that passes its own ID.
 
@@ -2299,6 +2357,18 @@ The extensions §6.3 Asset installation installs supply Director reception for `
 
 A rejected `synthetic` call kills the child. A Hermes injection that raises or exceeds its 10 s deadline, or one record refused for 600 s, kills the child, logs the cause and attempts the closed notice below once through ordered injection. A child that exits unexpectedly, without a `closed` record and without the plugin stopping it, queues `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session. A Hermes plugin unload for a still-attached session injects `[cafleet listen closed] the plugin unloaded: exit <code>: <last stderr line>` once through ordered injection after the child exits; a draining gateway refuses it, without retry. A child the plugin stops through session finalize, client detach, plugin cleanup or a Hermes unload for a detached session queues no closed notice, and each receiver attempts at most one. The OpenCode plugin decides the notice on the child's `close` event, after its stdio drains, so a final `closed` record is read first; a child `error` event, such as an asynchronous spawn failure, removes the receiver and queues the notice. An OpenCode child exiting by `SIGTERM` is an intentional stop by plugin cleanup or host shutdown (which can signal the child before cleanup runs) and queues no closed notice; a non-zero exit code or any other signal queues it. A `closed` record is delivered as a record and ends the receiver.
 
+**Downstream delivery queues.** Every Director receiver, native or extension, hands notices to a host queue that drains at turn boundaries. Installed upstream source, checked 2026-11-15, records these limits:
+
+| Backend | Queue | Version | Cap and refusal | Drain |
+|---|---|---|---|---|
+| `claude` | Monitor stdout line events, each queued as a task notification | 2.1.316 | No cap. A token bucket of 10 events, refilled one per 2 s, suppresses (drops) events above that rate and later reports `[N events suppressed — …]`; suppression sustained past 30 s stops the monitor. | Lines within 200 ms join one event |
+| `codex` | Thread submission queue (`codex queue`) | 0.165.0 | 100 submissions; a further submission exits non-zero with `queue cannot contain more than 100 submissions` | One submission per turn boundary; no list or retract |
+| `opencode` | Session inbox rows from `session.synthetic` with `delivery: "queue"` | 2.2.5 | No cap and no refusal; each call inserts one persisted inbox row | One `queue` row per turn boundary |
+| `hermes` | Gateway busy queue for ordered injection | 2026.9.24 | 32 pending rows; a further injection returns `False` (§ Ordered injection) | One row per turn |
+| `pi` | In-memory follow-up queue from `deliverAs: "followUp"` | 1.5.0 | No cap and no refusal | One message per agent stop under the default `followUpMode` `one-at-a-time` |
+
+Claude Code Monitor also truncates each line at 500 characters and each event at 3,000. Its official documentation states no batching window, rate limit or truncation; those values come from the installed source. Under the §6.3 `message listen` notice bound, a notice stays far below the Monitor rate. A `pending` line longer than 500 characters (roughly 100 or more three-digit IDs) reaches the session truncated, and the poll it prompts still returns every pending record.
+
 **Hermes plugin.** The plugin declares tool `cafleet_listen` and hook `on_session_finalize`. It depends on three private Hermes core seams outside the plugin API, which the tool resolves on every call:
 
 | Seam | Use |
@@ -2309,7 +2379,7 @@ A rejected `synthetic` call kills the child. A Hermes injection that raises or e
 
 `hermes plugins validate` flags the first two seams' imports as private core imports. A failed import, lookup or attachment read returns `{"ok": false, "error": "<seam>: <exception>"}` and starts no receiver; an empty session key returns `{"ok": false, "error": "cafleet_listen must be called from a session turn"}`. Ordered injection bypasses the consent check of `ctx.inject_message`, so before spawning the child the tool requires `ctx._gateway_injection_allowed()`, which holds when `plugins.entries.cafleet.allow_gateway_injection` is `true` (§6.3 Hermes plugin enablement), and otherwise returns `{"ok": false, "error": "plugins.entries.cafleet.allow_gateway_injection is not true; run 'cafleet setup --coding-agent hermes'"}`; it then verifies `director_id`. The child selects its database only through `--database-url`, so an omitted `database_url` selects the default database exactly as in the Director's shell. The plugin decodes child output as UTF-8, replacing invalid bytes, and treats a stdout read failure as the end of output. A watchdog checks every 5 s that the session has at least one subscriber; a read error kills the child. `on_session_finalize` resolves the finalized session's route through the session authority and stops the receiver with that session key, so a session id rotated by context compression still matches. The unload callback stops every receiver and confirms its exit, so plugin re-discovery leaves no untracked receiver; re-discovery leaves the gateway and its sessions running, so the unload closed notice, sent outside the callback after the receiver's delivery ends, tells a still-attached Director to re-arm reception.
 
-**Ordered injection.** `ctx.inject_message` returns `True` once it schedules its dispatch coroutine on the gateway loop, before the record is committed, so consecutive calls can commit out of order. The plugin instead submits each record's `_dispatch_plugin_message_injection(...)` coroutine to the runner's `_gateway_loop` with `asyncio.run_coroutine_threadsafe` and waits up to 10 s for its result before reading the next line. A `False` result is a refused injection, treated as transient (for example the session authority's 32-row admission queue cap, a draining gateway or a briefly detached client): the plugin keeps the record, waits 1 s and retries it, and later records wait behind it. The retry checks no attachment, so a detached session keeps the 30 s detach grace and the watchdog alone ends its receiver.
+**Ordered injection.** `ctx.inject_message` returns `True` once it schedules its dispatch coroutine on the gateway loop, before the record is committed, so consecutive calls can commit out of order. The plugin instead submits each record's `_dispatch_plugin_message_injection(...)` coroutine to the runner's `_gateway_loop` with `asyncio.run_coroutine_threadsafe` and waits up to 10 s for its result before reading the next line. A `False` result is a refused injection, treated as transient (for example the session authority's 32-row admission queue cap, a draining gateway or a briefly detached client): the plugin keeps the record, waits 1 s and retries it, and later records wait behind it. The retry checks no attachment, so a detached session keeps the 30 s detach grace and the watchdog alone ends its receiver. Under the §6.3 `message listen` notice bound, listen alone fills the 32-row queue only when the Director completes more than 32 hold releases or ceiling firings within one busy turn; otherwise the refusal path is reached when other injections fill the queue.
 
 **OpenCode plugin.** One V2 plugin file defines `Plugin.define({ id: "cafleet", setup })`. Each tool calls `ctx.permission.assert({ sessionID, agent, source, action: "cafleet", resources: [<tool name>] })` before any work, then verifies its `director_id` (Director verification above). The `context` hook registers in every session; it and the event loop act only on a session holding a goal stored by the operator-typed `/cafleet-goal` command or by a goal tool whose `director_id` verified. `cafleet_listen` returns `ok: false` when the spawned child has no pid. Its goal extension stores `{objective, status, generation, continuations, idle_streak}` under storage key `goal/<sessionID>` and mirrors it in the session instruction entry `cafleet-goal`, which first appears in 2.2.0:
 
@@ -3935,7 +4005,7 @@ Measurements establish submitted native input separately from model consumption,
 
 Live acceptance records carry the source/installed CAFleet version, native CLI version, native configuration/mode, detector and answer profiles, Director mode/provenance, attributed decision/evidence references, request identity/token, receipt/stage, multiplexer, terminal size, cwd and redacted evidence. They include a permitted operation, an ordinary command failure after allow, an actual permission refusal, an approval that blocks the model, both supported answer routes and observed continuation. The exercised cases cover stale tokens/epochs/events, same/different operation keys, conflicting decisions, partial writes/lost replies, redraw, fragmented ANSI/UTF-8, primary/alternate screens, resize, title-only prompts, question/trust/update screens, transcript quotes, identical requests, concurrent human/output/input, slow display, database locks, outbox pressure, startup compensation, runner hard kill and deletion. Unavailable native modes or unobserved cases remain explicit coverage limits and cannot pass that profile's release gate.
 
-Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and another two seconds from commit to receiver output.
+Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the committed ID reaches receiver output in the next notice.
 
 - Exact child argv for the selected native policy, with native/managed restrictions and sandbox boundaries preserved.
 - Equal run IDs across sibling databases, and replacement at an unchanged path.

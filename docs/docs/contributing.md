@@ -87,16 +87,21 @@ Every claimed detector/composer/answer capability requires CAFleet-owned positiv
 
 ### Run a CAFleet subscribe probe
 
-The subscribe probe establishes a tier-1 (native) or tier-2 (extension) subscribe listen as SPEC Role requirements defines it. The candidate Director starts its receiver through the mechanism under test, such as a native tool or a CAFleet plugin tool, and a probe member sends the records.
+The subscribe probe establishes a tier-1 (native) or tier-2 (extension) subscribe listen as SPEC Role requirements defines it. The candidate Director starts its receiver through the mechanism under test, such as a native tool or a CAFleet plugin tool, and a probe member sends the messages. A probe message ID is *observed in a notice* when a `pending` record the receiver delivers names it.
 
-1. Prepare the isolated database, Director session and probe member as in steps 1–3 of the stream probe below, and start the receiver after the Director consumes the ready.
-2. **Idle.** With the Director idle, send one record. A new turn must start without user input and consume it.
-3. **Busy.** Ask the Director to run a foreground command of at least 60 s, such as `sleep 90`, and send two records while it runs. The command must not be interrupted, and each record must reach the session no later than the end of that turn, without input.
-4. **Burst.** Send three records back to back. All three must arrive, in order.
-5. **Owner exit.** End the Director session the receiver belongs to, and confirm with `ps` that no `cafleet message listen` survives it.
-6. Record the backend, native version, mechanism, message IDs, send timestamps, each record's delivery turn and timestamp, ACK timestamps and the receiver's exit in the design doc's evidence record.
+1. Prepare the isolated database, Director session and probe member as in steps 1–3 of the stream probe below, and start the receiver after the Director consumes the ready. Then give the Director the instruction below the steps.
+2. **Idle.** With the Director idle, send one message. A notice naming it must start a turn without user input, and the Director polls and ACKs it.
+3. **Busy.** Ask the Director to run a foreground command of at least 60 s, such as `sleep 90`, and send two messages while it runs. The command must not be interrupted; a notice must arrive no later than the end of that turn, and the poll it prompts must return both IDs.
+4. **Burst.** Ask the Director to run a foreground command of at least 60 s and under 300 s, and send 150 messages back to back while it runs. At most two notice turns may arrive for the burst, and every ID must be consumed through a notice-prompted poll. On Codex the forwarder must stay alive with no `codex queue` refusal.
+5. **Hold ceiling.** With the Director idle, send `hold-probe keep` and record t1, the time its notice turn starts. After that turn ends and 60 s have passed since t1, send `hold-probe 2`. No notice may arrive before t1 + 285 s, and one notice naming both IDs must arrive between t1 + 285 s and t1 + 315 s. The Director ACKs `hold-probe 2`; then tell it to release the hold so it ACKs `hold-probe keep`.
+6. **Owner exit.** End the Director session the receiver belongs to, and confirm with `ps` that no `cafleet message listen` survives it.
+7. Record the backend, native version, mechanism, message IDs, send timestamps, each notice's delivery turn, timestamp and named IDs, ACK timestamps and the receiver's exit in the design doc's evidence record.
 
-A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Probe each mechanism separately; the backend's Director reception recipe owns the concrete tool calls.
+The Director instruction for step 1:
+
+> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, run `cafleet message poll <director-id> --json`, then ACK every listed message except one whose body is exactly `hold-probe keep`; run no other `poll`, `wait` or `show`. When I tell you to release the hold, ACK the `hold-probe keep` message.
+
+A `poll`, `wait` or `show` run without a preceding notice turn that first reveals a probe ID invalidates the run; the poll a notice prompts is part of consumption. The ±15 s hold-ceiling tolerance covers the receiver latency between the listener's delivery and t1 and the listener's one-second check interval. Probe each mechanism separately; the backend's Director reception recipe owns the concrete tool calls.
 
 ### Run a CAFleet stream probe
 
@@ -106,20 +111,20 @@ The stream probe establishes a tier-3 built-in compromise listen as SPEC Role re
 2. In a tmux pane, start the candidate Director session and register it with `cafleet fleet create --name <name> --coding-agent <backend>`, adding the pane ID and server it asks for when it cannot confirm the candidate's pane ([Director pane verification](concepts/members.md#director-pane-verification)).
 3. Have the Director spawn one probe member on any Member-eligible backend, with a spawn prompt that carries the `{database_url}` placeholder, sends `ready` and then ends its turn without further broker traffic; its ID is the sender identity.
 4. After the Director consumes the ready, have it start `cafleet message listen <director-id> --timeout 300` through the mechanism under test, then send the task prompt below the steps.
-5. From a separate shell, send three probe records at 20 s, 60 s and 120 s after the task prompt: `cafleet message send --from-member-id <probe-id> --to-member-id <director-id> "stream-probe 1"`, then `2` and `3`. Record each printed message ID and timestamp.
-6. Classify the run by the run classification below the steps. Capture the Director pane and retain the session records that show each record's first observation.
-7. Record the backend, native version, mechanism (tool call and flags), message IDs, send timestamps, each record's first observation (the tool result or injected event carrying its JSONL line, and its timestamp), ACK timestamps, the listener's exit timestamp, the task-turn end timestamp and the classification in the design doc's evidence record.
+5. From a separate shell, send three probe messages at 20 s, 60 s and 120 s after the task prompt: `cafleet message send --from-member-id <probe-id> --to-member-id <director-id> "stream-probe 1"`, then `2` and `3`. Record each printed message ID and timestamp.
+6. Classify the run by the run classification below the steps. Capture the Director pane and retain the session records that show each probe ID's first observation.
+7. Record the backend, native version, mechanism (tool call and flags), message IDs, send timestamps, each probe ID's first observation (the tool result or injected event carrying the `pending` line that names it, and its timestamp), ACK timestamps, the listener's exit timestamp, the task-turn end timestamp and the classification in the design doc's evidence record.
 
 The task prompt for step 4 sets `<mechanism instruction>` to "between steps, read your background listener with `<tool call>`" for a pull mechanism and "consume each record your background listener delivers" for a push mechanism:
 
-> Summarize the files `<file 1>`, `<file 2>`, … one at a time. `<mechanism instruction>`. Learn about broker records only from that listener's output; run no `cafleet message poll`, `wait` or `show`. When a `message` record appears there, ACK its message ID with `cafleet message ack <message-id>` and continue. Keep working until you have ACKed `stream-probe 3` or 240 seconds have passed since this prompt, then end your turn.
+> Summarize the files `<file 1>`, `<file 2>`, … one at a time. `<mechanism instruction>`. Learn about broker messages only from that listener's output; run no `cafleet message poll`, `wait` or `show`. When a `pending` record appears there, ACK each message ID it names with `cafleet message ack <message-id>` and continue. Keep working until you have ACKed `stream-probe 3` or 240 seconds have passed since this prompt, then end your turn.
 
 Classify each run as follows; the 240-second turn bound leaves 60 seconds of the 300-second lease for turn-boundary delivery.
 
 | Classification | Condition |
 |---|---|
-| Invalid | The task turn ended before 240 s without the Director having ACKed `stream-probe 3`; the task turn was still running when the listener exited; a record was first observed through a foreground `poll`, `wait` or `show`; every record was first observed in the listener's output while it ran but an ACK landed at or after the listener exited; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
-| Pass | A valid run in which every record was first observed in the listener's output delivered through the mechanism under test and ACKed before the listener exited. |
-| Fail | A valid run in which any record was first observed only after the listener exited, or was never observed in the listener's output. |
+| Invalid | The task turn ended before 240 s without the Director having ACKed `stream-probe 3`; the task turn was still running when the listener exited; a probe ID was first observed outside a `pending` record, or the Director ran any `poll`, `wait` or `show`; every probe ID was first observed in a notice while the listener ran but an ACK landed at or after the listener exited; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
+| Pass | A valid run in which every probe ID was first observed in a `pending` record delivered through the mechanism under test and ACKed before the listener exited. |
+| Fail | A valid run in which any probe ID was first observed only after the listener exited, or was never observed in a `pending` record. |
 
 A mechanism with three invalid runs is recorded as "not established" with the invalidating cause.

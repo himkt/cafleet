@@ -1,7 +1,7 @@
 # Coalesced ID-only inbox notices for `message listen`
 
 **Status**: Approved
-**Progress**: 11/48 tasks complete
+**Progress**: 21/48 tasks complete
 **Last Updated**: 2026-11-15
 
 ## Overview
@@ -287,19 +287,19 @@ Replacing the shared install (`mise //:all-install` and `cafleet setup` under th
 
 ### Step 3: Update docs/
 
-- [ ] Update the listener Core term in `docs/docs/concepts/overview.md` <!-- completed: -->
-- [ ] Update `docs/docs/mixed-backend-team.md` § Receive results for notice-driven polling <!-- completed: -->
-- [ ] Update `docs/docs/concepts/coding-agents.md`: the Director-requirements paragraph, the Codex reception row and the Hermes per-record sentence <!-- completed: -->
-- [ ] Update `docs/docs/contributing.md`: subscribe-probe instruction and steps (including burst and hold ceiling), the stream-probe task prompt and its per-ID Invalid/Pass/Fail rows <!-- completed: -->
-- [ ] Run `/update-readme` to confirm `README.md` needs no change <!-- completed: -->
+- [x] Update the listener Core term in `docs/docs/concepts/overview.md` <!-- completed: 2026-11-15T14:46 -->
+- [x] Update `docs/docs/mixed-backend-team.md` § Receive results for notice-driven polling <!-- completed: 2026-11-15T14:46 -->
+- [x] Update `docs/docs/concepts/coding-agents.md`: the Director-requirements paragraph, the Codex reception row and the Hermes per-record sentence <!-- completed: 2026-11-15T14:46 -->
+- [x] Update `docs/docs/contributing.md`: subscribe-probe instruction and steps (including burst and hold ceiling), the stream-probe task prompt and its per-ID Invalid/Pass/Fail rows <!-- completed: 2026-11-15T14:46 -->
+- [x] Run `/update-readme` to confirm `README.md` needs no change <!-- completed: 2026-11-15T14:46 -->
 
 ### Step 4: Update skills
 
-- [ ] Rewrite `assets/skills/cafleet/reference/cli.md` § `message listen` (record set, hold rule, notice bound, Codex bullets, error table) and its subcommand summary row <!-- completed: -->
-- [ ] Update every reception recipe in `assets/skills/cafleet/reference/coding-agents.md`: Claude, Codex (drop the `message_ref` sentence and restate the 100-cap note), OpenCode, Hermes and pi <!-- completed: -->
-- [ ] Add the Step 1 findings as Note → applies at rows bound to each backend's native reception recipe <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/roles/director.md` § Director wake steps 2–3 and the § Receiver recovery incomplete-output row <!-- completed: -->
-- [ ] Run `mise //docs:build` and fix broken links or anchors <!-- completed: -->
+- [x] Rewrite `assets/skills/cafleet/reference/cli.md` § `message listen` (record set, hold rule, notice bound, Codex bullets, error table) and its subcommand summary row <!-- completed: 2026-11-15T14:49 -->
+- [x] Update every reception recipe in `assets/skills/cafleet/reference/coding-agents.md`: Claude, Codex (drop the `message_ref` sentence and restate the 100-cap note), OpenCode, Hermes and pi <!-- completed: 2026-11-15T14:49 -->
+- [x] Add the Step 1 findings as Note → applies at rows bound to each backend's native reception recipe <!-- completed: 2026-11-15T14:49 -->
+- [x] Update `assets/skills/cafleet/roles/director.md` § Director wake steps 2–3 and the § Receiver recovery incomplete-output row <!-- completed: 2026-11-15T14:49 -->
+- [x] Run `mise //docs:build` and fix broken links or anchors <!-- completed: 2026-11-15T14:49 -->
 
 ### Step 5: Implement the notice and hold in listen
 

@@ -15,7 +15,7 @@ CAFleet coordinates independent coding-agent sessions in tmux or herdr through d
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
 | inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
 | finite receive | A bounded inbox wait (`message wait`) for scripts and manual use that also retries ordinary-member previews | [Message wait](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-wait) |
-| listener | The Director's persistent read-only `message listen` process that streams pending messages as JSONL, with explicit ACK consumption | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
+| listener | The Director's persistent read-only `message listen` process that notifies pending message IDs as JSONL, with explicit ACK consumption | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
 | runner | The owned PTY observer and input arbiter for a member run | [Member permission events](members.md#member-permission-events) |
 | runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
@@ -32,7 +32,7 @@ Fleet creation atomically registers the calling Director and its current pane, a
 |---|---|
 | Host | Continue its task and own native shell/background results |
 | Director | Assign work, receive replies, inspect evidence, resolve blockers and close the team |
-| CLI | Register sessions, persist messages, stream inbox records, preview ordinary-member messages and submit authorized pane input |
+| CLI | Register sessions, persist messages, notify pending message IDs, preview ordinary-member messages and submit authorized pane input |
 | Multiplexer | Create, read, type into and close panes and overflow windows while preserving layout ownership |
 | Member | Perform its assignment, report through the broker and route required unavailable commands |
 
