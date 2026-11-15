@@ -234,8 +234,9 @@ export default Plugin.define({
       editor.add({
         name: "cafleet_listen",
         description:
-          "Start CAFleet Director reception for this session: every broker record addressed to the Director " +
-          "arrives as its own turn beginning '[cafleet listen record]'.",
+          "Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' " +
+          "carries a pending notice naming unACKed message IDs; run 'cafleet message poll <director_id> --json' " +
+          "and ACK each consumed message.",
         input: {
           type: "object",
           properties: directorProperties,

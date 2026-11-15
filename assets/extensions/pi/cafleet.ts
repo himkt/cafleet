@@ -442,8 +442,9 @@ export default function (pi: ExtensionAPI) {
     name: "cafleet_listen",
     label: "CAFleet listen",
     description:
-      "Start CAFleet Director reception for this session: every broker record addressed to the Director " +
-      "arrives as a message beginning '[cafleet listen record]'.",
+      "Start CAFleet Director reception for this session: each message beginning '[cafleet listen record]' " +
+      "carries a pending notice naming unACKed message IDs; run 'cafleet message poll <director_id> --json' " +
+      "and ACK each consumed message.",
     parameters: Type.Object(directorParameters),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const input = params as DirectorInput

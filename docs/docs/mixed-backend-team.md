@@ -63,7 +63,7 @@ The send persists the assignment and reports how the runner delivered its previe
 
 ### Receive results
 
-The Director reads each message record from its listener; the installed CAFleet skill's backend recipe owns the tool calls, and reception sends no input into the Director's pane. On every wake, reconcile full pending payloads:
+The Director reads each notice from its listener, then polls; the installed CAFleet skill's backend recipe owns the tool calls, and reception sends no input into the Director's pane. A notice names pending message IDs only, and the listener holds later notices until the Director ACKs the IDs the outstanding notice named or that hold has lasted several minutes, so a burst of replies arrives as one notice rather than one per message. On every wake, reconcile full pending payloads:
 
 ```bash
 cafleet message poll 2 --json

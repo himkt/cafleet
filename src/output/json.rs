@@ -80,8 +80,8 @@ pub(crate) fn listen_ready(member_id: i64, fleet_id: i64) -> Value {
     json!({"event":"ready", "member_id":member_id, "fleet_id":fleet_id})
 }
 
-pub(crate) fn listen_message(row: &MessageRecord) -> Value {
-    json!({"event":"message", "message":message(row)})
+pub(crate) fn listen_pending(member_id: i64, message_ids: &[i64]) -> Value {
+    json!({"event":"pending", "member_id":member_id, "message_ids":message_ids})
 }
 
 pub(crate) fn listen_closed(member_id: i64, reason: &str) -> Value {
@@ -302,6 +302,19 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn listen_pending_names_the_member_then_the_message_ids_in_the_given_order() {
+        let value = crate::output::json::listen_pending(4, &[12, 10, 11]);
+        crate::broker::runtime::test_support::assert_key_order(
+            &value,
+            &["event", "member_id", "message_ids"],
+        );
+        assert_eq!(
+            value,
+            json!({"event":"pending","member_id":4,"message_ids":[12,10,11]})
+        );
     }
 
     #[test]

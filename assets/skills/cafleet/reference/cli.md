@@ -23,7 +23,7 @@ Exact command facts for running CAFleet and interpreting its results.
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request or question | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
-| `message listen` | Stream pending inbox records through stdout | `MEMBER_ID` | JSONL only |
+| `message listen` | Notify pending message IDs through stdout | `MEMBER_ID` | JSONL only |
 | `message ack` / `message show` | Consume / read one message | `MESSAGE_ID` | yes |
 
 `cafleet --version` prints `cafleet <version>` and exits 0.
@@ -171,26 +171,35 @@ Result fields are `member_id`, `outcome`, `messages`, `notification_errors`; out
 
 `cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
 
-Streams an active member's pending inbox, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer `1..=1800` lease is monotonic from startup; absence runs until closure/cancellation/failure.
+Notifies an active member's pending message IDs, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer `1..=1800` lease is monotonic from startup; absence runs until closure/cancellation/failure.
 
-Flush UTF-8 JSONL records: `ready` with `member_id,fleet_id` before replay; `message` containing the complete message record; `closed` with `member_id,reason`. There is no text mode or `--json`. Idle checks emit nothing. Closure reasons are `timeout`, `member_inactive`, `fleet_deleted`, and `session_exited` in forwarding mode only; deletion wins simultaneous lifecycle closure. Normal closure exits 0, operational/output failures exit 1, usage errors exit 2; cancellation may omit `closed`.
+Flush UTF-8 JSONL records: `ready` with `member_id,fleet_id` before replay; `pending` with `member_id,message_ids`; `closed` with `member_id,reason`. There is no text mode or `--json`. Closure reasons are `timeout`, `member_inactive`, `fleet_deleted`, and `session_exited` in forwarding mode only; deletion wins simultaneous lifecycle closure. Normal closure exits 0, operational/output failures exit 1, usage errors exit 2; cancellation may omit `closed`.
 
-Order records by creation/message ID; suppress already-emitted IDs per process. Listening changes no consumption/notification state and retries no pane delivery. Restart replays pending IDs; concurrent listeners are independent. Reconcile stale/replayed envelopes through poll/show JSON, record deferred actions and ACK consumption once. Preserve incomplete JSONL across native reads.
+```json
+{"event":"pending","member_id":1,"message_ids":[51,52,53]}
+```
 
-`--codex-thread THREAD` forwards records into a Codex thread and keeps the record, ordering, replay, lease and idle contracts:
+A `pending` notice is a wake signal, never a payload: `message_ids` is the member's full unACKed set at that moment, ordered by creation/message ID, and is never empty. Read bodies with `cafleet message poll <member-id> --json`.
+
+**Hold.** After a notice is delivered, the listener holds later notices while any ID it named stays unACKed. ACKing every named ID releases the hold, and the next snapshot with pending messages emits one notice naming the full pending set. A hold lasting 300 s with IDs the notice did not name re-sends one notice naming the full set and restarts the 300 s; unACKed notified IDs alone never trigger a re-notice.
+
+**Notice bound.** At most one new notice follows each hold release and each 300 s ceiling firing, so a burst of any size adds no notice beyond the outstanding one. A notice whose IDs you already handled through an earlier poll costs one empty or partial poll and needs no action. A restarted listener emits one notice naming every pending ID right after `ready`. IDs you poll and ACK before any notice names them are never notified.
+
+Listening changes no consumption/notification state and retries no pane delivery; concurrent listeners are independent. Record deferred actions and ACK consumption once. Preserve incomplete JSONL across native reads.
+
+`--codex-thread THREAD` forwards notices into a Codex thread and keeps the record, hold, replay, lease and idle contracts:
 
 - Stdout carries only `ready` and the final `closed` record, written right before exit with every reason, `session_exited` included.
-- Each `message` record, and each `closed` record with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, one at a time with a 10 s deadline each. `ready` and `closed` `session_exited` are never forwarded.
-- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal: the listener keeps the record, waits 1 s, checks the pinned session and retries it, so later records keep their order and none is dropped. The pinned session's exit during the wait ends the listener with `session_exited`.
-- A forwarded text over 65,536 bytes becomes `[cafleet listen record] {"event":"message_ref","message_id":<id>,"from_member_id":<id>,"bytes":<n>} — read it with: cafleet message show <id> --json`, where `bytes` is the length of the text it replaces.
+- Each `pending` notice, and each `closed` record with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, one at a time with a 10 s deadline each. `ready` and `closed` `session_exited` are never forwarded.
+- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal. A refused `pending` notice is rebuilt from a fresh snapshot after 1 s while the pinned session lives, and dropped when its IDs were ACKed meanwhile. A refused `closed` record is retried every 1 s with no time limit and, once accepted, still written to stdout. The pinned session's exit during either wait ends the listener with `session_exited`.
 - At startup the listener pins its nearest ancestor whose argv[0] basename is exactly `codex`. When that process exits (a reused pid counts as exited), stdout gets `closed` `session_exited` and the listener exits 0.
 
 | Condition | Result |
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
+| Full-queue refusal of a `pending` notice or forwarded `closed` record | Not an error: retried every 1 s while the pinned session lives |
 | `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
-| Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice, exit 1 |
 | `codex queue` exceeds 10 s while the pinned session is alive | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
 | `codex queue` exits non-zero or exceeds 10 s after the pinned session exited | stdout `closed` `session_exited`, exit 0, no closed notice |
 | Any other failure after `ready` | its usual diagnostic, closed notice, exit 1 |
