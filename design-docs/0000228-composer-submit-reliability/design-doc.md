@@ -1,8 +1,8 @@
 # Composer submit reliability
 
-**Status**: Approved
-**Progress**: 0/65 tasks complete
-**Last Updated**: 2026-11-14
+**Status**: Complete
+**Progress**: 65/65 tasks complete
+**Last Updated**: 2026-11-15
 
 ## Overview
 
@@ -10,21 +10,21 @@ Pushed previews and `member prompt` / `member exec` input are sometimes typed in
 
 ## Success Criteria
 
-- [ ] SGR or X10 pointer reports (motion, wheel, click) that reach the outer pane during the settle leave a profile delivery `submitted` on every bundled backend, on tmux and herdr (the issue's `herdr_mouse.py` / `matrix.py` matrix).
-- [ ] A pointer report still revokes a permission-response token, still stops a gated answer plan between stages, and stops a multi-chunk literal stage between chunks.
-- [ ] On a verified-composer run, keyboard or paste input during the settle produces `settled/left_in_composer` with `stop_cause=manual_input`, not `uncertain`. Later previews to that member are never `held` because of it. The stopped preview is re-delivered automatically once the composer is verified empty, unless its message was ACKed first.
-- [ ] `message send` prints a stderr diagnostic for every attempted message whose delivery is left in the composer or held by its own uncertain or abandoned receipt. The Director receives one `input_delivery_result` event for every stopped staged write, deferred or immediate.
-- [ ] Previews above the profile's measured `plain_literal_limit` (codex 1024 bytes; hermes the measured scalar boundary) are submitted: by bracketed paste when the profile declares it and the child has enabled mode 2004, otherwise by the pointer form. The concrete checks are the § Measurement acceptance sizes, codex 1037 bytes and hermes 2057 characters. An oversized `member prompt` / `member exec` with no safe mechanism is refused with zero bytes.
-- [ ] A submit key that does not take effect is reported as `left_in_composer` with `stop_cause=submit_unconfirmed` after a 2-second post-submit verification, not as `submitted`.
-- [ ] A 4000-scalar Japanese preview (about 12 KB) is `submitted` on claude, opencode and pi: positive short writes continue until the literal is complete, within the five-second attempt deadline.
-- [ ] `member delete` / `fleet delete` of a Hermes member whose composer holds a draft of up to 8192 scalars completes its work settlement.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass. Every new test is an in-file unit test. The native fixtures and acceptance records below are captured on the evidence versions.
+- [x] SGR or X10 pointer reports (motion, wheel, click) that reach the outer pane during the settle leave a profile delivery `submitted` on every bundled backend, on tmux and herdr (the issue's `herdr_mouse.py` / `matrix.py` matrix).
+- [x] A pointer report still revokes a permission-response token, still stops a gated answer plan between stages, and stops a multi-chunk literal stage between chunks.
+- [x] On a verified-composer run, keyboard or paste input during the settle produces `settled/left_in_composer` with `stop_cause=manual_input`, not `uncertain`. Later previews to that member are never `held` because of it. The stopped preview is re-delivered automatically once the composer is verified empty, unless its message was ACKed first.
+- [x] `message send` prints a stderr diagnostic for every attempted message whose delivery is left in the composer or held by its own uncertain or abandoned receipt. The Director receives one `input_delivery_result` event for every stopped staged write, deferred or immediate.
+- [x] Previews above the profile's measured `plain_literal_limit` (codex 1024 bytes; hermes the selected tested scalar cap) are submitted: by bracketed paste when the profile declares it and the child has enabled mode 2004, otherwise by the pointer form. The concrete checks are the § Measurement acceptance sizes, codex 1037 bytes and hermes 2057 characters. An oversized `member prompt` / `member exec` with no safe mechanism is refused with zero bytes.
+- [x] A submit key that does not take effect is reported as `left_in_composer` with `stop_cause=submit_unconfirmed` after a 2-second post-submit verification, not as `submitted`.
+- [x] A 4000-scalar Japanese preview (about 12 KB) is `submitted` on claude, opencode and pi: positive short writes continue until the literal is complete, within the five-second attempt deadline.
+- [x] `member delete` / `fleet delete` of a Hermes member whose composer holds a draft of up to 8192 scalars completes its work settlement.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass. Every new test is an in-file unit test. The native fixtures and acceptance records below are captured on the evidence versions.
 
 ---
 
 ## Background
 
-Evidence versions (issue #603): cafleet 0.35.0, tmux 3.6a, herdr 0.9.5, claude 2.1.319, codex 0.167.0, opencode 2.2.5, pi 1.5.0, hermes 2026.9.24. These versions are installed under `~/.local/share/mise/installs`. A multiplexer server started with an older `PATH` can resolve older installs, so every capture first verifies the launched version from a pane of the capturing server (Step 13). Reproduction scripts are in `/tmp/cafleet-repro-scripts/` (`matrix.py`, `herdr_mouse.py`, `probe_size.py`, `codex_size.py`).
+Evidence versions (issue #603): cafleet 0.35.0, tmux 3.6a, herdr 0.9.5, claude 2.1.319, codex 0.167.0, opencode 2.2.5, pi 1.5.0, hermes 2026.9.24. Native launch manifests record the pinned executables' absolute paths. A multiplexer server started with an older `PATH` can resolve older installs, so each pinned process's capture series verifies the launched version from actual `--version` output in a pane of the capturing server or its original native startup output before the first frame (Step 13). Process/series identities and raw-output offsets bind the frames to that evidence. Reproduction scripts are in `/tmp/cafleet-repro-scripts/` (`matrix.py`, `herdr_mouse.py`, `probe_size.py`, `codex_size.py`).
 
 | Cause | Today's code path | Effect |
 |---|---|---|
@@ -141,6 +141,7 @@ Preview operation keys become `preview:<run_id>:<message_id>:<attempt>`. A new c
 
 #### Latest-attempt rule
 
+
 Every sender, `message wait` rotation and runner decision reads the latest attempt of a message in the current run and applies the first matching row:
 
 | Latest attempt | Verified-composer run | Other runs |
@@ -167,9 +168,12 @@ Only the per-message holds of this table join the drain loop's skip set: an `in_
 
 On a verified-composer run the runner FIFO also advances past an `uncertain` head and sets the held composer, with that head as the blocking input. Every later write requires a verified empty composer (rule 3), so a composer holding CAFleet's partial bytes keeps later input queued, not held. Rule 1 of § Delivery method and interaction priority checks only the operation's own key for an uncertain prior attempt.
 
+
 #### Held composer
 
 While the held composer is set, every queue head is exempt from the rule-4 `idle_timeout` bound, whether it is a `redelivery` head or ordinary input queued behind an `uncertain` head's bytes. No fallback submission therefore mixes new bytes with CAFleet's left bytes. Clearing or submitting the composer, so that a fresh observation verifies it empty, clears the held composer and resumes profile delivery. A detector that never again verifies the composer empty would leave the head waiting; the stalled-head event (§ Stalled heads) gives the Director a bounded signal and its recovery. Rule 4 applies unchanged whenever the held composer is clear, for example to a human draft.
+
+Receipt reconciliation records a disposition independently of the physical composer hold. Preserve that hold and its original blocking provenance until a fresh observation verifies the composer empty. Every later waiting head retains its own stalled timer and recovery notification after reconciliation, including a head that follows an ACKed or cancelled head; previously published notifications remain readable and deduplicated.
 
 #### Re-delivery
 
@@ -215,6 +219,7 @@ Pointer classification, short-write continuation and the selection table of § B
 
 ### B. Paste thresholds, bracketed framing and post-submit verification
 
+
 #### Profile declaration
 
 Each `capabilities.composer.submission.prompt` and `.exec` object gains two required keys:
@@ -232,9 +237,12 @@ Each `capabilities.composer.submission.prompt` and `.exec` object gains two requ
 | Key | Values | Meaning |
 |---|---|---|
 | `literal_framing` | `plain` or `bracketed_paste` | `bracketed_paste` only where fixtures show that a bracketed literal followed by `submit_hex` submits at every measured size up to the maximum preview |
-| `plain_literal_limit` | `null` or `{"unit": "bytes" \| "scalars", "max": N}` with N ≥ 1 | The largest plain literal (prefix plus literal) measured to submit. `null` when the maximum preview submits plainly |
+| `plain_literal_limit` | `null` or `{"unit": "bytes" \| "scalars", "max": N}` with N ≥ 1 | The selected tested cap for plain prefix plus literal. A size-gated backend uses its stable measured boundary; a timing-gated backend uses a conservative tested cap. `null` when the maximum preview submits plainly |
+
+Native measurement selects a 1024-scalar plain cap for both Hermes operations. Prompt framing is `bracketed_paste`; exec framing is `plain`, because large bracketed native commands dispatch the displayed paste placeholder instead of the original command. The installed native Enter guard depends on processing time, so its measurement records the tested cap and actual ineffective-submit cases rather than a fixed adjacent scalar threshold.
 
 Bracketed framing writes the prefix plainly, then `1b5b3230307e`, the literal and `1b5b3230317e`, as one literal stage. The encoded ordinary-submission limit (65536 bytes) counts the 12 marker bytes. Unknown keys still fail catalog loading. The build guard requires every bundled profile with an executable composer plan to declare empty-composer observation, and requires each plan's fixture list to cite the framing, limit, post-submit and unsubmitted-literal fixtures (§ Measurement).
+
 
 #### Selection at zero bytes
 
@@ -324,11 +332,12 @@ Queue reasons gain `redelivery` and `delivery_budget_exhausted`; not-submitted o
 
 The exit status is unchanged (0 after commit). The JSON `input_id` and `delivery` report the receipt of this invocation's attempt for the new message. For a left-in-composer preview, that is attempt N with `delivery.status` `left_in_composer`; its successor appears only in the diagnostic.
 
-Each attempted message whose outcome is one of the three rows below prints one stderr diagnostic after `Message NEW_ID was persisted. `. Submitted and queued messages print none.
+Each attempted message whose outcome matches a row below prints one stderr diagnostic after `Message NEW_ID was persisted. `. Submitted and queued messages print none.
 
 | Outcome | Diagnostic |
 |---|---|
 | Left in composer | The string for its stage, listed below the table; `INPUT_ID` is attempt N and `NEXT_ID` its `redelivery` successor |
+| Held by its own in-progress receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is in progress; inspect it with cafleet input show INPUT_ID --json.` |
 | Held by its own uncertain receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is uncertain (STOP_CAUSE); inspect it with cafleet input show INPUT_ID --json and reconcile it with cafleet input reconcile.` |
 | Held after `abandoned_uncertain` | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID was abandoned as uncertain; send its content again as a new message if it is still needed.` |
 
@@ -436,7 +445,7 @@ The implementer records new native fixtures on the evidence versions, inside eac
 | Case | Required evidence |
 |---|---|
 | 2004 state | The child's mode 2004 at an empty composer, idle and working |
-| Plain boundary | The largest plain literal that submits and the smallest that does not, one unit apart (bytes for codex, scalars for hermes; claude, opencode and pi up to the maximum preview) |
+| Plain boundary or tested cap | A size-gated backend records adjacent largest-success/smallest-failure sizes. A timing-gated backend records its selected conservative cap, observed ineffective-submit sizes and timings, and command-fidelity probes. Every unbounded plain plan is measured through the maximum preview |
 | Bracketed submit | Literal typed and submitted screens for a bracketed literal below the plain boundary, above it, and at the maximum preview (4000 Japanese scalars), each followed by `submit_hex` after the 500 ms settle |
 | Post-submit | The screen within 2 s after the submit key, idle and working, observed as a verified empty composer |
 | Unsubmitted literal | The screen after an ineffective submit key, or with an over-limit plain literal retained (for example codex's inserted newlines after `[Pasted Content 1024 chars]`, the Hermes long composer), observed as not a verified empty composer |
@@ -485,120 +494,171 @@ Holding human keystrokes while a literal is written. A cap on re-delivery attemp
 
 ### Step 1: SPEC.md
 
-- [ ] §6.9 Terminal reply classification and Bounded input draining: pointer class, X10 state, `pointer_generation`, counter consumer table <!-- completed: -->
-- [ ] §6.9 Request-bound permission responses and Explicit manual key input: pointer revokes tokens and stops gated stages; press accounting unchanged <!-- completed: -->
-- [ ] §6.9 Executable native plans and Measured submission plans: `literal_framing`, `plain_literal_limit`, selection table, chunked literal, close stage, post-submit verification and budget reservation, constants <!-- completed: -->
-- [ ] §6.9 Durable input receipts: verified-composer runs, stop outcomes, `left_stage` (`escape_only`, `partial`, `literal_complete`, `submitted`), attempt keys, latest-attempt rule, the revised not-submitted sentence <!-- completed: -->
-- [ ] §6.9 Delivery method and interaction priority and Runner-owned deferred delivery: per-key rule 1, re-delivery, the held composer and its rule-4 exemption, queue-turn ACK checks, stalled heads, the immediate-attempt budget check, FIFO advance past uncertain, `plain_limit_exceeded`, the revised retry sentence <!-- completed: -->
-- [ ] §6.9 Delivery reporting, Stop cause (renamed section and table), `left_stage`, stage vocabulary, queue reasons (`redelivery`, `delivery_budget_exhausted`) and `plain_limit_exceeded`, Input delivery result event (`review_left_input`), new Input delivery stalled event (`review_stalled_input`), Native acceptance and coverage <!-- completed: -->
-- [ ] §6.9 Bundled profiles and native screen fixtures: per-profile framing/limit declarations, fixture id convention and empty-composer requirement (values filled in Step 13) <!-- completed: -->
-- [ ] §6.5 Push notifications, Held delivery and Accepted trade-offs (four new trade-offs); §6.7 Hermes work settlement <!-- completed: -->
-- [ ] §6.3 `message send`, Delivery outcome, `message wait`, `member prompt`, `member exec`, Runtime presentation, Runtime event and input commands, Error Messages: per-`left_stage` diagnostics with both input IDs, `left_in_composer` and `escape_only` errors, both over-limit CAUSE strings, `stop_cause` / `left_stage` keys, `queued` with `delivery_budget_exhausted`, `input_delivery_stalled` in event show <!-- completed: -->
-- [ ] §8 DDL: `member_input_operations` (`disposition`, `preview_attempt`, `stop_cause`, `left_stage`, CHECKs, UNIQUE) and its semantics, and the `member_runtime_events.kind` CHECK <!-- completed: -->
+
+- [x] §6.9 Terminal reply classification and Bounded input draining: pointer class, X10 state, `pointer_generation`, counter consumer table <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.9 Request-bound permission responses and Explicit manual key input: pointer revokes tokens and stops gated stages; press accounting unchanged <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.9 Executable native plans and Measured submission plans: `literal_framing`, `plain_literal_limit`, selection table, chunked literal, close stage, post-submit verification and budget reservation, constants <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.9 Durable input receipts: verified-composer runs, stop outcomes, `left_stage` (`escape_only`, `partial`, `literal_complete`, `submitted`), attempt keys, latest-attempt rule, the revised not-submitted sentence <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.9 Delivery method and interaction priority and Runner-owned deferred delivery: per-key rule 1, re-delivery, the held composer and its rule-4 exemption, queue-turn ACK checks, stalled heads, the immediate-attempt budget check, FIFO advance past uncertain, `plain_limit_exceeded`, the revised retry sentence <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.9 Delivery reporting, Stop cause (renamed section and table), `left_stage`, stage vocabulary, queue reasons (`redelivery`, `delivery_budget_exhausted`) and `plain_limit_exceeded`, Input delivery result event (`review_left_input`), new Input delivery stalled event (`review_stalled_input`), Native acceptance and coverage <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.9 Bundled profiles and native screen fixtures: per-profile framing/limit declarations, fixture id convention and empty-composer requirement (values filled in Step 13) <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.5 Push notifications, Held delivery and Accepted trade-offs (four new trade-offs); §6.7 Hermes work settlement <!-- completed: 2026-11-14T13:58 -->
+- [x] §6.3 `message send`, Delivery outcome, `message wait`, `member prompt`, `member exec`, Runtime presentation, Runtime event and input commands, Error Messages: per-`left_stage` diagnostics with both input IDs, `left_in_composer` and `escape_only` errors, both over-limit CAUSE strings, `stop_cause` / `left_stage` keys, `queued` with `delivery_budget_exhausted`, `input_delivery_stalled` in event show <!-- completed: 2026-11-14T13:58 -->
+- [x] §8 DDL: `member_input_operations` (`disposition`, `preview_attempt`, `stop_cause`, `left_stage`, CHECKs, UNIQUE) and its semantics, and the `member_runtime_events.kind` CHECK <!-- completed: 2026-11-14T13:58 -->
 
 ### Step 2: User documentation
 
-- [ ] Update the delivery paragraphs of `docs/docs/concepts/members.md` <!-- completed: -->
-- [ ] Add the property-based paste-limit sentence to `docs/docs/concepts/coding-agents.md` <!-- completed: -->
-- [ ] Confirm `README.md` needs no change <!-- completed: -->
+- [x] Update the delivery paragraphs of `docs/docs/concepts/members.md` <!-- completed: 2026-11-14T13:59 -->
+- [x] Add the property-based paste-limit sentence to `docs/docs/concepts/coding-agents.md` <!-- completed: 2026-11-14T13:59 -->
+- [x] Confirm `README.md` needs no change <!-- completed: 2026-11-14T13:59 -->
 
 ### Step 3: Skills
 
-- [ ] Update `assets/skills/cafleet/reference/cli.md` (delivery selection, errors, `input show` with `stop_cause` / `left_stage`, dispositions, stages including `escape_only` / `literal_complete`, key form, cause table, held reasons, queue reasons `redelivery` / `delivery_budget_exhausted`, outcome reason `plain_limit_exceeded`, the held composer, `review_left_input`, the `input_delivery_stalled` event and `review_stalled_input`) <!-- completed: -->
-- [ ] Update receipt inspection (`stop_cause`, `left_stage`), reconciliation, the `review_left_input` press procedure and the `input_delivery_stalled` recovery (inspect, press, reconcile or ACK) in `assets/skills/cafleet/roles/director.md` <!-- completed: -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` (delivery selection, errors, `input show` with `stop_cause` / `left_stage`, dispositions, stages including `escape_only` / `literal_complete`, key form, cause table, held reasons, queue reasons `redelivery` / `delivery_budget_exhausted`, outcome reason `plain_limit_exceeded`, the held composer, `review_left_input`, the `input_delivery_stalled` event and `review_stalled_input`) <!-- completed: 2026-11-14T14:03 -->
+- [x] Update receipt inspection (`stop_cause`, `left_stage`), reconciliation, the `review_left_input` press procedure and the `input_delivery_stalled` recovery (inspect, press, reconcile or ACK) in `assets/skills/cafleet/roles/director.md` <!-- completed: 2026-11-14T14:03 -->
 
 ### Step 4: Schema and storage
 
-- [ ] Edit `assets/migrations/V1__baseline.sql` per § Schema, including the `member_runtime_events.kind` CHECK for `input_delivery_stalled`, and update the setup shape guard for `stop_cause`, `preview_attempt` and `left_stage` <!-- completed: -->
-- [ ] Rename `UncertainCause` to `StopCause` with the new values; add `InputDisposition::LeftInComposer`, `preview_attempt`, and storage functions `record_input_left_in_composer` and `settle_left_and_queue_redelivery` (one immediate transaction) in `src/broker/runtime/` <!-- completed: -->
-- [ ] Add latest-attempt lookup by `(run_id, message_id)` and the `preview:<run_id>:<message_id>:<attempt>` key builder; replace every `format!("preview:…")` site <!-- completed: -->
-- [ ] Add the verified-composer run predicate, derived from the recorded backend and native version, shared by the runner and clients <!-- completed: -->
+
+| Surface | Agreed interface and invariant |
+|---|---|
+| Stored receipt types (`broker::runtime`) | Rename `UncertainCause` to `StopCause`; add its specified variants, `InputDisposition::LeftInComposer`, `DeliveryStatus::LeftInComposer` and `LeftStage::{EscapeOnly,Partial,LiteralComplete,Submitted}`. `InputOperation` gains `preview_attempt: Option<i64>`, `stop_cause: Option<StopCause>` and `left_stage: Option<LeftStage>`; reads validate their kind/disposition associations. |
+| Preview identity (`broker::runtime::inputs`) | `preview_operation_key(run_id: i64, message_id: i64, attempt: i64) -> Result<String, CafleetError>` validates positive components; `find_latest_preview_input(conn: &Connection, run_id: i64, message_id: i64) -> Result<Option<InputOperation>, CafleetError>` orders by durable attempt. Keep `NewInput`'s current fields and derive/validate the preview attempt from its canonical key at reservation, avoiding another independently supplied identity. |
+| Left settlement (`broker::runtime::inputs`) | `record_input_left_in_composer(conn: &mut Connection, owner: &RunOwner, input_id: i64, cause: StopCause, stage: LeftStage) -> Result<InputOperation, CafleetError>` handles prompt/exec; `settle_left_and_queue_redelivery` with the same arguments returns `Result<(InputOperation, InputOperation), CafleetError>` for the old and successor preview receipts. Each uses the existing bounded ownership-checked immediate transaction, requires the exact in-progress ordinary row and qualifying cause/stage, and the preview function copies its digest while checked-incrementing the attempt and inserting `ready/redelivery` atomically. |
+| Verified composer (`ProfileCatalog`) | `verified_composer(backend: CodingAgent, native_version: Option<&str>, operation: ComposerOperation) -> bool` requires both selected empty-composer observation and an executable operation plan. Runner services use their selected catalog; production clients use `ProfileCatalog::bundled()`, always passing the recorded run backend/version, with previews mapped to `Prompt`. |
+| Transport proofs (Step 5) | Add `Classified.pointer: usize`, `Transport::pointer_generation() -> u64` and `DrainedInput::pointer_generation() -> u64`. `validate_ordinary(&DrainedInput, Instant)` keeps the existing observation/instance/turn/keyboard bindings through `validate_observation_drain`; `validate_permission` adds pointer equality, and `validate_input_drain` retains its composer constraint. Route permission callers through `validate_permission` in the later runtime batch. |
+| Framing (`catalog`, Step 8) | Add `LiteralFraming::{Plain,BracketedPaste}` and `PlainLiteralLimit` with typed byte/scalar unit and positive maximum to validated composer declarations. Expose plan framing/limit getters and extend `ComposerPlan::stages` with the selected framing; keep prefix/plain-limit decisions at zero bytes in the coordinator, expose child mode 2004 through `Transport::bracketed_paste()`, and leave digest identity unchanged. |
+| Runtime and projections (Steps 6-11) | Extend existing `SubmissionStatus`/`SubmissionStage`, retain cumulative literal offset in the pending composer state, and reuse the existing hooks for partial writes, closes and verification. Keep result projection on `InputOperation::delivery()` and durable `left_stage`; reuse `input_delivery_result_cause` with `StopCause` and extend existing durable-result publication/recovery to immediate stops, plus a receipt-validated, run/head-deduplicated stalled event. |
+| Hermes (Step 12) | Keep region parsing and the bounded clear loop inside `coding_agent::hermes`; exercise them through its existing settlement entry point and fake pane/capture runner. SGR rows decide placeholder emptiness and stripped region text decides progress. |
+
+The transport interfaces preserve existing call sites during the transport-only batch; permission call-site routing and token counter binding belong to the subsequent runtime batch. Every inline-test change, including mechanical enum/key updates in existing tests, remains Tester-owned. Each production batch starts after Director review of its corresponding tests.
+
+- [x] Edit `assets/migrations/V1__baseline.sql` per § Schema, including the `member_runtime_events.kind` CHECK for `input_delivery_stalled`, and update the setup shape guard for `stop_cause`, `preview_attempt` and `left_stage` <!-- completed: 2026-11-14T14:58 -->
+- [x] Rename `UncertainCause` to `StopCause` with the new values; add `InputDisposition::LeftInComposer`, `preview_attempt`, and storage functions `record_input_left_in_composer` and `settle_left_and_queue_redelivery` (one immediate transaction) in `src/broker/runtime/` <!-- completed: 2026-11-14T14:58 -->
+- [x] Add latest-attempt lookup by `(run_id, message_id)` and the `preview:<run_id>:<message_id>:<attempt>` key builder; replace every `format!("preview:…")` site <!-- completed: 2026-11-14T14:58 -->
+- [x] Add the verified-composer run predicate, derived from the recorded backend and native version, shared by the runner and clients <!-- completed: 2026-11-14T14:58 -->
 
 ### Step 5: Pointer classification and counters
 
-- [ ] Add the pointer class and `x10` state to `ReplyClassifier` and `pointer_generation` to `Transport`, `DrainedInput` and drain results (`src/runtime/transport.rs`) <!-- completed: -->
-- [ ] Split drain-proof validation into ordinary (keyboard) and permission (keyboard and pointer) checks <!-- completed: -->
-- [ ] Bind both counters in permission tokens and gated-stage checks, and count pointer input in the checks between literal chunks (`src/runtime/input.rs`) <!-- completed: -->
+
+- [x] Add the pointer class and `x10` state to `ReplyClassifier` and `pointer_generation` to `Transport`, `DrainedInput` and drain results (`src/runtime/transport.rs`) <!-- completed: 2026-11-14T14:23 -->
+- [x] Split drain-proof validation into ordinary (keyboard) and permission (keyboard and pointer) checks <!-- completed: 2026-11-14T14:23 -->
+- [x] Bind both counters in permission tokens and gated-stage checks, and count pointer input in the checks between literal chunks (`src/runtime/input.rs`) <!-- completed: 2026-11-14T17:00 -->
 
 ### Step 6: Staged write stops
 
-- [ ] Route check and deadline stops of ordinary input to `left_in_composer` or `uncertain` per § Stop outcomes, with the complete-prefix and `short_write` override, the `escape_only` stage and the run predicate; keep permission responses `uncertain` <!-- completed: -->
-- [ ] Add the close stage for open bracketed literals, including a prefix ending inside a scalar <!-- completed: -->
+
+- [x] Route check and deadline stops of ordinary input to `left_in_composer` or `uncertain` per § Stop outcomes, with the complete-prefix and `short_write` override, the `escape_only` stage and the run predicate; keep permission responses `uncertain` <!-- completed: 2026-11-14T17:06 -->
+- [x] Add the close stage for open bracketed literals, including a prefix ending inside a scalar <!-- completed: 2026-11-14T17:06 -->
 
 ### Step 7: Short-write continuation
 
-- [ ] Retain the unwritten suffix on a positive short literal write and continue chunks with fresh checks until complete or the deadline minus the close reserve <!-- completed: -->
-- [ ] Start the settle after the last chunk <!-- completed: -->
+- [x] Retain the unwritten suffix on a positive short literal write and continue chunks with fresh checks until complete or the deadline minus the close reserve <!-- completed: 2026-11-14T16:54 -->
+- [x] Start the settle after the last chunk <!-- completed: 2026-11-14T16:54 -->
 
 ### Step 8: Bracketed framing and plain limits
 
-- [ ] Add `literal_framing` and `plain_literal_limit` to the composer plan schema, loader validation and build guard (`src/coding_agent/catalog.rs`) <!-- completed: -->
-- [ ] Expose the child's mode 2004 from the transport screen to input selection <!-- completed: -->
-- [ ] Implement the zero-byte selection table: preview pointer-form re-render, immediate prompt/exec refusal, and the queued `not_submitted` / `plain_limit_exceeded` settlement <!-- completed: -->
+
+- [x] Add `literal_framing` and `plain_literal_limit` to the composer plan schema, loader validation and build guard (`src/coding_agent/catalog.rs`) <!-- completed: 2026-11-15T01:15 -->
+- [x] Expose the child's mode 2004 from the transport screen to input selection <!-- completed: 2026-11-14T15:44 -->
+- [x] Implement the zero-byte selection table: preview pointer-form re-render, immediate prompt/exec refusal, and the queued `not_submitted` / `plain_limit_exceeded` settlement <!-- completed: 2026-11-14T17:00 -->
 
 ### Step 9: Post-submit verification
 
-- [ ] Reserve the full window before the submit-key stage (`deadline_expired` otherwise) and extend the deferred-head pre-check at `src/runtime/input.rs` (`stage_settle() * settles + STAGE_WRITE_MARGIN`) to include it <!-- completed: -->
-- [ ] Apply the same budget check before the first byte of an immediate attempt on a verified-composer run, queueing it with zero bytes under `defer_reason` `delivery_budget_exhausted` <!-- completed: -->
-- [ ] Hold the active input for the window and confirm by verified empty composer or a newly opened interaction <!-- completed: -->
-- [ ] Record `left_in_composer` / `submit_unconfirmed` with `left_stage` `submitted` when the window ends unconfirmed <!-- completed: -->
+
+- [x] Reserve the full window before the submit-key stage (`deadline_expired` otherwise) and extend the deferred-head pre-check at `src/runtime/input.rs` (`stage_settle() * settles + STAGE_WRITE_MARGIN`) to include it <!-- completed: 2026-11-14T17:06 -->
+- [x] Apply the same budget check before the first byte of an immediate attempt on a verified-composer run, queueing it with zero bytes under `defer_reason` `delivery_budget_exhausted` <!-- completed: 2026-11-14T17:06 -->
+- [x] Hold the active input for the window and confirm by verified empty composer or a newly opened interaction <!-- completed: 2026-11-14T17:06 -->
+- [x] Record `left_in_composer` / `submit_unconfirmed` with `left_stage` `submitted` when the window ends unconfirmed <!-- completed: 2026-11-14T17:06 -->
 
 ### Step 10: Re-delivery and per-message holds
 
-- [ ] Settle `left_in_composer` previews and insert the `redelivery` successor at the FIFO head in one transaction (runner) <!-- completed: -->
-- [ ] Implement the held composer (set by `left_in_composer` other than `escape_only` and by advancing past `uncertain`, cleared by a verified empty composer) and exempt every head from the rule-4 `idle_timeout` bound while it is set <!-- completed: -->
-- [ ] Check the queue head's message ACK and target on every queue turn and cancel it as `not_submitted` / `message_consumed` or `target_inactive` <!-- completed: -->
-- [ ] Publish `input_delivery_stalled` once per head after the stalled-head bound on a held composer, with `review_stalled_input` <!-- completed: -->
-- [ ] Advance the runner FIFO past an `uncertain` head on verified-composer runs only <!-- completed: -->
-- [ ] Apply the latest-attempt rule in `src/delivery.rs` and `src/cli/message.rs`: per-message holds join the skip set, every other `Held` ends the drain, the `ready` without deferred metadata row reuses its key, N+1 after `not_submitted` <!-- completed: -->
+
+- [x] Settle `left_in_composer` previews and insert the `redelivery` successor at the FIFO head in one transaction (runner) <!-- completed: 2026-11-14T17:06 -->
+- [x] Implement the held composer (set by `left_in_composer` other than `escape_only` and by advancing past `uncertain`, cleared by a verified empty composer) and exempt every head from the rule-4 `idle_timeout` bound while it is set <!-- completed: 2026-11-15T01:10 -->
+- [x] Check the queue head's message ACK and target on every queue turn and cancel it as `not_submitted` / `message_consumed` or `target_inactive` <!-- completed: 2026-11-14T17:06 -->
+- [x] Publish `input_delivery_stalled` once per head after the stalled-head bound on a held composer, with `review_stalled_input` <!-- completed: 2026-11-15T02:20 -->
+- [x] Advance the runner FIFO past an `uncertain` head on verified-composer runs only <!-- completed: 2026-11-14T17:06 -->
+- [x] Apply the latest-attempt rule in `src/delivery.rs` and `src/cli/message.rs`: per-message holds join the skip set, every other `Held` ends the drain, the `ready` without deferred metadata row reuses its key, N+1 after `not_submitted` <!-- completed: 2026-11-14T17:14 -->
 
 ### Step 11: CLI output and events
 
-- [ ] Add `left_in_composer` to `SubmissionStatus`, `DeliveryStatus` and the projection, `escape_only` and `literal_complete` to the stage vocabulary, the `left_stage` projection, and rename the `input show` key to `stop_cause` with `left_stage` after it (`src/output/json.rs`, `src/output/text.rs`) <!-- completed: -->
-- [ ] Print the scoped `message send` diagnostics with both input IDs and record them in `message wait` `notification_errors` <!-- completed: -->
-- [ ] Add the prompt/exec left-in-composer, `escape_only` and both over-limit errors (`src/cli/member.rs`, `src/runtime/input_client.rs`) <!-- completed: -->
-- [ ] Publish `input_delivery_result` for immediate stopped staged writes, with `cause` from `stop_cause` and the `review_left_input` action derived from the durable receipt; add the `input_delivery_stalled` event kind (`src/broker/runtime/events.rs`) <!-- completed: -->
+
+- [x] Add `left_in_composer` to `SubmissionStatus`, `DeliveryStatus` and the projection, `escape_only` and `literal_complete` to the stage vocabulary, the `left_stage` projection, and rename the `input show` key to `stop_cause` with `left_stage` after it (`src/output/json.rs`, `src/output/text.rs`) <!-- completed: 2026-11-14T17:14 -->
+- [x] Print the scoped `message send` diagnostics with both input IDs and record them in `message wait` `notification_errors` <!-- completed: 2026-11-14T17:14 -->
+- [x] Add the prompt/exec left-in-composer, `escape_only` and both over-limit errors (`src/cli/member.rs`, `src/runtime/input_client.rs`) <!-- completed: 2026-11-14T17:14 -->
+- [x] Publish `input_delivery_result` for immediate stopped staged writes, with `cause` from `stop_cause` and the `review_left_input` action derived from the durable receipt; add the `input_delivery_stalled` event kind (`src/broker/runtime/events.rs`) <!-- completed: 2026-11-14T17:14 -->
 
 ### Step 12: Hermes clear loop
 
-- [ ] Implement the composer region and replace `composer_row_empty` with the region-based emptiness check (`src/coding_agent/hermes.rs`) <!-- completed: -->
-- [ ] Replace the single clear batch with the round-based loop, one pause per round, and the region progress check <!-- completed: -->
-- [ ] Use a measured clear sequence only when Step 13 establishes one <!-- completed: -->
+- [x] Implement the composer region and replace `composer_row_empty` with the region-based emptiness check (`src/coding_agent/hermes.rs`) <!-- completed: 2026-11-14T15:16 -->
+- [x] Replace the single clear batch with the round-based loop, one pause per round, and the region progress check <!-- completed: 2026-11-14T15:16 -->
+- [x] Use a measured clear sequence only when Step 13 establishes one <!-- completed: 2026-11-14T15:16 -->
 
 ### Step 13: Native measurement and bundled profiles
 
-- [ ] Before each capture, run `--version` from a pane of the capturing multiplexer server and confirm the evidence version; when it differs, point that server's `PATH` at the evidence install under `~/.local/share/mise/installs` <!-- completed: -->
-- [ ] Capture the § Measurement fixtures for claude, codex, opencode, pi and hermes on tmux and herdr, using the new id convention <!-- completed: -->
-- [ ] Set `literal_framing` and `plain_literal_limit` for every bundled prompt/exec plan and cite the fixtures in `assets/profiles/bundled.json` <!-- completed: -->
-- [ ] Record the Hermes clear-sequence candidates and the 2057-character and 8192-scalar composer fixtures <!-- completed: -->
-- [ ] Fill the measured values into `SPEC.md` § Bundled profiles and native screen fixtures and § Hermes work settlement <!-- completed: -->
+For Pi, add `pi-working-composer` to the existing profile's composer rule set, at priority 50 with `observation=composer_empty`, `verified_noninteraction=true`, alternate screen, `max_rows=3` and `cursor=inside`. Match this exact three-row region; the spinner class contains the frames observed in the current native captures:
+
+```text
+region.start_pattern = ^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+ *$
+region.end_pattern   = ^─+ *$
+editor.scope         = region
+editor.pattern       = \A── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+ *\n *\n─+ *\z
+```
+
+The tapped long-exec post-1900ms captures establish this shape on tmux at 120 columns (editor row 35, cursor column 0) and herdr at 119 columns (editor row 36, cursor column 0). Retain the existing idle rule unchanged. A typed editor row, a paste token such as `! [paste #1 2047 chars]`, a multi-row draft or a cursor outside the editor region stays unverified. The measured `↑ N more` headers occur with retained multi-row literals; the proposed plain Working-header pattern excludes them. Native fixtures for both muxes should assert `ComposerEmpty`/verified-noninteraction after submit, and nonempty classification for the paired pre-submit long/paste literals. Existing `pi_profile::BUSY_OR_DRAFT_SCREENS`/`pi_draft_working_turn_and_cursor_outside_the_editor_are_not_idle` tests currently group working frames with drafts; Tester should classify each fixture by its actual editor contents and keep only retained literals in the nonempty group, then drive the newly empty working fixtures through post-submit verification.
+
+For Hermes, add `hermes-working-composer` at priority 50 with `observation=composer_empty`, `verified_noninteraction=true`, primary screen, `max_rows=1` and `cursor=at_end`. Use the full measured placeholder as the start/matcher constraint and the prefix alone as the end-pattern cursor endpoint:
+
+```text
+region.start_pattern = ^☤ ❯ type to redirect this turn · Tab queues it for after *$
+region.end_pattern   = "^☤ ❯ "
+prompt.scope         = line
+prompt.pattern       = ^☤ ❯ type to redirect this turn · Tab queues it for after *$
+```
+
+The tapped-v2 40-character post-1900ms captures establish the cursor at prefix column 4: tmux row 34 and herdr row 37. Their submitted-history `❯ Reply OK. ...` rows remain above the live `☤ ❯ ` editor and cannot satisfy this rule. Require the complete placeholder text and prefix endpoint together; arbitrary `☤ ❯ LITERAL`, a typed suffix/paste token, non-prefix cursor and multi-row retained drafts remain unverified. Add native positive and paired unsubmitted-literal fixtures on both muxes; preserve the idle rule and replay the 2057-character/8192-scalar draft fixtures as nonempty. Hermes deletion still uses its independently specified SGR-aware region and fixed clear rounds. The profile additions require corresponding SPEC.md capability/rule paragraphs and fixture citations before source integration; user/agent command surfaces stay as documented because their behavior already selects verified empty working composers.
+
+
+- [x] Before each pinned process's capture series, confirm the evidence version from actual `--version` output in a pane of the capturing multiplexer server or that process's original native startup output before its first frame; bind every frame to its absolute executable path, process/series identity and raw-output offsets <!-- completed: 2026-11-15T00:19 -->
+- [x] Capture the § Measurement fixtures for claude, codex, opencode, pi and hermes on tmux and herdr, using the new id convention <!-- completed: 2026-11-14T17:00 -->
+- [x] Set `literal_framing` and `plain_literal_limit` for every bundled prompt/exec plan and cite the fixtures in `assets/profiles/bundled.json` <!-- completed: 2026-11-14T15:44 -->
+- [x] Record the Hermes clear-sequence candidates and the 2057-character and 8192-scalar composer fixtures <!-- completed: 2026-11-14T15:44 -->
+- [x] Fill the measured values into `SPEC.md` § Bundled profiles and native screen fixtures and § Hermes work settlement <!-- completed: 2026-11-14T15:02 -->
 
 ### Step 14: Unit tests (in-file `mod tests`)
 
-- [ ] `src/runtime/transport.rs`: SGR/X10 reports advance `pointer_generation` only; split and expired X10 prefixes; mouse forms inside a human paste stay manual; ordinary proofs survive pointer input; permission proofs do not <!-- completed: -->
-- [ ] `src/runtime/input.rs` stops: pointer during settle submits; pointer between chunks records `pointer_input` and closes an open paste; keyboard during settle and between chunks records `left_in_composer`; a prefix ending inside a scalar or paste marker records `short_write`; `escape_only` stop; deadline bound at a complete prefix records `deadline_expired` with `left_stage` `partial`; a stop after the whole literal records `literal_complete` <!-- completed: -->
-- [ ] `src/runtime/input.rs` writes: chunked continuation completes; close stage written; bracketed selection gated on 2004; over-limit preview pointer form, immediate prompt refusal, queued prompt `not_submitted` / `plain_limit_exceeded` <!-- completed: -->
-- [ ] `src/runtime/input.rs` verification: window reservation stops before the submit key; deferred-head pre-check includes the window; an immediate attempt below the budget is queued as `delivery_budget_exhausted` with zero bytes and later drains; confirmation and `submit_unconfirmed`; every Unsubmitted-literal fixture driven through post-submit verification yields `submit_unconfirmed`; pointer revokes permission tokens <!-- completed: -->
-- [ ] `src/runtime/input.rs` queue: re-delivery successor at the FIFO head; with the held composer set, a `redelivery` head and a head behind an `uncertain` head get no `idle_timeout` fallback; a verified empty composer clears it and rule 4 applies again; an ACKed waiting head is cancelled on the next queue turn without a write; `input_delivery_stalled` fires once after the bound and not for time behind an interaction; FIFO advances past uncertain on verified-composer runs; a run without composer verification records `uncertain`, re-delivers nothing and keeps the FIFO stopped <!-- completed: -->
-- [ ] `src/broker/runtime/inputs.rs`: schema CHECKs, including a `left_in_composer` row with NULL `stop_cause` or NULL `left_stage` rejected and a `left_stage` on another disposition rejected; atomic settle-and-queue; latest-attempt lookup; `stop_cause` and `left_stage` persistence <!-- completed: -->
-- [ ] `src/broker/runtime/events.rs`: an `input_delivery_stalled` event row inserts under the edited `kind` CHECK and round-trips its payload; publication is deduplicated per head input <!-- completed: -->
-- [ ] `src/delivery.rs` and `src/cli/message.rs`: per-message holds skip and continue, member-wide holds end the drain, `ready` without deferred metadata reuses its key, attempt N+1 after `not_submitted`, invariant failure on a successor-less `left_in_composer`, member-wide hold on runs without composer verification, scoped diagnostics with both input IDs <!-- completed: -->
-- [ ] `src/coding_agent/catalog.rs`: new plan keys validated; build guard requires empty-composer observation and fixture citations <!-- completed: -->
-- [ ] `src/coding_agent/hermes.rs`: region emptiness on the 2057-character fixture, with the `❯ ` row judged on its SGR capture (italic placeholder empty, typed text non-empty); progress compares stripped region text; clear loop empties an 8192-scalar draft in 9 rounds of exactly 16 batches (144 batches); fails on no progress and on budget expiry <!-- completed: -->
-- [ ] `src/output/json.rs`, `src/broker/runtime/events.rs`, `src/cli/member.rs`: projection with `left_stage`, `stop_cause` key, `escape_only` / `literal_complete`, event scope; `review_left_input` only for `literal_complete` / `submitted` with a qualifying cause and null for interaction stops; `input_delivery_stalled` payload and argv; prompt/exec errors <!-- completed: -->
+
+- [x] `src/runtime/transport.rs`: SGR/X10 reports advance `pointer_generation` only; split and expired X10 prefixes; mouse forms inside a human paste stay manual; ordinary proofs survive pointer input; permission proofs do not <!-- completed: 2026-11-14T14:23 -->
+- [x] `src/runtime/input.rs` stops: pointer during settle submits; pointer between chunks records `pointer_input` and closes an open paste; keyboard during settle and between chunks records `left_in_composer`; a prefix ending inside a scalar or paste marker records `short_write`; `escape_only` stop; deadline bound at a complete prefix records `deadline_expired` with `left_stage` `partial`; a stop after the whole literal records `literal_complete` <!-- completed: 2026-11-14T17:06 -->
+- [x] `src/runtime/input.rs` writes: chunked continuation completes; close stage written; bracketed selection gated on 2004; over-limit preview pointer form, immediate prompt refusal, queued prompt `not_submitted` / `plain_limit_exceeded` <!-- completed: 2026-11-14T17:06 -->
+- [x] `src/runtime/input.rs` verification: window reservation stops before the submit key; deferred-head pre-check includes the window; an immediate attempt below the budget is queued as `delivery_budget_exhausted` with zero bytes and later drains; confirmation and `submit_unconfirmed`; every Unsubmitted-literal fixture driven through post-submit verification yields `submit_unconfirmed`; pointer revokes permission tokens <!-- completed: 2026-11-14T17:06 -->
+- [x] `src/runtime/input.rs` queue: re-delivery successor at the FIFO head; with the held composer set, a `redelivery` head and a head behind an `uncertain` head get no `idle_timeout` fallback; a verified empty composer clears it and rule 4 applies again; an ACKed waiting head is cancelled on the next queue turn without a write; `input_delivery_stalled` fires once after the bound and not for time behind an interaction; FIFO advances past uncertain on verified-composer runs; a run without composer verification records `uncertain`, re-delivers nothing and keeps the FIFO stopped <!-- completed: 2026-11-15T02:20 -->
+- [x] `src/broker/runtime/inputs.rs`: schema CHECKs, including a `left_in_composer` row with NULL `stop_cause` or NULL `left_stage` rejected and a `left_stage` on another disposition rejected; atomic settle-and-queue; latest-attempt lookup; `stop_cause` and `left_stage` persistence <!-- completed: 2026-11-14T14:58 -->
+- [x] `src/broker/runtime/events.rs`: an `input_delivery_stalled` event row inserts under the edited `kind` CHECK and round-trips its payload; publication is deduplicated per head input <!-- completed: 2026-11-15T02:20 -->
+- [x] `src/delivery.rs` and `src/cli/message.rs`: per-message holds skip and continue, member-wide holds end the drain, `ready` without deferred metadata reuses its key, attempt N+1 after `not_submitted`, invariant failure on a successor-less `left_in_composer`, member-wide hold on runs without composer verification, scoped diagnostics with both input IDs <!-- completed: 2026-11-14T17:14 -->
+- [x] `src/coding_agent/catalog.rs`: new plan keys validated; build guard requires empty-composer observation and fixture citations <!-- completed: 2026-11-15T01:15 -->
+- [x] `src/coding_agent/hermes.rs`: region emptiness on the 2057-character fixture, with the `❯ ` row judged on its SGR capture (italic placeholder empty, typed text non-empty); progress compares stripped region text; clear loop empties an 8192-scalar draft in 9 rounds of exactly 16 batches (144 batches); fails on no progress and on budget expiry <!-- completed: 2026-11-14T15:16 -->
+- [x] `src/output/json.rs`, `src/broker/runtime/events.rs`, `src/cli/member.rs`: projection with `left_stage`, `stop_cause` key, `escape_only` / `literal_complete`, event scope; `review_left_input` only for `literal_complete` / `submitted` with a qualifying cause and null for interaction stops; `input_delivery_stalled` payload and argv; prompt/exec errors <!-- completed: 2026-11-14T17:14 -->
 
 ### Step 15: Verification
 
-- [ ] Run `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
-- [ ] Run the live acceptance matrix (§ Measurement) on tmux and herdr and record it <!-- completed: -->
-- [ ] Reinstall the CLI and confirm the issue's reproduction outline no longer reproduces any cause <!-- completed: -->
+Final implementation: f044047c on `feat/composer-submit-reliability`. All implementation tasks and success criteria pass. The final full test run passes 1882 tests with 11 ignored and zero failures in 59.98 seconds; lint, documentation build and private CLI installation pass. `.evidence/review2-final-checks.json` records the commands and candidate SHA-256. Independent verification passes all ten new reconciliation regressions and 23 distinct focused tests; `.evidence/review2-independent-audit.json` and `review2-final-binding.json` bind the tested source and installed binary. The production coordinator, durable reconciliation and event publication/readback establish per-head timers, immutable historical records, zero additional native offers and fresh-empty-only resumption, using synthetic transport and elapsed-time setup.
+
+`.evidence/final-review-index.md` indexes the native acceptance matrices and independent reports. Each native record retains its measured source, executable version, byte offsets and candidate hash, including the separately verified 4c75072b FIFO/exec delta. Size captures prove later native outcomes rather than independently timing the two-second window; ineffective-submit cases independently measure that window. Instrumentation influences scheduling, and the actual permission-stage probes use Pi. The final eligibility/publication correction uses deterministic production-path integration rather than a newly measured native three-minute reconciliation run. `.evidence/coordination-archive.md` preserves resolved implementation decisions and verification details. Reviewer30 approved f044047c after independent full-suite, lint and documentation checks. The user approved local completion through the executing backend decision surface. Task-owned verification fleets, gateway processes, named sessions and the execution team are stopped and unregistered; `.evidence/final-cleanup.json` records direct verification and teardown retries. Historical evidence and database files are retained.
+
+- [x] Run `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: 2026-11-15 02:23 UTC -->
+- [x] Run the live acceptance matrix (§ Measurement) on tmux and herdr and record it <!-- completed: 2026-11-15T00:19 -->
+- [x] Reinstall the CLI and confirm the issue's reproduction outline no longer reproduces any cause <!-- completed: 2026-11-15 02:26 UTC -->
 
 ---
+
 
 ## Changelog
 
 | Date | Changes |
 |------|---------|
+| 2026-11-14 | Native measurement selects a conservative 1024-scalar Hermes plain cap, independent prompt/exec framing, and explicit command-fidelity evidence for timing-gated input |
 | 2026-11-14 | Initial draft |
 | 2026-11-14 | Review round 1: verified-composer runs, complete-prefix rule, `pointer_input`, `escape_only`, re-delivery exempt from `idle_timeout`, `review_left_input`, window reservation, `plain_limit_exceeded`, Hermes region and rounds, fixture id convention |
 | 2026-11-14 | Review round 2: held composer exempts every head from `idle_timeout`, queue-turn ACK cancellation, `input_delivery_stalled`, immediate-attempt budget check, durable `left_stage` with `literal_complete`, `review_left_input` scope, Hermes SGR row judgment and fixed 16-batch rounds |
