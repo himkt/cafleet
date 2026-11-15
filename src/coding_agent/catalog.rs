@@ -3042,6 +3042,56 @@ mod tests {
             }
         }
 
+        #[test]
+        fn additional_selected_operation_claims_must_match_despite_complete_valid_coverage() {
+            let mut baseline = measured();
+            baseline["fixtures"][0]["kind"] = json!("native");
+            validate_provenance(&baseline).unwrap();
+            for operation in ["prompt", "exec"] {
+                let plan =
+                    &baseline["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                let framing = plan["literal_framing"].as_str().unwrap();
+                let unit = plan["plain_literal_limit"]["unit"].as_str().unwrap();
+                let other_framing = if framing == "plain" {
+                    "bracketed_paste"
+                } else {
+                    "plain"
+                };
+                let other_unit = if unit == "bytes" { "scalars" } else { "bytes" };
+                for multiplexer in ["tmux", "herdr"] {
+                    let matching = composer_evidence_records(
+                        operation,
+                        multiplexer,
+                        &plan["literal_framing"],
+                        &plan["plain_literal_limit"],
+                    );
+                    let mut valid_extra = baseline.clone();
+                    valid_extra["fixtures"][0]["composer_evidence"] = json!(matching);
+                    validate_provenance(&valid_extra).unwrap();
+                    let mut wrong_framing = matching[0].clone();
+                    wrong_framing["literal_framing"] = json!(other_framing);
+                    let mut mismatched = vec![wrong_framing];
+                    for limit in [
+                        json!({"unit":unit,"max":512}),
+                        json!({"unit":other_unit,"max":1024}),
+                        Value::Null,
+                    ] {
+                        let mut record = matching[1].clone();
+                        record["plain_literal_limit"] = limit;
+                        mismatched.push(record);
+                    }
+                    for record in mismatched {
+                        let mut value = baseline.clone();
+                        value["fixtures"][0]["composer_evidence"] = json!([record]);
+                        assert!(
+                            validate_provenance(&value).is_err(),
+                            "the additional selected claim contradicts its plan: {record}"
+                        );
+                    }
+                }
+            }
+        }
+
         fn unlimited() -> Value {
             let mut value = measured();
             for operation in ["prompt", "exec"] {
