@@ -2599,7 +2599,26 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/claude.json",
-      "sha256": "e70c0e89808994efcf1bd57c747ccee0df8711d1da9f339090512e77cdd942f5"
+      "sha256": "e70c0e89808994efcf1bd57c747ccee0df8711d1da9f339090512e77cdd942f5",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "claude-2.1.319-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-tmux-120-6",
@@ -2609,7 +2628,26 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "7cc35f33cf1b4f28492a706e7ae71b22fb97e12f4d4c026420031c47585f8ce9"
+      "sha256": "7cc35f33cf1b4f28492a706e7ae71b22fb97e12f4d4c026420031c47585f8ce9",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "claude-2.1.319-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-56",
@@ -2899,7 +2937,26 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/claude.json",
-      "sha256": "de4586aabea514ac11670b4f8961abd2b9e69c2c7b83f3e31901e3fd7f17d106"
+      "sha256": "de4586aabea514ac11670b4f8961abd2b9e69c2c7b83f3e31901e3fd7f17d106",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "claude-2.1.319-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
@@ -2909,7 +2966,26 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "623ad1b56fe85f559a4a39a0e8a3de8c9a2a4f059304bf2289ae1b03a8769644"
+      "sha256": "623ad1b56fe85f559a4a39a0e8a3de8c9a2a4f059304bf2289ae1b03a8769644",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "claude-2.1.319-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
@@ -3059,7 +3135,20 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/codex.json",
-      "sha256": "b2e8a460c83d23184bac89b003112a0604af4ff700cbe4f324b08b81ed60892e"
+      "sha256": "b2e8a460c83d23184bac89b003112a0604af4ff700cbe4f324b08b81ed60892e",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
@@ -3069,7 +3158,20 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "0a8848f3e6e166b915230c2d63fca57783f7c4596923dce28988266680abff9c"
+      "sha256": "0a8848f3e6e166b915230c2d63fca57783f7c4596923dce28988266680abff9c",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-literal-tapped-v2-herdr-119-8",
@@ -3099,7 +3201,18 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/codex.json",
-      "sha256": "b7bf76c63b2a2c4ea30bbca061f360ee8c4daa2ea340c7d48d508b1a4cef0ef2"
+      "sha256": "b7bf76c63b2a2c4ea30bbca061f360ee8c4daa2ea340c7d48d508b1a4cef0ef2",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-post-1900ms-tapped-v2-tmux-120-12",
@@ -3109,7 +3222,18 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "7600b1c1f0a55f41aafbde6308b1bf87b0149dcc40d69769ff8dc027371de089"
+      "sha256": "7600b1c1f0a55f41aafbde6308b1bf87b0149dcc40d69769ff8dc027371de089",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-1001-args-execution-proof-literal-tapped-v2-herdr-119-14",
@@ -3419,7 +3543,20 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/codex.json",
-      "sha256": "98ffdb19e7656408c4360ec7517e06b4b71b0331d1ffecf6608d554cec9b2e84"
+      "sha256": "98ffdb19e7656408c4360ec7517e06b4b71b0331d1ffecf6608d554cec9b2e84",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
@@ -3429,7 +3566,20 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "f116d075d0a3691da78db3a93a964f5e7a60a5daf2bc5736f3388ab4903a6575"
+      "sha256": "f116d075d0a3691da78db3a93a964f5e7a60a5daf2bc5736f3388ab4903a6575",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-prompt-plain-1024-literal-tapped-v2-herdr-119-27",
@@ -3459,7 +3609,18 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/codex.json",
-      "sha256": "874965ec9ee461a437f16f2d860c512bdabd3b06f910a8efdb1d5bf55c3452cc"
+      "sha256": "874965ec9ee461a437f16f2d860c512bdabd3b06f910a8efdb1d5bf55c3452cc",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-prompt-plain-1024-post-1900ms-tapped-v2-tmux-120-31",
@@ -3469,7 +3630,18 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "27d3055ac300f71e739cbdb9f8d5ae0619ddff03f9111e5a35da06e27f3098c0"
+      "sha256": "27d3055ac300f71e739cbdb9f8d5ae0619ddff03f9111e5a35da06e27f3098c0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-prompt-plain-1025-literal-tapped-v2-herdr-119-33",
@@ -3879,7 +4051,26 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/opencode.json",
-      "sha256": "bd4051e31fa91522fc2f98cb9bff7371fa0d16aedefbd3e389729b82d7e7e54e"
+      "sha256": "bd4051e31fa91522fc2f98cb9bff7371fa0d16aedefbd3e389729b82d7e7e54e",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-tmux-120-6",
@@ -3889,7 +4080,26 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "f866b244573fc737fcab96f508c1e653888e09804fe7fd1266ef88e8a834be01"
+      "sha256": "f866b244573fc737fcab96f508c1e653888e09804fe7fd1266ef88e8a834be01",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-56",
@@ -4159,7 +4369,26 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/opencode.json",
-      "sha256": "f5c745a2d64d48e216c7cbd109ba7cdaaca4dc54345c5611388cffce243129f9"
+      "sha256": "f5c745a2d64d48e216c7cbd109ba7cdaaca4dc54345c5611388cffce243129f9",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
@@ -4169,7 +4398,26 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "ce9064d6f440ab74837219cba2062b3bbcf9dbe7229ffc02a43f81ebc2979d08"
+      "sha256": "ce9064d6f440ab74837219cba2062b3bbcf9dbe7229ffc02a43f81ebc2979d08",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
@@ -4439,7 +4687,26 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/pi.json",
-      "sha256": "117a6c364090eb72be1a7b3ff486c6bf337db40b6449098a5e16268936d09a42"
+      "sha256": "117a6c364090eb72be1a7b3ff486c6bf337db40b6449098a5e16268936d09a42",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61",
@@ -4449,7 +4716,26 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/pi.json",
-      "sha256": "9f75fb540b1bbd27112845a849a45ff09db56acc8def6783f49a65f52f0d8028"
+      "sha256": "9f75fb540b1bbd27112845a849a45ff09db56acc8def6783f49a65f52f0d8028",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-70",
@@ -4679,7 +4965,26 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/pi.json",
-      "sha256": "ccb5bc8e6ab2c9e03a1f0d2aa996b0e7e2869a00f86c8bb5273a6b080cb67648"
+      "sha256": "ccb5bc8e6ab2c9e03a1f0d2aa996b0e7e2869a00f86c8bb5273a6b080cb67648",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
@@ -4689,7 +4994,26 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/pi.json",
-      "sha256": "b96b34084f1f008c8303aa73f4e2f79d76626dc867f45c083573468199c243ad"
+      "sha256": "b96b34084f1f008c8303aa73f4e2f79d76626dc867f45c083573468199c243ad",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
@@ -4919,7 +5243,29 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/hermes.json",
-      "sha256": "816345b9f4b1184b74a71bb7376edfa16c6dd07269d7ee5afc6313a20141991d"
+      "sha256": "816345b9f4b1184b74a71bb7376edfa16c6dd07269d7ee5afc6313a20141991d",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 1024
+          }
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-exec-plain-1024-ja-args-execution-proof-post-1900ms-tapped-v2-tmux-120-6",
@@ -4929,7 +5275,29 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/hermes.json",
-      "sha256": "6a738395ae1b7902b8aa53b2f6613fc3dafab185513c89b61eb1d7d3aed127fe"
+      "sha256": "6a738395ae1b7902b8aa53b2f6613fc3dafab185513c89b61eb1d7d3aed127fe",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 1024
+          }
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-exec-plain-1024-ja-args-literal-tapped-v2-herdr-119-77",
@@ -5099,7 +5467,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/hermes.json",
-      "sha256": "2f4afec1b5d650670c9084cfcd99566f447192f5c89379018a9f861284d34537"
+      "sha256": "2f4afec1b5d650670c9084cfcd99566f447192f5c89379018a9f861284d34537",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-100",
@@ -5109,7 +5484,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/hermes.json",
-      "sha256": "c0e24ebd6cb547b33f0944ba3f15b517b8a3f8f10e7254edd94a9fe8d1977a16"
+      "sha256": "c0e24ebd6cb547b33f0944ba3f15b517b8a3f8f10e7254edd94a9fe8d1977a16",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-100",
@@ -5239,7 +5621,20 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/hermes.json",
-      "sha256": "ca338730d606f072a7d08f1834de62e92d44ba0e1af7ad2b5e4274d7bfe3fb0a"
+      "sha256": "ca338730d606f072a7d08f1834de62e92d44ba0e1af7ad2b5e4274d7bfe3fb0a",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
@@ -5249,7 +5644,20 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/hermes.json",
-      "sha256": "7fb9e58350dc327bcaa9a671b5f4ccd2df32acb4d2a29734a116c8861c00a69d"
+      "sha256": "7fb9e58350dc327bcaa9a671b5f4ccd2df32acb4d2a29734a116c8861c00a69d",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-prompt-plain-1024-ja-literal-tapped-v2-herdr-119-27",
@@ -5279,7 +5687,18 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/hermes.json",
-      "sha256": "d88c1d3d664336c8693aaa7a4876aca0564926d28b41f99e5ec2280c2006d3bb"
+      "sha256": "d88c1d3d664336c8693aaa7a4876aca0564926d28b41f99e5ec2280c2006d3bb",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 1024
+          }
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-prompt-plain-1024-ja-post-1900ms-tapped-v2-tmux-120-31",
@@ -5289,7 +5708,18 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/hermes.json",
-      "sha256": "1653d55388fe42a5060c4a4f0d4ff612c2b57b5cbecc4b047c1aa9dd4d88943f"
+      "sha256": "1653d55388fe42a5060c4a4f0d4ff612c2b57b5cbecc4b047c1aa9dd4d88943f",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 1024
+          }
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-prompt-plain-2048-ja-literal-tapped-v2-herdr-119-34",
@@ -5419,7 +5849,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/hermes.json",
-      "sha256": "6ff117552e26d151d1d297a34445f26c34f276cf1b4f61232b7ccafe26e70901"
+      "sha256": "6ff117552e26d151d1d297a34445f26c34f276cf1b4f61232b7ccafe26e70901",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-tmux-120-50",
@@ -5429,7 +5866,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/hermes.json",
-      "sha256": "863528141586785f1c874710e0d0479e64316b3ee73ba4fa5e440d35882361fa"
+      "sha256": "863528141586785f1c874710e0d0479e64316b3ee73ba4fa5e440d35882361fa",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-50",
@@ -5639,7 +6083,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/claude.json",
-      "sha256": "15dd44fbf0a8ac274f67a32e1ef8909f44ace2f9d8e3b7c817fa83b596a993ce"
+      "sha256": "15dd44fbf0a8ac274f67a32e1ef8909f44ace2f9d8e3b7c817fa83b596a993ce",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
@@ -5649,7 +6100,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "2c3667e3e807043b924bb5234a2b3dba7fa951f37a1541f1fc2958be8ed13f5a"
+      "sha256": "2c3667e3e807043b924bb5234a2b3dba7fa951f37a1541f1fc2958be8ed13f5a",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
@@ -5659,7 +6117,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/claude.json",
-      "sha256": "71cae04a7d2bbe1e4125f2ac51e1db2bf749ec7f20c0ab5d504d64045ac72733"
+      "sha256": "71cae04a7d2bbe1e4125f2ac51e1db2bf749ec7f20c0ab5d504d64045ac72733",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
@@ -5669,7 +6134,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "728b202c04678e00aae40f41b87fa8677feccaaf9d4ac1cd683a27d3c2c040e3"
+      "sha256": "728b202c04678e00aae40f41b87fa8677feccaaf9d4ac1cd683a27d3c2c040e3",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
@@ -5679,7 +6151,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/codex.json",
-      "sha256": "0ff98ac91724e44129bbded9dccf05eeffb1fd4dbc47dcfa4123b2884f364896"
+      "sha256": "0ff98ac91724e44129bbded9dccf05eeffb1fd4dbc47dcfa4123b2884f364896",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
@@ -5689,7 +6168,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "d9d8bcf2bfd9e20afc5dba5a54c9630be68f844ad0ff66c5c4c1910b21864421"
+      "sha256": "d9d8bcf2bfd9e20afc5dba5a54c9630be68f844ad0ff66c5c4c1910b21864421",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
@@ -5699,7 +6185,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/opencode.json",
-      "sha256": "9f3fee0d88e9bb452fe4ce7b8225ffc4d84369b2e5ab76d111bdb92922760535"
+      "sha256": "9f3fee0d88e9bb452fe4ce7b8225ffc4d84369b2e5ab76d111bdb92922760535",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
@@ -5709,7 +6202,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "82f4c3f0832c8c8ed3e9278767e9189dca8b18ae1717fad1356f0376be667d99"
+      "sha256": "82f4c3f0832c8c8ed3e9278767e9189dca8b18ae1717fad1356f0376be667d99",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
@@ -5719,7 +6219,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/opencode.json",
-      "sha256": "6609a07205bc96b0777afc7296135b53b93d4a459a47f0612a4f98ea03ca2d09"
+      "sha256": "6609a07205bc96b0777afc7296135b53b93d4a459a47f0612a4f98ea03ca2d09",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
@@ -5729,7 +6236,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "f673febcf6af9ce372c5b6a8d7c7fb59edfe188bd403b3a372927fe4013bd4de"
+      "sha256": "f673febcf6af9ce372c5b6a8d7c7fb59edfe188bd403b3a372927fe4013bd4de",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
@@ -5739,7 +6253,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/pi.json",
-      "sha256": "466e0e2b883d8abba6335a3c740eee225c209011f20af828bcf7264369729cbe"
+      "sha256": "466e0e2b883d8abba6335a3c740eee225c209011f20af828bcf7264369729cbe",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
@@ -5749,7 +6270,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/pi.json",
-      "sha256": "4a69b7f237a282717c03130ee6f1492e8b8b56a6156bb45af02037a1c27cb0b7"
+      "sha256": "4a69b7f237a282717c03130ee6f1492e8b8b56a6156bb45af02037a1c27cb0b7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
@@ -5759,7 +6287,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/pi.json",
-      "sha256": "8bb95fd33ec2422677bc7f08d0e88882db4fb029ab412cf06a6983a821ee911a"
+      "sha256": "8bb95fd33ec2422677bc7f08d0e88882db4fb029ab412cf06a6983a821ee911a",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
@@ -5809,7 +6344,14 @@
       "rows": 40,
       "cols": 119,
       "source_ref": "native/codex.json",
-      "sha256": "c4780e298e28a252a050e7015eeb4cfef22a2a3c8a0620d20d7d1a3d8bc8d028"
+      "sha256": "c4780e298e28a252a050e7015eeb4cfef22a2a3c8a0620d20d7d1a3d8bc8d028",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
@@ -5819,7 +6361,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "4e20b44d413832317041b54b09c4278ecb8b3e93ef98645174e61ae17c84b196"
+      "sha256": "4e20b44d413832317041b54b09c4278ecb8b3e93ef98645174e61ae17c84b196",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
@@ -5829,7 +6378,14 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/pi.json",
-      "sha256": "0dfa203512a3d9fe9a527b1b585ed543f17816c6a2b4115f917a38309e86d09b"
+      "sha256": "0dfa203512a3d9fe9a527b1b585ed543f17816c6a2b4115f917a38309e86d09b",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
     }
   ],
   "profiles": [

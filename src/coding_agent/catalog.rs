@@ -322,14 +322,14 @@ pub(crate) enum LiteralFraming {
     BracketedPaste,
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum LiteralUnit {
     Bytes,
     Scalars,
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlainLiteralLimit {
     unit: LiteralUnit,
@@ -1199,7 +1199,8 @@ impl ProfileCatalog {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum ComposerOperation {
     Prompt,
     Exec,
@@ -1626,6 +1627,89 @@ pub(crate) mod test_support {
         #[serde(rename = "source_ref")]
         _source_ref: NonBlank,
         sha256: NonBlank,
+        #[serde(default, deserialize_with = "present")]
+        composer_evidence: Option<Vec<ComposerEvidence>>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum EvidenceMultiplexer {
+        Tmux,
+        Herdr,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum ComposerEvidenceKind {
+        Framing,
+        PlainLimit,
+        PostSubmit,
+        UnsubmittedLiteral,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+    enum ComposerEvidence {
+        Framing {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+            literal_framing: LiteralFraming,
+        },
+        PlainLimit {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+            #[serde(deserialize_with = "Option::deserialize")]
+            plain_literal_limit: Option<PlainLiteralLimit>,
+        },
+        PostSubmit {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+        },
+        UnsubmittedLiteral {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+        },
+    }
+
+    impl ComposerEvidence {
+        fn identity(&self) -> (ComposerOperation, EvidenceMultiplexer, ComposerEvidenceKind) {
+            match self {
+                Self::Framing {
+                    operation,
+                    multiplexer,
+                    ..
+                } => (*operation, *multiplexer, ComposerEvidenceKind::Framing),
+                Self::PlainLimit {
+                    operation,
+                    multiplexer,
+                    ..
+                } => (*operation, *multiplexer, ComposerEvidenceKind::PlainLimit),
+                Self::PostSubmit {
+                    operation,
+                    multiplexer,
+                } => (*operation, *multiplexer, ComposerEvidenceKind::PostSubmit),
+                Self::UnsubmittedLiteral {
+                    operation,
+                    multiplexer,
+                } => (
+                    *operation,
+                    *multiplexer,
+                    ComposerEvidenceKind::UnsubmittedLiteral,
+                ),
+            }
+        }
+
+        fn matches_plan(&self, plan: &ProvenanceSubmission) -> bool {
+            match self {
+                Self::Framing {
+                    literal_framing, ..
+                } => *literal_framing == plan.literal_framing,
+                Self::PlainLimit {
+                    plain_literal_limit,
+                    ..
+                } => *plain_literal_limit == plan.plain_literal_limit,
+                Self::PostSubmit { .. } | Self::UnsubmittedLiteral { .. } => true,
+            }
+        }
     }
 
     #[derive(Deserialize)]
@@ -1660,8 +1744,61 @@ pub(crate) mod test_support {
 
     #[derive(Deserialize)]
     struct ProvenanceSubmissions {
-        prompt: Option<Cited>,
-        exec: Option<Cited>,
+        prompt: Option<ProvenanceSubmission>,
+        exec: Option<ProvenanceSubmission>,
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceSubmission {
+        fixture_ids: Ids,
+        literal_framing: LiteralFraming,
+        #[serde(deserialize_with = "Option::deserialize")]
+        plain_literal_limit: Option<PlainLiteralLimit>,
+    }
+
+    impl ProvenanceSubmission {
+        fn validate_evidence(
+            &self,
+            operation: ComposerOperation,
+            fixtures: &[ProvenanceFixture],
+        ) -> Result<()> {
+            let mut coverage = BTreeSet::new();
+            for id in &self.fixture_ids.0 {
+                let fixture = fixtures
+                    .iter()
+                    .find(|fixture| &fixture.id.0 == id)
+                    .ok_or_else(|| invalid("unknown fixture"))?;
+                for record in fixture.composer_evidence.iter().flatten() {
+                    let (observed_operation, multiplexer, kind) = record.identity();
+                    if observed_operation != operation {
+                        continue;
+                    }
+                    require(
+                        record.matches_plan(self),
+                        &format!(
+                            "composer evidence {id} for {operation:?}/{multiplexer:?}/{kind:?} must match its selected plan"
+                        ),
+                    )?;
+                    coverage.insert((multiplexer, kind));
+                }
+            }
+            for multiplexer in [EvidenceMultiplexer::Tmux, EvidenceMultiplexer::Herdr] {
+                for kind in [
+                    ComposerEvidenceKind::Framing,
+                    ComposerEvidenceKind::PlainLimit,
+                    ComposerEvidenceKind::PostSubmit,
+                    ComposerEvidenceKind::UnsubmittedLiteral,
+                ] {
+                    require(
+                        coverage.contains(&(multiplexer, kind)),
+                        &format!(
+                            "composer {operation:?}/{multiplexer:?}/{kind:?} evidence required"
+                        ),
+                    )?;
+                }
+            }
+            Ok(())
+        }
     }
 
     #[derive(Deserialize)]
@@ -1683,9 +1820,6 @@ pub(crate) mod test_support {
         }
     }
 
-    /// The bundled-catalog build guard's provenance rules: unique fixture ids with lowercase
-    /// 32-byte digests, and non-empty citations of known fixtures of the profile's backend whose
-    /// capture version lies in the profile's interval; continuations cite native fixtures.
     pub(crate) fn validate_provenance(definitions: &Value) -> Result<()> {
         let raw = ProvenanceCatalog::deserialize(definitions)
             .map_err(|cause| invalid(cause.to_string()))?;
@@ -1696,6 +1830,19 @@ pub(crate) mod test_support {
                 lower_hex_bytes(&fixture.sha256.0, 32).is_some_and(|hash| hash.len() == 32),
                 "lowercase source digest required",
             )?;
+            if let Some(evidence) = &fixture.composer_evidence {
+                require(
+                    !evidence.is_empty(),
+                    "present composer evidence must be nonempty",
+                )?;
+                let mut claims = BTreeSet::new();
+                for record in evidence {
+                    require(
+                        claims.insert(record.identity()),
+                        "duplicate operation/multiplexer/evidence kind",
+                    )?;
+                }
+            }
         }
         let thresholds = raw
             .profiles
@@ -1767,8 +1914,14 @@ pub(crate) mod test_support {
             {
                 cite(&capability.fixture_ids)?;
                 if let Some(submission) = &capability.submission {
-                    for cited in [&submission.prompt, &submission.exec].into_iter().flatten() {
-                        cite(&cited.fixture_ids)?;
+                    for (operation, plan) in [
+                        (ComposerOperation::Prompt, submission.prompt.as_ref()),
+                        (ComposerOperation::Exec, submission.exec.as_ref()),
+                    ] {
+                        if let Some(plan) = plan {
+                            cite(&plan.fixture_ids)?;
+                            plan.validate_evidence(operation, &raw.fixtures)?;
+                        }
                     }
                 }
             }
