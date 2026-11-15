@@ -27,8 +27,8 @@ A fleet spreads its member panes across several windows, a tmux window or a herd
 
 | Rule | Effect |
 |---|---|
-| Column capacity | A column holds one member for every 30 rows of window height, up to 8. The capacity is read when a member is created, so resizing your terminal affects only later members |
-| Small terminals | A Director window shorter than 30 rows holds no members, so every member opens in an overflow window. An overflow window always takes at least one member per column |
+| Column capacity | A column holds one member for every 15 rows of window height, up to 8. The capacity is read when a member is created, so resizing your terminal affects only later members |
+| Small terminals | A Director window shorter than 15 rows holds no members, so every member opens in an overflow window. An overflow window always takes at least one member per column |
 | Free slots | A slot freed by `member delete` is reused first, so a newer member can land in the Director window while older members sit in overflow windows |
 | Existing members | A member never moves to another window or column after creation |
 | Window numbers | Overflow numbers only increase within a fleet, and a failed creation can skip one. An overflow window closes when its last member leaves; the Director window stays open |
