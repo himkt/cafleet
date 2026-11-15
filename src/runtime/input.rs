@@ -6865,6 +6865,285 @@ mod tests {
                 armed: std::sync::atomic::AtomicBool,
             }
 
+            struct FailLaterBeforeWrite {
+                inner: Arc<Hooks>,
+                armed: std::sync::atomic::AtomicBool,
+            }
+
+            impl InputHooks for FailLaterBeforeWrite {
+                fn checkpoint(
+                    &self,
+                    boundary: InputBoundary,
+                    state: &InputCheckpoint,
+                    deadline: Instant,
+                ) -> Result<()> {
+                    let later_write =
+                        matches!(boundary, InputBoundary::BeforeWrite) && state.written_bytes > 0;
+                    self.inner.checkpoint(boundary, state, deadline)?;
+                    if later_write && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        return Err(CafleetError::DeadlineExceeded);
+                    }
+                    Ok(())
+                }
+            }
+
+            fn exceptional_literal_stage(kind: storage::InputKind) -> Vec<u8> {
+                let mut bytes = Vec::new();
+                if kind == storage::InputKind::Exec {
+                    bytes.extend_from_slice(b"! ");
+                }
+                bytes.extend_from_slice(LITERAL.as_bytes());
+                bytes
+            }
+
+            fn exceptional_program(kind: storage::InputKind) -> Vec<u8> {
+                let mut bytes = exceptional_literal_stage(kind);
+                bytes.push(b'~');
+                bytes
+            }
+
+            fn exceptional_literal(
+                host: &mut Host,
+                kind: storage::InputKind,
+                short: Option<usize>,
+                deferred: bool,
+            ) -> (i64, i64) {
+                let mut input = request(host, "ordinary:exceptional-literal", LITERAL);
+                if kind == storage::InputKind::Exec {
+                    let InputControlOperation::SubmitPrompt(mut body) = input.operation else {
+                        panic!("the harness creates a prompt body")
+                    };
+                    body.input_kind = kind;
+                    input.operation = InputControlOperation::SubmitExec(body);
+                }
+                host.coordinator.services.hooks = Arc::new(FailLaterBeforeWrite {
+                    inner: host.hooks.clone(),
+                    armed: std::sync::atomic::AtomicBool::new(true),
+                });
+                host.pty.short = short;
+                let first = if deferred {
+                    form(host);
+                    Some(queued(host, input, "interaction_open"))
+                } else {
+                    assert!(host.handle(input).unwrap().is_none());
+                    None
+                };
+                if deferred {
+                    host.show(SCREEN.to_vec());
+                }
+                let literal = exceptional_literal_stage(kind);
+                let written = short.unwrap_or(literal.len());
+                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
+                    host,
+                    |host| host.pty.written.len() == written,
+                );
+                assert_eq!(host.pty.written, literal[..written]);
+                let id = host
+                    .coordinator
+                    .pending
+                    .as_ref()
+                    .unwrap()
+                    .input_id()
+                    .unwrap();
+                if let Some(first) = first {
+                    assert_eq!(id, first);
+                }
+                let next = queued(
+                    host,
+                    request(host, "prompt:after-exceptional-literal", LITERAL),
+                    "earlier_input",
+                );
+                let failure = (0..64)
+                    .find_map(|_| {
+                        host.drain();
+                        match host.try_advance() {
+                            Err(failure) => Some(failure),
+                            Ok(None) => None,
+                            Ok(Some(_)) => panic!("a deferred checkpoint failure keeps its error"),
+                        }
+                    })
+                    .expect("the next pre-write checkpoint fails after actual literal bytes");
+                assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
+                assert_eq!(failure.context.input_id, Some(id));
+                assert_eq!(failure.context.run_id, Some(host.fixture.run.run_id));
+                let failed = row(host, id);
+                if deferred {
+                    assert_eq!(failed.state, storage::InputState::Uncertain);
+                    assert_eq!(failed.stop_cause, Some(storage::StopCause::WriteFailed));
+                } else {
+                    assert_eq!(failed.state, storage::InputState::InProgress);
+                    assert_eq!(failed.stop_cause, None);
+                    host.coordinator
+                        .set_queued_composer_busy_since(next, &old_wait());
+                    let since = host.coordinator.queue.front().unwrap().composer_busy_since;
+                    host.coordinator.finish_pending_attempt();
+                    host.coordinator.finish_pending_attempt();
+                    assert_eq!(
+                        host.coordinator.queue.front().unwrap().composer_busy_since,
+                        since
+                    );
+                }
+                assert_eq!(failed.disposition, None);
+                assert!(host.coordinator.pending.is_none());
+                assert_eq!(host.pty.offers.len(), 1);
+                assert_eq!(host.pty.offers[0], literal);
+                host.pty.short = None;
+                host.confirm_after_programs([encoded()]);
+                (id, next)
+            }
+
+            fn finish_after_exceptional_clear(host: &mut Host, first: i64, next: i64) {
+                let before = host.pty.written.clone();
+                let blocked = row(host, first);
+                host.show(SCREEN.to_vec());
+                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
+                    host,
+                    |host| row(host, next).state == storage::InputState::Accepted,
+                );
+                let delivered = row(host, next);
+                assert_eq!(delivered.disposition, None);
+                assert_eq!(
+                    delivered.delivery_method,
+                    Some(storage::DeliveryMethod::Profile)
+                );
+                assert_eq!(delivered.delivery_reason, None);
+                assert_eq!(host.pty.written, [before, encoded()].concat());
+                assert_eq!(
+                    host.pty.offers[1..],
+                    [LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                );
+                assert_eq!(row(host, first), blocked);
+            }
+
+            #[test]
+            fn exceptional_later_before_write_requires_fresh_empty_after_positive_literal_bytes() {
+                for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
+                    for short in [Some(3), None] {
+                        with_catalog_host(
+                            permission_configured("plain", Value::Null),
+                            exceptional_program(kind),
+                            |host| {
+                                let (first, next) = exceptional_literal(host, kind, short, true);
+                                let before = host.pty.written.clone();
+                                for _ in 0..64 {
+                                    let _ = turn(host);
+                                }
+                                assert_eq!(row(host, next).state, storage::InputState::Ready);
+                                assert_eq!(
+                                    host.pty.written, before,
+                                    "the stale empty frame grants no write"
+                                );
+                                assert_eq!(host.pty.offers.len(), 1);
+                                finish_after_exceptional_clear(host, first, next);
+                            },
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn exceptional_later_before_write_holds_nonempty_composer_past_idle_bound_and_stalls() {
+                for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
+                    for short in [Some(3), None] {
+                        with_catalog_host(
+                            permission_configured("plain", Value::Null),
+                            exceptional_program(kind),
+                            |host| {
+                                let (first, next) = exceptional_literal(host, kind, short, true);
+                                host.show(DRAFT.to_vec());
+                                host.coordinator
+                                    .set_queued_composer_busy_since(next, &old_wait());
+                                let before = host.pty.written.clone();
+                                for _ in 0..64 {
+                                    let _ = turn(host);
+                                }
+                                assert_eq!(row(host, next).state, storage::InputState::Ready);
+                                assert_eq!(
+                                    host.pty.written, before,
+                                    "held CAFleet text outlives the idle fallback bound"
+                                );
+                                assert_eq!(host.pty.offers.len(), 1);
+                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
+                                host,
+                                |host| host.fixture.conn.query_row(
+                                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
+                                    rusqlite::params![host.fixture.run.run_id, next],
+                                    |row| row.get::<_, i64>(0),
+                                ).unwrap() > 0,
+                            );
+                                let payloads = host.fixture.conn.prepare(
+                                "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
+                            ).unwrap().query_map(rusqlite::params![host.fixture.run.run_id, next], |row| row.get::<_, String>(0))
+                                .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+                                assert_eq!(payloads.len(), 1);
+                                let event: Value = serde_json::from_str(&payloads[0]).unwrap();
+                                assert_eq!(event["blocking_input_id"], first);
+                                assert_eq!(event["input_id"], next);
+                                assert_eq!(event["message_id"], Value::Null);
+                                assert_eq!(host.pty.written, before);
+                                finish_after_exceptional_clear(host, first, next);
+                            },
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn exceptional_later_before_write_immediate_retirement_preserves_the_hold_and_timer() {
+                for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
+                    for short in [Some(3), None] {
+                        with_catalog_host(
+                            permission_configured("plain", Value::Null),
+                            exceptional_program(kind),
+                            |host| {
+                                let (first, next) = exceptional_literal(host, kind, short, false);
+                                let mut reconcile = host.request("receipt:exceptional-literal");
+                                reconcile.operation =
+                                    InputControlOperation::Receipt(ReceiptAction::Reconcile {
+                                        input_id: first,
+                                        expected: storage::InputState::InProgress,
+                                        disposition: storage::InputDisposition::AbandonedUncertain,
+                                        evidence_ref:
+                                            "synthetic:positive-literal-later-before-write-failure"
+                                                .into(),
+                                    });
+                                assert!(
+                                    matches!(host.handle(reconcile).unwrap(), Some(InputControlReply::Receipt(ReceiptReply::Settled { input_id })) if input_id == first)
+                                );
+                                let abandoned = row(host, first);
+                                assert_eq!(abandoned.state, storage::InputState::Settled);
+                                assert_eq!(
+                                    abandoned.disposition,
+                                    Some(storage::InputDisposition::AbandonedUncertain)
+                                );
+                                let before = host.pty.written.clone();
+                                for _ in 0..64 {
+                                    let _ = turn(host);
+                                }
+                                assert_eq!(row(host, next).state, storage::InputState::Ready);
+                                assert_eq!(host.pty.written, before);
+                                assert_eq!(host.pty.offers.len(), 1);
+                                host.show(DRAFT.to_vec());
+                                let since =
+                                    host.coordinator.queue.front().unwrap().composer_busy_since;
+                                for _ in 0..64 {
+                                    let _ = turn(host);
+                                }
+                                assert_eq!(
+                                    host.coordinator.queue.front().unwrap().composer_busy_since,
+                                    since
+                                );
+                                assert_eq!(row(host, next).state, storage::InputState::Ready);
+                                assert_eq!(host.pty.written, before);
+                                assert_eq!(host.pty.offers.len(), 1);
+                                finish_after_exceptional_clear(host, first, next);
+                                assert_eq!(row(host, first), abandoned);
+                            },
+                        );
+                    }
+                }
+            }
+
             impl InputHooks for FailAfterWrite {
                 fn checkpoint(
                     &self,
