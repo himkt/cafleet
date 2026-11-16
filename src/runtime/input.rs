@@ -7523,7 +7523,7 @@ mod tests {
             fn exceptional_later_before_write_immediate_retirement_preserves_the_hold_and_timer() {
                 for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
                     for short in [Some(3), None] {
-                        with_catalog_host(
+                        crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
                             permission_configured("plain", Value::Null),
                             exceptional_program(kind),
                             |host| {
@@ -10744,6 +10744,23 @@ mod tests {
                 pub(crate) event_evidence: &'static str,
             }
 
+            /// Keeps exact input-event sequences independent of storage scheduling delays.
+            struct InputFixtureWriterHooks;
+
+            impl crate::runtime::writer::WriterHooks for InputFixtureWriterHooks {
+                fn before(
+                    &self,
+                    _: crate::runtime::writer::WriterBoundary,
+                    _: Instant,
+                ) -> Result<()> {
+                    Ok(())
+                }
+
+                fn work_slice(&self) -> Duration {
+                    Duration::from_secs(30)
+                }
+            }
+
             /// A run owned by this process as its runner, with a started writer, observation
             /// controller and transport over a live `/bin/cat` native child.
             pub(in crate::runtime::input) struct RunnerFixture {
@@ -10784,7 +10801,13 @@ mod tests {
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                     let mut controller =
                         ObservationController::new(&fixture.run, catalog, policy).unwrap();
-                    let mut writer = writer_fixture.start().unwrap();
+                    let mut writer = EventWriter::start_with_hooks(
+                        format!("sqlite:///{}", writer_fixture.fixture.conn.path().unwrap()),
+                        writer_fixture.fixture.run.clone(),
+                        writer_fixture.lock.clone(),
+                        Arc::new(InputFixtureWriterHooks),
+                    )
+                    .unwrap();
                     writer.set_deadline(until);
                     let WriterFixture {
                         mut fixture,

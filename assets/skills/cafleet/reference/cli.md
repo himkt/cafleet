@@ -56,7 +56,7 @@ Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/
 
 Roster records contain `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack`, `idle`. Fleet-reference matches have kind `director`; others `member`. Missing activity may be null and pane placement pending.
 
-Every JSON `placement` has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id`, `mux_window_name` and `mux_pane_id` are null together while creation is pending. `window_ordinal` is `0` for the Director window and `1` or greater for an overflow window named `cafleet-<fleet_id>-<ordinal>`; `column_side` is `left` or `right`.
+Every JSON `placement` has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id`, `mux_window_name` and `mux_pane_id` are null together while creation is pending. New fleets name windows `cafleet-<fleet_id>-<ordinal>`: `window_ordinal` is `0` for the Director window and `1` or greater for overflow windows; `column_side` is `left` or `right`. Members using an existing window copy its recorded name, including names from existing registrations.
 
 Text rows list `member_id`, `name`, `kind`, `backend`, `window` (the window name) and `pane_id`, then `idle`; a pending window or pane prints `(pending)` and absent activity `-`:
 
@@ -92,20 +92,22 @@ Send/create require exactly one positional body or `--file PATH`; `--file -` rea
 | herdr session | `--mux-server`; `HERDR_SESSION`; the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; `default`. With `--pane`, these environment sources apply only when the environment detects herdr |
 | Director pane | `--pane`, checked only for existence on the server; else `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr), verified against the caller's process ancestry |
 
-After reading the pane's session, window and pane, `fleet create` reads the Director window's name and records it as the Director placement's `mux_window_name`. Each failure exits 1 before any write:
+Target resolution and the initial read of the pane's concrete session, window and pane IDs precede registration and naming. Each failure below exits 1 before any write:
 
 | Condition | Error |
 |---|---|
 | tmux finds no server | `Error: no tmux server found; pass --mux-server <socket path>` |
-| The tmux window-name reply is malformed or names another window | `Error: unexpected tmux display-message output: <quoted>` |
-| The herdr `tab get` reply has no label; a `tab_not_found` failure propagates | `Error: herdr tab get missing 'label' field` |
 | The pane is not on the chosen server (a tmux reply with an empty field or another `pane_id`) | `Error: pane <pane-id> was not found on the <backend> server <server>; pass --pane and --mux-server for the Director's pane` |
 | `--pane` is neither ID form | `Error: --pane <pane> is neither a tmux pane ID (%N) nor a herdr pane ID (<workspace>:<pane>)` |
 | A shared-server ancestor, without `--pane` | `Error: cafleet fleet create cannot verify this session's pane: a shared <label> server (pid <pid>) runs this command, …` naming both the tmux and the herdr guidance |
 | The env pane fails verification, without `--pane` | `Error: cafleet fleet create cannot verify that <VAR>=<pane> is this session's pane: <cause>; …` naming the detected multiplexer's guidance |
 | `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr) is unset, without `--pane` | `Error: cafleet fleet create cannot identify its <backend> pane because <VAR> is not set; …` naming the detected multiplexer's guidance |
 
-Each refusal ends `then run cafleet fleet create with --pane <pane-id> --mux-server <server>`. `<cause>` is one of `the pane does not exist on the <backend> server <server>`, `this command runs in a nested PID namespace`, `the process ancestry could not be read: <read error>`, `the process ancestry stopped at pid <pid> before reaching pid 1` or `the pane's process <pane_pid> is not an ancestor of this command`. The guidance names what the user, not the agent, runs in the Director pane:
+After allocating the fleet ID inside the registration transaction, `fleet create` overwrites the resolved window/tab name with `cafleet-<fleet_id>-0`: `tmux -S <server> rename-window -t <window_id> <name>` or `herdr --session <server> tab rename <tab_id> <name>`. It reads the name back, requires exact equality and rechecks the original session, window and pane IDs before recording the canonical `mux_window_name` and committing. The tmux reader removes exactly the final LF and validates the echoed window ID; the herdr reader validates `result.tab.tab_id` and requires a string `label`. Every fallible registration read precedes commit, and success output follows confirmed commit.
+
+Naming, verification and registration failures exit 1 with no success payload, including under `--json`, and roll back active uncommitted registration. A failed commit reports an unconfirmed registry outcome if SQLite already ended the transaction, and a rollback failure accompanies the original cause. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, state that the terminal name may have changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. Rolled-back IDs can be reused. Applied names remain after failure, crash or fleet deletion, while the Director pane keeps running. An output failure after confirmed commit preserves registration. Existing fleets retain their recorded names; subsequent user renames leave snapshots unchanged. Ordinary pane titles/labels retain their current behavior.
+
+Each caller-verification refusal ends `then run cafleet fleet create with --pane <pane-id> --mux-server <server>`. `<cause>` is one of `the pane does not exist on the <backend> server <server>`, `this command runs in a nested PID namespace`, `the process ancestry could not be read: <read error>`, `the process ancestry stopped at pid <pid> before reaching pid 1` or `the pane's process <pane_pid> is not an ancestor of this command`. The guidance names what the user, not the agent, runs in the Director pane:
 
 | Multiplexer | Guidance text in the refusal | The user replies with |
 |---|---|---|
@@ -601,7 +603,7 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `member create` | A pi prompt begins with `@` (exit 2) | The prompt error under § `member create` |
 | `member create` | A non-default database and a prompt without `{database_url}` | The placeholder error under § `member create` |
 | `member delete` | A `hermes` run's work stop cannot be verified | The settlement error under § `member delete` |
-| `fleet create` | The Director window's name cannot be read | The window-name errors under § Fleet commands |
+| `fleet create` | Director window naming, name read-back, pane-context verification or subsequent registration fails | The naming and transaction outcomes under § Fleet commands |
 | `member create` | The fleet layout lock stays busy, an overflow window cannot be read, the window ordinal changed, or a new-window reply is malformed | The outcomes under § `member create` |
 | `member delete` / `fleet delete` | The fleet layout lock stays busy for 60 seconds | The busy outcomes under § `member delete` and § Fleet commands |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` |

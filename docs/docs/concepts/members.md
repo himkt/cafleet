@@ -4,7 +4,7 @@ Register the calling session as Director, then create independent member panes a
 
 ## Registration and readiness
 
-`fleet create` atomically registers the current Director with its pane and multiplexer server, and every later command drives the multiplexer through that recorded placement. When CAFleet cannot confirm the Director's pane, registration needs one step from you ([Director pane verification](#director-pane-verification)). `member create` inherits that Director's backend unless overridden, validates model/effort, native policy, evidence policy and prompt identity before registration, then starts the member's owned PTY runner. A failed creation rolls back or deregisters its pending member and reports the original cause with any cleanup error ([creation failure compensation](https://github.com/himkt/cafleet/blob/main/SPEC.md#creation-failure-compensation)).
+`fleet create` overwrites the current Director window/tab name with `cafleet-<fleet_id>-0`, verifies the name and pane location, then atomically registers the Director with that placement and multiplexer server. Every later command drives the multiplexer through the recorded placement. When CAFleet cannot confirm the Director's pane, registration needs one step from you ([Director pane verification](#director-pane-verification)). A naming or verification failure rolls back uncommitted registration and leaves the Director pane running; an applied name remains, and the error identifies the attempted target for inspection. `member create` inherits that Director's backend unless overridden, validates model/effort, native policy, evidence policy and prompt identity before registration, then starts the member's owned PTY runner. A failed member creation rolls back or deregisters its pending member and reports the original cause with any cleanup error ([creation failure compensation](https://github.com/himkt/cafleet/blob/main/SPEC.md#creation-failure-compensation)).
 
 Members send ready, then poll their inbox; the Director can assign a member once its ready arrives.
 
@@ -23,7 +23,7 @@ The pane ID's form names its multiplexer (`%N` for tmux, `<workspace>:<pane>` fo
 
 ## Pane layout
 
-A fleet spreads its member panes across several windows, a tmux window or a herdr tab. The Director keeps the left half of its own window alone, and members stack in that window's right column. When that column is full, `member create` opens an overflow window named `cafleet-<fleet_id>-<ordinal>`, such as `cafleet-3-1`, in the background without taking focus. An overflow window fills its left column top to bottom, then its right column. After every member creation and deletion, the panes of each column in that window have equal heights.
+A fleet spreads its member panes across several windows, a tmux window or a herdr tab. Creation names the Director window `cafleet-<fleet_id>-0`, such as `cafleet-3-0`. The Director keeps the left half of that window alone, and members stack in its right column. When that column is full, `member create` opens an overflow window named `cafleet-<fleet_id>-<ordinal>`, starting at `cafleet-3-1` for that fleet, in the background without taking focus. An overflow window fills its left column top to bottom, then its right column. After every member creation and deletion, the panes of each column in that window have equal heights.
 
 | Rule | Effect |
 |---|---|
@@ -33,7 +33,7 @@ A fleet spreads its member panes across several windows, a tmux window or a herd
 | Existing members | A member never moves to another window or column after creation |
 | Window numbers | Overflow numbers only increase within a fleet, and a failed creation can skip one. An overflow window closes when its last member leaves; the Director window stays open |
 
-Each member's pane carries the member name: herdr labels the pane, and tmux sets its pane title, which shows when `pane-border-status` is on and which a coding agent may retitle. `member list` shows each member's `window` and `pane_id`, and `member create` and `member show` print `window=<name>`. The Director window's name is the one it had when `fleet create` ran.
+Each ordinary member's pane carries the member name: herdr labels the pane, and tmux sets its pane title, which shows when `pane-border-status` is on and which a coding agent may retitle. Ordinary pane naming is best effort; Director window naming is required for successful fleet registration. `member list` shows each member's `window` and `pane_id`, and `member create` and `member show` print `window=<name>`. These names are placement snapshots: existing fleets retain their recorded names, and later user renames leave the registry unchanged. Fleet deletion leaves the Director window's current name in place.
 
 Member creations and deletions in one fleet wait for each other, up to 60 seconds, so concurrent calls never pick the same slot. If you close an overflow window by hand while its members stay registered, the next `member create` fails and names the window and its members; run `cafleet member delete MEMBER_ID` for each, then retry. The [fleet window layout contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#fleet-window-layout) defines capacity, slot selection, naming and the layout lock.
 

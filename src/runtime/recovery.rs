@@ -3608,6 +3608,7 @@ mod tests {
     }
 
     mod completion {
+        use crate::runtime::recovery::test_support::descriptor::recover_released_with_host;
         use crate::runtime::recovery::tests::*;
         use rusqlite::hooks::AuthAction;
         use rusqlite::hooks::AuthContext;
@@ -3686,6 +3687,12 @@ mod tests {
 
         fn immediate_completion(exceptional: bool, foreign_owner: bool, status: RunStatus) {
             let (mut case, claim) = prepare(exceptional);
+            let mut inherited_lock = (foreign_owner && !exceptional).then(|| {
+                RunLock::acquire(&case.fixture.conn, &case.fixture.run.owner())
+                    .unwrap()
+                    .unwrap()
+            });
+            let mut initial_snapshot_seen = false;
             let expected: CompletedSnapshot = Arc::new(Mutex::new(None));
             let published = expected.clone();
             let path = case.fixture.conn.path().unwrap().to_owned();
@@ -3694,6 +3701,12 @@ mod tests {
                 host.process = Evidence::Unknown;
             }
             host.action = Some(Box::new(move |boundary, run, _| {
+                if boundary == "after_snapshot" && inherited_lock.is_some() {
+                    if initial_snapshot_seen {
+                        inherited_lock.take();
+                    }
+                    initial_snapshot_seen = true;
+                }
                 if boundary == "before_takeover" {
                     let conn = Connection::open(&path).unwrap();
                     assert_eq!(
@@ -3705,7 +3718,7 @@ mod tests {
                 }
                 Ok(())
             }));
-            let result = case.recover_with(&mut host, claim.as_ref());
+            let result = recover_released_with_host(&mut case, &mut host, claim.as_ref());
             if foreign_owner {
                 assert!(
                     result.is_err(),
@@ -4793,9 +4806,19 @@ pub(crate) mod test_support {
         /// test shares that flock until its exec closes it, which recovery reads as a live owner,
         /// so retry that side-effect-free outcome briefly.
         pub(crate) fn recover_released(case: &mut Case) -> TestResult<RecoveryReport> {
-            let until = Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
+            recover_released_with_host(case, &mut new_host(), None)
+        }
+
+        pub(crate) fn recover_released_with_host(
+            case: &mut Case,
+            host: &mut Host,
+            claim: Option<&OwnerTerminationAttestation>,
+        ) -> TestResult<RecoveryReport> {
+            let until = host
+                .deadline
+                .min(Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE);
             loop {
-                let result = case.recover(&mut new_host());
+                let result = case.recover_with(host, claim);
                 let contended = matches!(
                     &result,
                     Ok(report) if matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable)

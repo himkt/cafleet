@@ -34,7 +34,7 @@ pub(crate) enum SlotChoice {
     },
 }
 
-pub(crate) fn overflow_window_name(fleet_id: i64, ordinal: i64) -> String {
+pub(crate) fn fleet_window_name(fleet_id: i64, ordinal: i64) -> String {
     format!("cafleet-{fleet_id}-{ordinal}")
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn choose_slot(
     let ordinal = last_window_ordinal + 1;
     SlotChoice::NewWindow {
         ordinal,
-        window_name: overflow_window_name(fleet_id, ordinal),
+        window_name: fleet_window_name(fleet_id, ordinal),
     }
 }
 
@@ -87,6 +87,22 @@ mod tests {
     use crate::multiplexer::layout::*;
 
     const FLEET: i64 = 3;
+
+    #[test]
+    fn fleet_window_names_cover_the_director_and_overflow_ordinals() {
+        for (fleet_id, ordinal, expected) in [
+            (3, 0, "cafleet-3-0"),
+            (3, 1, "cafleet-3-1"),
+            (42, 12, "cafleet-42-12"),
+            (
+                i64::MAX,
+                i64::MAX,
+                "cafleet-9223372036854775807-9223372036854775807",
+            ),
+        ] {
+            assert_eq!(fleet_window_name(fleet_id, ordinal), expected);
+        }
+    }
 
     fn panes(prefix: &str, count: usize) -> Vec<String> {
         (0..count)

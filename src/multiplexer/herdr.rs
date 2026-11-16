@@ -204,9 +204,21 @@ impl Multiplexer for HerdrMultiplexer {
             .transpose()
     }
 
+    fn rename_window(&self, window_id: &str, name: &str) -> Result<(), MultiplexerError> {
+        self.run_json(&self.core.argv(&["herdr", "tab", "rename", window_id, name]))?;
+        Ok(())
+    }
+
     fn window_name(&self, window_id: &str) -> Result<String, MultiplexerError> {
         let result = self.run_json(&self.core.argv(&["herdr", "tab", "get", window_id]))?;
-        Ok(str_field(&result["tab"], "tab get", "label")?.to_owned())
+        let tab = &result["tab"];
+        let tab_id = str_field(tab, "tab get", "tab_id")?;
+        if tab_id != window_id {
+            return Err(MultiplexerError::new(format!(
+                "herdr tab get returned tab {tab_id:?}, expected {window_id:?}"
+            )));
+        }
+        Ok(str_field(tab, "tab get", "label")?.to_owned())
     }
 
     fn window_height(&self, _window_id: &str, anchors: &[String]) -> Result<i64, MultiplexerError> {
@@ -1686,7 +1698,7 @@ mod tests {
 
         #[test]
         fn window_name_reads_the_tab_label() {
-            for label in ["agents", ""] {
+            for label in ["agents", "", " agents | left \r\n", "cafleet-42-0"] {
                 let runner = FakeRunner::with_binary("herdr");
                 runner.respond(Ok(herdr_envelope(
                     json!({"tab": {"tab_id": TAB, "label": label}}),
@@ -1712,6 +1724,69 @@ mod tests {
             runner.respond(failed("tab_not_found"));
             let error = on_server(runner).window_name(TAB).unwrap_err().to_string();
             assert!(error.contains("tab_not_found"), "{error}");
+        }
+
+        #[test]
+        fn window_name_requires_the_requested_tab_id_and_a_string_label() {
+            for tab in [
+                json!({"tab_id": "other", "label": "cafleet-42-0"}),
+                json!({"label": "cafleet-42-0"}),
+                json!({"tab_id": null, "label": "cafleet-42-0"}),
+                json!({"tab_id": 1, "label": "cafleet-42-0"}),
+                json!({"tab_id": TAB, "label": null}),
+                json!({"tab_id": TAB, "label": 1}),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(Ok(herdr_envelope(json!({"tab": tab}))));
+                assert!(on_server(runner.clone()).window_name(TAB).is_err(), "{tab}");
+                assert_eq!(runner.run_argvs(), vec![herdr(&["tab", "get", TAB])]);
+            }
+        }
+
+        #[test]
+        fn rename_window_targets_the_recorded_server_and_concrete_tab() {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(herdr_envelope(json!({}))));
+            on_server(runner.clone())
+                .rename_window(TAB, "cafleet-42-0")
+                .unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                vec![herdr(&["tab", "rename", TAB, "cafleet-42-0"])]
+            );
+        }
+
+        #[test]
+        fn rename_window_propagates_command_failure() {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(failed("rename denied"));
+            let error = on_server(runner.clone())
+                .rename_window(TAB, "cafleet-42-0")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("rename denied"), "{error}");
+            assert_eq!(
+                runner.run_argvs(),
+                vec![herdr(&["tab", "rename", TAB, "cafleet-42-0"])]
+            );
+        }
+
+        #[test]
+        fn rename_window_validates_the_json_result_envelope() {
+            for reply in ["not json", r#"{"id":1}"#, r#"{"result":null}"#] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(Ok(reply.into()));
+                assert!(
+                    on_server(runner.clone())
+                        .rename_window(TAB, "cafleet-42-0")
+                        .is_err(),
+                    "{reply}"
+                );
+                assert_eq!(
+                    runner.run_argvs(),
+                    vec![herdr(&["tab", "rename", TAB, "cafleet-42-0"])]
+                );
+            }
         }
     }
 }

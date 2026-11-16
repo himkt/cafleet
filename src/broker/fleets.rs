@@ -38,39 +38,80 @@ pub(crate) fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<FleetRec
 }
 
 /// Creates a fleet whose root Director occupies `director`, whose pane is required.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "database-only registration API for fixtures and native verification"
+    )
+)]
 pub(crate) fn create_fleet(
     conn: &mut Connection,
     name: &str,
     director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
-    assert!(
-        director.pane.is_some()
-            && director.window_ordinal == 0
-            && director.column_side == crate::multiplexer::layout::ColumnSide::Left,
-        "the Director placement records its pane in the Director window's left column"
-    );
+    create_fleet_with(conn, name, |_| Ok(director.clone()))
+}
+
+pub(crate) fn create_fleet_with(
+    conn: &mut Connection,
+    name: &str,
+    director: impl FnOnce(i64) -> Result<NewPlacement, CafleetError>,
+) -> Result<CreatedFleet, CafleetError> {
     let now = now_stamp();
     let tx = conn.transaction()?;
-    let fleet_id = tx.query_row(
-        "INSERT INTO fleets (name, created_at) VALUES (?1, ?2) RETURNING fleet_id",
-        params![name, now],
-        |row| row.get(0),
-    )?;
-    let director_id = insert_member_row(&tx, fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &now)?;
-    insert_placement_row(&tx, director_id, director, &now)?;
-    tx.execute(
-        "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
-        params![director_id, fleet_id],
-    )?;
-    tx.commit()?;
-    let director = crate::broker::members::get_member(conn, director_id, fleet_id)?
-        .expect("the created root Director is active");
-    Ok(CreatedFleet {
-        fleet_id,
-        name: name.to_owned(),
-        created_at: now,
-        director,
-    })
+    let result = (|| {
+        let fleet_id = tx.query_row(
+            "INSERT INTO fleets (name, created_at) VALUES (?1, ?2) RETURNING fleet_id",
+            params![name, now],
+            |row| row.get(0),
+        )?;
+        let director = director(fleet_id)?;
+        assert!(
+            director.pane.is_some()
+                && director.window_ordinal == 0
+                && director.column_side == crate::multiplexer::layout::ColumnSide::Left,
+            "the Director placement records its pane in the Director window's left column"
+        );
+        let director_id =
+            insert_member_row(&tx, fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &now)?;
+        insert_placement_row(&tx, director_id, &director, &now)?;
+        tx.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            params![director_id, fleet_id],
+        )?;
+        let director = crate::broker::members::get_member(&tx, director_id, fleet_id)?
+            .expect("the created root Director is active");
+        let created = CreatedFleet {
+            fleet_id,
+            name: name.to_owned(),
+            created_at: now,
+            director,
+        };
+        tx.execute_batch("COMMIT").map_err(|error| {
+            let error = CafleetError::from(error);
+            if tx.is_autocommit() {
+                error.with_diagnostic(
+                    "fleet registration outcome is unconfirmed: SQLite ended the transaction after a failed commit",
+                )
+            } else {
+                error
+            }
+        })?;
+        Ok(created)
+    })();
+    let error = match result {
+        Ok(created) => return Ok(created),
+        Err(error) => error,
+    };
+    let cleanup = if tx.is_autocommit() {
+        Ok(())
+    } else {
+        tx.rollback().map_err(|error| {
+            CafleetError::App(format!("rolling back fleet registration failed: {error}"))
+        })
+    };
+    CafleetError::merge_cleanup(Err(error), cleanup)
 }
 
 /// The recorded placement of `fleet_id`'s root Director.
@@ -256,25 +297,315 @@ mod tests {
 
     #[test]
     fn registration_is_atomic_at_every_stage_and_preserves_identity() {
-        let trigger = "BEFORE UPDATE OF director_member_id ON fleets";
+        for trigger in [
+            "BEFORE INSERT ON fleets",
+            "BEFORE INSERT ON members",
+            "BEFORE INSERT ON member_placements",
+            "BEFORE UPDATE OF director_member_id ON fleets",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
+            let calls = std::cell::Cell::new(0);
+            let error = create_fleet_with(&mut conn, "alpha", |fleet_id| {
+                assert_eq!(fleet_id, 1);
+                calls.set(calls.get() + 1);
+                Ok(director_new_placement("%0"))
+            })
+            .unwrap_err();
+            assert!(error.message().contains("registration failure"), "{error}");
+            assert_eq!(
+                calls.get(),
+                usize::from(trigger != "BEFORE INSERT ON fleets")
+            );
+            assert!(conn.is_autocommit());
+            for table in ["fleets", "members", "member_placements"] {
+                assert_eq!(row_count(&conn, table), 0, "{trigger}: {table}");
+            }
+            conn.execute_batch("DROP TRIGGER fail_registration")
+                .unwrap();
+            let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
+            assert_eq!((fleet, director), (1, 1));
+            let stored = get_fleet(&conn, fleet).unwrap().unwrap();
+            assert_eq!(stored.director_member_id, director);
+            let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
+            assert_eq!(member.kind, crate::broker::MemberKind::Director);
+            assert_eq!(member.placement.mux_pane_id.as_deref(), Some("%0"));
+        }
+    }
+
+    #[test]
+    fn placement_factory_receives_the_allocated_id_once_and_preserves_existing_names() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
-        let error =
-            broker::create_fleet(&mut conn, "alpha", &director_new_placement("%0")).unwrap_err();
-        assert!(error.message().contains("registration failure"));
+        let (legacy, _) = create_fleet_fixture(&mut conn, "legacy");
+        let seen = std::cell::RefCell::new(Vec::new());
+        let created = create_fleet_with(&mut conn, "alpha", |fleet_id| {
+            seen.borrow_mut().push(fleet_id);
+            let mut placement = director_new_placement("%5");
+            placement.pane.as_mut().unwrap().mux_window_name = format!("cafleet-{fleet_id}-0");
+            Ok(placement)
+        })
+        .unwrap();
+        assert_eq!(*seen.borrow(), [2]);
+        assert_eq!(created.fleet_id, 2);
+        assert_eq!(created.director.name, "Director");
+        assert_eq!(
+            created.director.placement.mux_window_name.as_deref(),
+            Some("cafleet-2-0")
+        );
+        assert_eq!(
+            director_placement(&conn, created.fleet_id).unwrap(),
+            created.director.placement
+        );
+        assert_eq!(
+            director_placement(&conn, legacy)
+                .unwrap()
+                .mux_window_name
+                .as_deref(),
+            Some("main")
+        );
+        assert!(conn.is_autocommit());
+    }
+
+    #[test]
+    fn placement_factory_failure_rolls_back_registration_and_allows_id_reuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let calls = std::cell::Cell::new(0);
+        let error = create_fleet_with(&mut conn, "alpha", |fleet_id| {
+            assert_eq!(fleet_id, 1);
+            calls.set(calls.get() + 1);
+            Err(CafleetError::App("placement factory failure".into()))
+        })
+        .unwrap_err();
+        assert_eq!(calls.get(), 1);
+        assert!(error.message().contains("placement factory failure"));
+        assert!(conn.is_autocommit());
         for table in ["fleets", "members", "member_placements"] {
             assert_eq!(row_count(&conn, table), 0);
         }
-        conn.execute_batch("DROP TRIGGER fail_registration")
+        assert_eq!(create_fleet_fixture(&mut conn, "retry").0, 1);
+    }
+
+    #[test]
+    fn both_registration_entry_points_assert_the_director_placement_contract() {
+        for factory in [false, true] {
+            for invalid in 0..3 {
+                let dir = tempfile::tempdir().unwrap();
+                let mut conn = migrated_conn(&dir);
+                let mut placement = director_new_placement("%0");
+                match invalid {
+                    0 => placement.pane = None,
+                    1 => placement.window_ordinal = 1,
+                    2 => placement.column_side = ColumnSide::Right,
+                    _ => unreachable!(),
+                }
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if factory {
+                        create_fleet_with(&mut conn, "alpha", |_| Ok(placement))
+                    } else {
+                        create_fleet(&mut conn, "alpha", &placement)
+                    }
+                }));
+                assert!(result.is_err(), "factory={factory}, invalid={invalid}");
+                assert!(conn.is_autocommit());
+                for table in ["fleets", "members", "member_placements"] {
+                    assert_eq!(row_count(&conn, table), 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn transaction_acquisition_failure_keeps_the_placement_factory_uninvoked() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        conn.authorizer(Some(|context: AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Transaction {
+                    operation: TransactionOperation::Begin
+                }
+            ) {
+                Authorization::Deny
+            } else {
+                Authorization::Allow
+            }
+        }))
+        .unwrap();
+        let result = create_fleet_with(&mut conn, "alpha", |_| {
+            panic!("a transaction is acquired before invoking the placement factory")
+        });
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
             .unwrap();
-        let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
-        assert_eq!((fleet, director), (1, 1));
-        let stored = get_fleet(&conn, fleet).unwrap().unwrap();
-        assert_eq!(stored.director_member_id, director);
-        let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
-        assert_eq!(member.kind, crate::broker::MemberKind::Director);
-        assert_eq!(member.placement.mux_pane_id.as_deref(), Some("%0"));
+        let error = result.unwrap_err();
+        assert!(error.message().contains("not authorized"), "{error}");
+        assert!(conn.is_autocommit());
+        for table in ["fleets", "members", "member_placements"] {
+            assert_eq!(row_count(&conn, table), 0);
+        }
+    }
+
+    #[test]
+    fn placement_failure_and_rollback_failure_both_remain_visible() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        conn.authorizer(Some(|context: AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Transaction {
+                    operation: TransactionOperation::Rollback
+                }
+            ) {
+                Authorization::Deny
+            } else {
+                Authorization::Allow
+            }
+        }))
+        .unwrap();
+        let result = create_fleet_with(&mut conn, "alpha", |_| {
+            Err(CafleetError::App("placement factory failure".into()))
+        });
+        let transaction_open = !conn.is_autocommit();
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        if transaction_open {
+            conn.execute_batch("ROLLBACK").unwrap();
+        }
+        let error = result.unwrap_err();
+        assert!(
+            error.message().contains("placement factory failure"),
+            "{error}"
+        );
+        assert!(error.message().contains("not authorized"), "{error}");
+        assert!(transaction_open);
+        for table in ["fleets", "members", "member_placements"] {
+            assert_eq!(row_count(&conn, table), 0);
+        }
+    }
+
+    #[test]
+    fn result_construction_failure_rolls_back_before_any_commit_attempt() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let commits = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&commits);
+        conn.commit_hook(Some(move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            false
+        }))
+        .unwrap();
+        conn.authorizer(Some(|context: AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Read {
+                    table_name: "member_placements",
+                    column_name: "backend"
+                }
+            ) {
+                Authorization::Deny
+            } else {
+                Authorization::Allow
+            }
+        }))
+        .unwrap();
+        let result = create_fleet_with(&mut conn, "alpha", |_| Ok(director_new_placement("%0")));
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        conn.commit_hook(None::<fn() -> bool>).unwrap();
+        let error = result.unwrap_err();
+        assert!(error.message().contains("prohibited"), "{error}");
+        assert_eq!(commits.load(Ordering::SeqCst), 0);
+        assert!(conn.is_autocommit());
+        for table in ["fleets", "members", "member_placements"] {
+            assert_eq!(row_count(&conn, table), 0);
+        }
+    }
+
+    #[test]
+    fn a_failed_commit_resolves_an_active_transaction_and_preserves_rollback_errors() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+        use std::sync::{Arc, Mutex};
+
+        for deny_rollback in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let attempts = Arc::new(Mutex::new(Vec::new()));
+            let observed = Arc::clone(&attempts);
+            conn.authorizer(Some(move |context: AuthContext<'_>| match context.action {
+                AuthAction::Transaction {
+                    operation: TransactionOperation::Unknown,
+                } => {
+                    observed.lock().unwrap().push("commit");
+                    Authorization::Deny
+                }
+                AuthAction::Transaction {
+                    operation: TransactionOperation::Rollback,
+                } => {
+                    observed.lock().unwrap().push("rollback");
+                    if deny_rollback {
+                        Authorization::Deny
+                    } else {
+                        Authorization::Allow
+                    }
+                }
+                _ => Authorization::Allow,
+            }))
+            .unwrap();
+            let result =
+                create_fleet_with(&mut conn, "alpha", |_| Ok(director_new_placement("%0")));
+            let transaction_open = !conn.is_autocommit();
+            conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                .unwrap();
+            if transaction_open {
+                conn.execute_batch("ROLLBACK").unwrap();
+            }
+            let error = result.unwrap_err();
+            let diagnostic = error.message();
+            assert!(diagnostic.contains("not authorized"), "{diagnostic}");
+            let attempts = attempts.lock().unwrap();
+            assert_eq!(attempts.first(), Some(&"commit"));
+            assert!(attempts[1..].contains(&"rollback"), "{attempts:?}");
+            assert_eq!(transaction_open, deny_rollback);
+            if deny_rollback {
+                assert!(
+                    diagnostic.to_lowercase().contains("rollback")
+                        || diagnostic.contains("rolling back"),
+                    "{diagnostic}"
+                );
+                assert!(
+                    diagnostic.matches("not authorized").count() >= 2,
+                    "{diagnostic}"
+                );
+            }
+            for table in ["fleets", "members", "member_placements"] {
+                assert_eq!(row_count(&conn, table), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_commit_with_an_ended_transaction_reports_an_unconfirmed_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        conn.commit_hook(Some(|| true)).unwrap();
+        let result = create_fleet_with(&mut conn, "alpha", |_| Ok(director_new_placement("%0")));
+        conn.commit_hook(None::<fn() -> bool>).unwrap();
+        let error = result.unwrap_err();
+        assert!(error.message().contains("unconfirmed"), "{error}");
+        assert!(conn.is_autocommit());
+        for table in ["fleets", "members", "member_placements"] {
+            assert_eq!(row_count(&conn, table), 0);
+        }
     }
 
     #[test]
