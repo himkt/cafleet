@@ -23,7 +23,7 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coord
 
 ## Install
 
-Install the CLI with Homebrew, then run the setup:
+Install the native coding agents you intend to use and choose any relocated configuration directories as described in the [Quickstart](https://himkt.github.io/cafleet/quickstart#install). Then install the CLI with Homebrew and run the shared setup:
 
 ```bash
 brew install himkt/tap/cafleet

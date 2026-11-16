@@ -9,23 +9,31 @@ pane inside tmux or herdr.
 brew install himkt/tap/cafleet
 ```
 
+Alternatively, extract the binary for your platform from [GitHub Releases](https://github.com/himkt/cafleet/releases) onto `PATH`.
+
+Install the native coding agents you intend to use and choose any relocated
+[configuration directories](concepts/coding-agents.md#config-directories) before
+setup. Keep those directory settings when launching members. If you use Hermes,
+make `hermes` available on `PATH` so setup installs and enables its plugin;
+[Hermes troubleshooting](concepts/coding-agents.md#hermes-configuration) covers
+installing it later.
+
+Run the shared setup once to install embedded skills, presets and plugins offline:
+
 ```bash
 cafleet setup
 ```
-
-Alternatively, extract the binary for your platform from [GitHub Releases](https://github.com/himkt/cafleet/releases) onto PATH, then run setup. Setup installs embedded skills, presets and plugins offline; `--coding-agent` selects a backend.
 
 Rerun `cafleet setup` after every upgrade, patch releases included: each version starts from a fresh database ([Upgrading cafleet](concepts/storage.md#upgrading-cafleet)).
 
 ## Configure
 
-CAFleet runs inside a coding agent without per-command permission prompts.
-Configure each backend you use:
+After shared setup, configure each backend you use:
 
 | Backend | Config file | Manual configuration | Installed by `cafleet setup` |
 |---|---|---|---|
-| [`claude` (Claude Code)](#claude-code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills |
-| [`codex` (OpenAI Codex CLI)](#codex) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` |
+| [`claude` (Claude Code)](#claude-code) | `~/.claude/settings.json` | The recommended `auto` permission profile below | The skills |
+| [`codex` (OpenAI Codex CLI)](#codex) | `~/.codex/config.toml` | A Director approval policy that permits needed escalation | The skills, plus `~/.codex/rules/cafleet.rules` |
 | [`opencode`](#opencode) | — | — | The skills, the `cafleet` and `cafleet-ask` agent presets and the CAFleet plugin |
 | [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills and the CAFleet plugin, enabled in your Hermes configuration |
 | [`pi` (pi coding agent)](#pi) | — | — | The skills and the CAFleet pi extension |
@@ -34,11 +42,10 @@ The paths above are defaults ([Config directories](concepts/coding-agents.md#con
 
 ### Claude Code
 
-Add the profile that matches your Director session's permission mode to
-`~/.claude/settings.json`. Members always start in `auto` mode, so auto mode
-must be available for your account and model.
-
-#### Auto mode
+Add the recommended `auto` profile to `~/.claude/settings.json`. Members start
+in `auto` mode by default, so auto mode must be available for your account and
+model. [Claude Code configuration](concepts/coding-agents.md#claude-code-configuration)
+covers other supported permission modes.
 
 ```json
 {
@@ -60,41 +67,40 @@ must be available for your account and model.
 }
 ```
 
-#### Other permission modes
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(cafleet *)",
-      "Skill(cafleet)",
-      "Skill(cafleet-design-doc)",
-      "Read(~/.claude/skills/**)",
-      "Edit",
-      "Write"
-    ],
-    "ask": [
-      "Bash(cafleet member prompt *)",
-      "Bash(cafleet member exec *)",
-      "Bash(cafleet member press *)"
-    ]
-  }
-}
-```
-
 The optional `ask` entries let you confirm each input the Director sends into
 a member's pane; drop them to let it dispatch without a prompt. Add an allow
 entry, such as `Bash(npm test *)`, for every project command members run.
 
 ### Codex
 
+Restart Codex after shared setup so it loads `~/.codex/rules/cafleet.rules`.
+Keep your own rules in a separate file beside it; setup replaces its installed
+file on every run.
+
+Before unattended member startup, approve the repository or directory shown by
+Codex's native `Trust this folder?` prompt. Codex 0.167.0 requests this consent
+for a fresh repository and a new worktree on the tested Linux launch;
+[working-directory trust](concepts/coding-agents.md#working-directory-trust)
+explains the scope.
+
+For a Director that needs to request escalation, add these top-level keys to
+`~/.codex/config.toml`, before any table headers:
+
 ```toml
-[sandbox_workspace_write]
-network_access = true
-writable_roots = ["/home/<you>/.local/share/cafleet"]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
 ```
 
-`network_access` lets cafleet reach the tmux or herdr socket, and `writable_roots` names the database directory. Setup overwrites the installed `~/.codex/rules/cafleet.rules`, so keep your own Codex rules in a separate file beside it.
+Keep an existing automatic reviewer when it already supports the needed
+escalation. The approval policy and reviewer are separate settings; this example
+selects the Director's policy, while `cafleet member create --permission-mode`
+selects a spawned member's policy. [Codex configuration](concepts/coding-agents.md#codex-configuration)
+explains the reviewer and any sandbox access needed for your command path.
+
+The Director's listener must emit `ready`. If the sandbox blocks startup, for
+example with `cannot run ps: Operation not permitted (os error 1)` on macOS,
+follow [Codex listener troubleshooting](concepts/coding-agents.md#codex-listener-startup)
+to retry through the host's approval flow and confirm notification delivery.
 
 Codex 0.167.0 and later run a Codex Director's tool commands through the shared Codex daemon, so registering a Codex Director usually asks you for its pane ID and server ([Director pane verification](concepts/members.md#director-pane-verification)).
 
@@ -122,28 +128,28 @@ Run the Director in the TUI client: `hermes chat --tui`, or set
 `display.interface: tui`. Hermes members keep the classic CLI.
 :::
 
-1. Run `cafleet setup --coding-agent hermes` with `hermes` on `PATH`.
-2. Start the Director with `hermes chat --tui`.
-3. Register the fleet with
+1. Start the Director with `hermes chat --tui`.
+2. Register the fleet with
    `cafleet fleet create --name <name> --coding-agent hermes`. When CAFleet
    asks for the pane ID and server, run the command it names
    ([Director pane verification](concepts/members.md#director-pane-verification)).
-4. Start reception with the plugin's `cafleet_listen` tool, passing the
+3. Start reception with the plugin's `cafleet_listen` tool, passing the
    Director ID.
 
 ### pi
 
-1. Install pi 1.5.0 or later and configure its default provider and model.
-2. Run `cafleet setup --coding-agent pi`. Setup installs into `~/.pi/agent`,
-   or into `PI_CODING_AGENT_DIR` when you set it; set the same value where
-   you run `cafleet member create`.
-3. Launch the Director with plain `pi` from the project directory, so the
+Use pi 1.5.0 or later. Shared setup installs into `~/.pi/agent`, or into
+`PI_CODING_AGENT_DIR` when you set it; use the same value where you run
+`cafleet member create`.
+
+1. Configure pi's default provider and model.
+2. Launch the Director with plain `pi` from the project directory, so the
    CAFleet pi extension loads.
-4. Register the fleet with
+3. Register the fleet with
    `cafleet fleet create --name <name> --coding-agent pi`, then start
    reception with the extension's `cafleet_listen` tool, passing the
    Director ID.
-5. Manage a goal with `/cafleet-goal <objective>` and its `status`,
+4. Manage a goal with `/cafleet-goal <objective>` and its `status`,
    `pause`, `resume` and `clear` subcommands.
 
 Members run under the CAFleet member gate's `cafleet-ask` mode: their broker
@@ -151,17 +157,6 @@ message commands run and every other shell command opens a native permission
 form for the Director. Choose `--permission-mode cafleet` for a member whose
 other commands should be denied and routed to the Director instead
 ([pi configuration](concepts/coding-agents.md#pi-configuration)).
-
-### Trust the working directory
-
-A freshly spawned member stalls on its coding agent's first-run trust prompt, ignoring every message until the prompt is cleared. Trust each working directory in advance: launch your coding agent there once and accept the prompt, or add a trust entry to its configuration. For Codex, add the absolute workspace path to `~/.codex/config.toml`:
-
-```toml
-[projects."/abs/path/to/workspace"]
-trust_level = "trusted"
-```
-
-Trust is granted per directory, so each git worktree needs its own approval. pi members skip pi's project-trust prompt by ignoring trust-gated project-local resources, so they need no trust entry.
 
 ## Simple example — invoke from a coding agent
 
