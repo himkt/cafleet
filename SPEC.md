@@ -1905,7 +1905,7 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 | `claude` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `claude` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
 | `codex` | Director | `goal` | `native` | — | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through the 200-record burst, idle and forced-failure steps, 0.165.0, checked 2026-11-06. |
-| `codex` | Director | `listen` | `native` | `subscribe` | `yes` | `cafleet message listen --codex-thread` forwarding through `codex queue` on the escalated path: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice with the forwarder alive and no queue refusal, the 300 s hold ceiling and owner exit ending the forwarder), 0.167.0, checked 2026-11-15. A Linux native-tool check with broad socket/database grants omitted reached listener `ready` and queued delivery through approved escalation after a namespace failure using CLI 0.167.0 and a managed daemon (initial server version unrecorded; replacement observed at 0.169.0), checked 2026-11-16. |
+| `codex` | Director | `listen` | `native` | `subscribe` | `yes` | `cafleet message listen --codex-thread` forwarding through `codex queue` on the escalated path: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice with the forwarder alive and no queue refusal, the 300 s hold ceiling and owner exit ending the forwarder), 0.167.0, checked 2026-11-15. The sandboxed path is unverified. |
 | `codex` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `codex` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
 | `opencode` | Director | `goal` | `extension` | — | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
@@ -2073,7 +2073,7 @@ The omitted claude and codex policies are native automatic approval modes (§6.9
 
 #### Claude permission posture
 
-On Linux, Claude Code 2.1.319's standard `auto` member launch with the generated broker allow rule waits at native folder trust in both a fresh Git repository and a new detached worktree without prior trust. With persisted trust configured for those directories, both launches reach initial broker readiness. Directory consent is separate from command permissions and auto-mode availability.
+Native directory consent, when requested, precedes broker readiness and is independent of command permissions and auto-mode availability.
 
 Under the omitted `--permission-mode auto`, a member runs its spawn-time allow rules and every tool call matching `permissions.allow` without review; Claude Code's auto mode classifier reviews each other call, and a refused call returns to the member, which routes it to the Director like any denial. Native rules, hooks and managed policy remain authoritative (a `deny` or `ask` rule still applies), and auto mode must be available for the account and model; where it is not, the member can show native permission forms, and the runner reports `automatic_review_unavailable` when its profile recognizes the notice. The runner holds the auto-mode dialogs `Make auto mode your default permission mode?` (shown when the user settings pin a non-`auto` default) and `Teach auto mode about your environment?` (shown in auto mode) as `question` interactions, which the Director dismisses through `permission respond --choice` (§6.9 *Bundled profiles and native screen fixtures* states the choices and when each dialog stops reappearing).
 
@@ -2091,21 +2091,17 @@ The inherited `config.toml` controls sandbox access and directory trust:
 |---|---|---|
 | `sandbox_workspace_write.network_access` | `true` permits network access for sandboxed commands | A command remains sandboxed and its multiplexer socket access is blocked by that boundary |
 | `sandbox_workspace_write.writable_roots` | Adds writable locations for sandboxed commands | A command remains sandboxed and the selected database directory is outside every effective writable location, including automatic temporary-directory grants |
-| `trust_level` | Records project trust under `[projects."<absolute path>"]` | Codex 0.167.0's standard `--no-daemon --approve-for-me` member launch on Linux stops at native `Folder access` / `Trust this folder?` consent in a fresh Git repository and a new detached worktree without prior project entries |
+| `trust_level` | Records project trust under `[projects."<absolute path>"]` | Native directory consent blocks readiness until the requested scope is trusted |
 
-The observed consent blocks initial broker readiness; the native prompt identifies the repository or directory whose trust is requested. A new worktree's need for separate consent depends on the native trust scope rather than a CAFleet per-directory rule. With trusted project entries configured for the fresh repository and detached worktree, the same standard Linux Codex 0.167.0 launch reaches initial broker readiness in both directories.
+Directory consent follows the native repository or directory scope, including worktrees.
 
 The approval policy determines whether an operation can request escalation; `approvals_reviewer` selects who decides an eligible request. Under `on-request`, the `user` reviewer receives a native approval prompt and `auto_review` receives automatic review. The native `--approve-for-me` launch supplies automatic review. Under `never`, a matching authorized command can run, while an operation requiring a new approval fails. Managed restrictions and stricter rules remain authoritative. [OpenAI's approval documentation](https://learn.chatgpt.com/docs/sandboxing/auto-review) defines the policy/reviewer distinction.
-
-Linux standalone Codex 0.167.0 members complete broker send/poll/ACK with network access disabled, no extra writable roots, automatic temporary-directory grants disabled and an external database. A separate native `--no-daemon exec` probe using the exact 0.167.0 binary captures a live herdr pane without explicit escalation under that configuration.
-
-Daemon-backed Director checks use CLI 0.167.0 with an initially unrecorded server version and a managed replacement observed at 0.169.0; later ordinary pane capture and final one-receiver recovery/fleet-deletion closure succeed under the same restrictive configuration. The variable-bearing listener starts through approved escalation after ordinary namespace startup fails and delivers queued notices. Client session metadata identifies the CLI version; daemon binary provenance is recorded separately.
 
 #### codex rules file
 
 The codex auto-approval rules for `cafleet` commands are a static file embedded in the binary (source `assets/presets/codex/cafleet.rules`) and installed by `setup`'s asset installation (§6.3) to `<codex home>/rules/cafleet.rules`, with `<codex home>` resolved per §6.3 *Config-dir resolution* (`CODEX_HOME`, default `~/.codex`), overwriting any existing target. Codex loads every `*.rules` file under its rules directory (decision precedence below), so operator customizations live in a separate rules file there. The checked-in `assets/presets/codex/cafleet.rules` is the content contract: exactly the one line `prefix_rule(pattern = ["cafleet"], decision = "allow")` followed by one trailing newline.
 
-The broad allow matches every `cafleet` command for every fleet, since every ID rides past the matched prefix as a positional or trailing argument. A matching `allow` authorizes execution outside the sandbox without prompting, subject to stricter matches and managed restrictions. Codex loads rules at startup; an existing session loads newly installed rules after restart. Shell wrappers and variable expansion affect the argv presented for matching, so a direct `execpolicy check` result alone does not establish the native command tool's handling of a shell script. [OpenAI's rules documentation](https://learn.chatgpt.com/docs/agent-configuration/rules) defines this execution boundary.
+The broad allow matches every `cafleet` command for every fleet. Matching commands run outside the sandbox, subject to stricter rules and managed restrictions; shell wrappers and variable expansion can affect matching. Codex loads installed rules at startup.
 
 Codex members have no spawn-time allow rules, so their broker commands use installed rules; the runner guard refuses Director-only commands inside a member (§6.3 Director-only command guard). Codex applies the strictest decision when several rules match (`forbidden` > `prompt` > `allow`), so operator `prompt` rules in a separate file request confirmation of matching Director commands.
 
@@ -2124,8 +2120,6 @@ static file installed by §6.3 Asset installation:
 The preset base is opencode's `--agent <mode>` discovery path: opencode 2.1.4 loads agent definitions from `~/.config/opencode` and from `OPENCODE_CONFIG_DIR`, so a relocated preset remains discoverable, and definitions with the same name can merge across those sources. `member create` forwards a set `OPENCODE_CONFIG_DIR` into the member environment (§6.3 *Member environment*), so the member's opencode loads the preset the precondition read.
 
 The selected policy's preset is a spawn precondition (§ Interface) whose error (§ Contract error strings) names the selector as the targeted repair; plain `cafleet setup` also installs it.
-
-On Linux, OpenCode 2.2.6's standard `mini --standalone --agent cafleet-ask` member launch reaches initial broker readiness in a fresh repository and a new detached worktree with empty fixture configuration and existing native provider authentication. Both tested launches proceed without a directory-consent screen.
 
 Each preset's `shell` ruleset is its `"*"` base followed by four `"allow"` entries for the member broker commands: `cafleet message send *`, `cafleet message poll *`, `cafleet message ack *` and `cafleet message show *`, where `*` matches any character sequence, spaces included, so a member passes `--database-url <url>` after the subcommand. The allow entries overlap only the base, so their order carries no precedence. Every other `cafleet` command, Director-only commands and `message listen` / `message wait` included, falls to the base, and the runner guard refuses the Director-only commands inside the member (§6.3 Director-only command guard). Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
 
@@ -2172,8 +2166,6 @@ Each preset body has three blank-line-separated paragraphs after the heading, wi
 
 After the config-dir and PATH checks, `member create` for hermes runs one concurrent batch: `hermes config path`, which resolves the effective Hermes home for settlement (§ Hermes work settlement), and the native version probe (§6.9 Native version probe). Both run the resolved executable with null stdin, the member's `HERMES_HOME` (the forwarded value, or unset) and output captured and bounded like the native version probe, under one deadline of the smaller of two seconds and the ten-second creation deadline. The `config path` result is evaluated first, then the version probe. Each `config path` failure exits 1 before registration with its § Contract error strings error.
 
-Native model readiness also depends on the selected Hermes provider/model and its authentication. A Hermes 2026.9.24 Nous Portal login failure blocks the model before initial broker readiness, independently of directory consent; successful CAFleet setup and preflight establish asset/configuration availability rather than provider authentication.
-
 #### Hermes work settlement
 
 A Hermes member's session can keep accepted work and background processes running after its pane's client exits. Deletion and creation compensation for a `hermes` run stop that work and verify the stop:
@@ -2203,8 +2195,6 @@ touches a session it does not own.
 #### pi member gate
 
 The CAFleet pi extension (§6.3 Asset installation) auto-loads in every pi session and holds both the Director extension (§ Director extensions) and the member gate, a `tool_call` handler that enforces each pi launch mode (§6.9 Launch policy and capability registry). pi 1.5.0 has no per-tool approval and no OS sandbox, so the gate is the member's whole permission posture.
-
-Native provider/model selection and credentials remain prerequisites for model readiness. A pi 1.5.0 session with no configured provider/model or credentials starts with an unknown model before broker readiness; extension loading alone establishes neither model readiness nor a directory-trust result.
 
 **Activation.** The extension registers the string flag `--cafleet-gate`, and on `session_start` the gate reads `pi.getFlag("cafleet-gate")`:
 

@@ -207,7 +207,7 @@ Listening changes no consumption/notification state and retries no pane delivery
 
 The closed notice is one best-effort `codex queue` of `[cafleet listen closed] exit 1: <stderr diagnostic>`, bounded by 10 s and not retried on a full queue. When it also fails, stderr adds `failed to forward the closed notice to codex thread <THREAD>: <cause>` and the exit stays 1.
 
-For sandbox startup failures, confirm the failed process exited and follow the [Codex native reception recipe](coding-agents.md#codex-native-director-reception) for host-authorized escalation, matching `ready` IDs and queued-notice verification. A direct argv rule check alone establishes no result for a native command tool's shell wrapper or variable-bearing script.
+For sandbox startup failures, confirm exit and follow the [Codex native reception recipe](coding-agents.md#codex-native-director-reception) for approved escalation and readiness checks.
 
 ### `message ack`
 
