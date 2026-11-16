@@ -10,7 +10,7 @@ Select a member backend through the CLI’s `--coding-agent` choices; mixed-back
 | `hermes` | Hermes Agent | Reads the cafleet skill files by absolute path |
 | `pi` | pi coding agent | Lists the installed cafleet skills and reads each `SKILL.md` with its read tool |
 
-Plain `cafleet setup` installs assets for every supported backend in one run, and `--coding-agent` narrows the selection; [Quickstart](../quickstart.md#configure) lists what setup installs for each backend and the configuration you add.
+Plain `cafleet setup` installs assets for every supported backend in one run, and `--coding-agent` narrows the selection; [Quickstart](../quickstart.md#configure) gives the starting configuration.
 
 - `cafleet fleet create --coding-agent` is required operator-declared metadata naming the backend the Director actually runs on: cafleet does not spawn the root Director's process and cannot detect what already runs in the calling pane. `fleet create` records the calling pane and its multiplexer server after confirming the pane, and asks you for the pane ID and server when it cannot ([Director pane verification](members.md#director-pane-verification)).
 - `cafleet member create --coding-agent` selects the spawned backend and is recorded as placement metadata; when omitted, the member inherits the spawning Director's placement backend.
@@ -93,9 +93,15 @@ A pi member has no OS-level sandbox: the CAFleet member gate decides which tools
 
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERMES_HOME` and `PI_CODING_AGENT_DIR` relocate their backend's installed assets; `OPENCODE_CONFIG_DIR` relocates only the OpenCode presets and plugin, leaving its skills under `~/.config/opencode/skills`. Set the variable where you run `cafleet setup` and `cafleet member create`: `member create` forwards only the selected backend's variable to the member, which then reads the configuration CAFleet installed into. The [config-dir resolution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#config-dir-resolution) specifies validation and every install target.
 
+### Working-directory trust
+
+Before unattended startup, open the backend in the working directory and accept
+any native folder-trust prompt. Follow its displayed scope; worktrees may need
+separate consent. Command permissions apply separately.
+
 ### Claude Code configuration
 
-Use the auto mode profile when your Director session runs in `auto` mode, and the other-modes profile for any other mode. Both pre-approve what members need beyond their broker commands; in auto mode the classifier reviews every other member call and every Director command no rule matches, so that profile carries no `Bash(cafleet ...)` entry.
+Start with the recommended `auto` profile in [Quickstart](../quickstart.md#claude-code). For a Director using another [supported permission mode](#launch-modes), set `permissions.defaultMode` to that mode and add `Bash(cafleet *)` to `permissions.allow`. Both profiles pre-approve what members need beyond their broker commands; in auto mode the classifier reviews every other member call and every Director command no rule matches, so that profile carries no `Bash(cafleet ...)` entry.
 
 | Entry | Profile | Needed by | Why |
 |---|---|---|---|
@@ -121,20 +127,32 @@ Claude Code can show two auto-mode dialogs in a member pane after a turn: `Make 
 
 ### Codex configuration
 
-`network_access = true` is required because tmux and herdr communicate over a local socket, which the Codex sandbox classifies as network access; without it cafleet commands fail with `Operation not permitted`. `writable_roots` grants write access to the selected database file's directory, `~/.local/share/cafleet` unless `--database-url` selects another.
+#### Command rules and sandbox access
 
-`cafleet setup` installs `~/.codex/rules/cafleet.rules`, which allows every `cafleet` command. Codex members need it for their broker commands, and the Director-only commands refuse a member's own ID by themselves. Codex applies the strictest decision across every `*.rules` file in that directory, and setup overwrites its own file on every install, so put your own rules, such as `prompt` rules confirming the Director's commands, in a separate file there. A rules directory maintained without the installed file, for example from a dotfiles repository, needs at least this rule:
+`cafleet setup` installs `~/.codex/rules/cafleet.rules`; restart Codex to load it
+and keep custom rules beside it. Matching `allow` rules permit execution outside
+the sandbox, subject to [stricter rules and managed policy](https://learn.chatgpt.com/docs/agent-configuration/rules).
 
-```text
-prefix_rule(
-    pattern = ["cafleet", "message"],
-    decision = "allow",
-    match = ["cafleet message poll 5", "cafleet message send --from-member-id 1 --to-member-id 2 ready"],
-    not_match = ["cafleet member list 1", "cafleet doctor"],
-)
-```
+Under `[sandbox_workspace_write]`, add `network_access = true` only for blocked
+multiplexer socket access, or `writable_roots = ["/absolute/database/directory"]`
+for an otherwise unwritable [database directory](storage.md#backend).
 
-That rule is enough for members. Keep the installed file for a Director session: Codex has no classifier to review the Director's other `cafleet` commands, so without a matching allow each follows the session's own approval policy and sandbox.
+#### Director approval policy
+
+Use `approval_policy = "on-request"` when current policy prevents needed escalation.
+`approvals_reviewer` selects `user` (you) or `auto_review` (automatic review);
+changing policy preserves that selection. Keep a working automatic reviewer.
+`approval_policy = "never"` cannot request escalation. [Quickstart](../quickstart.md#codex)
+configures the Director; `--permission-mode` selects member policy.
+[Managed policy and reviewer decisions](https://learn.chatgpt.com/docs/sandboxing/auto-review) still govern execution.
+
+#### Codex listener startup
+
+If sandbox restrictions block startup, such as macOS blocking `ps` or Linux
+bwrap namespace failure, confirm the failed listener exited. Ask the Director
+to retry the same command through its native approval flow with
+`sandbox_permissions: "require_escalated"`. Confirm `ready` and queued-notice
+delivery; resolve refused or unavailable approval before relying on reception.
 
 ### OpenCode configuration
 
@@ -152,7 +170,7 @@ OpenCode allows every action by default, so the plugin tools run on a default Di
 
 Hermes members use your existing Hermes configuration: your configured default provider and model, and your profile when `active_profile` selects one. Each member starts a fresh conversation.
 
-`cafleet setup --coding-agent hermes` installs the CAFleet plugin into `plugins/cafleet/` of the Hermes home that `hermes config path` reports, including an active profile's home, with an `executable` file naming the `cafleet` it runs. It then edits the reported file, keeping the rest of it: it adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain `cafleet setup` on a host without `hermes` installs the skills and skips the plugin.
+Shared setup installs the CAFleet plugin into `plugins/cafleet/` of the Hermes home that `hermes config path` reports, including an active profile's home, with an `executable` file naming the `cafleet` it runs. It then edits the reported file, keeping the rest of it: it adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain `cafleet setup` on a host without `hermes` installs the skills and skips the plugin.
 
 Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so registering a Hermes Director always asks you for its pane ID and server ([Director pane verification](members.md#director-pane-verification)). Each pending notice arrives as its own turn, in the listener's emission order. Reception alone fills the Hermes gateway's input queue only when the Director ACKs notices in more separate rounds within one busy turn than that queue holds; otherwise a full queue comes from other injections.
 
@@ -170,7 +188,7 @@ Under `approvals.mode: smart`, the default, commands Hermes does not consider da
 
 pi members use your existing pi configuration: the `defaultProvider` and `defaultModel` in `~/.pi/agent/settings.json` and the credentials pi already holds. Each member starts a fresh session in pi's fullscreen interface and ignores trust-gated project-local pi resources, so no project-trust dialog blocks it; `AGENTS.md` and `CLAUDE.md` still load.
 
-`cafleet setup --coding-agent pi` installs the skills into `~/.pi/agent/skills/` and the CAFleet pi extension as `~/.pi/agent/extensions/cafleet.ts`, with a `cafleet.executable` file naming the `cafleet` it runs; setup runs no `pi` command, and you rerun it after moving or upgrading the CLI. pi loads the extension in every session. In a Director session it supplies reception, the `/cafleet-goal` command and the `cafleet_ask` question tool; in a member session it is the member gate.
+Shared setup installs the skills into `~/.pi/agent/skills/` and the CAFleet pi extension as `~/.pi/agent/extensions/cafleet.ts`, with a `cafleet.executable` file naming the `cafleet` it runs; setup runs no `pi` command, and you rerun it after moving or upgrading the CLI. pi loads the extension in every session. In a Director session it supplies reception, the `/cafleet-goal` command and the `cafleet_ask` question tool; in a member session it is the member gate.
 
 pi has no per-tool approval and no OS-level sandbox, so the member gate is a pi member's whole permission posture:
 

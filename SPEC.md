@@ -2061,8 +2061,8 @@ pi clamps a thinking level to the model's capability, and a non-reasoning model 
 
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset or config prerequisite |
 |---|---|---|---|---|
-| `claude` | None | Yes, via `--name <member-name>` | Runs its spawn-time allow rules and every command matching `permissions.allow`; auto mode's classifier reviews the rest, and a refused command routes to the Director | A Claude Code permission profile; a permission posture, not a spawn dependency |
-| `codex` | Kernel-enforced workspace-write sandbox | No; `member list` `window` and `pane_id` locate the pane | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `<codex home>/rules/cafleet.rules`, the `config.toml` settings below and a trusted working directory; a permission posture, not a spawn dependency |
+| `claude` | None | Yes, via `--name <member-name>` | Runs its spawn-time allow rules and every command matching `permissions.allow`; auto mode's classifier reviews the rest, and a refused command routes to the Director | A Claude Code permission profile and native directory consent when requested; a permission posture, not a spawn dependency |
+| `codex` | Kernel-enforced workspace-write sandbox; matching allow rules and approved escalations authorize commands outside it | No; `member list` `window` and `pane_id` locate the pane | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `<codex home>/rules/cafleet.rules`, applicable sandbox access below and native directory consent when requested; a permission posture, not a spawn dependency |
 | `opencode` | None | No; `member list` `window` and `pane_id` locate the pane | `cafleet-ask` (default): the member broker commands run and every other shell command opens a native permission form; `cafleet`: the same broker commands, every other command denied | The selected policy's preset `<preset base>/agents/<mode>.md`; a spawn precondition |
 | `hermes` | None | No; `member list` `window` and `pane_id` locate the pane | `smart`: commands outside Hermes's dangerous-command patterns run unreviewed, and the guardian model reviews the rest and may open an approval prompt. Hardline floors, the sudo guard and `approvals.deny` block before any review | The operator configuration's `approvals.mode` |
 | `pi` | None | Yes, via `--name <member-name>`; pi titles the terminal `π - <name> - <cwd basename>` | `cafleet-ask` (default): the member broker commands run and every other bash command opens a native permission form, the gate's approval form for a command without a control character (§ pi member gate); `cafleet`: the same broker commands, every other command denied | The CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a spawn precondition |
@@ -2073,6 +2073,8 @@ The omitted claude and codex policies are native automatic approval modes (§6.9
 
 #### Claude permission posture
 
+Native directory consent, when requested, precedes broker readiness and is independent of command permissions and auto-mode availability.
+
 Under the omitted `--permission-mode auto`, a member runs its spawn-time allow rules and every tool call matching `permissions.allow` without review; Claude Code's auto mode classifier reviews each other call, and a refused call returns to the member, which routes it to the Director like any denial. Native rules, hooks and managed policy remain authoritative (a `deny` or `ask` rule still applies), and auto mode must be available for the account and model; where it is not, the member can show native permission forms, and the runner reports `automatic_review_unavailable` when its profile recognizes the notice. The runner holds the auto-mode dialogs `Make auto mode your default permission mode?` (shown when the user settings pin a non-`auto` default) and `Teach auto mode about your environment?` (shown in auto mode) as `question` interactions, which the Director dismisses through `permission respond --choice` (§6.9 *Bundled profiles and native screen fixtures* states the choices and when each dialog stops reappearing).
 
 Explicit native modes keep their own permission behavior. Under explicit `dontAsk`, a member runs without a prompt its spawn-time allow rules, Claude Code's built-in read-only commands, file reads inside its working directory and every tool call matching `permissions.allow`; every other call, a shell command or a file edit including one matching `permissions.ask`, is denied without a prompt. A write to one of Claude Code's protected paths, such as a project's `.git` or `.claude` directory, is denied whatever the allow list holds.
@@ -2081,23 +2083,29 @@ Members need no settings entry for their broker commands, which they receive as 
 
 #### Codex sandbox and configuration
 
-The kernel-enforced workspace-write sandbox confines writes to the workspace, and every Codex launch policy runs under it. §6.9 Launch policy and capability registry maps each choice to its argv, approval behavior and inherited Codex configuration.
+Every Codex member launch policy selects the kernel-enforced workspace-write sandbox. Commands execute within its boundary unless a matching allow rule or approved escalation authorizes execution outside it (§ codex rules file). §6.9 Launch policy and capability registry maps each choice to its argv, approval behavior and inherited Codex configuration.
 
-A codex spawn requires these `config.toml` settings:
+The inherited `config.toml` controls sandbox access and directory trust:
 
-| Setting | Required value | Why |
+| Setting | Effect | Applicable condition |
 |---|---|---|
-| `network_access` | `true` | The multiplexer socket counts as network access |
-| `writable_roots` | Includes the CAFleet database directory | The member writes the broker database |
-| `trust_level` | `"trusted"` under `[projects."<absolute workspace path>"]` | The working directory must be trusted before spawning |
+| `sandbox_workspace_write.network_access` | `true` permits network access for sandboxed commands | A command remains sandboxed and its multiplexer socket access is blocked by that boundary |
+| `sandbox_workspace_write.writable_roots` | Adds writable locations for sandboxed commands | A command remains sandboxed and the selected database directory is outside every effective writable location, including automatic temporary-directory grants |
+| `trust_level` | Records project trust under `[projects."<absolute path>"]` | Native directory consent blocks readiness until the requested scope is trusted |
+
+Directory consent follows the native repository or directory scope, including worktrees.
+
+The approval policy determines whether an operation can request escalation; `approvals_reviewer` selects who decides an eligible request. Under `on-request`, the `user` reviewer receives a native approval prompt and `auto_review` receives automatic review. The native `--approve-for-me` launch supplies automatic review. Under `never`, a matching authorized command can run, while an operation requiring a new approval fails. Managed restrictions and stricter rules remain authoritative. [OpenAI's approval documentation](https://learn.chatgpt.com/docs/sandboxing/auto-review) defines the policy/reviewer distinction.
 
 #### codex rules file
 
 The codex auto-approval rules for `cafleet` commands are a static file embedded in the binary (source `assets/presets/codex/cafleet.rules`) and installed by `setup`'s asset installation (§6.3) to `<codex home>/rules/cafleet.rules`, with `<codex home>` resolved per §6.3 *Config-dir resolution* (`CODEX_HOME`, default `~/.codex`), overwriting any existing target. Codex loads every `*.rules` file under its rules directory (decision precedence below), so operator customizations live in a separate rules file there. The checked-in `assets/presets/codex/cafleet.rules` is the content contract: exactly the one line `prefix_rule(pattern = ["cafleet"], decision = "allow")` followed by one trailing newline.
 
-The broad allow matches every `cafleet` command for every fleet, since every ID rides past the matched prefix as a positional or trailing argument. Codex members have no spawn-time allow rules, so they need it to run broker commands; the runner guard refuses the Director-only commands inside a member (§6.3 Director-only command guard). Codex applies the strictest decision when several rules match (`forbidden` > `prompt` > `allow`), so an operator who wants to confirm the Director's commands adds `prompt` rules in a separate rules file.
+The broad allow matches every `cafleet` command for every fleet. Matching commands run outside the sandbox, subject to stricter rules and managed restrictions; shell wrappers and variable expansion can affect matching. Codex loads installed rules at startup.
 
-A rules directory maintained without the installed file needs at least an `allow` rule for the `["cafleet", "message"]` prefix, covering the broker commands members run themselves (those a claude member receives as spawn-time allow rules). That minimum set suffices for members, not for a Director session: the rules settle only the commands they match, so every other `cafleet` command a Director runs follows that session's own approval policy inside the workspace-write sandbox, where an escalation goes to Codex's automatic reviewer under the omitted `approve-for-me`, to a native approval form under explicit `on-request`, and returns as a failure under explicit `never`. The installed file is a superset of the minimum set.
+Codex members have no spawn-time allow rules, so their broker commands use installed rules; the runner guard refuses Director-only commands inside a member (§6.3 Director-only command guard). Codex applies the strictest decision when several rules match (`forbidden` > `prompt` > `allow`), so operator `prompt` rules in a separate file request confirmation of matching Director commands.
+
+A rules directory maintained without the installed file needs an `allow` rule for the `["cafleet", "message"]` prefix to cover the broker commands members run themselves (those a claude member receives as spawn-time allow rules). The installed file also covers the Director's other `cafleet` subcommands. Operations without a matching allow follow the session's approval policy, reviewer and sandbox configuration (§ Codex sandbox and configuration).
 
 #### opencode preset
 

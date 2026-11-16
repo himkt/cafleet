@@ -197,6 +197,7 @@ Listening changes no consumption/notification state and retries no pane delivery
 | Condition | Result |
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
+| Process inspection fails at startup | The read error propagates before `ready`, including macOS `cannot run ps: Operation not permitted (os error 1)` |
 | No Codex ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
 | Full-queue refusal of a `pending` notice or forwarded `closed` record | Not an error: retried every 1 s while the pinned session lives |
 | `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
@@ -205,6 +206,8 @@ Listening changes no consumption/notification state and retries no pane delivery
 | Any other failure after `ready` | its usual diagnostic, closed notice, exit 1 |
 
 The closed notice is one best-effort `codex queue` of `[cafleet listen closed] exit 1: <stderr diagnostic>`, bounded by 10 s and not retried on a full queue. When it also fails, stderr adds `failed to forward the closed notice to codex thread <THREAD>: <cause>` and the exit stays 1.
+
+For sandbox startup failures, confirm exit and follow the [Codex native reception recipe](coding-agents.md#codex-native-director-reception) for approved escalation and readiness checks.
 
 ### `message ack`
 

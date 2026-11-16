@@ -4,7 +4,7 @@ Create independent coding-agent sessions in tmux or herdr, assign work and recei
 
 ## Prerequisites
 
-Follow Quickstart to [install](quickstart.md#install), [configure](quickstart.md#configure) and [trust the workspace](quickstart.md#trust-the-working-directory). Put each selected backend on PATH. Use literal returned IDs and one CAFleet command per shell-tool invocation.
+Follow Quickstart to [install](quickstart.md#install) and [configure](quickstart.md#configure), then resolve any native [working-directory consent](concepts/coding-agents.md#working-directory-trust). Put each selected backend on PATH. Use literal returned IDs and one CAFleet command per shell-tool invocation.
 
 ## Prompt
 
@@ -129,4 +129,4 @@ Fleet deletion retains history. When `cafleet fleet delete` exits 1, the Directo
 
 ## Backend variations
 
-Create a mixed team with explicit member backend/model flags, resolving role defaults and models through [model choice](concepts/coding-agents.md#model-choice). OpenCode members work through their selected provider/model, workspace tools, broker and native shell path. Hermes members use your configured default Hermes model unless you name one and need the [Hermes setup](quickstart.md#hermes) before their first spawn. pi members likewise use your configured pi default model, refuse a `:<thinking>` suffix in `--model`, run under the CAFleet member gate and need the [pi setup](quickstart.md#pi) before their first spawn. Each member receives its own installed role/core paths, shared BASE and host prerequisites.
+Create a mixed team with explicit member backend/model flags, resolving role defaults and models through [model choice](concepts/coding-agents.md#model-choice). OpenCode members work through their selected provider/model, workspace tools, broker and native shell path. Hermes members use your configured default Hermes model unless you name one; shared setup installs their plugin when Hermes is available ([Hermes configuration](concepts/coding-agents.md#hermes-configuration)). pi members likewise use your configured pi default model, refuse a `:<thinking>` suffix in `--model`, and run under the CAFleet member gate installed by shared setup ([pi configuration](concepts/coding-agents.md#pi-configuration)). Each member receives its own installed role/core paths, shared BASE and host prerequisites.
