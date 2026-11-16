@@ -35,8 +35,8 @@ After shared setup, configure each backend you use:
 | [`claude` (Claude Code)](#claude-code) | `~/.claude/settings.json` | The recommended `auto` permission profile below | The skills |
 | [`codex` (OpenAI Codex CLI)](#codex) | `~/.codex/config.toml` | A Director approval policy that permits needed escalation | The skills, plus `~/.codex/rules/cafleet.rules` |
 | [`opencode`](#opencode) | — | — | The skills, the `cafleet` and `cafleet-ask` agent presets and the CAFleet plugin |
-| [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills and the CAFleet plugin, enabled in your Hermes configuration |
-| [`pi` (pi coding agent)](#pi) | — | — | The skills and the CAFleet pi extension |
+| [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Configure and authenticate the provider/model; keep `approvals.mode` at `smart` | The skills and the CAFleet plugin, enabled in your Hermes configuration |
+| [`pi` (pi coding agent)](#pi) | `~/.pi/agent/settings.json` | Configure the default provider/model and its credentials | The skills and the CAFleet pi extension |
 
 The paths above are defaults ([Config directories](concepts/coding-agents.md#config-directories) covers relocating them); [Backend configuration](concepts/coding-agents.md#backend-configuration) has each backend's full reference and troubleshooting.
 
@@ -46,6 +46,11 @@ Add the recommended `auto` profile to `~/.claude/settings.json`. Members start
 in `auto` mode by default, so auto mode must be available for your account and
 model. [Claude Code configuration](concepts/coding-agents.md#claude-code-configuration)
 covers other supported permission modes.
+
+Before unattended member startup, launch Claude Code in the intended repository
+and approve the folder shown by its native trust prompt. See
+[working-directory trust](concepts/coding-agents.md#working-directory-trust)
+for the verified launch behavior and scope.
 
 ```json
 {
@@ -78,10 +83,9 @@ Keep your own rules in a separate file beside it; setup replaces its installed
 file on every run.
 
 Before unattended member startup, approve the repository or directory shown by
-Codex's native `Trust this folder?` prompt. Codex 0.167.0 requests this consent
-for a fresh repository and a new worktree on the tested Linux launch;
+Codex's native `Trust this folder?` prompt;
 [working-directory trust](concepts/coding-agents.md#working-directory-trust)
-explains the scope.
+records the verified launch behavior and scope.
 
 For a Director that needs to request escalation, add these top-level keys to
 `~/.codex/config.toml`, before any table headers:
@@ -121,6 +125,10 @@ denied and routed to the Director instead.
 
 ### Hermes
 
+Configure the default provider/model and complete its native login before
+launching a team. [Hermes configuration](concepts/coding-agents.md#hermes-configuration)
+covers provider-login troubleshooting.
+
 :::warning Start the Director with `hermes chat --tui`
 In the classic CLI, a Hermes Director still receives and answers member
 messages, but **neither the messages nor its replies appear in its pane**.
@@ -142,7 +150,8 @@ Use pi 1.5.0 or later. Shared setup installs into `~/.pi/agent`, or into
 `PI_CODING_AGENT_DIR` when you set it; use the same value where you run
 `cafleet member create`.
 
-1. Configure pi's default provider and model.
+1. Configure pi's default provider/model and its credentials in the same agent
+   directory used for shared setup.
 2. Launch the Director with plain `pi` from the project directory, so the
    CAFleet pi extension loads.
 3. Register the fleet with

@@ -101,12 +101,18 @@ approve the repository or directory its prompt identifies. Trust scope follows
 that backend and configuration; a new worktree can share a trusted repository
 scope or request its own consent.
 
-Codex 0.167.0's standard `--no-daemon --approve-for-me` member launch on Linux
-shows `Folder access` / `Trust this folder?` in both a fresh Git repository and
-a new detached worktree when its configuration has no prior project trust
-entries. It waits for consent before sending broker readiness. This observation
-establishes a prerequisite for that launch; command allow rules govern execution
-permissions separately from directory consent.
+These Linux results use a fresh Git repository and a new detached worktree,
+with clean directory-trust configuration and existing native provider access:
+
+| Backend | Verified launch | Startup behavior |
+|---|---|---|
+| Claude Code 2.1.319 | Standard `auto` member with its generated broker allow rule | Native folder trust blocks readiness in both directories. Persisted trust enables broker `ready` in both |
+| Codex 0.167.0 | Standard `--no-daemon --approve-for-me` member | `Folder access` / `Trust this folder?` blocks readiness in both directories. Configured trusted project entries enable broker `ready` in both |
+| OpenCode 2.2.6 | Standard `mini --standalone --agent cafleet-ask` member | Both directories reach broker `ready` without a directory-consent screen |
+
+Approve the repository or directory shown by a backend's native prompt before
+unattended startup on a path that requires consent. Command allow rules and
+automatic approval review govern execution permissions separately.
 
 When startup stops before `ready`, check the actual native screen. An
 authentication, model-availability or onboarding failure needs its own remedy;
@@ -170,6 +176,19 @@ a matching allow follows the effective approval policy, reviewer and sandbox.
 Shell wrappers or variable expansion can change what matches: a direct argv
 rule check establishes that argv's decision, while the native tool's execution
 establishes whether its command path works.
+
+On the tested Linux path, standalone Codex 0.167.0 members complete broker send,
+poll and ACK with network access disabled and no extra writable roots, even with
+the database outside the workspace and automatic temporary-directory grants
+disabled. A separate native `--no-daemon exec` check with the exact 0.167.0 binary
+captures a live herdr pane without explicit escalation under that configuration.
+
+The Director uses the same client, with an initially unrecorded daemon
+version and a managed replacement observed at 0.169.0; its later capture of a
+live herdr pane and final listener recovery/cleanup succeed under that same
+restrictive configuration. The variable-bearing Director listener needs approved
+escalation when that host's sandbox cannot create a namespace; the same command
+then reaches `ready` and delivers queued notices.
 
 Commands that remain sandboxed need access to the selected database and
 multiplexer socket. Add a sandbox grant only when the effective command path
@@ -259,6 +278,10 @@ OpenCode allows every action by default, so the plugin tools run on a default Di
 
 Hermes members use your existing Hermes configuration: your configured default provider and model, and your profile when `active_profile` selects one. Each member starts a fresh conversation.
 
+Complete the provider's native login and confirm the configured model works in
+that same Hermes home/profile before spawning members. Plugin installation and
+enablement prepare CAFleet reception; provider authentication enables the model.
+
 Shared setup installs the CAFleet plugin into `plugins/cafleet/` of the Hermes home that `hermes config path` reports, including an active profile's home, with an `executable` file naming the `cafleet` it runs. It then edits the reported file, keeping the rest of it: it adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain `cafleet setup` on a host without `hermes` installs the skills and skips the plugin.
 
 Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so registering a Hermes Director always asks you for its pane ID and server ([Director pane verification](members.md#director-pane-verification)). Each pending notice arrives as its own turn, in the listener's emission order. Reception alone fills the Hermes gateway's input queue only when the Director ACKs notices in more separate rounds within one busy turn than that queue holds; otherwise a full queue comes from other injections.
@@ -268,6 +291,7 @@ Under `approvals.mode: smart`, the default, commands Hermes does not consider da
 | Symptom | Cause | Resolution |
 |---|---|---|
 | Member messages and the Director's replies do not appear in the Director's pane | The Director runs the classic CLI | Restart the Director with `hermes chat --tui` |
+| Startup reports that Hermes is not logged into Nous Portal | The configured native provider login is unavailable | Run `hermes model` in the same Hermes home/profile to re-authenticate, then retry startup |
 | `cafleet doctor` reports `error hermes: hermes plugin cafleet is not enabled: plugins.enabled — run 'cafleet setup --coding-agent hermes'` | The plugin was skipped or is not enabled, for example after a plain `cafleet setup` before Hermes was installed | Run `cafleet setup --coding-agent hermes` |
 | Setup fails on the plugin | `plugins.disabled` lists `cafleet` | Remove `cafleet` from `plugins.disabled` and rerun setup |
 | Another user plugin stopped loading after setup | Once `plugins.enabled` exists, Hermes loads only the user plugins it lists | Add that plugin to `plugins.enabled` |
@@ -276,6 +300,11 @@ Under `approvals.mode: smart`, the default, commands Hermes does not consider da
 ### pi configuration
 
 pi members use your existing pi configuration: the `defaultProvider` and `defaultModel` in `~/.pi/agent/settings.json` and the credentials pi already holds. Each member starts a fresh session in pi's fullscreen interface and ignores trust-gated project-local pi resources, so no project-trust dialog blocks it; `AGENTS.md` and `CLAUDE.md` still load.
+
+Configure and authenticate that provider/model in the same agent directory used
+for setup and member creation. A native session that stops at an unknown model
+or missing credentials leaves broker readiness and directory-trust verification
+incomplete.
 
 Shared setup installs the skills into `~/.pi/agent/skills/` and the CAFleet pi extension as `~/.pi/agent/extensions/cafleet.ts`, with a `cafleet.executable` file naming the `cafleet` it runs; setup runs no `pi` command, and you rerun it after moving or upgrading the CLI. pi loads the extension in every session. In a Director session it supplies reception, the `/cafleet-goal` command and the `cafleet_ask` question tool; in a member session it is the member gate.
 
@@ -298,6 +327,7 @@ While a goal is active the extension continues the session turn by turn, pausing
 
 | Symptom | Cause | Resolution |
 |---|---|---|
+| pi starts with `model unknown` | Its agent directory lacks a usable provider/model selection or credentials | Configure the native default provider/model and its credentials in that agent directory, then retry startup |
 | `cafleet member create --coding-agent pi` fails with `cannot read the CAFleet pi extension at …` | Setup has not installed the extension at the resolved pi directory | Run `cafleet setup --coding-agent pi` |
 | A pi member exits at startup with `Error: Unknown option: --cafleet-gate` | pi did not load the extension, for example because it is disabled in pi's configuration or is a stale copy | Re-enable it if you disabled it, then run `cafleet doctor` and the `cafleet setup --coding-agent pi` it names |
 | The Director has no `cafleet_listen` tool, or a tool reports an executable record error | The extension or its `cafleet.executable` file is missing or outdated | Run `cafleet setup --coding-agent pi` and restart the Director |
