@@ -87,8 +87,11 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn rename_window(&self, window_id: &str, name: &str) -> Result<(), MultiplexerError> {
-        self.core
-            .run(&self.core.argv(&["tmux", "rename-window", "-t", window_id, name]))?;
+        self.core.run(
+            &self
+                .core
+                .argv(&["tmux", "rename-window", "-t", window_id, name]),
+        )?;
         Ok(())
     }
 

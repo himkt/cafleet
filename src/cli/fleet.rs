@@ -19,6 +19,7 @@ use crate::multiplexer::MuxBackend;
 use crate::multiplexer::caller;
 use crate::multiplexer::caller::CallerMux;
 use crate::multiplexer::caller::Verification;
+use crate::multiplexer::layout::fleet_window_name;
 use crate::output::format_fleet_create;
 use crate::output::format_fleet_delete;
 use crate::output::format_fleet_list;
@@ -177,22 +178,58 @@ pub(crate) fn create_with(
             target.server
         ))
     })?;
-    let window_name = target.mux.window_name(&context.window_id)?;
-    broker::create_fleet(
-        conn,
-        request.name,
-        &NewPlacement::director(
+    let mut attempted_fleet_id = None;
+    broker::create_fleet_with(conn, request.name, |fleet_id| {
+        let window_name = fleet_window_name(fleet_id, 0);
+        attempted_fleet_id = Some(fleet_id);
+        target.mux.rename_window(&context.window_id, &window_name)?;
+        let actual_name = target.mux.window_name(&context.window_id)?;
+        if actual_name != window_name {
+            return Err(CafleetError::App(format!(
+                "Director window name verification failed: expected {window_name:?}, found {actual_name:?}"
+            )));
+        }
+        let actual_context = target.mux.pane_context(&pane)?;
+        if actual_context.as_ref() != Some(&context) {
+            return Err(CafleetError::App(format!(
+                "Director pane context changed during window naming: expected {context:?}, found {actual_context:?}"
+            )));
+        }
+        Ok(NewPlacement::director(
             target.backend.name().into(),
-            context.session,
+            context.session.clone(),
             request.agent.name().into(),
-            target.server,
+            target.server.clone(),
             PlacementPane {
-                mux_window_id: context.window_id,
+                mux_window_id: context.window_id.clone(),
                 mux_window_name: window_name,
-                mux_pane_id: context.pane_id,
+                mux_pane_id: context.pane_id.clone(),
             },
-        ),
-    )
+        ))
+    })
+    .map_err(|error| {
+        let Some(fleet_id) = attempted_fleet_id else {
+            return error;
+        };
+        let inspection = match target.backend {
+            MuxBackend::Tmux => format!(
+                "tmux -S {:?} display-message -p -t {:?} '#{{window_id}}|#{{window_name}}'",
+                target.server, context.window_id
+            ),
+            MuxBackend::Herdr => format!(
+                "herdr --session {:?} tab get {:?}",
+                target.server, context.window_id
+            ),
+        };
+        error.with_diagnostic(format!(
+            "fleet create naming attempt: fleet_id={fleet_id} backend={} server={:?} window_id={:?} pane_id={:?} requested_name={:?}; the terminal name may have changed. Inspect 'cafleet fleet list' and `{inspection}`. The attempted fleet ID can be reused after rollback.",
+            target.backend.name(),
+            target.server,
+            context.window_id,
+            context.pane_id,
+            fleet_window_name(fleet_id, 0)
+        ))
+    })
 }
 
 /// Steps 2–6 of `fleet create` without `--pane`: the caller's multiplexer and its verified pane.

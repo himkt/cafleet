@@ -38,39 +38,80 @@ pub(crate) fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<FleetRec
 }
 
 /// Creates a fleet whose root Director occupies `director`, whose pane is required.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "database-only registration API for fixtures and native verification"
+    )
+)]
 pub(crate) fn create_fleet(
     conn: &mut Connection,
     name: &str,
     director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
-    assert!(
-        director.pane.is_some()
-            && director.window_ordinal == 0
-            && director.column_side == crate::multiplexer::layout::ColumnSide::Left,
-        "the Director placement records its pane in the Director window's left column"
-    );
+    create_fleet_with(conn, name, |_| Ok(director.clone()))
+}
+
+pub(crate) fn create_fleet_with(
+    conn: &mut Connection,
+    name: &str,
+    director: impl FnOnce(i64) -> Result<NewPlacement, CafleetError>,
+) -> Result<CreatedFleet, CafleetError> {
     let now = now_stamp();
     let tx = conn.transaction()?;
-    let fleet_id = tx.query_row(
-        "INSERT INTO fleets (name, created_at) VALUES (?1, ?2) RETURNING fleet_id",
-        params![name, now],
-        |row| row.get(0),
-    )?;
-    let director_id = insert_member_row(&tx, fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &now)?;
-    insert_placement_row(&tx, director_id, director, &now)?;
-    tx.execute(
-        "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
-        params![director_id, fleet_id],
-    )?;
-    tx.commit()?;
-    let director = crate::broker::members::get_member(conn, director_id, fleet_id)?
-        .expect("the created root Director is active");
-    Ok(CreatedFleet {
-        fleet_id,
-        name: name.to_owned(),
-        created_at: now,
-        director,
-    })
+    let result = (|| {
+        let fleet_id = tx.query_row(
+            "INSERT INTO fleets (name, created_at) VALUES (?1, ?2) RETURNING fleet_id",
+            params![name, now],
+            |row| row.get(0),
+        )?;
+        let director = director(fleet_id)?;
+        assert!(
+            director.pane.is_some()
+                && director.window_ordinal == 0
+                && director.column_side == crate::multiplexer::layout::ColumnSide::Left,
+            "the Director placement records its pane in the Director window's left column"
+        );
+        let director_id =
+            insert_member_row(&tx, fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &now)?;
+        insert_placement_row(&tx, director_id, &director, &now)?;
+        tx.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            params![director_id, fleet_id],
+        )?;
+        let director = crate::broker::members::get_member(&tx, director_id, fleet_id)?
+            .expect("the created root Director is active");
+        let created = CreatedFleet {
+            fleet_id,
+            name: name.to_owned(),
+            created_at: now,
+            director,
+        };
+        tx.execute_batch("COMMIT").map_err(|error| {
+            let error = CafleetError::from(error);
+            if tx.is_autocommit() {
+                error.with_diagnostic(
+                    "fleet registration outcome is unconfirmed: SQLite ended the transaction after a failed commit",
+                )
+            } else {
+                error
+            }
+        })?;
+        Ok(created)
+    })();
+    let error = match result {
+        Ok(created) => return Ok(created),
+        Err(error) => error,
+    };
+    let cleanup = if tx.is_autocommit() {
+        Ok(())
+    } else {
+        tx.rollback().map_err(|error| {
+            CafleetError::App(format!("rolling back fleet registration failed: {error}"))
+        })
+    };
+    CafleetError::merge_cleanup(Err(error), cleanup)
 }
 
 /// The recorded placement of `fleet_id`'s root Director.
