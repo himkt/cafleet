@@ -34,7 +34,7 @@ pub(crate) enum SlotChoice {
     },
 }
 
-pub(crate) fn overflow_window_name(fleet_id: i64, ordinal: i64) -> String {
+pub(crate) fn fleet_window_name(fleet_id: i64, ordinal: i64) -> String {
     format!("cafleet-{fleet_id}-{ordinal}")
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn choose_slot(
     let ordinal = last_window_ordinal + 1;
     SlotChoice::NewWindow {
         ordinal,
-        window_name: overflow_window_name(fleet_id, ordinal),
+        window_name: fleet_window_name(fleet_id, ordinal),
     }
 }
 

@@ -86,11 +86,18 @@ impl Multiplexer for TmuxMultiplexer {
         }))
     }
 
+    fn rename_window(&self, window_id: &str, name: &str) -> Result<(), MultiplexerError> {
+        self.core
+            .run(&self.core.argv(&["tmux", "rename-window", "-t", window_id, name]))?;
+        Ok(())
+    }
+
     /// tmux prints an empty line for a missing window, so the echoed window ID must match.
     fn window_name(&self, window_id: &str) -> Result<String, MultiplexerError> {
         let out = self.display(window_id, "#{window_id}|#{window_name}")?;
         let (echoed, name) = out
-            .trim_end_matches(['\n', '\r'])
+            .strip_suffix('\n')
+            .ok_or_else(|| unexpected_output(&out))?
             .split_once('|')
             .ok_or_else(|| unexpected_output(&out))?;
         if echoed != window_id {

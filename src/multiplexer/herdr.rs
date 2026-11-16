@@ -204,9 +204,21 @@ impl Multiplexer for HerdrMultiplexer {
             .transpose()
     }
 
+    fn rename_window(&self, window_id: &str, name: &str) -> Result<(), MultiplexerError> {
+        self.run_json(&self.core.argv(&["herdr", "tab", "rename", window_id, name]))?;
+        Ok(())
+    }
+
     fn window_name(&self, window_id: &str) -> Result<String, MultiplexerError> {
         let result = self.run_json(&self.core.argv(&["herdr", "tab", "get", window_id]))?;
-        Ok(str_field(&result["tab"], "tab get", "label")?.to_owned())
+        let tab = &result["tab"];
+        let tab_id = str_field(tab, "tab get", "tab_id")?;
+        if tab_id != window_id {
+            return Err(MultiplexerError::new(format!(
+                "herdr tab get returned tab {tab_id:?}, expected {window_id:?}"
+            )));
+        }
+        Ok(str_field(tab, "tab get", "label")?.to_owned())
     }
 
     fn window_height(&self, _window_id: &str, anchors: &[String]) -> Result<i64, MultiplexerError> {

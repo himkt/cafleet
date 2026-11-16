@@ -425,6 +425,8 @@ pub(crate) trait Multiplexer {
     /// pane.
     fn pane_process(&self, pane: &str) -> Result<Option<i64>, MultiplexerError>;
 
+    fn rename_window(&self, window_id: &str, name: &str) -> Result<(), MultiplexerError>;
+
     /// The current name of `window_id` on the targeted server; an empty name is valid.
     fn window_name(&self, window_id: &str) -> Result<String, MultiplexerError>;
 
