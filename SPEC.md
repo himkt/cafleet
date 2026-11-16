@@ -86,7 +86,7 @@ Format validation, baseline initialization, incompatible-file refusal and file p
 
 #### Fleets
 
-Bootstrap validates the Director's multiplexer server, pane and backend token, then inserts fleet, Director and placement and backfills the Director reference in one transaction. The Director placement is ordinal `0`, column `left`, with the window ID of its pane context and the window name `fleet create` read (§6.3 `fleet create`); the fleet starts with `last_window_ordinal` `0`. The current session remains the Director; no pane split or process launch occurs.
+Bootstrap validates the Director's multiplexer server, pane and backend token, then inserts the fleet in a transaction to allocate its ID. A placement factory receives that ID once, names and verifies the Director window (§6.3 `fleet create`), and supplies the placement before the broker inserts the Director and placement and backfills the Director reference. Construct the returned Director from rows read inside the transaction, then commit. The database-only `create_fleet` wrapper supplies a cloned placement through the same registration implementation. The Director placement is ordinal `0`, column `left`; public creation records `cafleet-<fleet_id>-0`, and the fleet starts with `last_window_ordinal` `0`. The current session remains the Director; no pane split or process launch occurs.
 
 List, show and delete follow §6.3 `fleet list`, `fleet show` and `fleet delete`; deletion preserves messages, and repeat deletion returns zero newly deregistered members.
 
@@ -379,7 +379,7 @@ Every fleet, member, message, event, input and permission command validates the 
 | `mux_server` (herdr) | `--mux-server`; else a non-empty `HERDR_SESSION`; else the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; else `default`. With `--pane`, these environment sources apply only when the detected backend equals the pane's (§ `--pane` ID form) |
 | Director pane | `--pane`, an operator assertion checked only for existence on the chosen server; else a non-empty `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr), verified against the caller's process ancestry (§ Caller pane verification) |
 
-The pane is then read on the chosen server — `tmux -S <server> display-message -p -t <pane> '#{session_name}|#{window_id}|#{pane_id}'` or `herdr --session <server> pane current --pane <pane>` — and its session, window and pane are recorded with the server as the Director's placement (§6.5 Multiplexer context). tmux prints `||` and exits 0 for a missing pane, so a reply with an empty field, or whose `pane_id` differs from the requested pane, means the pane was not found. After the pane context succeeds, `fleet create` reads the name of the Director's window (§6.5 Backend operations Window name) and records it as the Director placement's `mux_window_name`; a failed read exits 1 with the multiplexer error before any write, as a failed pane-context read does. `cafleet doctor` reads no window name. Each failure below exits 1 before any write:
+Read the pane on the chosen server — `tmux -S <server> display-message -p -t <pane> '#{session_name}|#{window_id}|#{pane_id}'` or `herdr --session <server> pane current --pane <pane>` — to resolve its concrete session, window and pane IDs (§6.5 Multiplexer context). tmux prints `||` and exits 0 for a missing pane, so a reply with an empty field, or whose `pane_id` differs from the requested pane, means the pane was not found. Target resolution and this initial pane-context read precede registration and naming. `cafleet doctor` reads only pane context and process information. Each failure below exits 1 before any write:
 
 | Condition | Error |
 |---|---|
@@ -397,7 +397,11 @@ The pane is then read on the chosen server — `tmux -S <server> display-message
 
 `--pane`, optionally with `--mux-server`, is the only override of caller pane verification.
 
-Registration follows the §6.2 Fleets bootstrap transaction. The Director has `name="Director"` and `description="Root Director for this fleet"`.
+Registration follows the §6.2 Fleets bootstrap transaction. After allocating the fleet ID, overwrite the resolved Director window/tab name with `cafleet-<fleet_id>-0` through `rename_window`, read it back and require exact equality (§6.5 Backend operations). Re-read the Director pane context and require the original session, window ID and pane ID. Record the canonical name as `mux_window_name`, construct the result before commit, and emit success only after confirmed commit. The Director has `name="Director"` and `description="Root Director for this fleet"`; its pane title/label retains its current value.
+
+Any naming, verification, insertion or result-construction failure exits 1 and rolls back active uncommitted registration, with no success payload even under `--json`. Keep the transaction guard through commit inspection: a failed commit rolls back an active transaction, or reports the registry outcome as unconfirmed if SQLite already ended it. Append a rollback failure to the original error. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, describe the terminal name as potentially changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. A rolled-back fleet ID can be reused.
+
+Applied names remain after a failure, crash or fleet deletion, and the Director pane keeps running. The rename and database commit are separate operations: a crash can leave a changed name without registration, or committed registration without delivered output. An output error after confirmed commit preserves registration and the name. Existing fleets keep their recorded names, and subsequent user renames leave placement snapshots unchanged.
 
 Run `fleet create` from the coding-agent session declared by `--coding-agent`; root-Director reception follows §6.3 `message listen` and §6.5 Push notifications.
 
@@ -405,14 +409,14 @@ Run `fleet create` from the coding-agent session declared by `--coding-agent`; r
 
 A coding agent whose tool commands run in a long-lived shared server passes that server's environment to `cafleet`, and that environment can name another pane or another multiplexer. `fleet create` therefore trusts `TMUX_PANE` / `HERDR_PANE_ID` only when the pane's process is an ancestor of the `cafleet` process, and `doctor` reports the same verification (§ `cafleet doctor` — Environment Diagnosis).
 
-Without `--pane`, `fleet create` runs these steps in order and exits 1 at the first failure, before any write:
+Without `--pane`, `fleet create` completes the caller checks before registration or naming, then runs the registration sequence:
 
 1. **Shared-server check.** Walk the caller's ancestry (§ Ancestry walk) and apply row 1 (§ Verification rows), before any multiplexer command; the walk itself runs none.
 2. **Backend.** Detect the backend (§6.5 Backend selection).
 3. **Env pane.** Read a non-empty `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr); an unset variable fails with the unset body (§ Refusal messages).
 4. **Server.** Resolve the server and check availability (§ `fleet create`), keeping their error messages.
 5. **Verification.** Apply rows 2–7.
-6. **Registration.** Read the pane context and register it (§ `fleet create`).
+6. **Registration.** Read the pane context, allocate the fleet ID, name and verify its window, then commit registration (§ `fleet create`).
 
 With `--pane`, `fleet create` reads no process entry: the pane's ID form selects the backend, the server follows § `--pane` ID form, availability is checked, then step 6 runs.
 
@@ -1284,8 +1288,8 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member create` | `--coding-agent hermes` with an unreadable `hermes config path`, before registration or multiplexer effects | §6.7 Hermes availability preflight | 1 |
 | `member create` | A non-default database and a spawn prompt without `{database_url}`, before registration (§6.3 Spawn-prompt substitution) | `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url` | 1 |
 | `member delete` | A `hermes` run whose work settlement cannot be verified; the member row and runner cleanup records are kept | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 |
-| `fleet create` | The tmux window-name reply is malformed or names another window, before any write (§6.5 Backend operations) | `Error: unexpected tmux display-message output: <quoted>` | 1 |
-| `fleet create` | The herdr `tab get` reply has no label, before any write (§6.5 Backend operations) | `Error: herdr tab get missing 'label' field` | 1 |
+| `fleet create` | Director window naming, exact name read-back or pane-context verification fails; active uncommitted registration rolls back (§6.5 Backend operations) | The cause and attempted target diagnostics of § `fleet create` | 1 |
+| `fleet create` | Registration or commit fails after naming is attempted | The registration cause, attempted target diagnostics and transaction-resolution outcome of § `fleet create`; rollback failures accompany the original error | 1 |
 | `member create` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; nothing is registered (§6.5 Fleet window layout) | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` | 1 |
 | `member delete` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; the run, pane and row are unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` | 1 |
 | `fleet delete` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; every member is unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.` | 1 |
@@ -1605,7 +1609,7 @@ A multiplexer context is a plain value of three non-empty strings: `session` (tm
 | tmux | The absolute server socket path | `tmux -S <mux_server> …` |
 | herdr | The herdr session name (`default` for the default session) | `herdr --session <mux_server> …` |
 
-Each member placement copies the Director's `mux_server`. `fleet create` also reads the Director window's name after the pane context succeeds (§ Backend operations); the multiplexer context itself and the `cafleet doctor` reads stay three strings.
+Each member placement copies the Director's `mux_server`. `fleet create` names the resolved Director window and verifies both its exact name and unchanged pane context before committing (§ Backend operations); the multiplexer context itself remains three strings.
 
 A member pane spawn takes the slot's pane target (§ Fleet window layout), built from the registry and the Director's recorded session:
 
@@ -1667,10 +1671,10 @@ Each scanned window's height is read live before registration (§ Backend operat
 | Object | Name | Mechanism |
 |---|---|---|
 | Overflow window | `cafleet-<fleet_id>-<ordinal>`, e.g. `cafleet-3-1` | tmux `new-window -n`, which also turns `automatic-rename` off for that window; herdr `tab create --label` |
-| Director window | Its name when `fleet create` ran | The window-name read of `fleet create` (§ Backend operations) |
+| Director window | `cafleet-<fleet_id>-0` | tmux `rename-window`, which also turns `automatic-rename` off for that window; herdr `tab rename`; verify the name before registration commits (§ Backend operations) |
 | Member pane | The member name | tmux `select-pane -T`; herdr `pane rename` |
 
-The recorded Director window name is a snapshot; renaming the window later leaves the registry unchanged. A tmux pane title is visible only when `pane-border-status` is on, and a coding agent may retitle its pane (§6.7 Backend capabilities); a herdr pane label is independent of the agent's terminal title. Naming failures never fail a spawn.
+Window names are creation-time placement snapshots; existing registrations retain their recorded names, and renaming a window later leaves the registry unchanged. Fleet deletion leaves the Director window's current name in place. Director window naming and verification are required for successful registration. Ordinary member pane naming is best effort. A tmux pane title is visible only when `pane-border-status` is on, and a coding agent may retitle its pane (§6.7 Backend capabilities); a herdr pane label is independent of the agent's terminal title.
 
 ##### Fleet layout lock
 
@@ -1712,7 +1716,8 @@ argv in § Prompt dispatch and § Explicit key dispatch.
 | Availability | `tmux` on `PATH` | `herdr` on `PATH` | `<backend> binary not found on PATH` |
 | Pane context (`fleet create` and `doctor`) | <code>tmux display-message -p -t &lt;pane&gt; "#{session_name}&#124;#{window_id}&#124;#{pane_id}"</code>, split on the first two <code>&#124;</code> | `herdr pane current --pane <pane>`; `result.pane` supplies `workspace_id`, `tab_id`, `pane_id` | tmux: `unexpected tmux display-message output: <quoted>`; herdr: `herdr <context> missing '<key>' field`; an unknown pane fails per §6.3 `fleet create` |
 | Pane process (`fleet create` and `doctor`, §6.3 Caller pane verification) | <code>tmux display-message -p -t &lt;pane&gt; "#{pane_id}&#124;#{pane_pid}"</code>, split on the first <code>&#124;</code> | `herdr pane process-info --pane <pane>`; `result.process_info.shell_pid` supplies the pid | tmux: an empty `pane_id` or one that differs from `<pane>` is a missing pane, and with a matching `pane_id` a pid that is not a positive integer fails with `unexpected tmux display-message output: <quoted>`; herdr: error code `pane_not_found` is a missing pane, and a missing or non-integer field fails with `herdr pane process-info missing 'shell_pid' field` |
-| Window name (`fleet create` only) | <code>tmux display-message -p -t &lt;window_id&gt; "#{window_id}&#124;#{window_name}"</code>, split on the first <code>&#124;</code> so a name containing <code>&#124;</code> survives; an empty name is valid | `herdr tab get <tab_id>`; `result.tab.label` supplies the name | tmux: a reply without <code>&#124;</code> or whose first field differs from `<window_id>` (a missing window prints an empty line) fails with `unexpected tmux display-message output: <quoted>`; herdr: the command failure (`tab_not_found`) propagates, and a missing label fails with `herdr tab get missing 'label' field` |
+| Rename window (`fleet create`) | `tmux rename-window -t <window_id> <name>` | `herdr tab rename <tab_id> <name>` | Propagate command failures; herdr also requires its JSON `result` envelope. Each value is one argv element on the resolved server |
+| Window name (`fleet create` verification) | <code>tmux display-message -p -t &lt;window_id&gt; "#{window_id}&#124;#{window_name}"</code>; remove exactly the final LF, split on the first <code>&#124;</code>, require the echoed window ID and preserve the remaining name exactly, including CR and embedded LF | `herdr tab get <tab_id>`; require `result.tab.tab_id` to equal the requested ID and a string `result.tab.label` | Propagate command failures and reject malformed output, missing fields and mismatched IDs; an empty name is valid for the reader, and registration requires exact equality with its canonical name |
 | Window height (`member create`) | `tmux display-message -p -t <window_id> "#{window_height}"`; the anchors are ignored | `herdr pane layout --pane <anchor>` for each anchor in order; the first successful `result.layout.area.height` is the height | tmux: output that is not a positive integer, including the empty line of a missing window, fails with `unexpected tmux display-message output: <quoted>`; herdr: a reply without the area fails with `herdr pane layout missing 'area' field`, any failure moves to the next anchor, and the read fails with the last anchor's error only when no anchor answers |
 | Spawn member pane | Per pane target, § Member pane creation | Per pane target, § Member pane creation | A failed or malformed creation response is an unknown pane-cleanup outcome (§ Pane ownership during creation); naming, equalization and re-parenting failures never fail the spawn |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
@@ -4306,7 +4311,7 @@ Window layout columns follow §6.5 Fleet window layout:
 | Column | Semantics |
 |---|---|
 | `fleets.last_window_ordinal` | Highest overflow ordinal ever allocated for the fleet; `0` until the first overflow window, and never decreased |
-| `member_placements.mux_window_name` | `cafleet-<fleet_id>-<ordinal>` for an overflow window; the Director window's name read at `fleet create` for ordinal 0 |
+| `member_placements.mux_window_name` | Creation-time window name: public fleet creation sets `cafleet-<fleet_id>-0`, overflow creation sets `cafleet-<fleet_id>-<ordinal>`, and members using an existing window copy its recorded name |
 | `member_placements.window_ordinal` | Chosen at registration; `0` for the Director and Director-window members |
 | `member_placements.column_side` | Chosen at registration; `left` for the Director row and `right` for every Director-window member. A stored value outside `left` / `right` fails decoding |
 
