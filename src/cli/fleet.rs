@@ -2567,6 +2567,144 @@ mod tests {
             herdr_envelope(serde_json::json!({"tab": {"tab_id": tab, "label": label}}))
         }
 
+        fn tmux_creation(runner: &FakeRunner, context: &str, window: &str, name: &str) {
+            runner.respond(Ok(context.into()));
+            runner.succeed(1);
+            runner.respond(Ok(format!("{window}|{name}\n")));
+            runner.respond(Ok(context.into()));
+        }
+
+        fn herdr_context(workspace: &str, tab: &str, pane: &str) -> String {
+            herdr_envelope(serde_json::json!({
+                "pane": {"workspace_id": workspace, "tab_id": tab, "pane_id": pane}
+            }))
+        }
+
+        fn herdr_creation(runner: &FakeRunner, workspace: &str, tab: &str, pane: &str, name: &str) {
+            runner.respond(Ok(herdr_context(workspace, tab, pane)));
+            runner.respond(Ok(herdr_envelope(serde_json::json!({}))));
+            runner.respond(Ok(tab_label(tab, name)));
+            runner.respond(Ok(herdr_context(workspace, tab, pane)));
+        }
+
+        fn assert_stored_placement(conn: &Connection, fleet: &CreatedFleet) {
+            assert_eq!(
+                crate::broker::fleets::director_placement(conn, fleet.fleet_id).unwrap(),
+                *director_placement(fleet)
+            );
+            assert_eq!(fleet.director.name, "Director");
+            assert_eq!(director_placement(fleet).window_ordinal, 0);
+            assert_eq!(director_placement(fleet).column_side, ColumnSide::Left);
+            assert!(conn.is_autocommit());
+        }
+
+        struct NamingTarget {
+            backend: MuxBackend,
+            server: &'static str,
+            pane: &'static str,
+            window: &'static str,
+        }
+
+        impl NamingTarget {
+            fn new(backend: MuxBackend) -> Self {
+                match backend {
+                    MuxBackend::Tmux => Self {
+                        backend,
+                        server: RERUN_SOCKET,
+                        pane: "%5",
+                        window: "@1",
+                    },
+                    MuxBackend::Herdr => Self {
+                        backend,
+                        server: "default",
+                        pane: "w4:p3N",
+                        window: "w4:t1",
+                    },
+                }
+            }
+
+            fn context(&self) -> String {
+                match self.backend {
+                    MuxBackend::Tmux => "main|@1|%5\n".into(),
+                    MuxBackend::Herdr => herdr_context("w4", self.window, self.pane),
+                }
+            }
+
+            fn renamed(&self) -> String {
+                match self.backend {
+                    MuxBackend::Tmux => String::new(),
+                    MuxBackend::Herdr => herdr_envelope(serde_json::json!({})),
+                }
+            }
+
+            fn name_reply(&self, name: &str) -> String {
+                match self.backend {
+                    MuxBackend::Tmux => format!("{}|{name}\n", self.window),
+                    MuxBackend::Herdr => tab_label(self.window, name),
+                }
+            }
+
+            fn calls(&self, name: &str) -> Vec<Vec<String>> {
+                match self.backend {
+                    MuxBackend::Tmux => vec![
+                        tmux(
+                            &["display-message", "-p", "-t", self.pane, CONTEXT_FORMAT],
+                            self.server,
+                        ),
+                        tmux(&["rename-window", "-t", self.window, name], self.server),
+                        tmux(
+                            &[
+                                "display-message",
+                                "-p",
+                                "-t",
+                                self.window,
+                                WINDOW_NAME_FORMAT,
+                            ],
+                            self.server,
+                        ),
+                        tmux(
+                            &["display-message", "-p", "-t", self.pane, CONTEXT_FORMAT],
+                            self.server,
+                        ),
+                    ],
+                    MuxBackend::Herdr => {
+                        let command = |parts: &[&str]| {
+                            let mut command = argv(&["herdr", "--session", self.server]);
+                            command.extend(argv(parts));
+                            command
+                        };
+                        vec![
+                            command(&["pane", "current", "--pane", self.pane]),
+                            command(&["tab", "rename", self.window, name]),
+                            command(&["tab", "get", self.window]),
+                            command(&["pane", "current", "--pane", self.pane]),
+                        ]
+                    }
+                }
+            }
+
+            fn assert_diagnostic(&self, error: &CafleetError, cause: Option<&str>) {
+                let diagnostic = error.message();
+                for expected in [
+                    self.backend.name(),
+                    self.server,
+                    self.window,
+                    self.pane,
+                    "cafleet-1-0",
+                    "fleet list",
+                ] {
+                    assert!(
+                        diagnostic.contains(expected),
+                        "missing {expected:?}: {diagnostic}"
+                    );
+                }
+                assert!(diagnostic.contains("changed"), "{diagnostic}");
+                if let Some(cause) = cause {
+                    assert!(diagnostic.contains(cause), "{diagnostic}");
+                }
+            }
+        }
+
         /// A process table that fails the test on any read, for paths that must not walk.
         struct UnreadTable;
 
@@ -2669,6 +2807,15 @@ mod tests {
             };
             assert_eq!(error.exit_code(), 1, "{error}");
             assert_eq!(fleet_rows(conn), (0, 0), "{error}");
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM member_placements", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+                0,
+                "{error}"
+            );
+            assert!(conn.is_autocommit(), "{error}");
             error
         }
 
@@ -2690,8 +2837,7 @@ mod tests {
         fn an_explicit_tmux_pane_reads_no_process_table_and_ignores_a_herdr_environment() {
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("main|@1|%5\n".to_string()));
-            runner.respond(Ok("@1|main\n".to_string()));
+            tmux_creation(&runner, "main|@1|%5\n", "@1", "cafleet-1-0");
             let fleet = create_with(
                 &mut conn,
                 request(Some("%5"), Some(RERUN_SOCKET)),
@@ -2722,7 +2868,7 @@ mod tests {
                     RERUN_SOCKET,
                     "main",
                     Some("@1"),
-                    Some("main"),
+                    Some("cafleet-1-0"),
                     0,
                     ColumnSide::Left,
                     Some("%5"),
@@ -2736,23 +2882,26 @@ mod tests {
                         &["display-message", "-p", "-t", "%5", CONTEXT_FORMAT],
                         RERUN_SOCKET
                     ),
+                    tmux(&["rename-window", "-t", "@1", "cafleet-1-0"], RERUN_SOCKET),
                     tmux(
                         &["display-message", "-p", "-t", "@1", WINDOW_NAME_FORMAT],
+                        RERUN_SOCKET
+                    ),
+                    tmux(
+                        &["display-message", "-p", "-t", "%5", CONTEXT_FORMAT],
                         RERUN_SOCKET
                     ),
                 ]
             );
             assert_eq!(fleet_rows(&conn), (1, 1));
+            assert_stored_placement(&conn, &fleet);
         }
 
         #[test]
         fn an_explicit_herdr_pane_reads_no_process_table_and_ignores_a_tmux_environment() {
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(herdr_envelope(serde_json::json!({
-                "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
-            }))));
-            runner.respond(Ok(tab_label("w4:t1", "agents")));
+            herdr_creation(&runner, "w4", "w4:t1", "w4:p3N", "cafleet-1-0");
             let fleet = create_with(
                 &mut conn,
                 request(Some("w4:p3N"), Some("default")),
@@ -2776,7 +2925,7 @@ mod tests {
                     "default",
                     "w4",
                     Some("w4:t1"),
-                    Some("agents"),
+                    Some("cafleet-1-0"),
                     Some("w4:p3N")
                 )
             );
@@ -2792,9 +2941,28 @@ mod tests {
                         "--pane",
                         "w4:p3N",
                     ]),
+                    argv(&[
+                        "herdr",
+                        "--session",
+                        "default",
+                        "tab",
+                        "rename",
+                        "w4:t1",
+                        "cafleet-1-0",
+                    ]),
                     argv(&["herdr", "--session", "default", "tab", "get", "w4:t1"]),
+                    argv(&[
+                        "herdr",
+                        "--session",
+                        "default",
+                        "pane",
+                        "current",
+                        "--pane",
+                        "w4:p3N",
+                    ]),
                 ]
             );
+            assert_stored_placement(&conn, &fleet);
         }
 
         #[test]
@@ -2862,8 +3030,7 @@ mod tests {
             assert!(runner.events().is_empty());
 
             let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("main|@2|%5\n".to_string()));
-            runner.respond(Ok("@2|main\n".to_string()));
+            tmux_creation(&runner, "main|@2|%5\n", "@2", "cafleet-1-0");
             let fleet = create_with(
                 &mut conn,
                 request(Some("%5"), Some(RERUN_SOCKET)),
@@ -3025,8 +3192,7 @@ mod tests {
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(Ok("%3|20\n".to_string()));
-            runner.respond(Ok("main|@1|%3\n".to_string()));
-            runner.respond(Ok("@1|work window\n".to_string()));
+            tmux_creation(&runner, "main|@1|%3\n", "@1", "cafleet-1-0");
             let fleet = create_with(
                 &mut conn,
                 request(None, None),
@@ -3051,7 +3217,7 @@ mod tests {
                     TMUX_SOCKET,
                     "main",
                     Some("@1"),
-                    Some("work window"),
+                    Some("cafleet-1-0"),
                     Some("%3"),
                     "codex"
                 )
@@ -3067,13 +3233,19 @@ mod tests {
                         &["display-message", "-p", "-t", "%3", CONTEXT_FORMAT],
                         TMUX_SOCKET
                     ),
+                    tmux(&["rename-window", "-t", "@1", "cafleet-1-0"], TMUX_SOCKET),
                     tmux(
                         &["display-message", "-p", "-t", "@1", WINDOW_NAME_FORMAT],
+                        TMUX_SOCKET
+                    ),
+                    tmux(
+                        &["display-message", "-p", "-t", "%3", CONTEXT_FORMAT],
                         TMUX_SOCKET
                     ),
                 ]
             );
             assert_eq!(fleet_rows(&conn), (1, 1));
+            assert_stored_placement(&conn, &fleet);
         }
 
         #[test]
@@ -3083,10 +3255,7 @@ mod tests {
             runner.respond(Ok(herdr_envelope(
                 serde_json::json!({"process_info": {"shell_pid": 20}}),
             )));
-            runner.respond(Ok(herdr_envelope(serde_json::json!({
-                "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
-            }))));
-            runner.respond(Ok(tab_label("w4:t1", "")));
+            herdr_creation(&runner, "w4", "w4:t1", "w4:p3N", "cafleet-1-0");
             let fleet = create_with(
                 &mut conn,
                 request(None, None),
@@ -3114,21 +3283,46 @@ mod tests {
                     "work",
                     "w4",
                     Some("w4:t1"),
-                    Some(""),
+                    Some("cafleet-1-0"),
                     Some("w4:p3N")
                 )
             );
             let selector = argv(&["herdr", "--session", "work", "pane"]);
             let calls = runner.run_argvs();
-            assert_eq!(calls.len(), 3);
+            assert_eq!(calls.len(), 5);
             assert_eq!(calls[0][..4], selector);
             assert_eq!(calls[0][4], "process-info");
             assert_eq!(calls[1][..4], selector);
             assert_eq!(calls[1][4], "current");
             assert_eq!(
                 calls[2],
+                argv(&[
+                    "herdr",
+                    "--session",
+                    "work",
+                    "tab",
+                    "rename",
+                    "w4:t1",
+                    "cafleet-1-0",
+                ])
+            );
+            assert_eq!(
+                calls[3],
                 argv(&["herdr", "--session", "work", "tab", "get", "w4:t1"])
             );
+            assert_eq!(
+                calls[4],
+                argv(&[
+                    "herdr",
+                    "--session",
+                    "work",
+                    "pane",
+                    "current",
+                    "--pane",
+                    "w4:p3N"
+                ])
+            );
+            assert_stored_placement(&conn, &fleet);
         }
 
         #[test]
@@ -3137,6 +3331,7 @@ mod tests {
                 let (_dir, mut conn) = database();
                 let runner = FakeRunner::with_binary("tmux");
                 runner.respond(Ok("main|@1|%5\n".to_string()));
+                runner.succeed(1);
                 runner.respond(Ok(reply.to_string()));
                 let error = refused(
                     &mut conn,
@@ -3151,7 +3346,7 @@ mod tests {
                         .contains("unexpected tmux display-message output: "),
                     "{reply:?}: {error}"
                 );
-                assert_eq!(runner.run_argvs().len(), 2, "{reply:?}");
+                assert_eq!(runner.run_argvs().len(), 3, "{reply:?}");
             }
         }
 
@@ -3178,6 +3373,7 @@ mod tests {
                 runner.respond(Ok(herdr_envelope(serde_json::json!({
                     "pane": {"workspace_id": "w4", "tab_id": "w4:t1", "pane_id": "w4:p3N"}
                 }))));
+                runner.respond(Ok(herdr_envelope(serde_json::json!({}))));
                 runner.respond(reply);
                 let error = refused(
                     &mut conn,
@@ -3187,6 +3383,233 @@ mod tests {
                     &UnreadTable,
                 );
                 assert!(error.to_string().contains(expected), "{error}");
+            }
+        }
+
+        #[test]
+        fn naming_uses_the_allocated_fleet_id_and_leaves_existing_placements_unchanged() {
+            for backend in [MuxBackend::Tmux, MuxBackend::Herdr] {
+                let (_dir, mut conn) = database();
+                let (legacy, _) =
+                    crate::broker::fleets::test_support::create_fleet_fixture(&mut conn, "legacy");
+                let previous = crate::broker::fleets::director_placement(&conn, legacy).unwrap();
+                let target = NamingTarget::new(backend);
+                let runner = FakeRunner::with_binary(backend.name());
+                match backend {
+                    MuxBackend::Tmux => {
+                        tmux_creation(&runner, &target.context(), target.window, "cafleet-2-0")
+                    }
+                    MuxBackend::Herdr => {
+                        herdr_creation(&runner, "w4", target.window, target.pane, "cafleet-2-0")
+                    }
+                }
+                let fleet = create_with(
+                    &mut conn,
+                    request(Some(target.pane), Some(target.server)),
+                    &HashMap::new(),
+                    runner.clone(),
+                    &UnreadTable,
+                )
+                .unwrap();
+                assert_eq!(fleet.fleet_id, 2);
+                assert_eq!(
+                    director_placement(&fleet).mux_window_name.as_deref(),
+                    Some("cafleet-2-0")
+                );
+                assert_stored_placement(&conn, &fleet);
+                assert_eq!(
+                    crate::broker::fleets::director_placement(&conn, legacy).unwrap(),
+                    previous
+                );
+                assert_eq!(runner.run_argvs(), target.calls("cafleet-2-0"));
+            }
+        }
+
+        #[test]
+        fn rename_and_readback_command_failures_roll_back_and_stop_immediately() {
+            for backend in [MuxBackend::Tmux, MuxBackend::Herdr] {
+                for (failed_call, cause) in [(2, "rename denied"), (3, "readback denied")] {
+                    let (_dir, mut conn) = database();
+                    let target = NamingTarget::new(backend);
+                    let runner = FakeRunner::with_binary(backend.name());
+                    runner.respond(Ok(target.context()));
+                    if failed_call == 3 {
+                        runner.respond(Ok(target.renamed()));
+                    }
+                    runner.respond(Err(crate::multiplexer::RunError::Failed {
+                        stderr: cause.into(),
+                    }));
+                    let error = refused(
+                        &mut conn,
+                        request(Some(target.pane), Some(target.server)),
+                        &[],
+                        &runner,
+                        &UnreadTable,
+                    );
+                    target.assert_diagnostic(&error, Some(cause));
+                    assert_eq!(
+                        runner.run_argvs(),
+                        target.calls("cafleet-1-0")[..failed_call]
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn successful_readback_requires_the_exact_canonical_name() {
+            for backend in [MuxBackend::Tmux, MuxBackend::Herdr] {
+                for name in [
+                    "",
+                    "main",
+                    "cafleet-2-0",
+                    "cafleet-1-0 ",
+                    "cafleet-1-0\r",
+                    "cafleet-1-0\n",
+                ] {
+                    let (_dir, mut conn) = database();
+                    let target = NamingTarget::new(backend);
+                    let runner = FakeRunner::with_binary(backend.name());
+                    runner.respond(Ok(target.context()));
+                    runner.respond(Ok(target.renamed()));
+                    runner.respond(Ok(target.name_reply(name)));
+                    let error = refused(
+                        &mut conn,
+                        request(Some(target.pane), Some(target.server)),
+                        &[],
+                        &runner,
+                        &UnreadTable,
+                    );
+                    target.assert_diagnostic(&error, None);
+                    assert_eq!(
+                        runner.run_argvs(),
+                        target.calls("cafleet-1-0")[..3],
+                        "{name:?}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn director_context_must_still_match_after_renaming() {
+            for backend in [MuxBackend::Tmux, MuxBackend::Herdr] {
+                let changed = match backend {
+                    MuxBackend::Tmux => vec![
+                        Ok("other|@1|%5\n".into()),
+                        Ok("main|@2|%5\n".into()),
+                        Ok("main|@1|%6\n".into()),
+                        Ok("||\n".into()),
+                        Err(crate::multiplexer::RunError::Failed {
+                            stderr: "context denied".into(),
+                        }),
+                    ],
+                    MuxBackend::Herdr => vec![
+                        Ok(herdr_context("w9", "w4:t1", "w4:p3N")),
+                        Ok(herdr_context("w4", "w4:t2", "w4:p3N")),
+                        Ok(herdr_context("w4", "w4:t1", "w4:p4N")),
+                        Err(crate::multiplexer::RunError::Failed {
+                            stderr: crate::multiplexer::test_support::herdr_error_stderr(
+                                "pane_not_found",
+                            ),
+                        }),
+                        Err(crate::multiplexer::RunError::Failed {
+                            stderr: "context denied".into(),
+                        }),
+                    ],
+                };
+                for reply in changed {
+                    let (_dir, mut conn) = database();
+                    let target = NamingTarget::new(backend);
+                    let runner = FakeRunner::with_binary(backend.name());
+                    runner.respond(Ok(target.context()));
+                    runner.respond(Ok(target.renamed()));
+                    runner.respond(Ok(target.name_reply("cafleet-1-0")));
+                    runner.respond(reply);
+                    let error = refused(
+                        &mut conn,
+                        request(Some(target.pane), Some(target.server)),
+                        &[],
+                        &runner,
+                        &UnreadTable,
+                    );
+                    target.assert_diagnostic(&error, None);
+                    assert_eq!(runner.run_argvs(), target.calls("cafleet-1-0"));
+                }
+            }
+        }
+
+        #[test]
+        fn registration_insert_failures_leave_the_applied_name_and_director_pane_in_place() {
+            for backend in [MuxBackend::Tmux, MuxBackend::Herdr] {
+                for trigger in [
+                    "BEFORE INSERT ON members",
+                    "BEFORE INSERT ON member_placements",
+                    "BEFORE UPDATE OF director_member_id ON fleets",
+                ] {
+                    let (_dir, mut conn) = database();
+                    conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
+                    let target = NamingTarget::new(backend);
+                    let runner = FakeRunner::with_binary(backend.name());
+                    runner.respond(Ok(target.context()));
+                    runner.respond(Ok(target.renamed()));
+                    runner.respond(Ok(target.name_reply("cafleet-1-0")));
+                    runner.respond(Ok(target.context()));
+                    let error = refused(
+                        &mut conn,
+                        request(Some(target.pane), Some(target.server)),
+                        &[],
+                        &runner,
+                        &UnreadTable,
+                    );
+                    target.assert_diagnostic(&error, Some("registration failure"));
+                    assert_eq!(runner.run_argvs(), target.calls("cafleet-1-0"));
+                }
+            }
+        }
+
+        #[test]
+        fn fleet_row_insertion_failure_stops_before_renaming() {
+            for backend in [MuxBackend::Tmux, MuxBackend::Herdr] {
+                let (_dir, mut conn) = database();
+                conn.execute_batch("CREATE TRIGGER fail_registration BEFORE INSERT ON fleets BEGIN SELECT RAISE(ABORT, 'fleet insertion failure'); END;").unwrap();
+                let target = NamingTarget::new(backend);
+                let runner = FakeRunner::with_binary(backend.name());
+                runner.respond(Ok(target.context()));
+                let error = refused(
+                    &mut conn,
+                    request(Some(target.pane), Some(target.server)),
+                    &[],
+                    &runner,
+                    &UnreadTable,
+                );
+                assert!(
+                    error.message().contains("fleet insertion failure"),
+                    "{error}"
+                );
+                assert_eq!(runner.run_argvs(), target.calls("cafleet-1-0")[..1]);
+            }
+        }
+
+        #[test]
+        fn commit_failure_keeps_naming_diagnostics_and_performs_no_terminal_compensation() {
+            for backend in [MuxBackend::Tmux, MuxBackend::Herdr] {
+                let (_dir, mut conn) = database();
+                conn.commit_hook(Some(|| true)).unwrap();
+                let target = NamingTarget::new(backend);
+                let runner = FakeRunner::with_binary(backend.name());
+                runner.respond(Ok(target.context()));
+                runner.respond(Ok(target.renamed()));
+                runner.respond(Ok(target.name_reply("cafleet-1-0")));
+                runner.respond(Ok(target.context()));
+                let error = refused(
+                    &mut conn,
+                    request(Some(target.pane), Some(target.server)),
+                    &[],
+                    &runner,
+                    &UnreadTable,
+                );
+                conn.commit_hook(None::<fn() -> bool>).unwrap();
+                target.assert_diagnostic(&error, Some("unconfirmed"));
+                assert_eq!(runner.run_argvs(), target.calls("cafleet-1-0"));
             }
         }
 
@@ -3227,8 +3650,7 @@ mod tests {
             };
             let (_dir, mut conn) = database();
             let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("main|@1|%5\n".to_string()));
-            runner.respond(Ok("@1|main\n".to_string()));
+            tmux_creation(&runner, "main|@1|%5\n", "@1", "cafleet-1-0");
             let fleet = create_with(
                 &mut conn,
                 request,
