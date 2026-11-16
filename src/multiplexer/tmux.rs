@@ -812,11 +812,43 @@ mod tests {
         const NAME_FORMAT: &str = "#{window_id}|#{window_name}";
 
         #[test]
+        fn rename_window_targets_the_recorded_socket_and_concrete_window() {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.succeed(1);
+            on_server(runner.clone())
+                .rename_window("@17", "cafleet-42-0")
+                .unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                vec![tmux(&["rename-window", "-t", "@17", "cafleet-42-0"])]
+            );
+        }
+
+        #[test]
+        fn rename_window_propagates_command_failure() {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(failed("rename denied"));
+            let error = on_server(runner.clone())
+                .rename_window("@17", "cafleet-42-0")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("rename denied"), "{error}");
+            assert_eq!(
+                runner.run_argvs(),
+                vec![tmux(&["rename-window", "-t", "@17", "cafleet-42-0"])]
+            );
+        }
+
+        #[test]
         fn window_name_reads_the_named_window_and_keeps_every_separator_after_the_first() {
             for (reply, expected) in [
                 ("@1|main\n", "main"),
                 ("@1|\n", ""),
                 ("@1|agents|left\n", "agents|left"),
+                ("@1| agents | left \n", " agents | left "),
+                ("@1|agents\r\n", "agents\r"),
+                ("@1|agents\n\n", "agents\n"),
+                ("@1|\r\n\n", "\r\n"),
             ] {
                 let runner = FakeRunner::with_binary("tmux");
                 runner.respond(Ok(reply.into()));
