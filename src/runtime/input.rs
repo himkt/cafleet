@@ -2054,6 +2054,29 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        self.receive(conn, request, observation, deadline, false)
+    }
+
+    /// The runner's own preview sweep request: it queues with zero bytes while another process
+    /// holds the pane input lock, so a merely queued sweep request holds no lock.
+    pub(super) fn handle_swept(
+        &mut self,
+        conn: &mut Connection,
+        request: InputControlRequest,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        self.receive(conn, request, observation, deadline, true)
+    }
+
+    fn receive(
+        &mut self,
+        conn: &mut Connection,
+        request: InputControlRequest,
+        observation: &ObservationController,
+        deadline: Instant,
+        queue_behind_busy_pane: bool,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
         if matches!(
             &request.operation,
             InputControlOperation::PermissionRespond(_)
@@ -2169,7 +2192,10 @@ impl InputCoordinator {
                     || self.finalization.is_some()
                     || self.pending_stamp.is_some()
                     || self.held_composer.is_some()
-                    || unresolved_deferred =>
+                    || unresolved_deferred
+                    || (queue_behind_busy_pane
+                        && PaneLock::try_acquire(&self.database_url, &self.placement)?
+                            .is_none()) =>
                 {
                     Some("earlier_input")
                 }
@@ -2396,6 +2422,23 @@ impl InputCoordinator {
         self.deferred_failed
     }
 
+    /// The runner already owns a preview's delivery: one waits in the FIFO or is being drained
+    /// from it, or a preview's terminal transaction is pending storage.
+    pub(super) fn owns_preview_delivery(&self) -> bool {
+        self.finalization.is_some()
+            || self.pending_stamp.is_some()
+            || self
+                .queue
+                .iter()
+                .chain(
+                    self.pending
+                        .as_ref()
+                        .and_then(PendingInput::deferred)
+                        .map(|deferred| &deferred.queued),
+                )
+                .any(|queued| queued.request.kind == storage::InputKind::Preview)
+    }
+
     pub(super) fn has_deferred_work(&self) -> bool {
         !self.queue.is_empty()
             || self.finalization.is_some()
@@ -2452,11 +2495,14 @@ impl InputCoordinator {
                 return Err(cause);
             }
         };
+        let retried = operation.is_retried_preview();
         if let Some(retained) = self.operations.get_mut(&input_id) {
             retained.operation = operation;
             retained.attempt_available = false;
         }
-        Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes, None);
+        if !retried {
+            Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes, None);
+        }
         Ok(())
     }
 
@@ -3041,7 +3087,9 @@ impl InputCoordinator {
         {
             return self.settle_accepted_preview(conn, observation, operation.input_id, stage);
         }
-        Self::publish_result(observation, operation.input_id, stage, operation.stop_cause);
+        if !operation.is_retried_preview() {
+            Self::publish_result(observation, operation.input_id, stage, operation.stop_cause);
+        }
         Ok(())
     }
 
@@ -5875,7 +5923,7 @@ mod tests {
 
         mod composer_reliability {
             use crate::runtime::input::tests::ordinary_prompt::deferred_queue::{
-                form, queued, row,
+                form, queued, result_events, row,
             };
             use crate::runtime::input::tests::ordinary_prompt::*;
             use serde_json::{Value, json};
@@ -6834,7 +6882,7 @@ mod tests {
             }
 
             #[test]
-            fn acked_held_preview_is_cancelled_on_the_next_queue_turn_without_writing() {
+            fn consumed_held_preview_is_cancelled_on_the_next_queue_turn_without_writing() {
                 with_host(|host| {
                     let (message, _) = stopped_preview(host, false);
                     let next = storage::find_latest_preview_input(
@@ -6845,7 +6893,12 @@ mod tests {
                     .unwrap()
                     .unwrap();
                     let writes = host.pty.written.clone();
-                    crate::broker::ack_message(&mut host.fixture.conn, message.message_id).unwrap();
+                    assert!(
+                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
+                            .unwrap()
+                            .iter()
+                            .any(|consumed| consumed.message_id == message.message_id)
+                    );
                     let _ = turn(host);
                     let cancelled = row(host, next.input_id);
                     assert_eq!(
@@ -6857,6 +6910,77 @@ mod tests {
                         Some("message_consumed")
                     );
                     assert_eq!(host.pty.written, writes);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        result_events(host, next.input_id),
+                        0,
+                        "a consumed re-delivery successor publishes no delivery result"
+                    );
+                });
+            }
+
+            #[test]
+            fn an_enter_press_that_verifies_the_composer_empty_delivers_the_waiting_head_then_the_later_input()
+             {
+                with_host(|host| {
+                    let (message, stopped) = stopped_preview(host, false);
+                    let waiting = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    let later = queued(
+                        host,
+                        request(host, "prompt:after-the-stalled-head", LITERAL),
+                        "earlier_input",
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(waiting.input_id, &old_wait());
+                    drain_stalled_events(host);
+                    readable_stalled_head(host, waiting.input_id, stopped);
+                    assert_eq!(
+                        row(host, waiting.input_id).state,
+                        storage::InputState::Ready
+                    );
+                    assert_eq!(row(host, later).state, storage::InputState::Ready);
+                    assert_eq!(
+                        host.coordinator.held_composer.map(|(input_id, _)| input_id),
+                        Some(stopped),
+                        "the left-in-composer blocker holds the composer"
+                    );
+                    let blocker = row(host, stopped);
+                    let canonical = canonical_preview(&message);
+                    let preview_program = [canonical.as_bytes(), b"~"].concat();
+                    host.confirm_submissions = true;
+                    host.confirm_after_programs([preview_program.clone(), encoded()]);
+                    let before = host.pty.written.len();
+                    host.type_human(b"\r");
+                    host.show(SCREEN.to_vec());
+                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
+                        host,
+                        |host| {
+                            matches!(
+                                row(host, later).state,
+                                storage::InputState::Accepted | storage::InputState::Settled
+                            )
+                        },
+                    );
+                    assert_eq!(
+                        host.coordinator.held_composer, None,
+                        "the verified empty composer clears the hold"
+                    );
+                    assert!(matches!(
+                        row(host, waiting.input_id).state,
+                        storage::InputState::Accepted | storage::InputState::Settled
+                    ));
+                    assert_eq!(
+                        host.pty.written[before..],
+                        [b"\r".as_slice(), &preview_program, &encoded()].concat(),
+                        "the press submits the retained literal, then the waiting head and the later input deliver in order"
+                    );
+                    assert_eq!(row(host, stopped), blocker);
                 });
             }
 
@@ -7058,8 +7182,8 @@ mod tests {
             }
 
             #[test]
-            fn reconciled_already_notified_blocker_notifies_the_later_head_after_ack_cancellation()
-            {
+            fn reconciled_already_notified_blocker_notifies_the_later_head_after_consumption_cancellation()
+             {
                 for disposition in [
                     storage::InputDisposition::NotSubmitted,
                     storage::InputDisposition::AbandonedUncertain,
@@ -7096,8 +7220,15 @@ mod tests {
                                 host.coordinator.queue.front().unwrap().composer_busy_since,
                                 since
                             );
-                            crate::broker::ack_message(&mut host.fixture.conn, message.message_id)
-                                .unwrap();
+                            assert!(
+                                crate::broker::poll_messages(
+                                    &host.fixture.conn,
+                                    message.to_member_id
+                                )
+                                .unwrap()
+                                .iter()
+                                .any(|consumed| consumed.message_id == message.message_id)
+                            );
                             crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(host, |host| row(host, first).state == storage::InputState::Settled);
                             assert_eq!(
                                 row(host, first).disposition,
@@ -8556,7 +8687,7 @@ mod tests {
                 )
             }
 
-            fn result_events(host: &Host, input_id: i64) -> i64 {
+            pub(super) fn result_events(host: &Host, input_id: i64) -> i64 {
                 host.fixture
                     .conn
                     .query_row(
@@ -8772,13 +8903,18 @@ mod tests {
             }
 
             #[test]
-            fn queued_preview_acknowledged_before_its_drain_settles_not_submitted_without_typing() {
+            fn queued_preview_consumed_before_its_drain_settles_not_submitted_without_typing() {
                 with_permission_host(Duration::from_secs(8), |host| {
                     let message = host.message("queued preview body");
                     form(host);
                     let request = preview_request(host, &message, &canonical_preview(&message));
                     let id = queued(host, request, "interaction_open");
-                    crate::broker::ack_message(&mut host.fixture.conn, message.message_id).unwrap();
+                    assert!(
+                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
+                            .unwrap()
+                            .iter()
+                            .any(|consumed| consumed.message_id == message.message_id)
+                    );
                     close(host);
                     turns_until(host, |host| {
                         row(host, id).state == storage::InputState::Settled
@@ -8795,6 +8931,105 @@ mod tests {
                         )
                         .unwrap();
                     assert!(notified.is_none());
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        result_events(host, id),
+                        0,
+                        "a preview consumed by poll publishes no delivery result"
+                    );
+                });
+            }
+
+            #[test]
+            fn a_preview_attempt_deadline_with_a_busy_pane_lock_settles_not_submitted_without_publishing()
+             {
+                with_permission_host(Duration::from_secs(30), |host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    let message = host.message("preview behind a busy pane lock");
+                    form(host);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical_preview(&message)),
+                        "interaction_open",
+                    );
+                    let prompt = queued(
+                        host,
+                        host.request("prompt:busy-control"),
+                        "interaction_open",
+                    );
+                    let _held = PaneLock::try_acquire(&url, &host.placement())
+                        .unwrap()
+                        .unwrap();
+                    close(host);
+                    turns_until(host, |host| {
+                        row(host, prompt).state == storage::InputState::Settled
+                    });
+                    assert_not_submitted(host, preview, "pane_input_busy");
+                    assert_not_submitted(host, prompt, "pane_input_busy");
+                    turns_until(host, |host| result_events(host, prompt) == 1);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        result_events(host, preview),
+                        0,
+                        "the transient preview outcome publishes nothing; the sweep retries it"
+                    );
+                    assert_eq!(result_events(host, prompt), 1, "a prompt still publishes");
+                    assert!(host.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
+            fn a_preview_whose_target_changed_still_publishes_its_delivery_result() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let message = host.message("preview for a moved target");
+                    form(host);
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical_preview(&message)),
+                        "interaction_open",
+                    );
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert_not_submitted(host, id, "target_changed");
+                    turns_until(host, |host| result_events(host, id) > 0);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                });
+            }
+
+            #[test]
+            fn orderly_shutdown_settles_a_queued_preview_runner_stopped_without_publishing() {
+                with_permission_host(Duration::from_secs(30), |host| {
+                    let message = host.message("preview queued at shutdown");
+                    form(host);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical_preview(&message)),
+                        "interaction_open",
+                    );
+                    let prompt = queued(
+                        host,
+                        host.request("prompt:shutdown-control"),
+                        "interaction_open",
+                    );
+                    let settled = shut_down(host);
+                    assert_eq!(settled, vec![preview, prompt]);
+                    assert_not_submitted(host, preview, "runner_stopped");
+                    assert_not_submitted(host, prompt, "runner_stopped");
+                    assert_eq!(result_events(host, prompt), 1, "a prompt still publishes");
+                    assert_eq!(
+                        result_events(host, preview),
+                        0,
+                        "the next run's sweep retries the still-pending message"
+                    );
+                    assert!(host.pty.offers.is_empty());
                 });
             }
 

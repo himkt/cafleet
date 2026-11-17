@@ -172,7 +172,7 @@ Hermes members use your existing Hermes configuration: your configured default p
 
 Shared setup installs the CAFleet plugin into `plugins/cafleet/` of the Hermes home that `hermes config path` reports, including an active profile's home, with an `executable` file naming the `cafleet` it runs. It then edits the reported file, keeping the rest of it: it adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain `cafleet setup` on a host without `hermes` installs the skills and skips the plugin.
 
-Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so registering a Hermes Director always asks you for its pane ID and server ([Director pane verification](members.md#director-pane-verification)). Each pending notice arrives as its own turn, in the listener's emission order. Reception alone fills the Hermes gateway's input queue only when the Director ACKs notices in more separate rounds within one busy turn than that queue holds; otherwise a full queue comes from other injections.
+Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so registering a Hermes Director always asks you for its pane ID and server ([Director pane verification](members.md#director-pane-verification)). Each pending notice arrives as its own turn, in the listener's emission order. Reception alone fills the Hermes gateway's input queue only when the Director polls in more separate rounds within one busy turn than that queue holds; otherwise a full queue comes from other injections.
 
 Under `approvals.mode: smart`, the default, commands Hermes does not consider dangerous run without review and its guardian model reviews the rest; a guardian escalation shows an approval prompt in the member's pane, which the Director answers. CAFleet needs no `approvals.deny` entries.
 
@@ -194,7 +194,7 @@ pi has no per-tool approval and no OS-level sandbox, so the member gate is a pi 
 
 | Operation | `cafleet-ask` (default) | `cafleet` |
 |---|---|---|
-| The member's broker message send, poll, ack or show, run as one simple command | Runs | Runs |
+| The member's broker message send, poll or show, run as one simple command | Runs | Runs |
 | A shell command holding a control character, such as a multi-line command or a terminal escape sequence | Blocked without a form; the member asks the Director to run it | Blocked; the member asks the Director to run it |
 | Any other shell command, including a compound command, a leading `NAME=value` assignment, a Git command, a `mise` task or another `cafleet` command | Opens the gate's approval form for the Director to answer | Blocked; the member asks the Director to run it |
 | Reading and searching files | Allowed, except a call that names a `.env` file | Same |

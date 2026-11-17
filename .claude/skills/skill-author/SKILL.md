@@ -55,13 +55,13 @@ The prompt references the authoritative role, installed CAFleet core/backend ref
 cafleet member create --fleet-id 7 --name summarizer --description "Summarizes a PR diff and three risks" --file /repo/researches/pr-1234/.prompts/summarizer-20260911T100100Z.md --json
 ```
 
-Receive that member's ready and ACK it. Dispatch its scope when inputs exist.
+Receive that member's ready and record it. Dispatch its scope when inputs exist.
 
 ### Review and revisions
 
 Receive the Summarizer's report under [Director wake](../../../assets/skills/cafleet/roles/director.md#director-wake).
 
-Read and ACK the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; keep the owned receiver through the review loop.
+Read and record the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; keep the owned receiver through the review loop.
 
 ### Teardown
 

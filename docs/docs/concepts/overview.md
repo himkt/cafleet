@@ -14,8 +14,7 @@ CAFleet coordinates independent coding-agent sessions in tmux or herdr through d
 | broker | The CLI's synchronous SQLite data-access layer | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
 | inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
-| finite receive | A bounded inbox wait (`message wait`) for scripts and manual use that also retries ordinary-member previews | [Message wait](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-wait) |
-| listener | The Director's persistent read-only `message listen` process that notifies pending message IDs as JSONL, with explicit ACK consumption | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
+| listener | The Director's persistent read-only `message listen` process that notifies unpolled message IDs as JSONL; the `message poll` each notice prompts consumes them | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
 | runner | The owned PTY observer and input arbiter for a member run | [Member permission events](members.md#member-permission-events) |
 | runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
@@ -40,7 +39,7 @@ The [subcommand summary](https://github.com/himkt/cafleet/blob/main/SPEC.md#subc
 
 ## Design document workflow
 
-Develop a feature through a reviewed design and an implementation. The `cafleet` and `cafleet-design-doc` skills coordinate the teams; give your coding agent one prompt per stage. Each prompt is a plain request, and your coding agent loads the `cafleet-design-doc` skill through its own skill mechanism, which [Coding agents](coding-agents.md) lists for each backend. Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`; the Director receives replies and checks evidence for as long as the fleet exists.
+Develop a feature through a reviewed design and an implementation. The `cafleet` and `cafleet-design-doc` skills coordinate the teams; give your coding agent one prompt per stage. Each prompt is a plain request, and your coding agent loads the `cafleet-design-doc` skill through its own skill mechanism, which [Coding agents](coding-agents.md) lists for each backend. Read durable coordination with `message show` (a poll consumes what it returns, so leave polling to the inbox owner) and inspect the team’s visible panes with `member capture`; the Director receives replies and checks evidence for as long as the fleet exists.
 
 ### Prompts {#prompts}
 

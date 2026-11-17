@@ -46,14 +46,14 @@ CODING AGENT: {coding_agent}
 DATABASE URL: {database_url}
 When DATABASE URL is not default, pass --database-url <that URL> on every cafleet command.
 As your first operational broker command, send: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
-Poll and ACK your assignment, perform it, poll before reporting completion and on every wake, then handle queued assignments before becoming idle.
+Poll your assignment and record it, perform it, poll before reporting completion and on every wake, then handle queued assignments before becoming idle.
 ```
 
 ```bash
 cafleet member create --fleet-id 1 --name alice --description "Independent review" --file /home/cafleet-demo/work/demo/.prompts/member.md
 ```
 
-Suppose the returned ID is `3`. Read its ready message and ACK it by its actual ID, then dispatch the assignment:
+Suppose the returned ID is `3`. Receive its ready message through your poll, then dispatch the assignment:
 
 ```bash
 cafleet message send --from-member-id 2 --to-member-id 3 "Review the change and report findings."
@@ -63,27 +63,17 @@ The send persists the assignment and reports how the runner delivered its previe
 
 ### Receive results
 
-The Director reads each notice from its listener, then polls; the installed CAFleet skill's backend recipe owns the tool calls, and reception sends no input into the Director's pane. A notice names pending message IDs only, and the listener holds later notices until the Director ACKs the IDs the outstanding notice named or that hold has lasted several minutes, so a burst of replies arrives as one notice rather than one per message. On every wake, reconcile full pending payloads:
+The Director reads each notice from its listener; the installed CAFleet skill's backend recipe owns the tool calls, and reception sends no input into the Director's pane. A notice names unpolled message IDs only. The Director remembers the highest message ID its polls have returned, so a notice naming only IDs at or below it needs no command. Otherwise it polls once:
 
 ```bash
 cafleet message poll 2 --json
 ```
 
-ACK every consumed delivery before ending the turn, using its returned ID:
+The poll consumes every message it returns, so the Director records each one's sender, required action and artifact pointers before running any other command. After a poll, the listener's next notice names only messages committed after it; while a notice stays unpolled, later messages wait for a single bulk re-notice several minutes later, so a burst of replies arrives as one notice rather than one per message. Keep deferred questions and approvals in host-owned task state; broker events leave pending user decisions pending. `message show MESSAGE_ID --json` reads a consumed message again. The [message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) and [Director consumption](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) contracts own the full procedure.
 
-```bash
-cafleet message ack 10
-```
+The Director keeps its listener for the fleet's lifetime, renewing an expired lease while the fleet exists; after an unexpected exit it polls the inbox and replaces the listener only once the old process has ended. Unpolled messages survive damaged output. [Director requirements](concepts/coding-agents.md#director-requirements) lists each backend's reception mechanism.
 
-Keep deferred questions and approvals in host-owned task state after ACK, and reconcile replayed IDs before acting; broker events leave pending user decisions pending. The [message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) and [Director consumption](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) contracts own the full procedure.
-
-The Director keeps its listener for the fleet's lifetime, renewing an expired lease while the fleet exists; after an unexpected exit it reconciles the inbox and replaces the listener only once the old process has ended. UnACKed messages survive damaged output. [Director requirements](concepts/coding-agents.md#director-requirements) lists each backend's reception mechanism.
-
-On a backend whose [Director verdict](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) is `yes` but whose listener tool is unavailable, the Director states that reception limit and uses manual `message poll` or a finite receive within host permissions. A finite receive also retries ordinary-member previews:
-
-```bash
-cafleet message wait 2 --timeout 300 --json
-```
+On a backend whose [Director verdict](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) is `yes` but whose listener tool is unavailable, the Director states that reception limit and runs manual `message poll` within host permissions. Each member's runner retries that member's undelivered previews on its own, so no Director command is needed for them.
 
 ### Handle an observed permission request
 

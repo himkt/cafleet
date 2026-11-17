@@ -625,13 +625,6 @@ mod tests {
                 json: true
             })
         ));
-        assert!(matches!(
-            parse(&["message", "ack", "44", "--json"]),
-            Command::Message(message::MessageCommand::Ack {
-                message_id: 44,
-                json: true
-            })
-        ));
     }
 
     #[test]
@@ -795,15 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn receive_leases_validate_integer_bounds_and_optional_listening() {
-        assert!(matches!(
-            parse(&["message", "wait", "17"]),
-            Command::Message(message::MessageCommand::Wait {
-                member_id: 17,
-                timeout: 300,
-                ..
-            })
-        ));
+    fn listen_leases_validate_integer_bounds_and_optional_forwarding() {
         assert!(matches!(
             parse(&["message", "listen", "17"]),
             Command::Message(message::MessageCommand::Listen {
@@ -820,26 +805,20 @@ mod tests {
             }) => assert_eq!(codex_thread.as_deref(), Some("THREAD")),
             _ => panic!("expected a forwarding listener"),
         }
-        for command in ["wait", "listen"] {
-            for seconds in ["1", "1800"] {
-                let parsed = parse(&["message", command, "17", "--timeout", seconds]);
-                match parsed {
-                    Command::Message(message::MessageCommand::Wait { timeout, .. }) => {
-                        assert_eq!(timeout, seconds.parse::<u64>().unwrap());
-                    }
-                    Command::Message(message::MessageCommand::Listen { timeout, .. }) => {
-                        assert_eq!(timeout, Some(seconds.parse::<u64>().unwrap()));
-                    }
-                    _ => panic!("expected finite receive"),
+        for seconds in ["1", "1800"] {
+            match parse(&["message", "listen", "17", "--timeout", seconds]) {
+                Command::Message(message::MessageCommand::Listen { timeout, .. }) => {
+                    assert_eq!(timeout, Some(seconds.parse::<u64>().unwrap()));
                 }
+                _ => panic!("expected a bounded listener"),
             }
-            for seconds in ["0", "1801", "fraction", "1.5"] {
-                assert_error(
-                    &["message", command, "17", "--timeout", seconds],
-                    ErrorKind::ValueValidation,
-                    seconds,
-                );
-            }
+        }
+        for seconds in ["0", "1801", "fraction", "1.5"] {
+            assert_error(
+                &["message", "listen", "17", "--timeout", seconds],
+                ErrorKind::ValueValidation,
+                seconds,
+            );
         }
         assert_error(
             &["message", "listen", "17", "--json"],

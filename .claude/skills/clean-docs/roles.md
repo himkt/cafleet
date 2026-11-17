@@ -30,8 +30,8 @@ Communicate through the Director via the broker; user communication and all Git
 writes belong to the Director. Git use is read-only (`diff`, `status`,
 `ls-files`). Use literal IDs from your spawn prompt's `FLEET ID:`,
 `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:` lines. Poll with
-`cafleet message poll`, ACK each consumed message with `cafleet message ack`
-and act on Director instructions.
+`cafleet message poll`, which consumes every message it returns, record each
+one before other work and act on Director instructions.
 
 Send single-line `<verb> (<pointer>)` messages; substance lives in the run
 artifact or your role's `COMMENT(scanner)` / `COMMENT(reviewer)` markers.

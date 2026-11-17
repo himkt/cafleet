@@ -67,7 +67,7 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
     json!({"member_id":row.member.member_id,"name":row.member.name,
         "kind":row.member.kind.as_str(),"placement":placement(&row.member.placement),
-        "last_sent":row.last_sent,"last_recv":row.last_recv,"last_ack":row.last_ack,"idle":row.idle})
+        "last_sent":row.last_sent,"last_recv":row.last_recv,"last_consumed":row.last_consumed,"idle":row.idle})
 }
 
 pub(crate) fn message(row: &MessageRecord) -> Value {
@@ -519,6 +519,42 @@ mod tests {
             }
             assert_eq!(value["window_ordinal"], 1);
             assert_eq!(value["column_side"], "left");
+        }
+
+        #[test]
+        fn member_activity_names_the_latest_consumption_last_consumed_before_idle() {
+            let activity = crate::broker::MemberActivity {
+                member: crate::broker::MemberRecord {
+                    member_id: 4,
+                    fleet_id: 1,
+                    name: "worker".into(),
+                    description: String::new(),
+                    registered_at: String::new(),
+                    status: crate::broker::MemberStatus::Active,
+                    kind: crate::broker::MemberKind::Member,
+                    placement: placement(true),
+                    runtime: None,
+                },
+                last_sent: None,
+                last_recv: Some("2026-11-13T00:00:01+00:00".into()),
+                last_consumed: Some("2026-11-13T00:00:02+00:00".into()),
+                idle: Some(3),
+            };
+            let value = crate::output::json::member_activity(&activity);
+            assert_key_order(
+                &value,
+                &[
+                    "member_id",
+                    "name",
+                    "kind",
+                    "placement",
+                    "last_sent",
+                    "last_recv",
+                    "last_consumed",
+                    "idle",
+                ],
+            );
+            assert_eq!(value["last_consumed"], "2026-11-13T00:00:02+00:00");
         }
 
         #[test]

@@ -123,10 +123,6 @@ pub(crate) mod test_support {
     }
 
     impl TestClock {
-        pub(crate) fn new() -> Self {
-            Self::starting_at(Instant::now())
-        }
-
         pub(crate) fn starting_at(origin: Instant) -> Self {
             Self {
                 origin,

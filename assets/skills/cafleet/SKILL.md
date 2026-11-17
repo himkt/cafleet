@@ -53,7 +53,7 @@ Pass full database-assigned integers literally; literal IDs preserve host permis
 | Position/flag | Subject |
 |---|---|
 | Positional `MEMBER_ID` | Recipient on message reads; recorded target on member commands; fleet derives from its row |
-| Positional `MESSAGE_ID` | Delivery on `message ack/show`; recipient and fleet derive from it |
+| Positional `MESSAGE_ID` | Delivery on `message show`; recipient and fleet derive from it |
 | Positional `FLEET_ID` | Fleet on `fleet show/delete` and `member list` |
 | `--from-member-id`, `--to-member-id` | Sender/recipient on `message send`; fleet derives from sender |
 | `--from-member-id` on a Director-only command | The caller, which must be the subject fleet's root Director |
@@ -83,20 +83,16 @@ Supply one positional body or `--file PATH`, using file input for long/multiline
 
 Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a `message show ID --json` pointer; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/queue/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input, and its sends report `notification_sent: false` without a pane diagnostic or multiplexer requirement.
 
-Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; a later send or `message wait` retries pending ordinary-member notifications. Recipients record deferred actions and ACK consumption. Fan out one send per recipient and report each failed recipient; [send outcomes](reference/cli.md#message-send) owns exact diagnostics.
+Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; the recipient's runner retries pending ordinary-member notifications on its own. Recipients record deferred actions when their poll consumes the message. Fan out one send per recipient and report each failed recipient; [send outcomes](reference/cli.md#message-send) owns exact diagnostics.
 
-## Poll and ACK
+## Poll
 
 ```bash
 cafleet message poll <my-member-id> [--json]
 ```
 
-```bash
-cafleet message ack <message-id>
-```
-
-Poll returns unACKed `input_required` deliveries newest first, with complete bodies under `--json`; your role file sets when to poll. The printed delivery ID differs from any host task-list ID. ACK changes a delivery from `input_required` to `completed`, removing it from poll output. Track unfinished actions outside the inbox after consumption; `message show MESSAGE_ID --json` recovers the full record.
+Poll returns every `input_required` delivery newest first, with complete bodies under `--json`, and consumes them in the same command: each returned record is `completed`, and no later poll returns it. Record each returned message's sender, required action and artifact pointers in host-owned state before running any other command; your role file sets when to poll. The printed delivery ID differs from any host task-list ID. `message show MESSAGE_ID --json` reads a consumed message again.
 
 ## Command index
 
-Use [cli.md](reference/cli.md) for invocation forms, flags, outputs and errors; its [subcommand summary](reference/cli.md#subcommand-summary) is the command registry, and per-command sections follow beside the shared output-shape, pane-input and setup/doctor sections. Backend notes in [coding-agents.md](reference/coding-agents.md) own host continuation and evidence. Members retain Send/Poll/ACK/show authority; Director actions follow their role.
+Use [cli.md](reference/cli.md) for invocation forms, flags, outputs and errors; its [subcommand summary](reference/cli.md#subcommand-summary) is the command registry, and per-command sections follow beside the shared output-shape, pane-input and setup/doctor sections. Backend notes in [coding-agents.md](reference/coding-agents.md) own host continuation and evidence. Members retain Send/Poll/show authority; Director actions follow their role.

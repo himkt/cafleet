@@ -28,11 +28,11 @@ Send the bare status phrase `ready`, not the `ready (<pointer>)` verb, optionall
 cafleet message poll <my-member-id> --json
 ```
 
-Record actionable content and deferred work, then ACK consumed deliveries immediately. Poll after ready, before completion reports and on every wake. Handle queued assignments before becoming idle; end the turn when none remain.
+Poll after ready, on every wake (a preview arriving is a wake) and before completion reports. The poll consumes every message it returns, so record each message's actionable content and deferred work before any other work; `message show MESSAGE_ID --json` reads a consumed message again. Handle queued assignments before becoming idle; end the turn when none remain.
 
-Act on and ACK the ID in each `[cafleet msg ID from SENDER TIMESTAMP]` preview line.
+A `[cafleet msg ID from SENDER TIMESTAMP]` preview line carries the body inline or a `message show` pointer; still run `poll --json` on that wake, which consumes that message and any others in one command. Deduplicate repeated preview lines by message ID.
 
-If your send prints `Message N was persisted. …`, send exactly one follow-up to that recipient: `message N was not delivered to your pane; poll your inbox`. End the turn if that follow-up also prints a persisted diagnostic.
+A send that prints `Message N was persisted. …` needs no follow-up: the recipient's runner retries the preview.
 
 ## BASE
 
@@ -66,7 +66,7 @@ Leave a native permission prompt open in your pane for the Director or user to a
 
 ## Identity and authority
 
-Pass the literal IDs and any `--database-url` from your spawn lines explicitly ([IDs](../SKILL.md#ids)); CLI validation surfaces missing identity. Use Send, Poll, ACK and `message show` on your own inbox; every other `cafleet` command is Director-owned. The [guarded subset](../reference/cli.md#director-only-command-guard) — explicit pane input, permission answers, input reconciliation and run recovery — requires the Director's `--from-member-id` and refuses your own ID with a `Director-only command` error. The rest carry no guard refusal and remain the Director's; `permission inspect` still requires the Director's `--from-member-id`. Route a need for any Director-owned command, naming the command and its purpose, with the message in [Reconsider, then route](#reconsider-then-route).
+Pass the literal IDs and any `--database-url` from your spawn lines explicitly ([IDs](../SKILL.md#ids)); CLI validation surfaces missing identity. Use Send, Poll and `message show` on your own inbox; every other `cafleet` command is Director-owned. The [guarded subset](../reference/cli.md#director-only-command-guard) — explicit pane input, permission answers, input reconciliation and run recovery — requires the Director's `--from-member-id` and refuses your own ID with a `Director-only command` error. The rest carry no guard refusal and remain the Director's; `permission inspect` still requires the Director's `--from-member-id`. Route a need for any Director-owned command, naming the command and its purpose, with the message in [Reconsider, then route](#reconsider-then-route).
 
 ## Shutdown
 

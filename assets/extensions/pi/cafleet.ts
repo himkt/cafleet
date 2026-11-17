@@ -32,7 +32,7 @@ const ALLOW_ONCE = "Allow once"
 const DENY = "Deny"
 
 const MEMBER_ALLOWLIST = [
-  "cafleet message send *", "cafleet message poll *", "cafleet message ack *", "cafleet message show *",
+  "cafleet message send *", "cafleet message poll *", "cafleet message show *",
 ]
 
 type GoalStatus = "active" | "paused" | "complete" | "cleared"
@@ -401,7 +401,7 @@ export default function (pi: ExtensionAPI) {
     if (mode === "cafleet") {
       return {
         block: true,
-        reason: `the CAFleet member gate runs only cafleet message send, poll, ack and show; ${ROUTE_COMMAND}`,
+        reason: `the CAFleet member gate runs only cafleet message send, poll and show; ${ROUTE_COMMAND}`,
       }
     }
     if (!ctx.hasUI) {
@@ -443,8 +443,8 @@ export default function (pi: ExtensionAPI) {
     label: "CAFleet listen",
     description:
       "Start CAFleet Director reception for this session: each message beginning '[cafleet listen record]' " +
-      "carries a pending notice naming unACKed message IDs; run 'cafleet message poll <director_id> --json' " +
-      "and ACK each consumed message.",
+      "carries a pending notice naming unpolled message IDs; when an ID is above your consumed watermark, " +
+      "run 'cafleet message poll <director_id> --json', which consumes what it returns.",
     parameters: Type.Object(directorParameters),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const input = params as DirectorInput

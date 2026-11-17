@@ -3930,6 +3930,7 @@ pub(crate) mod native_capture {
                     capture: Some(port),
                     observation_hooks: None,
                     shutdown_unit,
+                    preview_sweep: false,
                 },
             );
             let exported = task.finish(&result);
@@ -7570,6 +7571,7 @@ pub(crate) mod native_capture {
                             capture: Some(port),
                             observation_hooks: Some(observer.clone()),
                             shutdown_unit: Duration::from_secs(1),
+                            preview_sweep: false,
                         },
                     );
                     stop.store(true, Ordering::Release);

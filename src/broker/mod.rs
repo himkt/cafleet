@@ -133,7 +133,7 @@ pub(crate) struct MemberActivity {
     pub(crate) member: MemberRecord,
     pub(crate) last_sent: Option<String>,
     pub(crate) last_recv: Option<String>,
-    pub(crate) last_ack: Option<String>,
+    pub(crate) last_consumed: Option<String>,
     pub(crate) idle: Option<i64>,
 }
 

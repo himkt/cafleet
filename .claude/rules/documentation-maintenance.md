@@ -132,7 +132,7 @@ sections, with a `§` reference as the link.
 Two rules keep the non-owning mentions honest:
 
 - **Echo rule.** A non-owning page may describe an owned enumeration in
-  qualitative magnitude terms ("a finite receive bounds its native task lifetime"); it states no exact values.
+  qualitative magnitude terms ("the ceiling re-notice arrives several minutes later"); it states no exact values.
 - **Term tie-break.** When copies have drifted on what to call something, the
   term in the Core terms table of the concepts overview governs. The owning
   table and every linking mention adopt it.
@@ -174,7 +174,7 @@ State shared operational facts in each home for its audience.
 
 ### Director verdict changes
 
-To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version. The goal requirement needs native goal lifecycle controls from official documentation or installed help, or a CAFleet extension verified live against the extension-goal minimum bar. The listen requirement records its highest established tier: the subscribe probe for a native or extension subscribe listen, or the stream probe for a built-in compromise listen together with tier-1 and tier-2 negative evidence, each source named with its version and check date. Record each requirement row's source, delivery, version and date in `SPEC.md` § Role eligibility and derive its `verdict` row, then update the backend's skill Role eligibility Eligible and Basis cells, and add a Director reception recipe or state the manual `poll` / finite `wait` reception limit.
+To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version. The goal requirement needs native goal lifecycle controls from official documentation or installed help, or a CAFleet extension verified live against the extension-goal minimum bar. The listen requirement records its highest established tier: the subscribe probe for a native or extension subscribe listen, or the stream probe for a built-in compromise listen together with tier-1 and tier-2 negative evidence, each source named with its version and check date. Record each requirement row's source, delivery, version and date in `SPEC.md` § Role eligibility and derive its `verdict` row, then update the backend's skill Role eligibility Eligible and Basis cells, and add a Director reception recipe or state the manual `poll` reception limit.
 
 ### Template
 

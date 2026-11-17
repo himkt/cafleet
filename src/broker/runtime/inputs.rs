@@ -39,6 +39,11 @@ impl InputOperation {
         delivery_projection(self).expect("validated input receipts project their delivery")
     }
 
+    pub(crate) fn is_retried_preview(&self) -> bool {
+        self.delivery()
+            .is_some_and(|delivery| is_retried_preview_result(self.kind, &delivery))
+    }
+
     pub(crate) fn has_stalled_blocker_provenance(&self) -> bool {
         if self.kind == InputKind::PermissionResponse || self.delivery_method.is_none() {
             return false;
@@ -360,6 +365,23 @@ pub(crate) fn requeue_zero_byte_immediate(
     })
 }
 
+pub(crate) fn is_retried_preview_result(kind: InputKind, delivery: &DeliveryProjection) -> bool {
+    kind == InputKind::Preview
+        && delivery.status == DeliveryStatus::NotSubmitted
+        && matches!(
+            delivery.reason.as_deref(),
+            Some(
+                "pane_input_busy"
+                    | "storage_unavailable"
+                    | "observer_unavailable"
+                    | "delivery_budget_exhausted"
+                    | "runner_stopped"
+                    | "runner_lost"
+                    | "message_consumed"
+            )
+        )
+}
+
 pub(crate) type UnpublishedDeliveryResult = (i64, &'static str, Option<StopCause>);
 
 pub(crate) fn unpublished_delivery_results(
@@ -382,6 +404,9 @@ pub(crate) fn unpublished_delivery_results(
         let delivery = input
             .delivery()
             .expect("a deferred input is an ordinary input");
+        if input.is_retried_preview() {
+            continue;
+        }
         let stage = match delivery.status {
             DeliveryStatus::Submitted => "submitted",
             DeliveryStatus::NotSubmitted => "zero_bytes",
@@ -2514,7 +2539,7 @@ mod tests {
 
     #[test]
     fn accepted_preview_settlement_and_message_stamp_are_atomic() {
-        for already_acked in [false, true] {
+        for already_consumed in [false, true] {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let message = crate::broker::send_message(
@@ -2539,8 +2564,9 @@ mod tests {
                 InputState::Accepted,
             )
             .unwrap();
-            if already_acked {
-                crate::broker::ack_message(&mut fixture.conn, message.message_id).unwrap();
+            if already_consumed {
+                let consumed = crate::broker::poll_messages(&fixture.conn, fixture.member).unwrap();
+                assert_eq!(consumed.len(), 1);
             }
             let settled =
                 storage::settle_preview(&mut fixture.conn, &owner, input.input_id).unwrap();
@@ -3145,6 +3171,177 @@ mod tests {
                 storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap(),
                 expected,
                 "only an uncertain result carries the receipt's cause"
+            );
+        }
+    }
+
+    mod retried_previews {
+        use crate::broker::runtime::inputs::tests::*;
+
+        const RETRIED_REASONS: [&str; 7] = [
+            "pane_input_busy",
+            "storage_unavailable",
+            "observer_unavailable",
+            "delivery_budget_exhausted",
+            "runner_stopped",
+            "runner_lost",
+            "message_consumed",
+        ];
+
+        fn not_submitted(reason: Option<&str>) -> DeliveryProjection {
+            DeliveryProjection {
+                status: DeliveryStatus::NotSubmitted,
+                method: None,
+                reason: reason.map(str::to_owned),
+            }
+        }
+
+        fn delivery(status: DeliveryStatus, reason: &str) -> DeliveryProjection {
+            DeliveryProjection {
+                status,
+                method: Some(DeliveryMethod::Profile),
+                reason: Some(reason.to_owned()),
+            }
+        }
+
+        #[test]
+        fn the_retried_preview_set_is_exactly_the_not_submitted_preview_reasons_the_sweep_retries()
+        {
+            for reason in RETRIED_REASONS {
+                assert!(
+                    storage::is_retried_preview_result(
+                        InputKind::Preview,
+                        &not_submitted(Some(reason))
+                    ),
+                    "{reason}"
+                );
+            }
+            for reason in [Some("target_inactive"), Some("target_changed"), None] {
+                assert!(
+                    !storage::is_retried_preview_result(InputKind::Preview, &not_submitted(reason)),
+                    "{reason:?}"
+                );
+            }
+            for status in [
+                DeliveryStatus::LeftInComposer,
+                DeliveryStatus::Uncertain,
+                DeliveryStatus::Submitted,
+                DeliveryStatus::Queued,
+            ] {
+                for reason in RETRIED_REASONS {
+                    assert!(
+                        !storage::is_retried_preview_result(
+                            InputKind::Preview,
+                            &delivery(status, reason)
+                        ),
+                        "{status:?} {reason}"
+                    );
+                }
+            }
+            for kind in [
+                InputKind::Prompt,
+                InputKind::Exec,
+                InputKind::PermissionResponse,
+            ] {
+                for reason in RETRIED_REASONS
+                    .into_iter()
+                    .chain(["target_inactive", "target_changed"])
+                {
+                    assert!(
+                        !storage::is_retried_preview_result(kind, &not_submitted(Some(reason))),
+                        "{kind:?} {reason}"
+                    );
+                }
+            }
+        }
+
+        fn settled_preview(
+            fixture: &mut Fixture,
+            owner: &RunOwner,
+            reason: &str,
+        ) -> InputOperation {
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.director,
+                fixture.member,
+                reason,
+            )
+            .unwrap();
+            let input = fixture.input(
+                owner,
+                &storage::preview_operation_key(owner.run_id, message.message_id, 1).unwrap(),
+                InputKind::Preview,
+                Some(message.message_id),
+            );
+            settled_zero_byte(fixture, owner, input, reason)
+        }
+
+        fn settled_zero_byte(
+            fixture: &mut Fixture,
+            owner: &RunOwner,
+            input: InputOperation,
+            reason: &str,
+        ) -> InputOperation {
+            storage::requeue_zero_byte_immediate(
+                &mut fixture.conn,
+                owner,
+                input.input_id,
+                "interaction_open",
+            )
+            .unwrap();
+            storage::settle_zero_byte_deferred(
+                &mut fixture.conn,
+                owner,
+                input.input_id,
+                InputState::Ready,
+                reason,
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn unpublished_results_omit_retried_previews_and_keep_every_other_settled_receipt() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for reason in RETRIED_REASONS {
+                let settled = settled_preview(&mut fixture, &owner, reason);
+                assert_eq!(
+                    settled.delivery().unwrap(),
+                    not_submitted(Some(reason)),
+                    "{reason}"
+                );
+                assert_eq!(
+                    storage::get_input(&fixture.conn, settled.input_id).unwrap(),
+                    settled,
+                    "input show still reports the {reason} receipt"
+                );
+            }
+            let inactive = settled_preview(&mut fixture, &owner, "target_inactive");
+            let changed = settled_preview(&mut fixture, &owner, "target_changed");
+            let prompt = fixture.input(&owner, "prompt:busy", InputKind::Prompt, None);
+            let prompt = settled_zero_byte(&mut fixture, &owner, prompt, "pane_input_busy");
+            let exec = fixture.input(&owner, "exec:consumed", InputKind::Exec, None);
+            let exec = settled_zero_byte(&mut fixture, &owner, exec, "runner_stopped");
+            let left = fixture.left_input(
+                &owner,
+                "prompt:left",
+                InputKind::Prompt,
+                StopCause::ManualInput,
+                LeftStage::LiteralComplete,
+            );
+            assert_eq!(
+                storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap(),
+                [
+                    (inactive.input_id, "zero_bytes", None),
+                    (changed.input_id, "zero_bytes", None),
+                    (prompt.input_id, "zero_bytes", None),
+                    (exec.input_id, "zero_bytes", None),
+                    (
+                        left.input_id,
+                        "literal_complete",
+                        Some(StopCause::ManualInput)
+                    ),
+                ]
             );
         }
     }
