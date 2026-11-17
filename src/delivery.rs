@@ -1813,10 +1813,10 @@ mod tests {
                     },
                 ]
             );
-            broker::ack_message(&mut conn, first.message_id).unwrap();
-            let after_ack = check(&mut conn);
+            assert_eq!(broker::poll_messages(&conn, concrete).unwrap().len(), 1);
+            let after_consumption = check(&mut conn);
             assert_eq!(
-                after_ack.pending_notifications,
+                after_consumption.pending_notifications,
                 [PendingPreview {
                     member_id: pending,
                     message_id: second.message_id
@@ -1836,6 +1836,16 @@ mod tests {
 
     fn settings_for(conn: &Connection) -> Settings {
         Settings::for_database(std::path::Path::new(conn.path().unwrap()))
+    }
+
+    #[test]
+    fn the_not_notified_diagnostic_names_the_recipients_runner_as_the_retry_owner() {
+        let error = notification_error(4, 9, "pane input is busy");
+        assert_eq!((error.member_id, error.message_id), (4, 9));
+        assert_eq!(
+            error.error,
+            "message 9 was not notified to member 4: pane input is busy; member 4's runner retries it."
+        );
     }
 
     fn wrapped_line(message: &crate::broker::MessageRecord, body: &str) -> String {
@@ -2917,12 +2927,11 @@ mod tests {
 
         /// Consumes the runtime-event notifications the detected interaction sends the
         /// Director, so only the preview's own delivery is observed.
-        fn acknowledge_runtime_events(fixture: &mut ServiceFixture, run: &RunRecord) {
-            for pending in
+        fn consume_runtime_events(fixture: &mut ServiceFixture, run: &RunRecord) {
+            for consumed in
                 crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id).unwrap()
             {
-                assert_eq!(pending.from_member_id, run.member_id);
-                crate::broker::ack_message(&mut fixture.fixture.conn, pending.message_id).unwrap();
+                assert_eq!(consumed.from_member_id, run.member_id);
             }
         }
 
@@ -2957,7 +2966,7 @@ mod tests {
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
-                acknowledge_runtime_events(fixture, &run);
+                consume_runtime_events(fixture, &run);
                 let mut sent = Vec::new();
                 for body in ["first deferred preview", "second deferred preview"] {
                     let message = crate::broker::send_message(

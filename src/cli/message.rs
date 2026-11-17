@@ -1442,6 +1442,19 @@ mod tests {
     }
 
     #[test]
+    fn message_ack_and_message_wait_are_unrecognized_subcommands() {
+        for args in [["message", "ack", "44"], ["message", "wait", "17"]] {
+            let error = crate::cli::test_support::usage_error(&args);
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::InvalidSubcommand,
+                "{args:?}: {error}"
+            );
+            assert!(error.to_string().contains(args[1]), "{args:?}: {error}");
+        }
+    }
+
+    #[test]
     fn a_held_notice_blocks_a_new_arrival_and_allows_one_second_idle_sleeps() {
         let clock = test_clock();
         let mut io = ScriptedInbox {
@@ -1513,32 +1526,6 @@ mod tests {
         }
 
         #[test]
-        fn acking_every_held_id_releases_the_hold_and_the_next_notice_names_the_full_pending_set() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::new(&clock);
-            listen_over(&clock, &mut output, 6, |at| match at {
-                0..2 => vec![10],
-                2..4 => vec![10, 11, 12],
-                _ => vec![11, 12, 13],
-            });
-            assert_eq!(notices(&output), [vec![10], vec![11, 12, 13]]);
-            assert_eq!(notice_times(&output), [0, 4]);
-        }
-
-        #[test]
-        fn a_partial_ack_keeps_the_hold_until_the_last_held_id_is_acked() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::new(&clock);
-            listen_over(&clock, &mut output, 6, |at| match at {
-                0..2 => vec![10, 11],
-                2..4 => vec![11, 12],
-                _ => vec![12],
-            });
-            assert_eq!(notices(&output), [vec![10, 11], vec![12]]);
-            assert_eq!(notice_times(&output), [0, 4]);
-        }
-
-        #[test]
         fn a_released_hold_with_nothing_pending_emits_no_notice_until_a_message_arrives() {
             let clock = test_clock();
             let mut output = RecordingOutput::new(&clock);
@@ -1577,16 +1564,6 @@ mod tests {
         }
 
         #[test]
-        fn the_hold_ceiling_never_re_notices_without_fresh_ids() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::new(&clock);
-            listen_over(&clock, &mut output, 700, |at| {
-                if at < 5 { vec![10, 11] } else { vec![11] }
-            });
-            assert_eq!(notices(&output), [vec![10, 11]]);
-        }
-
-        #[test]
         fn the_next_hold_ceiling_is_measured_from_the_re_notice() {
             let clock = test_clock();
             let mut output = RecordingOutput::new(&clock);
@@ -1615,26 +1592,6 @@ mod tests {
         }
 
         #[test]
-        fn a_refused_notice_is_rebuilt_from_the_current_pending_set_and_only_delivery_commits_the_hold()
-         {
-            let clock = test_clock();
-            let mut output = RecordingOutput::refusing_pending(&clock, &[true, true]);
-            listen_over(&clock, &mut output, 6, |at| match at {
-                0 => vec![10],
-                1 => vec![10, 11],
-                2 | 3 => vec![11, 12],
-                _ => vec![11, 12, 13],
-            });
-            assert_eq!(
-                refusals(&output),
-                [(0, vec![10]), (1, vec![10, 11])],
-                "each retry follows a one-second idle sleep and a fresh snapshot"
-            );
-            assert_eq!(notices(&output), [vec![11, 12]]);
-            assert_eq!(notice_times(&output), [2]);
-        }
-
-        #[test]
         fn a_refused_re_notice_keeps_the_held_instant_so_the_retry_follows_one_idle_sleep() {
             let clock = test_clock();
             let mut output = RecordingOutput::refusing_pending(&clock, &[false, true]);
@@ -1658,19 +1615,6 @@ mod tests {
         }
 
         #[test]
-        fn a_refused_re_notice_is_abandoned_once_its_fresh_ids_are_acked() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::refusing_pending(&clock, &[false, true, true]);
-            listen_over(&clock, &mut output, 400, |at| match at {
-                0..5 => vec![10],
-                5..=300 => vec![10, 11],
-                _ => vec![10],
-            });
-            assert_eq!(refusals(&output), [(300, vec![10, 11])]);
-            assert_eq!(notices(&output), [vec![10]]);
-        }
-
-        #[test]
         #[should_panic(expected = "only a pending notice may be refused")]
         fn a_refused_ready_record_panics() {
             let clock = test_clock();
@@ -1686,6 +1630,257 @@ mod tests {
             let mut output = RecordingOutput::new(&clock);
             output.refused_event = Some("closed");
             listen_over(&clock, &mut output, 2, |_| Vec::new());
+        }
+
+        mod consuming_polls {
+            use crate::broker::messaging::listen_snapshot;
+            use crate::cli::message::tests::*;
+
+            enum Act {
+                Send(usize),
+                Poll,
+            }
+
+            /// A real broker inbox for the Director whose scripted sends and consuming polls
+            /// run, in order, before the first snapshot taken at or after their second.
+            struct ScriptedBroker<'a> {
+                _dir: tempfile::TempDir,
+                clock: &'a TestClock,
+                conn: Connection,
+                fleet: i64,
+                director: i64,
+                worker: i64,
+                script: Vec<(u64, Act)>,
+                applied: usize,
+                snapshots: usize,
+                sent: Vec<i64>,
+                polls: Vec<Vec<i64>>,
+            }
+
+            impl ListenIo for ScriptedBroker<'_> {
+                fn snapshot(&mut self, deadline: Deadline) -> Result<InboxSnapshot, CafleetError> {
+                    self.snapshots += 1;
+                    assert!(
+                        self.snapshots < 2_000,
+                        "a held notice must allow idle sleeps"
+                    );
+                    let now = self.clock.elapsed.get().as_secs();
+                    while let Some((at, act)) = self.script.get(self.applied)
+                        && *at <= now
+                    {
+                        match act {
+                            Act::Send(count) => {
+                                for _ in 0..*count {
+                                    let id = broker::send_message(
+                                        &mut self.conn,
+                                        self.worker,
+                                        self.director,
+                                        "scripted",
+                                    )
+                                    .unwrap()
+                                    .message_id;
+                                    self.sent.push(id);
+                                }
+                            }
+                            Act::Poll => {
+                                let consumed = broker::poll_messages(&self.conn, self.director)
+                                    .unwrap()
+                                    .into_iter()
+                                    .map(|message| message.message_id)
+                                    .collect();
+                                self.polls.push(consumed);
+                            }
+                        }
+                        self.applied += 1;
+                    }
+                    listen_snapshot(&mut self.conn, self.director, Some(self.fleet), deadline)
+                }
+            }
+
+            fn listen_broker<'a>(
+                clock: &'a TestClock,
+                output: &mut RecordingOutput<'a>,
+                lease_secs: u64,
+                script: Vec<(u64, Act)>,
+            ) -> ScriptedBroker<'a> {
+                let (dir, conn, fleet, director, worker) = broker_fixture();
+                let mut io = ScriptedBroker {
+                    _dir: dir,
+                    clock,
+                    conn,
+                    fleet,
+                    director,
+                    worker,
+                    script,
+                    applied: 0,
+                    snapshots: 0,
+                    sent: Vec::new(),
+                    polls: Vec::new(),
+                };
+                listen(
+                    clock,
+                    &mut io,
+                    output,
+                    director,
+                    Some(Duration::from_secs(lease_secs)),
+                )
+                .unwrap();
+                assert_eq!(
+                    output.records.last().unwrap()["reason"],
+                    "timeout",
+                    "{:?}",
+                    output.records
+                );
+                io
+            }
+
+            #[test]
+            fn a_consuming_poll_releases_the_hold_and_the_next_notice_names_only_post_poll_ids() {
+                let clock = test_clock();
+                let mut output = RecordingOutput::new(&clock);
+                let broker = listen_broker(
+                    &clock,
+                    &mut output,
+                    6,
+                    vec![
+                        (0, Act::Send(1)),
+                        (2, Act::Send(1)),
+                        (3, Act::Poll),
+                        (4, Act::Send(1)),
+                    ],
+                );
+                let sent = &broker.sent;
+                assert_eq!(broker.polls, [vec![sent[1], sent[0]]]);
+                assert_eq!(notices(&output), [vec![sent[0]], vec![sent[2]]]);
+                assert_eq!(notice_times(&output), [0, 4]);
+                assert!(
+                    notices(&output).iter().flatten().all(|id| *id != sent[1]),
+                    "an ID polled while held is never notified"
+                );
+            }
+
+            #[test]
+            fn mid_turn_polls_never_re_list_an_id_and_bound_the_notice_count() {
+                let clock = test_clock();
+                let mut output = RecordingOutput::new(&clock);
+                let mut script = Vec::new();
+                for second in 0..120 {
+                    script.push((second, Act::Send(1 + (second as usize % 3))));
+                    if second % 7 == 3 || second % 11 == 5 {
+                        script.push((second, Act::Poll));
+                    }
+                }
+                let broker = listen_broker(&clock, &mut output, 120, script);
+                let notified = notices(&output);
+                let mut seen = std::collections::BTreeSet::new();
+                for id in notified.iter().flatten() {
+                    assert!(
+                        seen.insert(*id),
+                        "message {id} appears in two notices: {notified:?}"
+                    );
+                    assert!(broker.sent.contains(id));
+                }
+                let consuming_polls = broker.polls.iter().filter(|ids| !ids.is_empty()).count();
+                assert!(consuming_polls >= 10);
+                assert!(
+                    notified.len() <= 1 + consuming_polls,
+                    "{} notices for {consuming_polls} consuming polls",
+                    notified.len()
+                );
+                assert!(notified.len() >= 2, "every release admits a later notice");
+            }
+
+            #[test]
+            fn an_unpolled_hold_with_a_fresh_arrival_re_notices_once_at_the_ceiling_naming_held_and_fresh_ids()
+             {
+                let clock = test_clock();
+                let mut output = RecordingOutput::new(&clock);
+                let broker = listen_broker(
+                    &clock,
+                    &mut output,
+                    700,
+                    vec![(0, Act::Send(1)), (10, Act::Send(1))],
+                );
+                let sent = &broker.sent;
+                assert_eq!(notices(&output), [vec![sent[0]], vec![sent[0], sent[1]]]);
+                assert_eq!(
+                    notice_times(&output),
+                    [0, HOLD_CEILING.as_secs()],
+                    "the re-notice fires exactly at the ceiling, never before it"
+                );
+            }
+
+            #[test]
+            fn an_unpolled_hold_without_a_fresh_arrival_never_re_notices() {
+                let clock = test_clock();
+                let mut output = RecordingOutput::new(&clock);
+                let broker = listen_broker(&clock, &mut output, 700, vec![(0, Act::Send(2))]);
+                assert_eq!(notices(&output), [broker.sent.clone()]);
+            }
+
+            #[test]
+            fn a_poll_before_the_ceiling_cancels_the_re_notice() {
+                let clock = test_clock();
+                let mut output = RecordingOutput::new(&clock);
+                let broker = listen_broker(
+                    &clock,
+                    &mut output,
+                    400,
+                    vec![
+                        (0, Act::Send(1)),
+                        (10, Act::Send(1)),
+                        (200, Act::Poll),
+                        (350, Act::Send(1)),
+                    ],
+                );
+                let sent = &broker.sent;
+                assert_eq!(broker.polls, [vec![sent[1], sent[0]]]);
+                assert_eq!(notices(&output), [vec![sent[0]], vec![sent[2]]]);
+                assert_eq!(notice_times(&output), [0, 350]);
+            }
+
+            #[test]
+            fn a_refused_notice_is_rebuilt_from_the_current_pending_set_and_only_delivery_commits_the_hold()
+             {
+                let clock = test_clock();
+                let mut output = RecordingOutput::refusing_pending(&clock, &[true, true]);
+                let broker = listen_broker(
+                    &clock,
+                    &mut output,
+                    6,
+                    vec![
+                        (0, Act::Send(1)),
+                        (1, Act::Send(1)),
+                        (2, Act::Poll),
+                        (2, Act::Send(2)),
+                        (4, Act::Send(1)),
+                    ],
+                );
+                let sent = &broker.sent;
+                assert_eq!(
+                    refusals(&output),
+                    [(0, vec![sent[0]]), (1, vec![sent[0], sent[1]])],
+                    "each retry follows a one-second idle sleep and a fresh snapshot"
+                );
+                assert_eq!(notices(&output), [vec![sent[2], sent[3]]]);
+                assert_eq!(notice_times(&output), [2]);
+            }
+
+            #[test]
+            fn a_refused_re_notice_is_abandoned_once_a_poll_consumes_its_ids() {
+                let clock = test_clock();
+                let mut output = RecordingOutput::refusing_pending(&clock, &[false, true, true]);
+                let broker = listen_broker(
+                    &clock,
+                    &mut output,
+                    400,
+                    vec![(0, Act::Send(1)), (5, Act::Send(1)), (301, Act::Poll)],
+                );
+                let sent = &broker.sent;
+                assert_eq!(refusals(&output), [(300, vec![sent[0], sent[1]])]);
+                assert_eq!(notices(&output), [vec![sent[0]]]);
+                assert_eq!(broker.polls, [vec![sent[1], sent[0]]]);
+            }
         }
 
         #[test]
@@ -1905,25 +2100,25 @@ mod tests {
     }
 
     #[test]
-    fn an_ack_output_race_preserves_the_snapshot_notice() {
+    fn a_poll_output_race_preserves_the_snapshot_notice() {
         let clock = test_clock();
-        let acknowledged = Cell::new(false);
+        let consumed = Cell::new(false);
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
             script: |_, _| {
-                Ok(open(if acknowledged.get() {
-                    messages(&[11])
+                Ok(open(if consumed.get() {
+                    Vec::new()
                 } else {
                     messages(&[10, 11])
                 }))
             },
         };
-        struct AckDuringReady<'a> {
+        struct PollDuringReady<'a> {
             output: RecordingOutput<'a>,
-            acknowledged: &'a Cell<bool>,
+            consumed: &'a Cell<bool>,
         }
-        impl ListenOutput for AckDuringReady<'_> {
+        impl ListenOutput for PollDuringReady<'_> {
             fn emit(
                 &mut self,
                 record: &Value,
@@ -1931,17 +2126,17 @@ mod tests {
             ) -> Result<Delivery, CafleetError> {
                 let delivery = self.output.emit(record, deadline)?;
                 if record["event"] == "ready" {
-                    self.acknowledged.set(true);
+                    self.consumed.set(true);
                 }
                 if record["event"] == "pending" {
-                    assert!(self.acknowledged.get());
+                    assert!(self.consumed.get());
                 }
                 Ok(delivery)
             }
         }
-        let mut output = AckDuringReady {
+        let mut output = PollDuringReady {
             output: RecordingOutput::new(&clock),
-            acknowledged: &acknowledged,
+            consumed: &consumed,
         };
         listen(
             &clock,
@@ -2101,8 +2296,9 @@ mod tests {
             assert_eq!(fcntl(&retained, FcntlArg::F_GETFL).unwrap(), original);
             assert!(conn.is_autocommit());
             assert_eq!(
-                broker::poll_messages(&conn, director).unwrap(),
-                std::slice::from_ref(&pending)
+                broker::get_message(&conn, pending.message_id).unwrap(),
+                pending,
+                "the listener consumes nothing"
             );
             if let Some(read_end) = read_end {
                 let flags = OFlag::from_bits_retain(fcntl(&read_end, FcntlArg::F_GETFL).unwrap());
@@ -2176,7 +2372,11 @@ mod tests {
             crate::output::json::listen_pending(director, &[pending.message_id])
         );
         assert_eq!(records[2]["reason"], "timeout");
-        assert_eq!(broker::poll_messages(&conn, director).unwrap(), [pending]);
+        assert_eq!(
+            broker::get_message(&conn, pending.message_id).unwrap(),
+            pending,
+            "the listener consumes nothing"
+        );
         assert!(conn.is_autocommit());
     }
 
@@ -2629,9 +2829,17 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 [queued(&pending_text(director, &backlog))],
                 "arrivals while the notice is held are not forwarded"
             );
-            for id in backlog {
-                broker::ack_message(&mut broker.conn, id).unwrap();
-            }
+            let consumed = broker::poll_messages(&broker.conn, director)
+                .unwrap()
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                consumed,
+                backlog.into_iter().chain([held, later]).collect(),
+                "one poll consumes the held and later arrivals together"
+            );
+            let after = ["sixth", "seventh"].map(|body| broker.send(worker, director, body));
             assert_eq!(
                 forwarder.wait_exit(Duration::from_secs(15)),
                 0,
@@ -2642,10 +2850,10 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 forwarder.forwarded(),
                 [
                     queued(&pending_text(director, &backlog)),
-                    queued(&pending_text(director, &[held, later])),
+                    queued(&pending_text(director, &after)),
                     queued(&closed_text(director, "timeout")),
                 ],
-                "ready is never forwarded"
+                "ready is never forwarded, and polled IDs are never forwarded again"
             );
             assert_eq!(
                 forwarder.stdout_records(),
@@ -2819,10 +3027,10 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         }
 
         #[test]
-        fn a_refused_notice_whose_ids_are_acked_during_refusals_is_abandoned() {
+        fn a_refused_notice_whose_ids_are_polled_during_refusals_is_abandoned() {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "acked while refused");
+            let message = broker.send(worker, director, "polled while refused");
             let forwarder = start(
                 &broker,
                 &listen_args(director, Some(5)),
@@ -2830,7 +3038,14 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 Launch::Session,
             );
             forwarder.wait_forwarded(2);
-            broker::ack_message(&mut broker.conn, message).unwrap();
+            assert_eq!(
+                broker::poll_messages(&broker.conn, director)
+                    .unwrap()
+                    .iter()
+                    .map(|consumed| consumed.message_id)
+                    .collect::<Vec<_>>(),
+                [message]
+            );
             assert_eq!(
                 forwarder.wait_exit(Duration::from_secs(15)),
                 0,

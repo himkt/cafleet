@@ -522,6 +522,42 @@ mod tests {
         }
 
         #[test]
+        fn member_activity_names_the_latest_consumption_last_consumed_before_idle() {
+            let activity = crate::broker::MemberActivity {
+                member: crate::broker::MemberRecord {
+                    member_id: 4,
+                    fleet_id: 1,
+                    name: "worker".into(),
+                    description: String::new(),
+                    registered_at: String::new(),
+                    status: crate::broker::MemberStatus::Active,
+                    kind: crate::broker::MemberKind::Member,
+                    placement: placement(true),
+                    runtime: None,
+                },
+                last_sent: None,
+                last_recv: Some("2026-11-13T00:00:01+00:00".into()),
+                last_consumed: Some("2026-11-13T00:00:02+00:00".into()),
+                idle: Some(3),
+            };
+            let value = crate::output::json::member_activity(&activity);
+            assert_key_order(
+                &value,
+                &[
+                    "member_id",
+                    "name",
+                    "kind",
+                    "placement",
+                    "last_sent",
+                    "last_recv",
+                    "last_consumed",
+                    "idle",
+                ],
+            );
+            assert_eq!(value["last_consumed"], "2026-11-13T00:00:02+00:00");
+        }
+
+        #[test]
         fn column_sides_render_as_their_stored_values() {
             for (side, wire) in [(ColumnSide::Left, "left"), (ColumnSide::Right, "right")] {
                 let value = crate::output::json::placement(&Placement {

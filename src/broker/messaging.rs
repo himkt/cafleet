@@ -394,8 +394,29 @@ mod tests {
     use crate::db::test_support::migrated_conn;
     use tempfile::TempDir;
 
+    fn status_state(conn: &rusqlite::Connection, message_id: i64) -> String {
+        conn.query_row(
+            "SELECT status_state FROM messages WHERE message_id=?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn second_connection(conn: &rusqlite::Connection) -> rusqlite::Connection {
+        crate::db::connect(&format!("sqlite:///{}", conn.path().unwrap())).unwrap()
+    }
+
+    fn consumed(record: &MessageRecord, status_timestamp: &str) -> MessageRecord {
+        MessageRecord {
+            status: crate::broker::MessageStatus::Completed,
+            status_timestamp: status_timestamp.to_owned(),
+            ..record.clone()
+        }
+    }
+
     #[test]
-    fn send_poll_show_and_strict_ack_preserve_the_complete_body() {
+    fn send_poll_and_show_preserve_the_complete_body_and_poll_consumes_what_it_returns() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "messages");
@@ -411,20 +432,234 @@ mod tests {
         assert_eq!(first.status, crate::broker::MessageStatus::InputRequired);
         assert_eq!(first.created_at, first.status_timestamp);
         assert_eq!(get_message(&conn, first.message_id).unwrap(), first);
+
+        let polled = poll_messages(&conn, worker).unwrap();
+        assert_eq!(polled.len(), 2);
+        let consumed_at = polled[0].status_timestamp.clone();
+        assert!(consumed_at >= second.status_timestamp);
         assert_eq!(
-            poll_messages(&conn, worker).unwrap(),
-            [second.clone(), first.clone()]
+            polled,
+            [
+                consumed(&second, &consumed_at),
+                consumed(&first, &consumed_at)
+            ],
+            "poll returns the post-consumption records newest first with one consumption time"
         );
+        assert_eq!(polled[1].text, text);
         assert_eq!(notified_at(&conn, first.message_id), None);
-        let ack = ack_message(&mut conn, first.message_id).unwrap();
-        assert_eq!(ack.status, crate::broker::MessageStatus::Completed);
-        assert!(ack.status_timestamp >= first.status_timestamp);
-        assert_eq!(ack.text, text);
-        assert!(ack_message(&mut conn, first.message_id).is_err());
-        assert_eq!(poll_messages(&conn, worker).unwrap(), [second]);
+        for record in &polled {
+            assert_eq!(get_message(&conn, record.message_id).unwrap(), *record);
+        }
+        assert!(poll_messages(&conn, worker).unwrap().is_empty());
+
+        let later = send_message(&mut conn, director, worker, "after the poll").unwrap();
+        let next = poll_messages(&conn, worker).unwrap();
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].message_id, later.message_id);
+        assert_eq!(next[0].status, crate::broker::MessageStatus::Completed);
         assert!(get_message(&conn, 999).is_err());
-        assert!(ack_message(&mut conn, 999).is_err());
-        assert!(poll_messages(&conn, 999).is_err());
+    }
+
+    #[test]
+    fn polling_an_unknown_or_inactive_member_fails_and_consumes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "unknown");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = send_message(&mut conn, director, worker, "held").unwrap();
+        let error = poll_messages(&conn, 999).unwrap_err();
+        assert_eq!(error.message(), "Member 999 not found");
+        assert_eq!(status_state(&conn, message.message_id), "input_required");
+        conn.execute(
+            "UPDATE members SET status='deregistered' WHERE member_id=?1",
+            [worker],
+        )
+        .unwrap();
+        let error = poll_messages(&conn, worker).unwrap_err();
+        assert_eq!(error.message(), format!("Member {worker} not found"));
+        assert_eq!(status_state(&conn, message.message_id), "input_required");
+        assert!(conn.is_autocommit());
+    }
+
+    #[test]
+    fn a_poll_that_fails_before_commit_rolls_back_and_consumes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "rollback");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let first = send_message(&mut conn, director, worker, "first").unwrap();
+        let second = send_message(&mut conn, director, worker, "second").unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_second_consumption BEFORE UPDATE OF status_state ON messages
+             WHEN NEW.message_id=2
+             BEGIN SELECT RAISE(ABORT, 'injected consumption failure'); END;",
+        )
+        .unwrap();
+        assert_eq!(second.message_id, 2);
+        let error = poll_messages(&conn, worker).unwrap_err();
+        assert!(
+            error.message().contains("injected consumption failure"),
+            "{error}"
+        );
+        assert!(
+            conn.is_autocommit(),
+            "the failed poll releases its transaction"
+        );
+        for message in [&first, &second] {
+            assert_eq!(status_state(&conn, message.message_id), "input_required");
+        }
+        conn.execute_batch("DROP TRIGGER reject_second_consumption")
+            .unwrap();
+        assert_eq!(poll_messages(&conn, worker).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_poll_holds_the_write_lock_from_selection_through_consumption() {
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "poll-race");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = send_message(&mut conn, director, worker, "only once").unwrap();
+        let other = second_connection(&conn);
+        other.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let rival = Arc::new(Mutex::new(None));
+        let observed = Arc::clone(&rival);
+        let mut intercepted = false;
+        conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if !intercepted
+                && matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "messages",
+                        ..
+                    }
+                )
+            {
+                intercepted = true;
+                *observed.lock().unwrap() = Some(poll_messages(&other, worker));
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+        let polled = poll_messages(&conn, worker).unwrap();
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        let rival = rival.lock().unwrap().take().expect("the rival poll ran");
+        assert!(
+            rival.is_err(),
+            "a rival poll during the selection cannot take the write lock: {rival:?}"
+        );
+        assert_eq!(
+            polled.iter().map(|m| m.message_id).collect::<Vec<_>>(),
+            [message.message_id]
+        );
+        assert_eq!(status_state(&conn, message.message_id), "completed");
+    }
+
+    #[test]
+    fn concurrent_polls_on_separate_connections_return_disjoint_sets_covering_the_pending_set() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "concurrent");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        for round in 0..20 {
+            let mut expected = std::collections::BTreeSet::new();
+            for index in 0..10 {
+                expected.insert(
+                    send_message(&mut conn, director, worker, &format!("{round}-{index}"))
+                        .unwrap()
+                        .message_id,
+                );
+            }
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let pollers = (0..2)
+                .map(|_| {
+                    let reader = second_connection(&conn);
+                    let barrier = std::sync::Arc::clone(&barrier);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        poll_messages(&reader, worker)
+                            .unwrap()
+                            .into_iter()
+                            .map(|message| {
+                                assert_eq!(message.status, crate::broker::MessageStatus::Completed);
+                                message.message_id
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>();
+            let results = pollers
+                .into_iter()
+                .map(|poller| poller.join().unwrap())
+                .collect::<Vec<_>>();
+            let mut union = std::collections::BTreeSet::new();
+            for id in results.iter().flatten() {
+                assert!(union.insert(*id), "message {id} returned by both polls");
+            }
+            assert_eq!(union, expected, "round {round}");
+            assert!(poll_messages(&conn, worker).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn message_ids_from_interleaved_inserts_increase_in_commit_order() {
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicU64;
+
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "commit-order");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let commits = Arc::new(AtomicU64::new(0));
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+        let senders = (0..4)
+            .map(|sender| {
+                let mut writer = second_connection(&conn);
+                let commits = Arc::clone(&commits);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let committed = Arc::new(Mutex::new(None));
+                    let hook = Arc::clone(&committed);
+                    writer.commit_hook(Some(move || {
+                        *hook.lock().unwrap() = Some(commits.fetch_add(1, Ordering::SeqCst));
+                        false
+                    }));
+                    barrier.wait();
+                    (0..25)
+                        .map(|index| {
+                            let id = send_message(
+                                &mut writer,
+                                director,
+                                worker,
+                                &format!("{sender}-{index}"),
+                            )
+                            .unwrap()
+                            .message_id;
+                            let sequence = committed.lock().unwrap().take().unwrap();
+                            (sequence, id)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut observed = senders
+            .into_iter()
+            .flat_map(|sender| sender.join().unwrap())
+            .collect::<Vec<_>>();
+        observed.sort();
+        assert_eq!(observed.len(), 100);
+        assert!(
+            observed.windows(2).all(|pair| pair[0].1 < pair[1].1),
+            "IDs ordered by commit sequence must strictly increase: {observed:?}"
+        );
     }
 
     #[test]
@@ -485,14 +720,9 @@ mod tests {
             [message.message_id],
         )
         .unwrap();
-        for result in [
-            get_message(&conn, message.message_id),
-            ack_message(&mut conn, message.message_id),
-        ] {
-            assert!(
-                matches!(result, Err(CafleetError::InvalidStoredValue { field, value }) if field == "messages.status_state" && value == "corrupt")
-            );
-        }
+        assert!(
+            matches!(get_message(&conn, message.message_id), Err(CafleetError::InvalidStoredValue { field, value }) if field == "messages.status_state" && value == "corrupt")
+        );
         assert!(poll_messages(&conn, director).unwrap().is_empty());
         conn.execute(
             "UPDATE messages SET status_state='input_required', text=X'00' WHERE message_id=?1",
@@ -501,47 +731,8 @@ mod tests {
         .unwrap();
         assert!(get_message(&conn, message.message_id).is_err());
         assert!(poll_messages(&conn, director).is_err());
-    }
-
-    #[test]
-    fn an_ack_that_loses_the_pending_transition_reports_completed() {
-        use rusqlite::hooks::AuthAction;
-        use rusqlite::hooks::AuthContext;
-        use rusqlite::hooks::Authorization;
-        use std::sync::Arc;
-        use std::sync::atomic::AtomicBool;
-        use std::sync::atomic::Ordering;
-
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "ack-race");
-        let member = register(&mut conn, fleet, "worker", Some("%2"));
-        let message = broker::send_message(&mut conn, director, member, "ready").unwrap();
-        let path = conn.path().unwrap().to_owned();
-        let won = Arc::new(AtomicBool::new(false));
-        let observed = won.clone();
-        let mut intercepted = false;
-        conn.authorizer(Some(move |context: AuthContext<'_>| {
-            if !intercepted
-                && matches!(
-                    context.action,
-                    AuthAction::Update {
-                        table_name: "messages",
-                        ..
-                    }
-                )
-            {
-                intercepted = true;
-                let mut other = rusqlite::Connection::open(&path).unwrap();
-                broker::ack_message(&mut other, message.message_id).unwrap();
-                observed.store(true, Ordering::SeqCst);
-            }
-            Authorization::Allow
-        }))
-        .unwrap();
-        let error = broker::ack_message(&mut conn, message.message_id).unwrap_err();
-        assert!(won.load(Ordering::SeqCst));
-        assert_eq!(error.message(), "Cannot ACK message in state completed");
+        assert_eq!(status_state(&conn, message.message_id), "input_required");
+        assert!(conn.is_autocommit());
     }
 
     fn notified_at(conn: &rusqlite::Connection, message_id: i64) -> Option<String> {
@@ -576,9 +767,21 @@ mod tests {
         let rows = broker::poll_messages(&conn, worker).unwrap();
         assert_eq!(
             rows.iter().map(|row| row.message_id).collect::<Vec<_>>(),
-            [ids[1], ids[0], ids[2]]
+            [ids[1], ids[0], ids[2]],
+            "the order is evaluated on the pre-consumption timestamps"
         );
         assert!(rows.iter().all(|row| row.to_member_id == worker));
+        assert!(
+            rows.iter()
+                .all(|row| row.status == crate::broker::MessageStatus::Completed
+                    && row.status_timestamp == rows[0].status_timestamp)
+        );
+        assert!(rows[0].status_timestamp.as_str() > "2026-02-01T00:00:00+00:00");
+        for (member, text) in [(peer, "other inbox"), (director, "outgoing")] {
+            let untouched = broker::poll_messages(&conn, member).unwrap();
+            assert_eq!(untouched.len(), 1, "{text}");
+            assert_eq!(untouched[0].text, text);
+        }
     }
 
     #[test]
@@ -647,20 +850,24 @@ mod tests {
     }
 
     #[test]
-    fn oldest_pending_preview_uses_creation_order_and_skips_acked_and_notified_rows() {
+    fn oldest_pending_preview_uses_creation_order_and_skips_consumed_and_notified_rows() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "preview");
         let worker = register(&mut conn, fleet, "worker", None);
-        let mut ids = Vec::new();
-        for text in ["acked", "notified", "oldest", "newest"] {
+        let mut ids = vec![
+            broker::send_message(&mut conn, director, worker, "consumed")
+                .unwrap()
+                .message_id,
+        ];
+        assert_eq!(broker::poll_messages(&conn, worker).unwrap().len(), 1);
+        for text in ["notified", "oldest", "newest"] {
             ids.push(
                 broker::send_message(&mut conn, director, worker, text)
                     .unwrap()
                     .message_id,
             );
         }
-        broker::ack_message(&mut conn, ids[0]).unwrap();
         conn.execute(
             "UPDATE messages SET notified_at='2026-10-23T00:00:00+00:00' WHERE message_id=?1",
             [ids[1]],
@@ -720,13 +927,12 @@ mod tests {
         #[test]
         fn broker_snapshots_are_read_only_oldest_first_and_ignore_preview_metadata() {
             let (_dir, mut conn, fleet, director, worker) = broker_fixture();
+            broker::send_message(&mut conn, worker, director, "consumed").unwrap();
+            assert_eq!(broker::poll_messages(&conn, director).unwrap().len(), 1);
             let later = broker::send_message(&mut conn, worker, director, "later").unwrap();
             let earlier = broker::send_message(&mut conn, director, director, "self").unwrap();
             let tied = broker::send_message(&mut conn, worker, director, "notified").unwrap();
             conn.execute("UPDATE messages SET created_at='1900-01-01T00:00:00+00:00', notified_at=status_timestamp WHERE message_id IN (?1, ?2)", [earlier.message_id, tied.message_id]).unwrap();
-            let acknowledged =
-                broker::send_message(&mut conn, worker, director, "consumed").unwrap();
-            broker::ack_message(&mut conn, acknowledged.message_id).unwrap();
             let changes = conn.total_changes();
             let messages = snapshot_messages(
                 listen_snapshot(&mut conn, director, Some(fleet), Deadline::new()).unwrap(),

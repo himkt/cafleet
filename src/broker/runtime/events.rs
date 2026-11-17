@@ -2899,9 +2899,14 @@ mod tests {
         }
         assert_eq!(payload["decision_outcome"], "unknown");
         assert_eq!(payload["source"], "runner_screen");
+        let consumed = crate::broker::poll_messages(&reader, fixture.director).unwrap();
         assert_eq!(
-            crate::broker::poll_messages(&reader, fixture.director).unwrap(),
-            [message]
+            consumed,
+            [crate::broker::MessageRecord {
+                status: crate::broker::MessageStatus::Completed,
+                status_timestamp: consumed[0].status_timestamp.clone(),
+                ..message
+            }]
         );
     }
 
@@ -3213,11 +3218,18 @@ mod tests {
     }
 
     #[test]
-    fn ack_consumes_the_message_without_closing_the_observed_interaction() {
+    fn poll_consumes_the_message_without_closing_the_observed_interaction() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
         let event = fixture.open(&owner);
-        crate::broker::ack_message(&mut fixture.conn, event.message_id.unwrap()).unwrap();
+        let consumed = crate::broker::poll_messages(&fixture.conn, fixture.director).unwrap();
+        assert_eq!(
+            consumed
+                .iter()
+                .map(|m| Some(m.message_id))
+                .collect::<Vec<_>>(),
+            [event.message_id]
+        );
         let view = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
         assert_eq!(view.interaction.unwrap().closed_at, None);
         assert_eq!(view.event.payload_json["decision_outcome"], "unknown");

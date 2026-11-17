@@ -2514,7 +2514,7 @@ mod tests {
 
     #[test]
     fn accepted_preview_settlement_and_message_stamp_are_atomic() {
-        for already_acked in [false, true] {
+        for already_consumed in [false, true] {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let message = crate::broker::send_message(
@@ -2539,8 +2539,9 @@ mod tests {
                 InputState::Accepted,
             )
             .unwrap();
-            if already_acked {
-                crate::broker::ack_message(&mut fixture.conn, message.message_id).unwrap();
+            if already_consumed {
+                let consumed = crate::broker::poll_messages(&fixture.conn, fixture.member).unwrap();
+                assert_eq!(consumed.len(), 1);
             }
             let settled =
                 storage::settle_preview(&mut fixture.conn, &owner, input.input_id).unwrap();

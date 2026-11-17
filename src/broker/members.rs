@@ -664,7 +664,7 @@ mod tests {
             rows[1].last_recv.as_deref(),
             Some(message.created_at.as_str())
         );
-        assert_eq!(rows[1].last_ack, None);
+        assert_eq!(rows[1].last_consumed, None);
         assert_eq!(rows[2].member.placement.mux_pane_id, None);
         assert_eq!(
             (
@@ -674,11 +674,14 @@ mod tests {
             ),
             (None, None, None)
         );
-        let ack = broker::ack_message(&mut conn, message.message_id).unwrap();
+        let consumed = broker::poll_messages(&conn, worker).unwrap();
+        assert_eq!(consumed.len(), 1);
+        let consumed_rows = list_members(&conn, fleet).unwrap();
         assert_eq!(
-            list_members(&conn, fleet).unwrap()[1].last_ack,
-            Some(ack.status_timestamp)
+            consumed_rows[1].last_consumed,
+            Some(consumed[0].status_timestamp.clone())
         );
+        assert!((0..=5).contains(&consumed_rows[1].idle.unwrap()));
         conn.execute(
             "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
             params![worker, fleet],
@@ -691,7 +694,11 @@ mod tests {
         assert_eq!(list_members(&conn, fleet).unwrap().len(), 2);
     }
 
-    fn activity(sent: Option<&str>, received: Option<&str>, ack: Option<&str>) -> MemberActivity {
+    fn activity(
+        sent: Option<&str>,
+        received: Option<&str>,
+        consumed: Option<&str>,
+    ) -> MemberActivity {
         MemberActivity {
             member: MemberRecord {
                 member_id: 1,
@@ -717,7 +724,7 @@ mod tests {
             },
             last_sent: sent.map(str::to_owned),
             last_recv: received.map(str::to_owned),
-            last_ack: ack.map(str::to_owned),
+            last_consumed: consumed.map(str::to_owned),
             idle: None,
         }
     }
@@ -727,6 +734,17 @@ mod tests {
         let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
         let row = activity(None, None, Some("2026-01-01T00:01:00Z"));
         assert_eq!(idle_seconds(&row, now).unwrap(), Some(0));
+    }
+
+    #[test]
+    fn idle_measures_from_a_consumption_later_than_every_send_and_receipt() {
+        let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
+        let row = activity(
+            Some("2025-12-31T23:00:00Z"),
+            Some("2025-12-31T23:00:00Z"),
+            Some("2025-12-31T23:59:30Z"),
+        );
+        assert_eq!(idle_seconds(&row, now).unwrap(), Some(30));
     }
 
     #[test]

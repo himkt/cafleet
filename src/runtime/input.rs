@@ -6834,7 +6834,7 @@ mod tests {
             }
 
             #[test]
-            fn acked_held_preview_is_cancelled_on_the_next_queue_turn_without_writing() {
+            fn consumed_held_preview_is_cancelled_on_the_next_queue_turn_without_writing() {
                 with_host(|host| {
                     let (message, _) = stopped_preview(host, false);
                     let next = storage::find_latest_preview_input(
@@ -6845,7 +6845,12 @@ mod tests {
                     .unwrap()
                     .unwrap();
                     let writes = host.pty.written.clone();
-                    crate::broker::ack_message(&mut host.fixture.conn, message.message_id).unwrap();
+                    assert!(
+                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
+                            .unwrap()
+                            .iter()
+                            .any(|consumed| consumed.message_id == message.message_id)
+                    );
                     let _ = turn(host);
                     let cancelled = row(host, next.input_id);
                     assert_eq!(
@@ -7058,8 +7063,8 @@ mod tests {
             }
 
             #[test]
-            fn reconciled_already_notified_blocker_notifies_the_later_head_after_ack_cancellation()
-            {
+            fn reconciled_already_notified_blocker_notifies_the_later_head_after_consumption_cancellation()
+             {
                 for disposition in [
                     storage::InputDisposition::NotSubmitted,
                     storage::InputDisposition::AbandonedUncertain,
@@ -7096,8 +7101,15 @@ mod tests {
                                 host.coordinator.queue.front().unwrap().composer_busy_since,
                                 since
                             );
-                            crate::broker::ack_message(&mut host.fixture.conn, message.message_id)
-                                .unwrap();
+                            assert!(
+                                crate::broker::poll_messages(
+                                    &host.fixture.conn,
+                                    message.to_member_id
+                                )
+                                .unwrap()
+                                .iter()
+                                .any(|consumed| consumed.message_id == message.message_id)
+                            );
                             crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(host, |host| row(host, first).state == storage::InputState::Settled);
                             assert_eq!(
                                 row(host, first).disposition,
@@ -8772,13 +8784,18 @@ mod tests {
             }
 
             #[test]
-            fn queued_preview_acknowledged_before_its_drain_settles_not_submitted_without_typing() {
+            fn queued_preview_consumed_before_its_drain_settles_not_submitted_without_typing() {
                 with_permission_host(Duration::from_secs(8), |host| {
                     let message = host.message("queued preview body");
                     form(host);
                     let request = preview_request(host, &message, &canonical_preview(&message));
                     let id = queued(host, request, "interaction_open");
-                    crate::broker::ack_message(&mut host.fixture.conn, message.message_id).unwrap();
+                    assert!(
+                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
+                            .unwrap()
+                            .iter()
+                            .any(|consumed| consumed.message_id == message.message_id)
+                    );
                     close(host);
                     turns_until(host, |host| {
                         row(host, id).state == storage::InputState::Settled

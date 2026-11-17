@@ -572,7 +572,7 @@ mod tests {
             member,
             last_sent: None,
             last_recv: None,
-            last_ack: None,
+            last_consumed: None,
             idle: None,
         };
         assert_eq!(format_member_list(&[]), "0 members.");
@@ -644,7 +644,7 @@ mod tests {
                 },
                 last_sent: None,
                 last_recv: None,
-                last_ack: None,
+                last_consumed: None,
                 idle: Some(idle),
             }
         }
