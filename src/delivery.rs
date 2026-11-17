@@ -20,11 +20,9 @@ use crate::runtime::SubmitInput;
 use crate::runtime::find_submission;
 use crate::runtime::submit_wrapped_input_under_pane_lock_with_host;
 use crate::runtime::validate_submission_target;
-use crate::time::Clock;
 use crate::time::Deadline;
 use rusqlite::Connection;
 use std::collections::BTreeSet;
-use std::time::Duration;
 
 pub(crate) const INLINE_BODY_LIMIT: usize = 4000;
 const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
@@ -91,7 +89,7 @@ pub(crate) fn notification_error(
         member_id,
         message_id,
         error: format!(
-            "message {message_id} was not notified to member {member_id}: {cause}; the next send to member {member_id} or the next message wait retries it."
+            "message {message_id} was not notified to member {member_id}: {cause}; member {member_id}'s runner retries it."
         ),
     }
 }
@@ -536,19 +534,6 @@ fn deliver_wrapped_pending(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PendingPreview {
-    pub(crate) member_id: i64,
-    pub(crate) message_id: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReceiveSnapshot {
-    pub(crate) messages: Vec<MessageRecord>,
-    pub(crate) pending: Vec<PendingPreview>,
-    pub(crate) pending_notifications: Vec<PendingPreview>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NotificationError {
     pub(crate) member_id: i64,
@@ -567,12 +552,6 @@ pub(crate) struct AttemptOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WaitOutcome {
-    pub(crate) messages: Vec<MessageRecord>,
-    pub(crate) notification_errors: Vec<NotificationError>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AttemptEnd {
     NoPending,
     Held,
@@ -588,218 +567,6 @@ impl AttemptOutcome {
             notification_errors: Vec::new(),
             attempted_inputs: std::collections::BTreeMap::new(),
         }
-    }
-}
-
-pub(crate) trait ReceiveIo {
-    fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError>;
-    fn attempt(
-        &mut self,
-        member_id: i64,
-        deadline: Deadline,
-        attempted: &BTreeSet<i64>,
-    ) -> Result<AttemptOutcome, CafleetError>;
-}
-
-pub(crate) fn wait<C: Clock, I: ReceiveIo>(
-    clock: &C,
-    io: &mut I,
-    timeout: Duration,
-) -> Result<WaitOutcome, CafleetError> {
-    let started = clock.now();
-    let expires = started + timeout;
-    let mut next_check = started;
-    let mut last_interval = None;
-    let mut cursor = None;
-    let mut messages = Vec::new();
-    let mut notification_errors: Vec<NotificationError> = Vec::new();
-    let mut attempted = BTreeSet::new();
-    loop {
-        let now = clock.now();
-        if now >= expires {
-            break;
-        }
-        if now < next_check {
-            clock.sleep(next_check.min(expires).duration_since(now));
-            continue;
-        }
-        let snapshot = match io.check(Deadline::until(expires.min(now + Duration::from_secs(5)))) {
-            Ok(snapshot) => snapshot,
-            Err(CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded) => {
-                let now = clock.now();
-                if now >= expires {
-                    break;
-                }
-                next_check =
-                    started + Duration::from_secs(now.duration_since(started).as_secs() + 1);
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
-        notification_errors.retain(|error| {
-            snapshot.pending_notifications.iter().any(|pending| {
-                pending.member_id == error.member_id && pending.message_id == error.message_id
-            })
-        });
-        messages = snapshot.messages;
-        let now = clock.now();
-        if !messages.is_empty() || now >= expires {
-            break;
-        }
-        let interval = now.duration_since(started).as_secs();
-        let selected = if last_interval == Some(interval) {
-            None
-        } else {
-            let eligible = snapshot
-                .pending
-                .iter()
-                .filter(|preview| !attempted.contains(&preview.message_id));
-            eligible
-                .clone()
-                .filter(|preview| cursor.is_none_or(|cursor| preview.member_id > cursor))
-                .min_by_key(|preview| preview.member_id)
-                .or_else(|| eligible.min_by_key(|preview| preview.member_id))
-        };
-        if let Some(preview) = selected {
-            let member = preview.member_id;
-            cursor = Some(member);
-            last_interval = Some(interval);
-            let outcome =
-                match io.attempt(
-                    member,
-                    Deadline::until(now + Duration::from_secs(5)),
-                    &attempted,
-                ) {
-                    Ok(outcome) => outcome,
-                    Err(
-                        error @ (CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded),
-                    ) => AttemptOutcome::ended(AttemptEnd::Failed(
-                        crate::delivery::notification_error(member, preview.message_id, error),
-                    )),
-                    Err(error) => return Err(error),
-                };
-            notification_errors.retain(|error| !outcome.sent.contains(&error.message_id));
-            let mut diagnostics = outcome.notification_errors;
-            if let AttemptEnd::Failed(error) = outcome.end {
-                diagnostics.push(error);
-            }
-            for error in diagnostics {
-                assert_eq!(
-                    error.member_id, member,
-                    "the owned attempt reports its selected member"
-                );
-                attempted.insert(error.message_id);
-                eprintln!("{}", error.error);
-                if let Some(previous) = notification_errors.iter_mut().find(|previous| {
-                    previous.member_id == error.member_id && previous.message_id == error.message_id
-                }) {
-                    *previous = error;
-                } else {
-                    notification_errors.push(error);
-                }
-            }
-            next_check = clock.now();
-        } else {
-            next_check = started + Duration::from_secs(interval + 1);
-        }
-    }
-    notification_errors.sort_by_key(|error| error.message_id);
-    Ok(WaitOutcome {
-        messages,
-        notification_errors,
-    })
-}
-
-pub(crate) struct BrokerReceiver<'a> {
-    conn: &'a mut Connection,
-    settings: &'a Settings,
-    member_id: i64,
-    fleet_id: Option<i64>,
-}
-
-impl<'a> BrokerReceiver<'a> {
-    pub(crate) fn new(conn: &'a mut Connection, settings: &'a Settings, member_id: i64) -> Self {
-        Self {
-            conn,
-            settings,
-            member_id,
-            fleet_id: None,
-        }
-    }
-}
-
-fn subject_fleet(
-    conn: &Connection,
-    member_id: i64,
-    expected: Option<i64>,
-) -> Result<i64, CafleetError> {
-    let fleet = broker::active_member_fleet(conn, member_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    broker::members::require_pinned_fleet(member_id, fleet, expected, "receive")?;
-    broker::fleets::require_live_fleet(conn, fleet)?;
-    Ok(fleet)
-}
-
-impl ReceiveIo for BrokerReceiver<'_> {
-    fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError> {
-        let (snapshot, fleet) = crate::db::with_database_budget(self.conn, deadline, |conn| {
-            let tx = conn.transaction()?;
-            let fleet = subject_fleet(&tx, self.member_id, self.fleet_id)?;
-            let messages = tx
-                .prepare(&format!(
-                    "SELECT {} FROM messages \
-                     WHERE to_member_id=?1 AND status_state='input_required' \
-                     ORDER BY status_timestamp DESC, message_id DESC",
-                    broker::messaging::MESSAGE_COLUMNS
-                ))?
-                .query_map([self.member_id], broker::messaging::map_message_row)?
-                .collect::<Result<Vec<_>, _>>()?;
-            let pending = broker::messaging::pending_previews(&tx, fleet, self.member_id)?
-                .into_iter()
-                .map(|(member_id, message_id)| PendingPreview {
-                    member_id,
-                    message_id,
-                })
-                .collect();
-            let pending_notifications =
-                broker::messaging::pending_notifications(&tx, fleet, self.member_id)?
-                    .into_iter()
-                    .map(|(member_id, message_id)| PendingPreview {
-                        member_id,
-                        message_id,
-                    })
-                    .collect();
-            tx.commit()?;
-            Ok((
-                ReceiveSnapshot {
-                    messages,
-                    pending,
-                    pending_notifications,
-                },
-                fleet,
-            ))
-        })?;
-        self.fleet_id = Some(fleet);
-        Ok(snapshot)
-    }
-
-    fn attempt(
-        &mut self,
-        member_id: i64,
-        deadline: Deadline,
-        attempted: &BTreeSet<i64>,
-    ) -> Result<AttemptOutcome, CafleetError> {
-        let fleet = crate::db::with_database_budget(self.conn, deadline, |conn| {
-            subject_fleet(conn, self.member_id, self.fleet_id)
-        })?;
-        crate::delivery::deliver_pending(
-            self.conn,
-            self.settings,
-            member_id,
-            Some(fleet),
-            deadline,
-            attempted,
-        )
     }
 }
 
@@ -2545,6 +2312,55 @@ mod tests {
                 .map(|m| m.message_id)
                 .collect::<Vec<_>>(),
             [reply.message_id]
+        );
+    }
+
+    #[test]
+    fn delivery_treats_the_fleets_director_back_reference_as_the_root_director() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, former_director) = create_fleet_fixture(&mut conn, "new-root");
+        let observer = register(&mut conn, fleet, "observer", Some("%2"));
+        let director = register(&mut conn, fleet, "new-director", Some("%3"));
+        conn.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            rusqlite::params![director, fleet],
+        )
+        .unwrap();
+        let ordinary =
+            broker::send_message(&mut conn, director, former_director, "ordinary assignment")
+                .unwrap();
+        let reply = broker::send_message(&mut conn, observer, director, "root reply").unwrap();
+        let settings = settings_for(&conn);
+        let root = broker::get_member(&conn, director, fleet).unwrap().unwrap();
+        assert_eq!(root.kind, broker::MemberKind::Director);
+        let lock = crate::pane_lock::lock_path(&settings.database_url, &root.placement).unwrap();
+        let outcome = deliver_pending(
+            &mut conn,
+            &settings,
+            director,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        assert!(outcome.sent.is_empty());
+        assert!(matches!(outcome.end, AttemptEnd::NoPending));
+        assert!(!lock.exists(), "{}", lock.display());
+        assert_eq!(preview_stamp(&conn, reply.message_id), None);
+        assert_eq!(
+            broker::get_member(&conn, former_director, fleet)
+                .unwrap()
+                .unwrap()
+                .kind,
+            broker::MemberKind::Member
+        );
+        assert_eq!(
+            broker::oldest_pending_preview(&conn, former_director, &BTreeSet::new())
+                .unwrap()
+                .map(|message| message.message_id),
+            Some(ordinary.message_id),
+            "the former Director's inbox is an ordinary preview candidate"
         );
     }
 

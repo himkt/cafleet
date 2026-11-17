@@ -2054,6 +2054,29 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        self.receive(conn, request, observation, deadline, false)
+    }
+
+    /// The runner's own preview sweep request: it queues with zero bytes while another process
+    /// holds the pane input lock, so a merely queued sweep request holds no lock.
+    pub(super) fn handle_swept(
+        &mut self,
+        conn: &mut Connection,
+        request: InputControlRequest,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        self.receive(conn, request, observation, deadline, true)
+    }
+
+    fn receive(
+        &mut self,
+        conn: &mut Connection,
+        request: InputControlRequest,
+        observation: &ObservationController,
+        deadline: Instant,
+        queue_behind_busy_pane: bool,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
         if matches!(
             &request.operation,
             InputControlOperation::PermissionRespond(_)
@@ -2169,7 +2192,10 @@ impl InputCoordinator {
                     || self.finalization.is_some()
                     || self.pending_stamp.is_some()
                     || self.held_composer.is_some()
-                    || unresolved_deferred =>
+                    || unresolved_deferred
+                    || (queue_behind_busy_pane
+                        && PaneLock::try_acquire(&self.database_url, &self.placement)?
+                            .is_none()) =>
                 {
                     Some("earlier_input")
                 }
@@ -2396,6 +2422,23 @@ impl InputCoordinator {
         self.deferred_failed
     }
 
+    /// The runner already owns a preview's delivery: one waits in the FIFO or is being drained
+    /// from it, or a preview's terminal transaction is pending storage.
+    pub(super) fn owns_preview_delivery(&self) -> bool {
+        self.finalization.is_some()
+            || self.pending_stamp.is_some()
+            || self
+                .queue
+                .iter()
+                .chain(
+                    self.pending
+                        .as_ref()
+                        .and_then(PendingInput::deferred)
+                        .map(|deferred| &deferred.queued),
+                )
+                .any(|queued| queued.request.kind == storage::InputKind::Preview)
+    }
+
     pub(super) fn has_deferred_work(&self) -> bool {
         !self.queue.is_empty()
             || self.finalization.is_some()
@@ -2452,11 +2495,14 @@ impl InputCoordinator {
                 return Err(cause);
             }
         };
+        let retried = operation.is_retried_preview();
         if let Some(retained) = self.operations.get_mut(&input_id) {
             retained.operation = operation;
             retained.attempt_available = false;
         }
-        Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes, None);
+        if !retried {
+            Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes, None);
+        }
         Ok(())
     }
 
@@ -3041,7 +3087,9 @@ impl InputCoordinator {
         {
             return self.settle_accepted_preview(conn, observation, operation.input_id, stage);
         }
-        Self::publish_result(observation, operation.input_id, stage, operation.stop_cause);
+        if !operation.is_retried_preview() {
+            Self::publish_result(observation, operation.input_id, stage, operation.stop_cause);
+        }
         Ok(())
     }
 

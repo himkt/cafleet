@@ -741,7 +741,7 @@ fn stalled_delivery(
         cause: None,
         stalled: Some((blocking_input_id, waiting_since)),
         action: json!({"kind":"review_stalled_input",
-            "instruction":"Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; otherwise ask the user to clear or submit the composer. Reconcile an uncertain blocker after that evidence. ACK the waiting preview when its composer stays unverified after clearing or its message no longer needs delivery.",
+            "instruction":"Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.",
             "inspect_argv":inspect,
             "press_argv":action.get("press_argv").cloned().unwrap_or(Value::Null)}),
     })

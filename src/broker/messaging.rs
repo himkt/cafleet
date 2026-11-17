@@ -312,46 +312,6 @@ fn select_listen_snapshot(
     Ok(InboxSnapshot::Open { fleet_id, messages })
 }
 
-pub(crate) fn pending_previews(
-    conn: &Connection,
-    fleet_id: i64,
-    subject_id: i64,
-) -> Result<Vec<(i64, i64)>, CafleetError> {
-    pending_preview_messages(conn, fleet_id, subject_id, true)
-}
-
-pub(crate) fn pending_notifications(
-    conn: &Connection,
-    fleet_id: i64,
-    subject_id: i64,
-) -> Result<Vec<(i64, i64)>, CafleetError> {
-    pending_preview_messages(conn, fleet_id, subject_id, false)
-}
-
-fn pending_preview_messages(
-    conn: &Connection,
-    fleet_id: i64,
-    subject_id: i64,
-    require_pane: bool,
-) -> Result<Vec<(i64, i64)>, CafleetError> {
-    let mut statement = conn.prepare(&format!(
-        "SELECT m.member_id, g.message_id FROM members m
-         JOIN fleets f ON f.fleet_id=m.fleet_id
-         JOIN messages g ON g.to_member_id=m.member_id
-         WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id!=?2
-         AND m.member_id!=f.director_member_id AND {}
-         AND (?3=0 OR EXISTS(SELECT 1 FROM member_placements p WHERE p.member_id=m.member_id AND p.mux_pane_id IS NOT NULL))
-         ORDER BY m.member_id, g.created_at, g.message_id",
-        crate::broker::messaging::PENDING_PREVIEW,
-    ))?;
-    statement
-        .query_map(params![fleet_id, subject_id, require_pane], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(crate::error::CafleetError::from)
-}
-
 #[cfg(test)]
 pub(crate) mod test_support {
     use rusqlite::Connection;
@@ -841,10 +801,6 @@ mod tests {
             .unwrap()
             .is_none()
         );
-        assert_eq!(
-            crate::broker::messaging::pending_previews(&conn, fleet, director).unwrap(),
-            vec![(worker, previous.message_id), (worker, next.message_id)]
-        );
     }
 
     #[test]
@@ -1159,65 +1115,5 @@ mod tests {
                 .unwrap();
             assert_handler_cleared(&conn);
         }
-    }
-
-    #[test]
-    fn preview_rotation_selects_only_concrete_ordinary_placements() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "rotation");
-        let pending = register(&mut conn, fleet, "pending", None);
-        let placed = register(&mut conn, fleet, "placed", Some("%2"));
-        broker::send_message(&mut conn, director, pending, "wait for placement").unwrap();
-        let message = broker::send_message(&mut conn, director, placed, "deliver now").unwrap();
-        assert_eq!(
-            pending_previews(&conn, fleet, director).unwrap(),
-            vec![(placed, message.message_id)]
-        );
-    }
-
-    #[test]
-    fn the_subjects_own_previews_are_not_listed() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "subject");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        broker::send_message(&mut conn, worker, director, "reply").unwrap();
-        let to_worker = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        assert_eq!(
-            pending_previews(&conn, fleet, director).unwrap(),
-            vec![(worker, to_worker.message_id)]
-        );
-        assert!(pending_previews(&conn, fleet, worker).unwrap().is_empty());
-    }
-
-    #[test]
-    fn retry_eligibility_follows_the_fleets_director_back_reference() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, former_director) = create_fleet_fixture(&mut conn, "new-root");
-        let observer = register(&mut conn, fleet, "observer", Some("%2"));
-        let director = register(&mut conn, fleet, "new-director", Some("%3"));
-        conn.execute(
-            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
-            rusqlite::params![director, fleet],
-        )
-        .unwrap();
-        let ordinary =
-            broker::send_message(&mut conn, director, former_director, "ordinary assignment")
-                .unwrap();
-        let reply = broker::send_message(&mut conn, observer, director, "root reply").unwrap();
-        assert_eq!(
-            pending_previews(&conn, fleet, observer).unwrap(),
-            vec![(former_director, ordinary.message_id)]
-        );
-        assert_eq!(
-            broker::poll_messages(&conn, director)
-                .unwrap()
-                .iter()
-                .map(|m| m.message_id)
-                .collect::<Vec<_>>(),
-            [reply.message_id]
-        );
     }
 }

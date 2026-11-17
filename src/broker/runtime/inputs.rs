@@ -39,6 +39,11 @@ impl InputOperation {
         delivery_projection(self).expect("validated input receipts project their delivery")
     }
 
+    pub(crate) fn is_retried_preview(&self) -> bool {
+        self.delivery()
+            .is_some_and(|delivery| is_retried_preview_result(self.kind, &delivery))
+    }
+
     pub(crate) fn has_stalled_blocker_provenance(&self) -> bool {
         if self.kind == InputKind::PermissionResponse || self.delivery_method.is_none() {
             return false;
@@ -399,6 +404,9 @@ pub(crate) fn unpublished_delivery_results(
         let delivery = input
             .delivery()
             .expect("a deferred input is an ordinary input");
+        if input.is_retried_preview() {
+            continue;
+        }
         let stage = match delivery.status {
             DeliveryStatus::Submitted => "submitted",
             DeliveryStatus::NotSubmitted => "zero_bytes",

@@ -132,6 +132,11 @@ struct PendingInputClient {
     deadline: Instant,
 }
 
+/// The runner's own immediate preview attempt; it has no control-socket client to answer.
+struct PendingSweep {
+    deadline: Instant,
+}
+
 struct NativeIo<'a> {
     input: &'a mut NonblockingFile,
     pty: &'a mut PtySession,
@@ -286,8 +291,8 @@ impl RunnerLoop<'_> {
             coordinator.handle_received(self.conn, request, self.native.controller, deadline)?;
         if reply.is_none() {
             ensure(
-                self.pending_input_client.is_none(),
-                "accepted pending input already has a client",
+                self.pending_input_client.is_none() && self.pending_sweep.is_none(),
+                "an accepted immediate input requires no other attempt in flight",
             )?;
             self.pending_input_client = Some(PendingInputClient {
                 id: client_id,
@@ -738,6 +743,8 @@ pub(crate) fn run_service(
         started: false,
         coordinator: None,
         pending_input_client: None,
+        pending_sweep: None,
+        preview_sweep: PreviewSweep::default(),
         deferred_retry: DeferredRetry::default(),
         shutdown_client: None,
         native_exit: None,
@@ -896,6 +903,8 @@ struct RunnerLoop<'a> {
     started: bool,
     coordinator: Option<InputCoordinator>,
     pending_input_client: Option<PendingInputClient>,
+    pending_sweep: Option<PendingSweep>,
+    preview_sweep: PreviewSweep,
     deferred_retry: DeferredRetry,
     shutdown_client: Option<u64>,
     native_exit: Option<ChildExit>,
@@ -1246,12 +1255,13 @@ impl RunnerLoop<'_> {
         if let Some(clock) = self.observe_exit()? {
             return Ok(ControlFlow::Break(clock));
         }
-        if self.pending_input_client.is_some() {
+        if self.pending_input_client.is_some() || self.pending_sweep.is_some() {
             if let Some(clock) = self.complete_pending_input()? {
                 return Ok(ControlFlow::Break(clock));
             }
         } else {
             self.retry_deferred()?;
+            self.sweep_previews()?;
         }
         Ok(ControlFlow::Continue(progress))
     }
@@ -1278,13 +1288,14 @@ impl RunnerLoop<'_> {
             .map_err(CafleetError::from)
     }
 
-    /// Drives the client-owned input and replies once it completes.
+    /// Drives the in-flight immediate input to its reply: a client-owned attempt answers its
+    /// client, and the runner's own sweep attempt settles without a reply.
     fn complete_pending_input(&mut self) -> Result<Option<ShutdownClock>> {
-        let deadline = self
-            .pending_input_client
-            .as_ref()
-            .expect("a pending input has its client")
-            .deadline;
+        let deadline = match (&self.pending_input_client, &self.pending_sweep) {
+            (Some(client), None) => client.deadline,
+            (None, Some(sweep)) => sweep.deadline,
+            _ => unreachable!("exactly one immediate input attempt is in flight"),
+        };
         let coordinator = started(&mut self.coordinator);
         let result = match self.native.quiesce(coordinator, deadline) {
             Err(failure) => Err(CafleetError::from(failure)),
@@ -1306,6 +1317,12 @@ impl RunnerLoop<'_> {
         if !matches!(result, Ok(None)) {
             started(&mut self.coordinator).finish_pending_attempt();
             self.deferred_retry.next_at = None;
+            if self.pending_sweep.take().is_some() {
+                self.finish_sweep(
+                    result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
+                );
+                return Ok(None);
+            }
             let pending = self
                 .pending_input_client
                 .take()
@@ -1349,6 +1366,207 @@ impl RunnerLoop<'_> {
         }
         Ok(())
     }
+
+    /// Retries the member's oldest unnotified pending preview that never reached the FIFO,
+    /// strictly oldest-first and through the same entry point a control-socket preview reaches.
+    fn sweep_previews(&mut self) -> Result<()> {
+        let now = Instant::now();
+        self.preview_sweep
+            .observe(self.native.controller.status().eligibility);
+        if started(&mut self.coordinator).owns_preview_delivery() || !self.preview_sweep.due(now) {
+            return Ok(());
+        }
+        let deadline = now + SWEEP_ATTEMPT_BUDGET;
+        match self.sweep_candidate(deadline) {
+            Ok(Some(input)) => self.submit_sweep(input, deadline),
+            Ok(None) => {}
+            Err(cause) => {
+                eprintln!("member runtime: preview sweep: {}", cause.message());
+                self.preview_sweep.back_off(Instant::now());
+            }
+        }
+        Ok(())
+    }
+
+    /// Selects the next attempt under the latest-attempt table, settling accepted history
+    /// without typing; `None` ends this tick.
+    fn sweep_candidate(&mut self, deadline: Instant) -> Result<Option<SubmitInput>> {
+        let run = self.run.clone();
+        let verified = crate::coding_agent::coding_agent(&run.backend).is_some_and(|backend| {
+            self.catalog.verified_composer(
+                backend,
+                run.native_version.as_deref(),
+                crate::coding_agent::ComposerOperation::Prompt,
+            )
+        });
+        let mut skipped = std::collections::BTreeSet::new();
+        loop {
+            let Some(message) = with_database_deadline(self.conn, deadline, |conn| {
+                sweep_snapshot(conn, &run, &skipped)
+            })?
+            else {
+                return Ok(None);
+            };
+            let latest = with_database_deadline(self.conn, deadline, |conn| {
+                storage::find_latest_preview_input(conn, run.run_id, message.message_id)
+            })?;
+            let attempt = match latest {
+                None => 1,
+                Some(input) => match (input.state, input.disposition) {
+                    (InputState::Ready, _) if input.deferred_at.is_some() => return Ok(None),
+                    (InputState::Ready, _) => {
+                        input.preview_attempt.expect("a preview has its attempt")
+                    }
+                    (InputState::InProgress | InputState::Uncertain, _)
+                    | (InputState::Settled, Some(InputDisposition::AbandonedUncertain)) => {
+                        if !verified {
+                            return Ok(None);
+                        }
+                        skipped.insert(message.message_id);
+                        continue;
+                    }
+                    (InputState::Accepted, _)
+                    | (InputState::Settled, Some(InputDisposition::Submitted)) => {
+                        with_database_deadline(self.conn, deadline, |conn| {
+                            storage::settle_preview(conn, &run.owner(), input.input_id)
+                        })?;
+                        skipped.insert(message.message_id);
+                        continue;
+                    }
+                    (InputState::Settled, Some(InputDisposition::NotSubmitted)) => {
+                        if input.is_retried_preview()
+                            && self
+                                .preview_sweep
+                                .backs_off_after(input.input_id, Instant::now())
+                        {
+                            return Ok(None);
+                        }
+                        input
+                            .preview_attempt
+                            .expect("a preview has its attempt")
+                            .checked_add(1)
+                            .ok_or_else(|| error("preview attempt exhausted"))?
+                    }
+                    (InputState::Settled, _) => {
+                        return Err(error(format!(
+                            "preview input {} was left in the composer without a re-delivery attempt",
+                            input.input_id
+                        )));
+                    }
+                },
+            };
+            return Ok(Some(SubmitInput {
+                operation_key: storage::preview_operation_key(
+                    run.run_id,
+                    message.message_id,
+                    attempt,
+                )?,
+                input_kind: InputKind::Preview,
+                message_id: Some(message.message_id),
+                literal: crate::delivery::canonical_preview_line(&message),
+            }));
+        }
+    }
+
+    fn submit_sweep(&mut self, input: SubmitInput, deadline: Instant) {
+        let request =
+            InputExpiration::capture(deadline, &mut RealInputDeadlineClock).map(|expiration| {
+                InputControlRequest {
+                    identity: crate::runtime::ControlIdentity::from_run(&self.run),
+                    expires_at_mono_ns: expiration.monotonic_ns(),
+                    operation: InputControlOperation::SubmitPrompt(input),
+                }
+            });
+        let reply = request.and_then(|request| {
+            started(&mut self.coordinator)
+                .handle_swept(self.conn, request, self.native.controller, deadline)
+                .map_err(CafleetError::from)
+        });
+        match reply {
+            Ok(None) => self.pending_sweep = Some(PendingSweep { deadline }),
+            Ok(Some(reply)) => self.finish_sweep(Ok(reply)),
+            Err(cause) => self.finish_sweep(Err(cause)),
+        }
+    }
+
+    /// Settles a completed sweep attempt in the runner, which has no client to settle it, and
+    /// feeds its outcome to the run-wide backoff.
+    fn finish_sweep(&mut self, reply: Result<InputControlReply>) {
+        let now = Instant::now();
+        let submission = match reply {
+            Ok(InputControlReply::Submission(submission)) => submission,
+            Ok(_) => unreachable!("a preview submission replies with a submission"),
+            Err(cause) => {
+                eprintln!("member runtime: preview sweep: {}", cause.message());
+                self.preview_sweep.back_off(now);
+                return;
+            }
+        };
+        match submission.status {
+            SubmissionStatus::Accepted => {
+                let input_id = submission
+                    .input_id
+                    .expect("an accepted preview has its durable input ID");
+                if let Err(cause) = self.settle_swept(input_id) {
+                    eprintln!(
+                        "member runtime: preview sweep: input {input_id} settlement: {}",
+                        cause.message()
+                    );
+                }
+                self.preview_sweep.reset();
+            }
+            SubmissionStatus::Held => self.preview_sweep.back_off(now),
+            SubmissionStatus::Queued
+            | SubmissionStatus::Rejected
+            | SubmissionStatus::Uncertain
+            | SubmissionStatus::LeftInComposer => {}
+        }
+    }
+
+    fn settle_swept(&mut self, input_id: i64) -> Result<()> {
+        let deadline = Instant::now() + SWEEP_ATTEMPT_BUDGET;
+        let run = self.run.clone();
+        with_database_deadline(self.conn, deadline, |conn| {
+            storage::settle_preview(conn, &run.owner(), input_id)
+        })?;
+        let retirement = InputExpiration::capture(deadline, &mut RealInputDeadlineClock)?;
+        let request = InputControlRequest {
+            identity: crate::runtime::ControlIdentity::from_run(&run),
+            expires_at_mono_ns: retirement.monotonic_ns(),
+            operation: InputControlOperation::Receipt(ReceiptAction::Retire { input_id }),
+        };
+        started(&mut self.coordinator)
+            .handle_received(self.conn, request, self.native.controller, deadline)
+            .map_err(CafleetError::from)?;
+        Ok(())
+    }
+}
+
+/// The sweep's read snapshot: the run's member is an active ordinary member whose recorded run
+/// is this run with a concrete placement, and its oldest unnotified pending message.
+fn sweep_snapshot(
+    conn: &mut Connection,
+    run: &RunRecord,
+    skipped: &std::collections::BTreeSet<i64>,
+) -> Result<Option<broker::MessageRecord>> {
+    let tx = conn.transaction()?;
+    let Some(fleet_id) = broker::active_member_fleet(&tx, run.member_id)? else {
+        return Ok(None);
+    };
+    let current = broker::get_member(&tx, run.member_id, fleet_id)?.filter(|member| {
+        member.kind == broker::MemberKind::Member
+            && member.placement.mux_pane_id.is_some()
+            && member
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.run.run_id == run.run_id)
+    });
+    let message = match current {
+        Some(_) => broker::oldest_pending_preview(&tx, run.member_id, skipped)?,
+        None => None,
+    };
+    tx.commit()?;
+    Ok(message)
 }
 
 /// Fences ordinary input after the native exit and queues every durable deferred result that
@@ -1397,6 +1615,68 @@ impl SweepBackoff {
 
     pub(crate) fn reset(&mut self) {
         self.delay = Duration::ZERO;
+    }
+}
+
+const SWEEP_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
+
+/// Paces the pending-preview sweep: one pass per interval, none before the run-wide backoff
+/// expires. Each transient `not_submitted` receipt arms the backoff once, before its retry.
+#[derive(Default)]
+struct PreviewSweep {
+    next_at: Option<Instant>,
+    backoff: SweepBackoff,
+    backoff_until: Option<Instant>,
+    backed_off_input: Option<i64>,
+    eligibility: Option<InputEligibility>,
+}
+
+impl PreviewSweep {
+    fn due(&mut self, now: Instant) -> bool {
+        let due = self.next_at.is_none_or(|next_at| now >= next_at)
+            && self.backoff_until.is_none_or(|until| now >= until);
+        if due {
+            self.next_at = Some(now + PREVIEW_SWEEP_INTERVAL);
+        }
+        due
+    }
+
+    /// An interaction closing or a candidate clearing resets the backoff.
+    fn observe(&mut self, eligibility: InputEligibility) {
+        let released = matches!(
+            self.eligibility,
+            Some(InputEligibility::Hold(
+                GateReason::Interaction | GateReason::Candidate
+            ))
+        ) && !matches!(
+            eligibility,
+            InputEligibility::Hold(GateReason::Interaction | GateReason::Candidate)
+        );
+        if released {
+            self.reset();
+        }
+        self.eligibility = Some(eligibility);
+    }
+
+    fn back_off(&mut self, now: Instant) {
+        self.backoff.transient();
+        self.backoff_until = Some(now + self.backoff.delay());
+    }
+
+    /// Arms the backoff the first time the sweep meets this transient receipt; `true` while the
+    /// retry must wait.
+    fn backs_off_after(&mut self, input_id: i64, now: Instant) -> bool {
+        if self.backed_off_input == Some(input_id) {
+            return false;
+        }
+        self.backed_off_input = Some(input_id);
+        self.back_off(now);
+        true
+    }
+
+    fn reset(&mut self) {
+        self.backoff.reset();
+        self.backoff_until = None;
     }
 }
 

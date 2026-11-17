@@ -10,11 +10,9 @@ use crate::cli::resolve_body;
 use crate::config::Settings;
 use crate::delivery::AttemptEnd;
 use crate::delivery::AttemptOutcome;
-use crate::delivery::BrokerReceiver;
 use crate::error::CafleetError;
 use crate::output::format_message;
 use crate::output::format_message_sent;
-use crate::output::format_message_wait;
 use crate::output::format_messages;
 use crate::runtime::ProcessTable;
 use crate::runtime::SystemProcessTable;
@@ -78,19 +76,7 @@ pub(crate) enum MessageCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Receive incoming messages and retry pending ordinary-member previews.
-    Wait {
-        /// Recipient whose inbox is received.
-        #[arg(value_name = "MEMBER_ID")]
-        member_id: i64,
-        /// Maximum seconds to wait.
-        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=1800))]
-        timeout: u64,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Stream full pending inbox records as JSONL without consuming them.
+    /// Notify pending message IDs as JSONL without consuming them.
     Listen {
         /// Active recipient whose inbox is streamed.
         #[arg(value_name = "MEMBER_ID")]
@@ -178,28 +164,6 @@ pub(crate) fn run(
                 messages.iter().map(crate::output::json::message).collect(),
             );
             emit(json, &payload, || format_messages(&messages))
-        }
-        MessageCommand::Wait {
-            member_id,
-            timeout,
-            json,
-        } => {
-            let mut receiver = BrokerReceiver::new(conn, settings, member_id);
-            let outcome = crate::delivery::wait(
-                &SystemClock,
-                &mut receiver,
-                std::time::Duration::from_secs(timeout),
-            )?;
-            let messages = &outcome.messages;
-            let payload = serde_json::json!({
-                "member_id":member_id,
-                "outcome":if messages.is_empty() { "timeout" } else { "messages" },
-                "messages":messages.iter().map(crate::output::json::message).collect::<Vec<_>>(),
-                "notification_errors":outcome.notification_errors.iter().map(|error| serde_json::json!({
-                    "member_id":error.member_id,"message_id":error.message_id,"error":error.error
-                })).collect::<Vec<_>>(),
-            });
-            emit(json, &payload, || format_message_wait(member_id, messages))
         }
         MessageCommand::Listen {
             member_id,

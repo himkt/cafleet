@@ -48,17 +48,6 @@ pub(crate) fn format_message_sent(
     )
 }
 
-pub(crate) fn format_message_wait(member_id: i64, messages: &[MessageRecord]) -> String {
-    if messages.is_empty() {
-        format!("Timed out waiting for member {member_id}.")
-    } else {
-        format!(
-            "Messages available for member {member_id}.\n{}",
-            format_messages(messages)
-        )
-    }
-}
-
 pub(crate) fn format_fleet_list(fleets: &[FleetSummary]) -> String {
     if fleets.is_empty() {
         return "No fleets found.".into();
