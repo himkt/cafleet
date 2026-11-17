@@ -1312,7 +1312,7 @@ Left-in-composer prompt/exec errors append known receipt identity as `input_id=I
 
 ### 6.4 Output & Formatting
 
-A message is a durable point-to-point delivery. The recipient owns its inbox and explicitly acknowledges consumption.
+A message is a durable point-to-point delivery. The recipient owns its inbox, and its poll consumes every message it returns.
 
 #### Persisted shape
 
@@ -4103,7 +4103,7 @@ The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.
 | `fleets` | Fleet identity, creation/deletion and root Director reference |
 | `members` | Member registration and active/deregistered state |
 | `member_placements` | Multiplexer and coding-agent association |
-| `messages` | Point-to-point delivery, acknowledgement and preview stamp |
+| `messages` | Point-to-point delivery, poll consumption and preview stamp |
 | `runtime_database_identity` | Singleton database-instance identity for runtime namespaces |
 | `cafleet_database` | Singleton record of the cafleet version that initialized the file |
 | `member_runs` | Launch intent, ownership, lifecycle, recorded coverage and observed effective policy |

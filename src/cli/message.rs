@@ -1900,7 +1900,7 @@ mod tests {
         assert_eq!(
             notices(&output),
             (0..8).map(|id| vec![id]).collect::<Vec<_>>(),
-            "each second acks the held ID, so the release notices the new arrival"
+            "each second a poll consumes the held ID, so the release notices the new arrival"
         );
         assert!(
             io.snapshots

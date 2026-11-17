@@ -551,6 +551,9 @@ pub(crate) struct RunnerDependencies {
 
     #[cfg(test)]
     pub(crate) shutdown_unit: Duration,
+
+    #[cfg(test)]
+    pub(crate) preview_sweep: bool,
 }
 pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
     run_service(
@@ -572,6 +575,9 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 
             #[cfg(test)]
             shutdown_unit: Duration::from_secs(1),
+
+            #[cfg(test)]
+            preview_sweep: true,
         },
     )
 }
@@ -744,7 +750,14 @@ pub(crate) fn run_service(
         coordinator: None,
         pending_input_client: None,
         pending_sweep: None,
+        #[cfg(not(test))]
         preview_sweep: PreviewSweep::default(),
+        #[cfg(test)]
+        preview_sweep: if services.preview_sweep {
+            PreviewSweep::default()
+        } else {
+            PreviewSweep::disabled()
+        },
         deferred_retry: DeferredRetry::default(),
         shutdown_client: None,
         native_exit: None,
@@ -1427,9 +1440,7 @@ impl RunnerLoop<'_> {
                     }
                     (InputState::Accepted, _)
                     | (InputState::Settled, Some(InputDisposition::Submitted)) => {
-                        with_database_deadline(self.conn, deadline, |conn| {
-                            storage::settle_preview(conn, &run.owner(), input.input_id)
-                        })?;
+                        self.settle_swept(input.input_id)?;
                         skipped.insert(message.message_id);
                         continue;
                     }
@@ -1629,10 +1640,16 @@ struct PreviewSweep {
     backoff_until: Option<Instant>,
     backed_off_input: Option<i64>,
     eligibility: Option<InputEligibility>,
+    #[cfg(test)]
+    disabled: bool,
 }
 
 impl PreviewSweep {
     fn due(&mut self, now: Instant) -> bool {
+        #[cfg(test)]
+        if self.disabled {
+            return false;
+        }
         let due = self.next_at.is_none_or(|next_at| now >= next_at)
             && self.backoff_until.is_none_or(|until| now >= until);
         if due {
@@ -1677,6 +1694,17 @@ impl PreviewSweep {
     fn reset(&mut self) {
         self.backoff.reset();
         self.backoff_until = None;
+    }
+}
+
+#[cfg(test)]
+impl PreviewSweep {
+    /// A sweep that never comes due, so a runner fixture's own preview delivery races no sweep.
+    fn disabled() -> Self {
+        Self {
+            disabled: true,
+            ..Self::default()
+        }
     }
 }
 
@@ -2715,14 +2743,20 @@ pub(crate) mod test_support {
             with_configured_input_service(true, exit_code, body);
         }
 
-        /// Runs an input service whose deadline is `lifetime` instead of the default ten
-        /// seconds, for runner behavior that spans several retry intervals.
-        pub(crate) fn with_input_service_for(
+        /// The only input service whose runner sweeps pending previews; `lifetime` replaces
+        /// the default ten-second deadline for behavior that spans several retry intervals.
+        pub(crate) fn with_sweeping_input_service(
             lifetime: Duration,
             detecting: bool,
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
-            with_input_service_lifetime(lifetime, detecting, 0, |_| {}, body);
+            with_input_service_lifetime(
+                lifetime,
+                detecting,
+                0,
+                |config| config["preview_sweep"] = json!(true),
+                body,
+            );
         }
 
         fn with_configured_input_service(
@@ -2743,7 +2777,7 @@ pub(crate) mod test_support {
                 Duration::from_secs(10),
                 detecting,
                 exit_code,
-                configure_catalog,
+                |config| configure_catalog(&mut config["catalog"]),
                 body,
             );
         }
@@ -2752,7 +2786,7 @@ pub(crate) mod test_support {
             lifetime: Duration,
             detecting: bool,
             exit_code: i32,
-            configure_catalog: impl FnOnce(&mut Value),
+            configure: impl FnOnce(&mut Value),
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
             let until = Instant::now() + lifetime;
@@ -2761,7 +2795,7 @@ pub(crate) mod test_support {
                 let path = fixture._dir.path().join("observation-services.json");
                 let mut config: Value =
                     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-                configure_catalog(&mut config["catalog"]);
+                configure(&mut config);
                 std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
             });
             fixture.cleanup_deadline = Some(until);
@@ -3070,6 +3104,10 @@ pub(crate) mod test_support {
                     config.parent().unwrap(),
                 )?,
                 shutdown_unit: Duration::from_secs(1),
+                preview_sweep: match value.get("preview_sweep") {
+                    None => false,
+                    Some(enabled) => enabled.as_bool().expect("preview_sweep is a boolean"),
+                },
             };
             crate::runtime::service::run_service(settings, descriptor, services)
         }
@@ -4263,7 +4301,7 @@ mod tests {
 
         #[test]
         fn the_sweep_submits_unnotified_previews_oldest_first_with_no_caller_command() {
-            with_input_service(|fixture, until| {
+            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
                 let first = send(fixture, "first swept preview");
                 let second = send(fixture, "second swept preview");
                 wait_delivered(fixture, &first, until);
@@ -4294,7 +4332,7 @@ mod tests {
 
         #[test]
         fn a_consumed_message_is_never_selected() {
-            with_input_service(|fixture, until| {
+            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
                 let run = fixture.fixture.run.clone();
                 let tx = fixture
                     .fixture
@@ -4324,8 +4362,55 @@ mod tests {
         }
 
         #[test]
+        fn a_disconnected_consumers_accepted_preview_is_settled_by_the_sweep_and_its_receipt_retired()
+         {
+            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
+                let message = send(fixture, "disconnected swept preview λ");
+                let key = storage::preview_operation_key(
+                    fixture.fixture.run.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap();
+                let literal = line(&message);
+                let value = request(
+                    fixture,
+                    &key,
+                    &literal,
+                    InputKind::Preview,
+                    Some(message.message_id),
+                    until,
+                );
+                let mut abandoned = Peer::connect(fixture);
+                abandoned.send(&encode_control_frame(&value).unwrap(), until);
+                abandoned.stream.shutdown(Shutdown::Read).unwrap();
+                wait_delivered(fixture, &message, until);
+                drop(abandoned);
+                input_service_barrier(fixture, until);
+                assert_eq!(lines(fixture), [literal, "barrier".to_owned()]);
+                let receipts = previews(fixture, message.message_id);
+                assert_eq!(receipts.len(), 1, "{receipts:?}");
+                assert_eq!(receipts[0].operation_key, key);
+                assert_runner_settled_submitted(fixture, &message);
+                let query = json!({"protocol_version":1,"kind":"receipt",
+                    "identity":fixture.prepared.as_ref().unwrap(),"expires_at_mono_ns":expiration(until),
+                    "action":"query","operation_key":key});
+                let reply = exchange(fixture, &query, until);
+                let receipt = &reply["result"]["receipt"];
+                assert_eq!(receipt["status"], "present", "{reply}");
+                assert_eq!(receipt["input_id"], receipts[0].input_id, "{reply}");
+                let projection: SubmissionResult =
+                    serde_json::from_value(receipt["submission"].clone()).unwrap();
+                assert_eq!(
+                    projection.output_seq, None,
+                    "the sweep retires the coordinator's cached receipt after settling it: {reply}"
+                );
+            });
+        }
+
+        #[test]
         fn the_sweep_never_duplicates_a_preview_the_fifo_already_holds() {
-            with_detecting_input_service(|fixture, until| {
+            with_sweeping_input_service(Duration::from_secs(10), true, |fixture, until| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
                 manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
@@ -4380,7 +4465,7 @@ mod tests {
 
         #[test]
         fn a_sweep_request_queues_with_zero_bytes_behind_a_held_pane_lock_and_delivers_once_free() {
-            with_input_service_for(Duration::from_secs(30), false, |fixture, until| {
+            with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
                 let held = pane_lock(fixture);
                 let message = send(fixture, "swept behind a held pane lock");
                 wait_for(until, "the sweep reserves a receipt", || {
@@ -4406,7 +4491,7 @@ mod tests {
 
         #[test]
         fn a_transient_failure_backs_off_and_retries_the_same_head_before_a_newer_message() {
-            with_input_service_for(Duration::from_secs(45), false, |fixture, until| {
+            with_sweeping_input_service(Duration::from_secs(45), false, |fixture, until| {
                 let held = pane_lock(fixture);
                 let head = send(fixture, "head behind a busy pane");
                 let newer = send(fixture, "newer message");
@@ -4492,7 +4577,7 @@ mod tests {
         #[test]
         fn an_in_flight_sweep_attempt_blocks_a_second_sweep_and_queues_a_control_request_behind_it()
         {
-            with_input_service_for(Duration::from_secs(30), false, |fixture, until| {
+            with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
                 let stopped = StoppedNative::stop(fixture);
                 let head = send(fixture, "in flight while the native is stopped");
                 let newer = send(fixture, "second pending message");
