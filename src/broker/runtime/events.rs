@@ -4595,11 +4595,6 @@ mod tests {
                 payload["director_action"]["instruction"],
                 "Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction."
             );
-            let instruction = payload["director_action"]["instruction"].as_str().unwrap();
-            assert!(
-                !instruction.contains("ACK") && !instruction.contains("poll"),
-                "{instruction}"
-            );
             assert_eq!(
                 payload["director_action"]["inspect_argv"],
                 json!([
