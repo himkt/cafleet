@@ -21,8 +21,10 @@ This skill maintains each backend's Model catalog, its provenance/context notes,
 
 ## Approved sources (exhaustive allowlist)
 
-Fetch **only** the official pages listed in this table. Every page except
-Claude Code model configuration is pricing and availability authority.
+Fetch **only** the official sources listed in this table. Each source is
+authority for exactly what its row feeds: the provider pricing pages and the
+OpenCode Go models endpoint are pricing and availability authority, and the
+OpenCode Go usage-limits page feeds only the Go table's usage-limit notes.
 Claude Code model configuration is capability authority for the `claude`
 backend's context windows and `[1m]` applicability; use the pricing sources
 to price models, never the capability page. Search results, third-party price
@@ -34,7 +36,8 @@ sites, and social posts are never model-list authority.
 | OpenAI pricing | `codex` prices | `https://developers.openai.com/api/docs/pricing.md` |
 | Codex model availability | `codex` availability | `https://learn.chatgpt.com/docs/models.md` |
 | OpenCode Console models and pricing | `opencode` prices and availability | `https://opencode.ai/v2/docs/console/models/` |
-| OpenCode Go models and usage-limit pricing | `opencode-go` prices and availability | `https://opencode.ai/v2/docs/console/go` |
+| OpenCode Go models endpoint (JSON) | `opencode-go` prices and availability | `https://opencode.ai/inference/go/v1/models` |
+| OpenCode Go usage limits | `opencode-go` usage-limit and Extra Usage notes | `https://opencode.ai/v2/docs/console/go` |
 | Claude Code model configuration | `claude` context windows and `[1m]` applicability | `https://code.claude.com/docs/en/model-config.md` |
 
 ## Refresh procedure
@@ -153,37 +156,39 @@ section after the Console table and its notes, within the `opencode` backend's
 `### Model catalog`. Point to it from the Console preamble; the shared
 last-refreshed date covers both tables.
 
-1. **Price from the Go page only.** Use the Go page's per-token amounts from
-   its price table. These amounts count against subscription usage limits;
-   never price a Go row from the Console page or a vendor page.
-2. **Copy the Go model ID exactly.** Map each display name to its `Model ID`
-   through the Go page's *Endpoints* table, whose header is
-   `Model | Model ID | Endpoint | AI SDK Package`. Write
-   `opencode-go/<model-id>`, with the ID copied verbatim.
-3. **Mirror the Go catalog.** Add every missing listed ID, remove every
-   delisted ID, and re-verify every remaining row's price. Apply published
-   deprecation dates using the Console procedure's display-name binding rule:
-   keep a future-dated model with a note and remove one whose date has passed.
+1. **Price from the Go models endpoint only.** The endpoint returns JSON whose
+   `data` array holds one entry per Go model. Each `type` `chat` entry is a
+   catalog model; price it from `cost.text.input.price` and
+   `cost.text.output.price`, which are USD per MTok counted against
+   subscription usage limits. Never price a Go row from the Console page or a
+   vendor page.
+2. **Copy the Go model ID exactly.** Write `opencode-go/<id>`, with the entry's
+   `id` copied verbatim.
+3. **Mirror the Go catalog.** Add every missing `chat` entry ID, remove every
+   row whose ID the endpoint no longer returns, and re-verify every remaining
+   row's price.
 4. **Apply the row rules and maintain the notes.** Use the Console table's
-   columns: `Model | Class | Input $/MTok | Output $/MTok`, with one row per Go
-   *Endpoints* ID. A price-table display name with no *Endpoints* ID or more
-   than one ID, or an *Endpoints* ID with no price-table row or without both
-   Input and Output prices, is a parse failure: stop under Refresh procedure
+   columns: `Model | Class | Input $/MTok | Output $/MTok`, with one row per
+   `chat` entry ID. A duplicated `id`, or a `chat` entry without both a numeric
+   input and output price, is a parse failure: stop under Refresh procedure
    step 1.
 
-   Use the currently billed base (shortest-prompt) rate for each row.
-   Record a free-for-a-limited-time model with `0.00` in both columns.
+   Record the listed base price for each row; `cost.multipliers` scale it under
+   the stated `when` conditions, and each multiplier gets one note beneath the
+   table naming its model IDs, factor and condition. Record a free model with
+   `0.00` in both columns.
 
-   The preamble states that this table lists every model on the Go page and
-   that `opencode-go/` is part of the `--model` value. Explain that these tokens
+   The preamble states that this table lists every model the OpenCode Go
+   models endpoint returns and that `opencode-go/` is part of the `--model`
+   value. Explain that these tokens
    require configured providers that include an OpenCode Go subscription and
    that the Director checks availability per spawn under
    [Director model selection](../../../assets/skills/cafleet/roles/director.md#model-selection).
 
    Explain beneath the table that prices are USD per MTok counted against
-   subscription usage limits, and that Extra Usage bills usage beyond the
-   limits to the pay-as-you-go balance.
-   End with `Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).`
+   subscription usage limits, and, from the usage-limits page, that Extra
+   Usage bills usage beyond the limits to the pay-as-you-go balance.
+   End with `Sources: [OpenCode Go models endpoint](https://opencode.ai/inference/go/v1/models) and [OpenCode Go usage limits](https://opencode.ai/v2/docs/console/go).`
 
 5. **Order and classify every row.** Keep one table ordered most → least
    capable, with a Class on every row. Reuse the Console Class for each shared
