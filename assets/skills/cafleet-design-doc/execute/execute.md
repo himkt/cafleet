@@ -10,7 +10,7 @@ Preserve host permissions, user scope, prior decisions and stop requests through
 
 ## Director responsibilities
 
-Own correctness against the approved specification. Assign bounded paths, shared interfaces, checks and evidence locations. Retrieve complete durable messages, ACK consumption and facilitate ready work. Inspect broker, pane and artifact evidence before treating a member as stalled; disclose a replacement and preserve its handoff.
+Own correctness against the approved specification. Assign bounded paths, shared interfaces, checks and evidence locations. Retrieve complete durable messages, record each one as its poll consumes it and facilitate ready work. Inspect broker, pane and artifact evidence before treating a member as stalled; disclose a replacement and preserve its handoff.
 
 ### Step 1: Resolve Design Document Path (Director)
 
@@ -40,7 +40,7 @@ Read the assigned [Programmer](roles/programmer.md), [Tester](roles/tester.md), 
 1. Diagnose prerequisites, register the calling Director atomically and retain literal fleet/member IDs.
 2. Follow [Director wake](../../cafleet/roles/director.md#director-wake).
 3. Render compact role-by-path prompts with the delta table below, supplying BASE, owned paths and checks.
-4. Receive and ACK ready, then dispatch each member when inputs exist. Resolve uncertain launch/input by inspecting actual evidence before another submission.
+4. Receive and record ready, then dispatch each member when inputs exist. Resolve uncertain launch/input by inspecting actual evidence before another submission.
 
 Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>` (the column heading), TEAM `design document execution`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this per-role delta. Every role's CONTEXT LINES start with `DESIGN DOCUMENT: [INSERT absolute design-doc path]`. Spawn the Reviewer only at Step 5.
 

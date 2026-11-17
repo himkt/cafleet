@@ -11,7 +11,7 @@ Create and execute coordination uses the verb/pointer schema, except that these 
 | Create pre-draft clarification | Drafter questions and Director user-answer relay | Before design-document content exists; normal coordination resumes with the first draft. |
 | Execute Verifier tool discovery | Verifier's initial tool-and-MCP inventory to Director | First substantive payload after ready; later verification reports use ordinary paired markers. |
 
-Retrieve and send these payloads complete under the cafleet skill's [Send and Poll rules](../../cafleet/SKILL.md#send-unicast) (`--json` reads, `--file` for long bodies), then ACK the consumed delivery.
+Retrieve and send these payloads complete under the cafleet skill's [Send and Poll rules](../../cafleet/SKILL.md#send-unicast) (`--json` reads, `--file` for long bodies), recording each delivery the poll consumes.
 
 Before drafting, fresh-Drafter clarification may write hidden BASE-rooted broker-payload artifacts that hold questions, not design-document content, under the BASE write guards and explicit-output-path rules. The clarification gate stands: receive answers before creating or writing the design document.
 

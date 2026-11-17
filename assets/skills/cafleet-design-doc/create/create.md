@@ -10,7 +10,7 @@ Preserve BASE/output paths and role boundaries.
 
 ## Director responsibilities
 
-Preserve the user's scope, answers and existing annotations. Assign explicit owned paths, and report evidence instead of inferring completion from idle time. Read full durable messages, ACK consumption, and keep reception and supervision under the shared [Director procedure](../../cafleet/roles/director.md#supervision).
+Preserve the user's scope, answers and existing annotations. Assign explicit owned paths, and report evidence instead of inferring completion from idle time. Read full durable messages, record each one as its poll consumes it, and keep reception and supervision under the shared [Director procedure](../../cafleet/roles/director.md#supervision).
 
 ### Step 0: Path Resolution & Resume Detection (Director)
 
@@ -23,7 +23,7 @@ An existing document keeps its content: existing user-relay markers enter resume
 1. Diagnose actual prerequisites with `cafleet doctor`, register the calling Director and retain returned literal IDs.
 2. Follow [Director wake](../../cafleet/roles/director.md#director-wake).
 3. Spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) with their role paths, required skills, concrete document/BASE paths and scoped assignments.
-4. Receive and ACK ready before depending on a member. Dispatch each assignment when its inputs exist; inspect actual placement when launch evidence is uncertain.
+4. Receive and record ready before depending on a member. Dispatch each assignment when its inputs exist; inspect actual placement when launch evidence is uncertain.
 
 Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>`, TEAM `design document creation`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this per-role delta.
 

@@ -6,11 +6,11 @@ This is the self-contained interface and observable-behavior specification for t
 
 CAFleet multiplexes coding-agent sessions in tmux or herdr and coordinates them with durable point-to-point SQLite messages. The host owns task continuation and native execution results; the Director owns delegation, wake handling, evidence inspection, authorization and cleanup. The shipped product consists of the CLI, embedded skills/presets and documentation site.
 
-Reproduce the documented command/option/exit surface, configuration defaults, current schema, enum values, output shapes, lifecycle, finite receive, notification, locking, termination deferral and native dispatch semantics. The current format identity defines compatibility; required data corruption surfaces at its read boundary.
+Reproduce the documented command/option/exit surface, configuration defaults, current schema, enum values, output shapes, lifecycle, consuming poll, notification, locking, termination deferral and native dispatch semantics. The current format identity defines compatibility; required data corruption surfaces at its read boundary.
 
 ## 2. Architecture stance
 
-The core is synchronous. A send previews pending ordinary-member messages within its budget; finite receive owns bounded waits and notification retries. A persistent read-only listener notifies pending message IDs through JSONL without pane operations. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools own receiver handles and collect native results; consumed deliveries are explicitly ACKed, and deferred actions and native handles remain in host-owned state. Automatic Director reception sends no Escape, text, Enter or queued composer input.
+The core is synchronous. A send previews pending ordinary-member messages within its budget, and each ordinary member's runner retries its own still-pending previews (§6.9 Runner pending-preview sweep). A persistent read-only listener notifies pending message IDs through JSONL without pane operations. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools own receiver handles and collect native results; a poll consumes every delivery it returns, and deferred actions and native handles remain in host-owned state. Automatic Director reception sends no Escape, text, Enter or queued composer input.
 
 ## 3. Module layout
 
@@ -23,7 +23,7 @@ The core is synchronous. A send previews pending ordinary-member messages within
 | Multiplexer | Discovery, pane creation/capture/input/kill and layout compensation |
 | Pane input | Stable OS locks, runner-state gating and durable receipt settlement |
 | Member runtime | Owned PTY transport, typed observations, durable event/inbox transactions and identity-pinned recovery |
-| Notification / receiving | Ordinary-member draining delivery, caller-owned finite retries and read-only persistent inbox streams, optionally forwarded to a Codex thread |
+| Notification / receiving | Ordinary-member draining delivery and read-only persistent inbox streams, optionally forwarded to a Codex thread |
 | Coding-agent backends | Registry, availability, model/effort validation and spawn argv |
 | CLI | Parse/guard/compose these contracts and emit results |
 
@@ -80,7 +80,7 @@ Schema compatibility and the application identity are specified in §8 Database 
 
 Connections use SQLite foreign-key enforcement and a normal five-second busy timeout; a bounded operation caps that wait to its remaining budget. The selected file path resolves per §6.3 Database selection, and its canonical database file keys lock-directory construction.
 
-Format validation, baseline initialization, incompatible-file refusal and file preservation follow §6.3 Schema-version guard. An invocation's validated connection serves its internal send, ACK and notification stamp operations; standalone public broker write functions retain their own format guard.
+Format validation, baseline initialization, incompatible-file refusal and file preservation follow §6.3 Schema-version guard. An invocation's validated connection serves its internal send, poll consumption and notification stamp operations; standalone public broker write functions retain their own format guard.
 
 ### 6.2 Broker
 
@@ -96,17 +96,19 @@ Registration requires a live fleet and active valid root Director. Insert the me
 
 Slot occupancy counts the fleet's active members with a concrete placement by `window_ordinal` and `column_side`, excluding the Director row; a pending placement holds no slot (§6.5 Fleet window layout).
 
-Roster reads active members of live fleets, derive kind (§5.4 Member kind discriminator) and include nullable activity. Activity is the maximum sent, received and ACK timestamp; `idle` is the elapsed seconds since the latest known activity, truncated to an integer, and null is the correct state without activity. Detailed views retain registration, description and placement data. Placement mutations acquire the same pane input locks as input writers. Required Director/placement/enum corruption fails rather than producing placeholder values.
+Roster reads active members of live fleets, derive kind (§5.4 Member kind discriminator) and include nullable activity. Activity is the maximum sent, received and consumption timestamp (`last_consumed`); `idle` is the elapsed seconds since the latest known activity, truncated to an integer, and null is the correct state without activity. Detailed views retain registration, description and placement data. Placement mutations acquire the same pane input locks as input writers. Required Director/placement/enum corruption fails rather than producing placeholder values.
 
 #### Messaging
 
-Send requires active sender/recipient in the same live fleet and persists exact text. Every individual fan-out send commits independently; keep already committed IDs when another recipient fails. Poll/wait read incoming unread messages by descending status timestamp/message ID. Show requires existence. ACK requires an unread existing row, stamps completion and removes notification eligibility (§6.4 Persisted shape).
+Send requires active sender/recipient in the same live fleet and persists exact text. Every individual fan-out send commits independently; keep already committed IDs when another recipient fails. Poll selects every incoming `input_required` message by descending status timestamp/message ID and completes exactly those rows in the same write transaction (§6.3 `message poll`), which removes their notification eligibility (§6.4 Persisted shape). Show requires existence and changes no state.
 
-Pending preview selection chooses the oldest eligible row by `(created_at, message_id)` for an active ordinary recipient with a concrete pane; root Directors and self-sends are ineligible. Revalidate ordinary-member kind, fleet, placement, message status and null notification stamp while holding pane input ownership. Stamp success conditionally only after complete submission; delivery leaves `status_state` unchanged until explicit ACK. Listening selects every pending record independently of notification fields, including stamped pending self-sends, without changing broker state.
+Message ID order is commit order. `messages.message_id` is `AUTOINCREMENT`, allocated inside the inserting write transaction, and SQLite serializes writers, so a message with a larger ID always commits after every message with a smaller ID. A receiver that records the highest message ID its polls returned therefore knows that every pending ID at or below that value was consumed by an earlier poll.
+
+Pending preview selection chooses the oldest eligible row by `(created_at, message_id)` for an active ordinary recipient with a concrete pane; root Directors and self-sends are ineligible. Revalidate ordinary-member kind, fleet, placement, message status and null notification stamp while holding pane input ownership. Stamp success conditionally only after complete submission; delivery leaves `status_state` unchanged until the recipient's poll consumes the message. Listening selects every pending record independently of notification fields, including stamped pending self-sends, without changing broker state.
 
 #### Broker errors
 
-Preserve the validation boundary and explicit cause. Missing member/message, inactive fleet/Director, cross-fleet pair and already-ACKed rows fail with application errors; §6.3 CLI *Error Messages* lists their exact strings.
+Preserve the validation boundary and explicit cause. Missing member/message, inactive fleet/Director, and cross-fleet pair fail with application errors; §6.3 CLI *Error Messages* lists their exact strings.
 
 ### 6.3 CLI
 
@@ -130,9 +132,9 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
-| `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
+| `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
 | `message listen` | Notify pending message IDs through stdout | `MEMBER_ID` | JSONL only |
-| `message ack` / `message show` | Consume / read one message | `MESSAGE_ID` | yes |
+| `message show` | Read one message | `MESSAGE_ID` | yes |
 
 #### Database selection
 
@@ -168,9 +170,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `fleet delete` | `Deleted fleet ID. Deregistered N members.` plus one line per ordinary member | `{fleet_id, deregistered_count, members}` |
 | `message send` | `Message sent.` then envelope, delivery line and any input line | `{message, notification_sent, input_id, delivery}` |
 | `message poll` | Envelopes, or `No messages found.` | Full record array |
-| `message ack` | `Message acknowledged.` then envelope | `{message}` |
 | `message show` | Envelope | `{message}` |
-| `message wait` | Availability/timeout line and any messages | `{member_id, outcome, messages, notification_errors}` |
 | `message listen` | — | Tagged `ready`, `pending`, `closed` JSONL records; no `--json` flag |
 | `member create` | `ID NAME backend=AGENT pane=PANE window=WINDOW` plus runtime line | Member with placement and runtime |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
@@ -189,7 +189,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 
 ##### Member list output
 
-Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack` and `idle`. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending window or pane.
+Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_consumed` and `idle`. `last_consumed` is the latest `status_timestamp` of the member's completed incoming messages, the time its poll consumed them. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending window or pane.
 
 Every JSON `placement` object, in roster, `member create`, `member show` and `fleet create` output, has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id` and `mux_window_name` are null exactly when `mux_pane_id` is null.
 
@@ -236,7 +236,7 @@ The guard is cooperative, not a security boundary: it stops a member that passes
 
 #### `permissions.allow` coverage
 
-Prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Native Monitor authorization is separate: a Bash-rule check establishes no Monitor permission. Literal IDs and trailing JSON flags preserve prefix matching.
+Prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300`. Native Monitor authorization is separate: a Bash-rule check establishes no Monitor permission. Literal IDs and trailing JSON flags preserve prefix matching.
 
 Ask entries for the Director's pane-input prefixes follow §6.7 Claude permission posture, which states the permission-profile contract. `cafleet permission respond` runs under the Director host's effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses.
 
@@ -777,7 +777,7 @@ Resolve the complete text body, including a `--file -` stdin wait, before starti
 | Another sender's root Director | §6.5 Push notifications, with no pane-delivery diagnostic and no multiplexer requirement | `{"status":"not_applicable","method":null,"reason":"director_stdout"}` | `null` |
 | An ordinary member | Drain its pending messages oldest-first into its concrete pane within the remaining budget, the new message included | The projection of this invocation's evaluation of the new message | The receipt's ID when allocated |
 
-§6.5 Push notifications specifies the line, the drain and under-lock revalidation. A committed send exits 0 with its stdout record; a queued, held or unavailable ordinary-member notification leaves `notification_sent=false`. `notification_sent` is `true` exactly when this invocation submitted the newly committed message, including after draining an older one. When another invocation delivered it, `notification_sent` stays `false` with no stderr diagnostic; the recipient still received the line. An exhausted attempt preserves any committed sent prefix and reports the failure with its current receipt context. The next send to that recipient or a `message wait` (§6.3) rotation retries messages still pending; the runner retries a preview it accepted into its queue (§6.9 Runner-owned deferred delivery).
+§6.5 Push notifications specifies the line, the drain and under-lock revalidation. A committed send exits 0 with its stdout record; a queued, held or unavailable ordinary-member notification leaves `notification_sent=false`. `notification_sent` is `true` exactly when this invocation submitted the newly committed message, including after draining an older one. When another invocation delivered it, `notification_sent` stays `false` with no stderr diagnostic; the recipient still received the line. An exhausted attempt preserves any committed sent prefix and reports the failure with its current receipt context. The recipient's runner retries messages still pending: a preview it accepted into its queue retries itself (§6.9 Runner-owned deferred delivery), and its pending-preview sweep retries every other unnotified pending message (§6.9 Runner pending-preview sweep), as does the next send to that recipient.
 
 JSON is ordered `message,notification_sent,input_id,delivery`. `input_id` is the nullable durable input ID of the new message's preview receipt, and `delivery` is the shared delivery projection (§6.9 Delivery reporting) for the new message, even when the invocation also retries an older one. Text output appends the delivery and input lines of §6.3 Runtime presentation after the envelope.
 
@@ -786,7 +786,7 @@ JSON is ordered `message,notification_sent,input_id,delivery`. `input_id` is the
 A notification failure prints `Message NEW_ID was persisted. ` followed by its diagnostic on stderr; stdout and exit 0 are unchanged. Every per-attempt failure uses this diagnostic:
 
 ```text
-message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; the next send to member MEMBER_ID or the next message wait retries it.
+message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; member MEMBER_ID's runner retries it.
 ```
 
 For each attempted message left in the composer or held by its own in-progress, uncertain or abandoned receipt, print one scoped diagnostic after that same persisted prefix. `INPUT_ID` identifies this invocation's attempt N and `NEXT_ID` its atomic re-delivery successor; the new message's JSON still projects N, not its successor. Submitted and queued messages produce none.
@@ -806,37 +806,20 @@ For each attempted message left in the composer or held by its own in-progress, 
 | The pane input lock stays busy through the lock wait (§6.5 Pane input lock) | `pane input remained busy` |
 | Runner lock, transport or submission failure | The runner error text with known run/input context |
 | Database busy or deadline exceeded during the under-lock snapshot or notification stamp | The storage error text; names the current candidate, or the candidate from placement revalidation when selection has not completed |
-| `message wait` attempt fails with database busy or deadline exceeded before selecting a candidate | The storage error text; names the selected rotation entry |
 
 Other failures, including corrupt, incompatible or unreadable storage and a termination-span start failure, retain their causes after the persisted prefix. Storage failure before commit exits 1 with its cause.
 
 ##### `message poll`
 
-`cafleet message poll MEMBER_ID [--json]` returns only incoming `input_required` records, descending by status timestamp/message ID. Unknown or inactive member: `Member ID not found`, exit 1.
+`cafleet message poll MEMBER_ID [--json]` returns and consumes every incoming `input_required` message in one write transaction:
 
-##### `message wait`
+1. Open one `BEGIN IMMEDIATE` transaction under the ordinary database timeout.
+2. Validate an active member. An unknown or inactive member returns `Member ID not found`, exits 1 and consumes nothing.
+3. Select every `to_member_id=MEMBER_ID AND status_state='input_required'` row, ordered by `status_timestamp DESC, message_id DESC`; the order is evaluated before the update.
+4. Update exactly the selected IDs to `status_state='completed'` with one `status_timestamp` (now), and re-read them in the step-3 order.
+5. Commit, then print. JSON is the array of post-consumption records, each with `status_state` `completed`. Text keeps its 200-codepoint body truncation (§ Message Body Truncation), and `message show MESSAGE_ID --json` recovers a full body.
 
-`cafleet message wait MEMBER_ID [--timeout SECONDS] [--json]`
-
-Timeout is an integer in `1..=1800`, default `300`. Validate an active subject and live fleet. Existing unread deliveries return immediately; otherwise check at one-second monotonic intervals. The invocation is a blocking receive for scripts and manual use and never ACKs messages.
-
-Between inbox checks, retry pending deliveries for at most one ordinary member per interval with an in-memory round-robin cursor. Select concrete ordinary-member placements in the fleet, excluding its root Director, the wait's own subject, self-notifications, ACKed and already-notified rows. Each attempt drains that member's pending messages under the delivery procedure (§6.5 Push notifications) without consulting pane state. One invocation attempts each pending message at most once; a later send or wait invocation retries a failed message, and later messages for the same member remain eligible. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
-
-Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second budget for runtime locking, revalidation, submission and receipt settlement. A lock still busy at that attempt's bound records the not-notified diagnostic (§6.3 Delivery outcome) in `notification_errors`. Cap subprocess/database waits and staged input to the remaining original budget. Mandatory database finalization follows §6.5 Push notifications. A receive returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
-
-The ordered JSON result is:
-
-```json
-{"member_id":41,"outcome":"timeout","messages":[],"notification_errors":[]}
-```
-
-`outcome` is `messages` with nonempty full poll records, or `timeout` with an empty array. Each diagnostic has ordered keys `{member_id, message_id, error}`. Keep one diagnostic per not-notified message, ordered by message ID.
-
-Left-in-composer and per-message uncertain/abandoned diagnostics use the same exact strings as §6.3 Delivery outcome in `notification_errors`; per-message holds on verified-composer runs preserve eligibility of later messages under §6.9 Durable input receipts and settlement.
-
-Pending placement and a placement change under the lock are ordinary holds that keep entries unchanged. A drain that notifies a recorded message removes that message's entry. Reconcile diagnostics with each successful receive snapshot and the typed observations of its owned notification attempt. Remove an entry when they show its message ACKed, its recipient gone or the message notified by any invocation. After receive expiry, return the last successful snapshot reconciled with the completed attempt's observations. Subsequent external changes become visible to the next invocation; final reconciliation starts no additional I/O or tail budget.
-
-Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause and retains earlier notification diagnostics on stderr, including when JSON output was requested. Ctrl+C outside a delivery attempt terminates the process normally; inside an attempt it takes effect when the attempt's termination-deferral span (§6.5 Termination during pane input) ends.
+Writers serialize on the transaction, so two concurrent polls of one member return disjoint sets whose union is the pending set. An empty inbox prints `[]` (text: `No messages found.`), commits a no-op and exits 0. A failure before commit rolls back and consumes nothing. A stdout failure after commit leaves the returned messages consumed; no later poll or listener notice lists them again, and `message show` still reads each one. Consumption is independent of the assignment's progress (§6.4 Persisted shape).
 
 ##### `message listen`
 
@@ -862,7 +845,7 @@ The command always emits JSONL; text mode and `--json` are absent. Stdout contai
 {"event":"closed","member_id":1,"reason":"timeout"}
 ```
 
-A `pending` record is an ID-only notice; it carries no message body, and the receiver reads full records through `message poll`, `message show` or `message wait`:
+A `pending` record is an ID-only notice; it carries no message body, and the receiver consumes full records through `message poll` (or reads one through `message show`):
 
 | Field | Type | Contract |
 |---|---|---|
@@ -876,7 +859,7 @@ Each short read transaction validates identity and selects every `input_required
 
 **Notice hold.** The listener's only emission state is the *hold*. A hold exists exactly while some ID named by the last delivered notice is still pending; it carries the *held set* `H` (those IDs, never empty) and `held_at`, the monotonic instant that notice was delivered. The listener starts with no hold. `HOLD_CEILING` is 300 s. On every successful snapshot with ordered pending set `P`, in order:
 
-1. **Reconcile:** `H ← H ∩ P`. ACKed IDs leave the hold; when `H` becomes empty, the hold and its `held_at` end.
+1. **Reconcile:** `H ← H ∩ P`. Consumed IDs leave the hold; when `H` becomes empty, the hold and its `held_at` end.
 2. **Fresh IDs:** `F ← P \ H`.
 3. **Decide** by the table below.
 4. **Commit:** when the output reports the notice delivered (stdout: the complete record plus LF flushed; forwarding: § Codex forwarding), the hold becomes `H ← P` with `held_at` set to now. A refused notice leaves the hold exactly as step 1 left it, and the next snapshot decides again. An output failure ends the listener with exit 1.
@@ -885,20 +868,23 @@ Each short read transaction validates identity and selects every `input_required
 |---|---|
 | `P` empty | Emit nothing |
 | No hold and `P` non-empty (hold released) | Emit `pending(P)` |
-| A hold, `F` non-empty and at least `HOLD_CEILING` since `held_at` | Emit `pending(P)`, the stall-guard re-notice |
+| A hold, `F` non-empty and at least `HOLD_CEILING` since `held_at` | Emit `pending(P)`, the ceiling re-notice: one bulk record naming every unpolled ID |
 | Otherwise (a hold with `F` empty, or the ceiling not reached) | Emit nothing |
 
 Every notice carries the full pending set, so every pending ID an earlier notice named is in `H`; that one set separates notified from fresh IDs, and the listener keeps no per-ID history. A failed snapshot leaves the hold unchanged. A snapshot that emits nothing, or whose notice is refused, waits one second (shortened by the lease) before the next snapshot; one whose notice is delivered rechecks immediately.
 
-**Notice bound.** Notices are bounded by receiver activity, not by arrivals: a hold release emits at most one notice, at the first later snapshot whose `P` is non-empty; a hold-ceiling firing emits at most one notice and restarts the ceiling; no other event emits a notice. At most one new notice therefore follows each hold release and each ceiling firing. A receiver that ACKs every held ID in k separate rounds during one long turn while messages keep arriving can queue up to k notices behind that turn, plus one per 300 s of the turn; a notice that arrives after its IDs were handled costs one empty or partial poll. Without a release or a ceiling firing, a burst of any size adds no notice beyond the one outstanding.
+**Re-listing.** An ID leaves `P` only through a consuming `message poll`, which consumes the subject's whole pending set atomically, so a snapshot sees either all held IDs pending or none of them, and any poll by the receiver releases the hold. The next ordinary notice names only IDs committed after that poll. Within one listener process an ID appears in two notices only through a ceiling re-notice, which fires only when no poll has run for `HOLD_CEILING` since the held notice was delivered, so every ID it names, held or fresh, is unpolled. The only other re-listing is a new listener's startup replay of still-unpolled IDs. The ceiling is the liveness backstop for a delivered notice that no receiver turn acted on; without it, every later message would stay held.
+
+**Notice bound.** Each ordinary notice after the first requires a hold release, and each release requires a poll that consumed held IDs. Each ceiling firing emits at most one notice and restarts the ceiling. A listener therefore emits at most 1 notice, plus one per poll that consumed held IDs, plus one per ceiling firing (at most one per `HOLD_CEILING`, and only while held IDs stay unpolled with fresh IDs present). A receiver turn with k mid-turn polls can queue at most k + 1 notices behind it, each naming only IDs that turn already consumed. A burst of any size adds no notice beyond the one outstanding.
 
 | Situation | Behavior |
 |---|---|
-| The receiver handled a notice's IDs through a mid-turn poll before the queued notice arrived | The stale notice costs one empty or partial poll |
-| Listener restart | The new process emits one notice naming every pending ID right after `ready`, including IDs a previous listener notified |
-| The receiver polls and ACKs IDs before any notice names them | Those IDs are never notified |
-| A message, including a runtime event such as `interaction_opened`, arrives while a notice is held | No notice until the held IDs are ACKed or the ceiling re-notice fires; the ID is visible to any `poll` immediately |
-| The receiver leaves a notified ID unACKed and nothing new arrives | No re-notice; the ceiling fires only for fresh IDs |
+| A delivered notice whose IDs are never polled, and a new message arrives | One ceiling re-notice naming the held and fresh IDs, at least `HOLD_CEILING` after `held_at` |
+| A delivered notice whose IDs are never polled, and nothing new arrives | No re-notice; the ceiling fires only when fresh IDs exist |
+| The receiver polls before any notice names an ID | That ID is never notified |
+| A message, including a runtime event such as `interaction_opened`, arrives while a notice is held | No notice until the receiver polls or the ceiling re-notice fires; any `poll` returns the ID immediately |
+| The receiver polls mid-turn, then a queued notice is delivered | The queued notice names only IDs that poll consumed |
+| Listener restart | The new process emits `ready`, then one notice naming every pending (unpolled) ID, including IDs a previous listener notified |
 
 Listening leaves consumption and `notified_at` unchanged and performs no pane retry, lock or dispatch; stamped pending self-sends remain notice-eligible. Concurrent listeners are independent read-only observers with no consumer lock, each with its own hold.
 
@@ -917,7 +903,7 @@ Database contention retries stay inside the snapshot budget; exhaustion or anoth
 - **Forwarding command:** `codex queue --thread THREAD --message <text>`, where the text is `[cafleet listen record] <compact record JSON>`.
 - **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded.
 - **Full-queue refusal.** Codex refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure.
-- **Refused notice.** A `pending` notice gets one `codex queue` attempt. Exit 0 delivers it and commits the hold; a full-queue refusal refuses it immediately, leaving the hold as reconcile left it (§ `message listen`). The listener then waits one second, checks the pinned session (§ Liveness) and takes a fresh snapshot, so the retry is rebuilt from the then-current pending set, and a notice whose set has become empty, or whose re-notice no longer has fresh IDs, is abandoned. The pinned session's exit ends the listener with `session_exited`.
+- **Refused notice.** A `pending` notice gets one `codex queue` attempt. Exit 0 delivers it and commits the hold; a full-queue refusal refuses it immediately, leaving the hold as reconcile left it (§ `message listen`). The listener then waits one second, checks the pinned session (§ Liveness) and takes a fresh snapshot, so the retry is rebuilt from the then-current pending set, and a notice whose set has become empty because a poll consumed it, or whose re-notice no longer has fresh IDs, is abandoned. The pinned session's exit ends the listener with `session_exited`.
 - **Refused `closed` record.** A forwarded `closed` record is retried in place on every full-queue refusal after 1 s, checking the pinned session before each retry, with no time limit; the pinned session's exit ends the listener with `session_exited`. After acceptance the record is written to stdout under a fresh five-second output deadline taken when forwarding returns, so a refusal of any length still leaves the stdout `closed` record. The `session_exited` record written after a refused closing record meets the pinned session's exit uses the same fresh deadline.
 - **Argument size.** A notice's forwarded text grows by about one ID's digits plus a comma per pending message and is bounded only by the platform's single-argument limit (131,072 bytes on Linux, roughly 16,000 seven-digit IDs). A spawn failure such as `E2BIG` takes the `failed to forward record to codex thread <THREAD>: could not start codex: …` row below.
 - **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of §6.9 Native executable resolution.
@@ -939,13 +925,9 @@ Database contention retries stay inside the snapshot budget; exhaustion or anoth
 
 **Liveness.** Each idle tick (at most 1 s) checks the pinned pid with `kill(pid, 0)`. On Linux it also compares the pinned process's start time from `/proc/<pid>/stat`, so a reused pid counts as exited. The pinned process's exit ends the listener with `session_exited`. The listener sets no `PR_SET_PDEATHSIG`, which fires when the forking thread exits rather than the multi-threaded Codex process.
 
-##### `message ack`
-
-`cafleet message ack MESSAGE_ID [--json]` transitions an existing unread message to completed, updating its status timestamp. The recipient/fleet derive from that row. ACK signifies consumption (§6.4 Persisted shape).
-
 ##### `message show`
 
-`cafleet message show MESSAGE_ID [--json]` returns one full record. Existence is the read guard.
+`cafleet message show MESSAGE_ID [--json]` returns one full record in any state and changes no state; it is the recovery read for a consumed body. Existence is the read guard.
 
 #### `cafleet member` — Member Lifecycle + Pane Interaction
 
@@ -1307,8 +1289,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The live-fleet guard: the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 |
-| `message ack` / `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` | 1 |
-| `message ack` | A message not in the `input_required` state | `Error: Cannot ACK message in state <state>` | 1 |
+| `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` | 1 |
 | `message send` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` | 1 |
 | `message send` | The recipient is unknown or inactive | `Error: Destination member not found: <to-member-id>` | 1 |
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` | 1 |
@@ -1351,11 +1332,11 @@ The ordered public record is:
 }
 ```
 
-`to_member_id` is always an integer. ACK changes `status_state` to `completed` and stamps `status_timestamp`; completion means consumption, independent of the assignment's progress.
+`to_member_id` is always an integer. The recipient's consuming poll (§6.3 `message poll`) changes `status_state` to `completed` and stamps `status_timestamp` with the consumption time; completion means consumption, independent of the assignment's progress.
 
 #### Rendered shape
 
-§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records; show/ACK wrap one record as `message`; send adds `notification_sent`; wait returns full poll records inside its finite receive result; listen carries message IDs, not the full record, in tagged `pending` notices, with separate `ready`/`closed` lifecycle records and explicit ACK consumption. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
+§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records it consumed; show wraps one record as `message`; send adds `notification_sent`; listen carries message IDs, not the full record, in tagged `pending` notices, with separate `ready`/`closed` lifecycle records, and leaves consumption to the poll the notice prompts. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
 
 ##### Text-mode projection
 
@@ -1376,7 +1357,7 @@ Text bodies use a fixed 200 codepoints plus `…`; `--json` preserves the comple
 
 #### Runtime observation messages
 
-A runtime notification is an ordinary inbox record whose `text` is the complete versioned event JSON. The pinned observed member is its sender and the Director its recipient; verify the durable event/message association through `event show` before acting. Its typed source distinguishes runner observation from model-authored speech. Version-2 permission-opening events carry a broker-built `director_action` (review instruction and inspection argv), validated against the stored event/Director association (§6.9 Request-bound permission responses). ACK consumes the message independently of the attributed decision, answer submission, event visibility and actual continuation. §6.9 Persistence, notification and read interfaces owns evidence policy, atomic association and archived recovery.
+A runtime notification is an ordinary inbox record whose `text` is the complete versioned event JSON. The pinned observed member is its sender and the Director its recipient; verify the durable event/message association through `event show` before acting. Its typed source distinguishes runner observation from model-authored speech. Version-2 permission-opening events carry a broker-built `director_action` (review instruction and inspection argv), validated against the stored event/Director association (§6.9 Request-bound permission responses). The Director's poll consumes the message independently of the attributed decision, answer submission, event visibility and actual continuation. §6.9 Persistence, notification and read interfaces owns evidence policy, atomic association and archived recovery.
 
 #### `strip_ansi` regex and CR-defrag
 
@@ -1465,7 +1446,7 @@ No database statement runs while a writer waits for the lock.
 
 | Writer | Lock still busy when the wait ends |
 |---|---|
-| `message send` / `message wait` delivery | The §6.3 Delivery outcome diagnostic with `CAUSE` `pane input remained busy` |
+| `message send` delivery | The §6.3 Delivery outcome diagnostic with `CAUSE` `pane input remained busy` |
 | `member prompt`, `member exec` | Exit 1 with the runner input failure and recorded runtime context (§6.3 Runtime presentation) |
 | `member press` | Exit 1 with the primary and zero-dispatch diagnostics (§6.3 `member press`) |
 
@@ -1477,19 +1458,19 @@ Interrupting a host turn, including through Escape-first delivery fallback, can 
 
 | Command | Span |
 |---|---|
-| `message send`, each `message wait` attempt | From lock acquisition through the last `notified_at` stamp |
+| `message send` | From lock acquisition through the last `notified_at` stamp |
 | `member prompt`, `member exec` | From the runner request through its reply |
 | `member press` | Begin before acquiring the lock; retain it through the writing process and bounded cleanup, releasing the lock before restoring signals |
 | `member create` | From fleet layout lock acquisition (§ Fleet window layout) through `started` or the end of its compensation |
 | `member delete`, `fleet delete` | From pane lock acquisition through fleet layout lock acquisition, deregistration and layout cleanup |
 
-Every span is bounded by its own deadline, so a deferred signal waits at most one span. `message wait` outside an attempt keeps default signal behavior. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts; the member session, started by the multiplexer server, does not inherit it.
+Every span is bounded by its own deadline, so a deferred signal waits at most one span. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts; the member session, started by the multiplexer server, does not inherit it.
 
 `SIGKILL` cannot be deferred; a kill inside a span leaves:
 
 | Killed command | State left | Discovery and recovery |
 |---|---|---|
-| `message send` / `message wait` between first keystroke and stamp | `notified_at` stays NULL; the line may or may not have reached the pane | The next send or `message wait` retries it; a duplicate line is possible |
+| `message send` between first keystroke and stamp | `notified_at` stays NULL; the line may or may not have reached the pane | The recipient's runner sweep (§6.9 Runner pending-preview sweep) or the next send retries it; a duplicate line is possible |
 | `member prompt` / `member exec` after typing began | Partial or complete input | `member capture`; re-dispatch only after inspecting the pane |
 | `member press` after its writing process starts | Any prefix, including empty or complete, may have been handled | Inspect the pane before an explicitly authorized new action |
 | `member create` | A pane without a registry row, or a row whose placement stays pending; the OS releases the fleet layout lock, and a consumed overflow ordinal stays consumed | `member list` and `member capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
@@ -1540,7 +1521,7 @@ A started write with an ambiguous result retains uncertainty; failure after subm
 
 #### Push notifications
 
-Active ordinary recipients with concrete panes receive previews through their recorded transport. The root Director receives through native `message listen` (§6.3) or manual broker reads, with zero automatic pane input. Self-sends persist without pane input. §6.3 `message send` owns `notification_sent`, exact output and errors; §6.3 `message wait` owns diagnostic revalidation and bounded retries.
+Active ordinary recipients with concrete panes receive previews through their recorded transport. The root Director receives through native `message listen` (§6.3) or manual broker reads, with zero automatic pane input. Self-sends persist without pane input. §6.3 `message send` owns `notification_sent`, exact output and errors; §6.9 Runner pending-preview sweep owns the retry of previews still pending after the send.
 
 Profile delivery submits unchanged the canonical wrapped preview, this exact line ending with the resume clause:
 
@@ -1564,7 +1545,7 @@ One synchronous drain uses a five-second attempt budget and the runtime pane-loc
 4. A new input attempt requires a fresh pinned run identity/epoch and socket health; retained accepted history proceeds to settlement.
 5. Select the oldest unattempted pending message by `(created_at,message_id)` and revalidate the recipient/placement. Each invocation attempts it at most once; query its durable receipt before current input eligibility.
 6. A new attempt sends the canonical base preview to the runner, which reserves the receipt, then submits it immediately, queues it with zero bytes or holds it (§6.9 Delivery method and interaction priority). An immediate submission commits its durable in-progress row and selected method before child bytes, then records accepted, uncertain or left-in-composer outcome under §6.9 Stop cause. Reuse the captured expiration for submission and any later retirement.
-7. Settle accepted delivery in one transaction that stamps `notified_at` or verifies ACK and marks the receipt settled/submitted. The serialized service verifies that same durable settled/submitted receipt and excludes every active pending writer before removing an unleased cache entry with no available attempt permit. Retirement uses the remaining original expiration and sends zero native bytes. Failure after possible input preserves the actual receipt state and notification stamp for reconciliation.
+7. Settle accepted delivery in one transaction that stamps `notified_at` or verifies consumption and marks the receipt settled/submitted. The serialized service verifies that same durable settled/submitted receipt and excludes every active pending writer before removing an unleased cache entry with no available attempt permit. Retirement uses the remaining original expiration and sends zero native bytes. Failure after possible input preserves the actual receipt state and notification stamp for reconciliation.
 8. Continue at step 5 while the budget and input state permit. The runner evaluates each new attempt afresh; a request queued behind an earlier queued input receives the same queued result.
 
 A retirement failure after settlement preserves the committed sent prefix and `notification_sent=true`. Report `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining known run/input/key context and the original cause. This warning uses the attempt error shape; durable settlement remains authoritative and grants no submission replay.
@@ -1573,13 +1554,13 @@ The lock owner retains the lock through final submission/settlement. Wrapped del
 
 The notification diagnostic (§6.3 Delivery outcome) applies to failed input attempts and database contention, retaining actual causes and the committed message. Mandatory finalization uses the later of the original deadline and one second after finalization begins, while the transport stays within its original deadline. Other fatal storage errors retain their cause; a send preserves its committed result.
 
-Delivery leaves `status_state` unchanged: an inline or pointer preview stays `input_required` until its recipient ACKs the message ID, and poll and ACK identify consumption independently of input delivery.
+Delivery leaves `status_state` unchanged: an inline or pointer preview stays `input_required` until its recipient polls, and the consuming poll identifies consumption independently of input delivery.
 
 ##### Held delivery
 
 The runner queues a wrapped preview with zero bytes and a durable ready receipt, or selects delivery fallback, under the ordered rules of §6.9 Delivery method and interaction priority, and retries a queued preview itself (§6.9 Runner-owned deferred delivery). Wrapped delivery stays held, with no queue acceptance or write, for a degraded/recovering/lost observer, unavailable ownership or storage, uncertain reachability or this message's own uncertain receipt, pending placement or a placement change under the lock. On a verified-composer run, a held message's uncertain/abandoned receipt permits draining later messages; other holds end the drain (§6.9 Durable input receipts and settlement). Queued and held delivery leave `notified_at` unset, report no successful notification, create no new permission event and grant no native answer.
 
-A message stays pending for external retry while the lock stays busy (contention waits within the attempt budget), the pane is not yet placed, the budget runs out or an attempt fails; the next send to that ordinary recipient or a `message wait` (§6.3) rotation retries it. Transport and stamp failures after persistence remain diagnostics alongside a successful send result; no notification outcome erases a committed delivery.
+A message stays pending while the lock stays busy (contention waits within the attempt budget), the pane is not yet placed, the budget runs out or an attempt fails; the recipient's runner sweep (§6.9 Runner pending-preview sweep) retries it with no caller command, as does the next send to that ordinary recipient. Transport and stamp failures after persistence remain diagnostics alongside a successful send result; no notification outcome erases a committed delivery.
 
 ##### Accepted trade-offs
 
@@ -1588,16 +1569,16 @@ These trade-offs apply to delivery fallback, which leads with Escape. A single E
 - Where Escape interrupts an ordinary member's working turn, the resume clause tells the recipient to continue.
 - Where Escape dismisses an ordinary member's question, confirmation or approval prompt, the host can report a user rejection before the input arrives; Claude Code reports `The user doesn't want to proceed with this tool use.` The preview's dismissed-prompt clause marks that rejection as delivery-caused, and the member re-issues the required tool call or re-asks the question. `member prompt` and `member exec` input carries no clause; the Director checks the pane for an open prompt before that dispatch.
 - Escape does not reliably clear typed composer text on every host; unsent text in an ordinary member's pane can be submitted together with the delivered line.
-- A failed or interrupted notification is retried, so a recipient can see the same `[cafleet msg ID …]` line more than once; it polls and ACKs by ID.
+- A failed or interrupted notification is retried, so a recipient can see the same `[cafleet msg ID …]` line more than once; it polls and deduplicates by ID.
 - Two sends in quick succession from different senders each lead with Escape; the second can interrupt the turn the first delivery started.
 - A wrapped runner suppresses fallback for detected and candidate interactions only (§6.9 Delivery method and interaction priority). On a run with unknown or partial detection coverage, fallback can dismiss an undetected permission request or question; a changed native UI can trigger fallback while its unsupported permission answer remains unavailable.
-- OpenCode `mini` captures can expose only the status bar. Inspect retained session records for submitted input and native shell output when capture omits them; use broker poll and ACK to establish message consumption.
+- OpenCode `mini` captures can expose only the status bar. Inspect retained session records for submitted input and native shell output when capture omits them; a message's `completed` state, read with `message show`, establishes its consumption by the member's poll.
 
 Verified-composer delivery additionally accepts these trade-offs (§6.9 Durable input receipts and settlement):
 
 - Re-delivery can duplicate a line after a human or Director Enter submitted the retained literal; recipients deduplicate by message ID.
 - While the held composer is set, every queue head waits for a verified empty composer, exempt from `idle_timeout`; later previews, prompts and execs remain queued until clearing or submission verifies empty.
-- A composer rule that never verifies empty after clearing keeps heads waiting. `input_delivery_stalled` signals the Director after 3 minutes; recovery inspects the whole literal, presses Enter when appropriate, reconciles uncertain input or ACKs an unnecessary preview.
+- A composer rule that never verifies empty after clearing keeps heads waiting. `input_delivery_stalled` signals the Director after 3 minutes; recovery inspects the whole literal and presses Enter when appropriate, sends other keys the capture shows are needed, or asks the user to clear or submit the composer, and reconciles uncertain input from that evidence. A composer that never verifies empty after clearing is a profile defect reported for correction.
 - A human key during the post-submit verification window can make the composer nonempty, producing `submit_unconfirmed` and duplicate delivery.
 
 #### Multiplexer context
@@ -1809,7 +1790,7 @@ spawn or a delete.
 
 ### 6.6 Receiving and pane input
 
-The receive task is the synchronous caller-owned `message wait` process (§6.3 `message wait`); its round-robin cursor, attempted-message set and diagnostics live only in memory. Every failed attempt, including database busy or deadline exceeded before candidate selection, adds its message ID to the attempted set. Submission budgets and pane input locking follow §6.5 Multiplexer.
+An ordinary member's still-pending previews are retried by that member's own runner (§6.9 Runner pending-preview sweep), with no caller command; submission budgets and pane input locking follow §6.5 Multiplexer. Director reception is the persistent listener plus the consuming `message poll` each notice prompts (§6.3 `message listen`, §6.3 `message poll`).
 
 The persistent listener follows §6.3 `message listen` and performs no preview retry, pane lock, multiplexer resolution or termination-deferral span. Goal activation/pause/budget and pending decisions retain host authority.
 
@@ -1829,7 +1810,7 @@ An *approval form* is a native permission request that blocks the member until a
 
 Evaluate each role independently; a backend ships for the roles it meets. A verdict is `yes` only when recorded evidence establishes every Eligible-tier requirement of that role against the profile selected for the recorded native version; otherwise it is `no` with "not established" or the observed failure as evidence, and a Director `no` names each unmet requirement. Default-mode approval-prompt coverage counts toward the Member verdict; other bundled-support capabilities never change a verdict. Each requirement group's evidence holds for its own recorded native version; a newer installed version carries the verdict forward until the next re-check, which follows any change to the backend's bundled profile boundary or recorded evidence. A Member-eligible backend whose version probe fails or selects no profile still launches: it records `coverage=unknown`, and any approval form it shows is answered manually on the native surface. A backend with unknown detector/composer coverage, including such a run, permits manual terminal work and delivers ordinary generated input through delivery fallback. § Role eligibility records each backend's verdicts.
 
-Every non-default launch mode is an explicit `--permission-mode` choice under §6.9 Launch policy and capability registry, which records each mode's `auto`/`manual` class. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. The decision surface and native receive support are evaluated independently of Director eligibility: a Director meeting both requirements may use manual `poll` or finite `wait` when its reception mechanism is unavailable, and a tier-3 listen establishes no unsolicited wake of an idle session.
+Every non-default launch mode is an explicit `--permission-mode` choice under §6.9 Launch policy and capability registry, which records each mode's `auto`/`manual` class. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. The decision surface and native receive support are evaluated independently of Director eligibility: a Director meeting both requirements may use manual `poll` when its reception mechanism is unavailable, and a tier-3 listen establishes no unsolicited wake of an idle session.
 
 The bundled backend policy catalog owns launch-mode choices and defaults, exact argv mapping, version eligibility and detection/composer profiles. The omitted native argv is specified below; an explicit native mode changes only its permission argument and preserves the remaining argv and literal assignment.
 
@@ -1860,29 +1841,30 @@ Both probes are stated in message-ID terms. A probe message ID is *observed in a
 
 | Probe | Pass condition | Invalidation rule |
 |---|---|---|
-| Subscribe | Each probe message ID is first observed in a notice; the Director then consumes it through the poll that notice prompts | A `poll`, `wait` or `show` run without a preceding notice turn that first reveals a probe ID invalidates the run; a notice-prompted `poll` is part of consumption |
-| Stream | Each probe message ID is first observed in a notice in the running listener's output and is ACKed while the same listener process still runs | Any `poll`, `wait` or `show` invalidates the run; the Director ACKs IDs directly from the notice |
+| Subscribe | Each probe message ID is first observed in a notice; the Director then consumes it through the poll that notice prompts | A `poll` or `show` that first reveals a probe ID without a preceding notice turn invalidates the run; a notice-prompted `poll` is part of consumption |
+| Stream | Each probe message ID is first observed in a notice in the running listener's output and is consumed by one notice-prompted poll while the same listener process still runs | Any other `poll` or `show` invalidates the run |
 
 **Subscribe probe** (tier 1 or 2, on an installed native version). The candidate Director starts the receiver through its tier's mechanism while another member sends broker messages. After it consumes the probe member's ready, the Director runs under this instruction:
 
-> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, run `cafleet message poll <director-id> --json`, then ACK every listed message except one whose body is exactly `hold-probe keep`; run no other `poll`, `wait` or `show`. When I tell you to release the hold, ACK the `hold-probe keep` message.
+> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, end the turn with no commands when every named ID is at or below your consumed watermark; otherwise run `cafleet message poll <director-id> --json` once and raise the watermark. Run no other `poll` or `show` unless a step below directs it. When I say `hold`, end the next notice turn without polling.
 
 | Step | Procedure | Pass condition |
 |---|---|---|
-| Idle | Send one message to the idle Director | A notice naming it starts a turn without input; the Director polls and ACKs it |
-| Busy | During a foreground command of at least 60 s, send two messages | The command is not interrupted; a notice arrives no later than the end of that turn, and the poll it prompts returns both IDs |
-| Burst | During a foreground command of at least 60 s and under 300 s, send 150 messages back to back | At most two notice turns arrive for the burst, and every ID is consumed through a notice-prompted poll. On Codex the forwarder stays alive and no `codex queue` refusal occurs. |
-| Hold ceiling | With the Director idle, send `hold-probe keep` and record t1, the time its notice turn starts. After that turn ends and 60 s have passed since t1, send `hold-probe 2`. | No notice arrives before t1 + 285 s. One notice naming both IDs arrives between t1 + 285 s and t1 + 315 s. The Director ACKs `hold-probe 2` and, when told, `hold-probe keep`. |
+| Idle | Send one message to the idle Director | A notice naming it starts a turn without input; the poll it prompts returns it |
+| Busy | During a foreground command of at least 60 s, send two messages | The command is not interrupted; a notice arrives no later than the end of that turn, and its poll returns both IDs |
+| Burst | During a foreground command of at least 60 s and under 300 s, send 150 messages back to back | At most two notice turns arrive for the burst, and every ID is consumed through a notice-prompted poll. No ID appears in two notices. On Codex the forwarder stays alive and no `codex queue` refusal occurs. |
+| Consumed notice | Direct one turn: a 30 s foreground command while m1 is sent, one poll, a second 30 s command while m2 is sent, one poll, then end the turn | Every notice turn delivered after that turn names only consumed IDs and runs no command; no ID appears in two notices |
+| Hold ceiling | Say `hold`; send `hold-probe 1` to the idle Director and record t1, the time its notice turn starts (the Director ends it without polling). After that turn ends and 60 s have passed since t1, send `hold-probe 2`. | No notice arrives before t1 + 285 s. One notice naming both IDs arrives between t1 + 285 s and t1 + 315 s; its IDs are above the watermark, so the Director polls once and the poll returns both |
 | Owner exit | End the Director session | No `cafleet message listen` survives (`ps`) |
 
 t1 observes the held notice's delivery from the session side. The listener sets `held_at` when delivery succeeds, which precedes t1 by the receiver latency, and checks the ceiling once per one-second idle interval; the ±15 s tolerance around t1 + 300 s covers both.
 
-**Stream probe** (tier 3, on an installed native version). The candidate Director starts `cafleet message listen` through its native background-execution facility and continues unrelated work in the same session under the task prompt "Learn about broker messages only from that listener's output; run no `cafleet message poll`, `wait` or `show`. When a `pending` record appears there, ACK each message ID it names with `cafleet message ack <message-id>` and continue." The facility must deliver each record the running listener emits without waiting for the process to exit, at the latest at the session's next turn boundary, whether the host pushes records into the session or the model reads the running process's accumulated output on demand. Another member sends probe messages at separate times during that work. Output that reaches the session only when the process exits, including a completion notification for a finite receive, does not count as observation. Mid-turn delivery and waking an idle session are not required.
+**Stream probe** (tier 3, on an installed native version). The candidate Director starts `cafleet message listen` through its native background-execution facility and continues unrelated work in the same session under the task prompt "Learn about broker messages only from that listener's output; run no other `poll` or `show`. When a `pending` record appears there, run `cafleet message poll <director-id> --json` once and continue." The facility must deliver each record the running listener emits without waiting for the process to exit, at the latest at the session's next turn boundary, whether the host pushes records into the session or the model reads the running process's accumulated output on demand. Another member sends probe messages at separate times during that work. Output that reaches the session only when the process exits, including a completion notification for a finished background process, does not count as observation. Mid-turn delivery and waking an idle session are not required.
 
 | Stream-probe run | Classification |
 |---|---|
-| A probe ID first observed outside a notice, or any `poll`, `wait` or `show` | Invalid |
-| Every probe ID first observed in a notice and ACKed before the listener exited | Pass |
+| A probe ID first observed outside a notice, or any `poll` or `show` other than one notice-prompted poll | Invalid |
+| Every probe ID first observed in a notice and consumed by a notice-prompted poll before the listener exited | Pass |
 | A probe ID first observed only after the listener exited, or never observed in a notice | Fail |
 
 Each run records the mechanism, native version and check date.
@@ -1980,7 +1962,7 @@ The blocks below are the child argv with omitted permission selection. The leadi
   (+ <prompt>)                                       # bare trailing positional
 ```
 
-The `--allowedTools` values are the claude member's **spawn-time allow rules**, one argv token per rule, so the member depends on no `Bash(cafleet ...)` rule in the user's `settings.json`. Every claude member receives exactly `Bash(cafleet message *)`, covering its broker commands including finite `message wait` and `message listen`. `--allowedTools` takes several values, so it precedes `--name`, which ends the list and keeps the prompt positional. The rules are fixed at spawn: a later loss of allow rules in the user's settings does not affect a running member. These cases stay with the host:
+The `--allowedTools` values are the claude member's **spawn-time allow rules**, one argv token per rule, so the member depends on no `Bash(cafleet ...)` rule in the user's `settings.json`. Every claude member receives exactly `Bash(cafleet message *)`, covering its broker commands including `message listen`. `--allowedTools` takes several values, so it precedes `--name`, which ends the list and keeps the prompt positional. The rules are fixed at spawn: a later loss of allow rules in the user's settings does not affect a running member. These cases stay with the host:
 
 - A `deny` or `ask` rule at any settings level, including managed policy, still blocks the command.
 - The managed setting `allowManagedPermissionRulesOnly` makes Claude Code ignore `--allowedTools`.
@@ -2126,7 +2108,7 @@ The preset base is opencode's `--agent <mode>` discovery path: opencode 2.1.4 lo
 
 The selected policy's preset is a spawn precondition (§ Interface) whose error (§ Contract error strings) names the selector as the targeted repair; plain `cafleet setup` also installs it.
 
-Each preset's `shell` ruleset is its `"*"` base followed by four `"allow"` entries for the member broker commands: `cafleet message send *`, `cafleet message poll *`, `cafleet message ack *` and `cafleet message show *`, where `*` matches any character sequence, spaces included, so a member passes `--database-url <url>` after the subcommand. The allow entries overlap only the base, so their order carries no precedence. Every other `cafleet` command, Director-only commands and `message listen` / `message wait` included, falls to the base, and the runner guard refuses the Director-only commands inside the member (§6.3 Director-only command guard). Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
+Each preset's `shell` ruleset is its `"*"` base followed by three `"allow"` entries for the member broker commands: `cafleet message send *`, `cafleet message poll *` and `cafleet message show *`, where `*` matches any character sequence, spaces included, so a member passes `--database-url <url>` after the subcommand. The allow entries overlap only the base, so their order carries no precedence. Every other `cafleet` command, Director-only commands and `message listen` included, falls to the base, and the runner guard refuses the Director-only commands inside the member (§6.3 Director-only command guard). Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
 
 Both presets set `"cafleet": "deny"` in their permission map as defense in depth for the CAFleet plugin tools (§ Director extensions): the deny refuses a member server's tools before the plugin's Director verification runs.
 
@@ -2233,7 +2215,7 @@ The permission argv stays independent of the pi base, so runtime observation re-
 | Case | Reason |
 |---|---|
 | Bash command holding a control character, either mode | `the CAFleet member gate refuses a command holding a control character; route the command to the Director if it is required` |
-| Bash command not allowlisted, `cafleet` mode | `the CAFleet member gate runs only cafleet message send, poll, ack and show; route the command to the Director if it is required` |
+| Bash command not allowlisted, `cafleet` mode | `the CAFleet member gate runs only cafleet message send, poll and show; route the command to the Director if it is required` |
 | Bash command not allowlisted, `cafleet-ask` mode in a session without the interactive TUI | `the approval form needs the interactive pi TUI; route the command to the Director if it is required` |
 | Form answered `Deny` | `the operator denied this command` |
 | Form dismissed | `the approval form was dismissed; the command did not run` |
@@ -2267,7 +2249,7 @@ The permission argv stays independent of the pi base, so runtime observation re-
 
 ```ts
 const MEMBER_ALLOWLIST = [
-  "cafleet message send *", "cafleet message poll *", "cafleet message ack *", "cafleet message show *",
+  "cafleet message send *", "cafleet message poll *", "cafleet message show *",
 ];
 ```
 
@@ -2324,7 +2306,7 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 
 #### Host evidence and native-input authorization
 
-**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Director pending notices arrive through one native Monitor task (§ Role eligibility); the installed CAFleet skill's [Claude native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#claude-native-director-reception) owns discovery, invocation, renewal and evidence limits, and manual finite reception remains available when Monitor is unavailable or denied.
+**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Director pending notices arrive through one native Monitor task (§ Role eligibility); the installed CAFleet skill's [Claude native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#claude-native-director-reception) owns discovery, invocation, renewal and evidence limits, and manual `poll` reception remains available when Monitor is unavailable or denied.
 
 Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
@@ -2350,7 +2332,7 @@ The extensions §6.3 Asset installation installs supply Director reception for `
 
 | Extension | `cafleet_listen` description |
 |---|---|
-| Hermes plugin | `Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' carries a pending notice naming unACKed message IDs; run 'cafleet message poll <director_id> --json' and ACK each consumed message.` |
+| Hermes plugin | `Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' carries a pending notice naming unpolled message IDs; when an ID is above your consumed watermark, run 'cafleet message poll <director_id> --json', which consumes what it returns.` |
 | OpenCode plugin | The Hermes text |
 | pi extension | The Hermes text with `each turn beginning` replaced by `each message beginning` |
 
@@ -2394,7 +2376,7 @@ Claude Code Monitor also truncates each line at 500 characters and each event at
 
 `hermes plugins validate` flags the first two seams' imports as private core imports. A failed import, lookup or attachment read returns `{"ok": false, "error": "<seam>: <exception>"}` and starts no receiver; an empty session key returns `{"ok": false, "error": "cafleet_listen must be called from a session turn"}`. Ordered injection bypasses the consent check of `ctx.inject_message`, so before spawning the child the tool requires `ctx._gateway_injection_allowed()`, which holds when `plugins.entries.cafleet.allow_gateway_injection` is `true` (§6.3 Hermes plugin enablement), and otherwise returns `{"ok": false, "error": "plugins.entries.cafleet.allow_gateway_injection is not true; run 'cafleet setup --coding-agent hermes'"}`; it then verifies `director_id`. The child selects its database only through `--database-url`, so an omitted `database_url` selects the default database exactly as in the Director's shell. The plugin decodes child output as UTF-8, replacing invalid bytes, and treats a stdout read failure as the end of output. A watchdog checks every 5 s that the session has at least one subscriber; a read error kills the child. `on_session_finalize` resolves the finalized session's route through the session authority and stops the receiver with that session key, so a session id rotated by context compression still matches. The unload callback stops every receiver and confirms its exit, so plugin re-discovery leaves no untracked receiver; re-discovery leaves the gateway and its sessions running, so the unload closed notice, sent outside the callback after the receiver's delivery ends, tells a still-attached Director to re-arm reception.
 
-**Ordered injection.** `ctx.inject_message` returns `True` once it schedules its dispatch coroutine on the gateway loop, before the record is committed, so consecutive calls can commit out of order. The plugin instead submits each record's `_dispatch_plugin_message_injection(...)` coroutine to the runner's `_gateway_loop` with `asyncio.run_coroutine_threadsafe` and waits up to 10 s for its result before reading the next line. A `False` result is a refused injection, treated as transient (for example the session authority's 32-row admission queue cap, a draining gateway or a briefly detached client): the plugin keeps the record, waits 1 s and retries it, and later records wait behind it. The retry checks no attachment, so a detached session keeps the 30 s detach grace and the watchdog alone ends its receiver. Under the §6.3 `message listen` notice bound, listen alone fills the 32-row queue only when the Director completes more than 32 hold releases or ceiling firings within one busy turn; otherwise the refusal path is reached when other injections fill the queue.
+**Ordered injection.** `ctx.inject_message` returns `True` once it schedules its dispatch coroutine on the gateway loop, before the record is committed, so consecutive calls can commit out of order. The plugin instead submits each record's `_dispatch_plugin_message_injection(...)` coroutine to the runner's `_gateway_loop` with `asyncio.run_coroutine_threadsafe` and waits up to 10 s for its result before reading the next line. A `False` result is a refused injection, treated as transient (for example the session authority's 32-row admission queue cap, a draining gateway or a briefly detached client): the plugin keeps the record, waits 1 s and retries it, and later records wait behind it. The retry checks no attachment, so a detached session keeps the 30 s detach grace and the watchdog alone ends its receiver. Under the §6.3 `message listen` notice bound, listen alone fills the 32-row queue only when more than 32 consuming polls or ceiling firings queue notices behind one busy turn; otherwise the refusal path is reached when other injections fill the queue.
 
 **OpenCode plugin.** One V2 plugin file defines `Plugin.define({ id: "cafleet", setup })`. Each tool calls `ctx.permission.assert({ sessionID, agent, source, action: "cafleet", resources: [<tool name>] })` before any work, then verifies its `director_id` (Director verification above). The `context` hook registers in every session; it and the event loop act only on a session holding a goal stored by the operator-typed `/cafleet-goal` command or by a goal tool whose `director_id` verified. `cafleet_listen` returns `ok: false` when the spawned child has no pid. Its goal extension stores `{objective, status, generation, continuations, idle_streak}` under storage key `goal/<sessionID>` and mirrors it in the session instruction entry `cafleet-goal`, which first appears in 2.2.0:
 
@@ -3369,7 +3351,7 @@ Order each refresh after its opening and previously accepted semantic transition
 
 A closing transition keeps the stored request evidence; the closing frame's post-policy evidence appears only in the `interaction_closed` event payload.
 
-Keep decision outcome (`approved`, `denied`, `cancelled`) and operation outcome separate from episode visibility. Screen disappearance, Enter, Escape, a timeout, a message ACK and resumed animation establish none of those outcomes by themselves. Machine decision outcome is `unknown` unless explicitly documented native evidence establishes it; human/Director reports remain attributed reports, not authenticated native events.
+Keep decision outcome (`approved`, `denied`, `cancelled`) and operation outcome separate from episode visibility. Screen disappearance, Enter, Escape, a timeout, a message's consumption and resumed animation establish none of those outcomes by themselves. Machine decision outcome is `unknown` unless explicitly documented native evidence establishes it; human/Director reports remain attributed reports, not authenticated native events.
 
 ##### Continuation screens
 
@@ -3505,7 +3487,7 @@ Before persistence, the outbox stores an observed transition keyed by `(run_id, 
 
 The runner uses the broker library directly and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence or listener restart. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may replay historical frames as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`, retaining the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
 
-`event show` returns the complete durable event with its notification/archive state and current interaction/run state, and `input show` returns a durable programmatic-input receipt (§ CLI presentation contract). Runtime events use the ordinary broker message envelope and ACK semantics.
+`event show` returns the complete durable event with its notification/archive state and current interaction/run state, and `input show` returns a durable programmatic-input receipt (§ CLI presentation contract). Runtime events use the ordinary broker message envelope and poll-time consumption.
 
 ##### Automatic review events
 
@@ -3529,7 +3511,20 @@ The `director_action.instruction` is: "Verify this event. Automatic review is un
 
 ##### Input delivery result event
 
-The runner emits one `input_delivery_result` event to the run's Director for a deferred input's first submitted, not-submitted, uncertain or left-in-composer result, and for every immediate stopped staged write (`uncertain` or `left_in_composer`). It creates no interaction row and carries no literal payload. Immediate submitted results remain in command output and receipts only.
+The runner emits one `input_delivery_result` event to the run's Director for a deferred input's first submitted, not-submitted, uncertain or left-in-composer result, and for every immediate stopped staged write (`uncertain` or `left_in_composer`), except a retried preview result (below). It creates no interaction row and carries no literal payload. Immediate submitted results remain in command output and receipts only.
+
+A *retried preview result* is a preview receipt settled `not_submitted` whose message stays pending for a runner sweep (§ Runner pending-preview sweep) or is already consumed. Durable receipt fields alone define the set, so a send-originated preview, a re-delivery successor and a sweep attempt are treated alike. One predicate over kind plus delivery status and reason defines it, and both live publication and the shutdown/recovery scan for unpublished results apply it:
+
+| Receipt | Delivery | Reason | `input_delivery_result` |
+|---|---|---|---|
+| `kind=preview` | `not_submitted` | `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted` | None; the sweep retries the still-pending message |
+| `kind=preview` | `not_submitted` | `runner_stopped`, `runner_lost` | None; the next run's sweep retries the still-pending message |
+| `kind=preview` | `not_submitted` | `message_consumed` | None; the member's poll already consumed the message |
+| `kind=preview` | `not_submitted` | `target_inactive`, `target_changed` | Published |
+| Any kind | `left_in_composer`, `uncertain`, or submitted after deferral | — | Published |
+| `prompt`, `exec` | `not_submitted` (any reason) | — | Published |
+
+`input show` reports every receipt, including those whose result is not published.
 
 | Field | Value |
 |---|---|
@@ -3573,7 +3568,13 @@ After the head waits 3 minutes solely on a held composer (§ Runner-owned deferr
 | `delivery` | Head receipt's ordered `status,method,reason` projection, status `queued` |
 | `director_action` | `{"kind":"review_stalled_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKING_INPUT_ID","--json"],"press_argv":PRESS_ARGV}` |
 
-INSTRUCTION prescribes capture and inspection of the blocking input; Enter via `member press` only when its whole literal remains and `member show` reports no current interaction, otherwise native user clearing/submission; evidence-based reconciliation of an uncertain blocker; then ACK of a waiting preview whose composer never verifies empty after clearing or whose message no longer needs delivery. The next queue turn cancels an ACKed head as `not_submitted/message_consumed`. PRESS_ARGV is the `review_left_input` argv only when the blocker qualifies for that action, otherwise null. Both argv fields include the selected non-default database when applicable. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later head can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication.
+INSTRUCTION is exactly:
+
+```text
+Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.
+```
+
+A verified empty composer resumes the FIFO and the waiting head delivers on the next queue turn; when the member's poll already consumed the head's message, the next queue turn instead cancels it as `not_submitted/message_consumed`. PRESS_ARGV is the `review_left_input` argv only when the blocker qualifies for that action, otherwise null. Both argv fields include the selected non-default database when applicable. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later head can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication.
 
 ##### Effective policy record
 
@@ -3709,7 +3710,7 @@ Only a successful final check installs an opaque, single-use proof bound to its 
 
 ##### Durable input receipts and settlement
 
-Preview keys are exactly `preview:<run_id>:<message_id>:<attempt>`, independent of CLI invocation or connection. `preview_attempt` starts at 1, and each message's attempts share the canonical payload digest under distinct keys. Every sender, wait rotation and runner decision reads the latest attempt in the current run before live eligibility and applies the first matching row:
+Preview keys are exactly `preview:<run_id>:<message_id>:<attempt>`, independent of CLI invocation or connection. `preview_attempt` starts at 1, and each message's attempts share the canonical payload digest under distinct keys. Every sender, sweep and runner decision reads the latest attempt in the current run before live eligibility and applies the first matching row:
 
 | Latest attempt | Verified-composer run | Other run |
 |---|---|---|
@@ -3717,7 +3718,7 @@ Preview keys are exactly `preview:<run_id>:<message_id>:<attempt>`, independent 
 | `ready` with deferred metadata | Skip this queued message for this invocation | Same |
 | `ready` without deferred metadata | Reuse its key and attempt; reevaluate zero-byte eligibility | Same |
 | `in_progress` or `uncertain` | Per-message hold; diagnose and continue with later pending messages | End the member's drain |
-| `accepted` or `settled/submitted` | Stamp or verify ACK and settle without typing | Same |
+| `accepted` or `settled/submitted` | Stamp or verify consumption and settle without typing | Same |
 | `settled/not_submitted` | Start attempt N+1 automatically | Same |
 | `settled/abandoned_uncertain` | Per-message hold; retries ended | End the member's drain |
 | `settled/left_in_composer` | Fail if it is latest: the runner must have atomically created its successor (§6.3 Error Messages) | Invalid on this run |
@@ -3728,11 +3729,11 @@ An ordinary `receipt query` reads the durable operation for its fixed run/key an
 
 Before the first child byte, commit `in_progress` to `member_input_operations` under the current ownership epoch and bounded database budget. A failed commit permits zero child bytes. After writing, persist `accepted`, `uncertain` or `settled/left_in_composer` before promising that outcome; failed persistence leaves the durable row in progress and returns uncertainty. The live runner may reconcile retained stage evidence into the same row. On a verified-composer run, recorded writes forming a complete prefix permit the runner to settle a stopped ordinary input as `left_in_composer` with `stop_cause` and `left_stage` in the transaction that clears its in-memory write authority (§ Stop cause); permission responses retain uncertainty.
 
-Retire only the in-memory receipt after validating durable settlement, the current full run/owner and original run lock, exclusion of every active writer, and absence of a leased guard or available attempt permit for that input. Cache absence is idempotent only after the same durable and ownership checks. For a preview, atomically stamp `notified_at` (or verify the message is already ACKed) and set its input row to `settled/submitted`; a later `receipt retire` verifies that transaction before freeing memory. For prompt/exec, the durable accepted input row itself is the queryable submission record: the creator or runner can settle it as submitted and retire the cache after verifying that stored row. Printed stdout only presents its input ID and supplies no durable acknowledgement. Settled operation keys/digests/dispositions persist for the lifetime of the database file, so a delayed request still returns the prior disposition and never types again.
+Retire only the in-memory receipt after validating durable settlement, the current full run/owner and original run lock, exclusion of every active writer, and absence of a leased guard or available attempt permit for that input. Cache absence is idempotent only after the same durable and ownership checks. For a preview, atomically stamp `notified_at` (or verify the message is already consumed) and set its input row to `settled/submitted`; a later `receipt retire` verifies that transaction before freeing memory. For prompt/exec, the durable accepted input row itself is the queryable submission record: the creator or runner can settle it as submitted and retire the cache after verifying that stored row. Printed stdout only presents its input ID and supplies no durable acknowledgement. Settled operation keys/digests/dispositions persist for the lifetime of the database file, so a delayed request still returns the prior disposition and never types again.
 
-Bound unretired side-effect receipts, including queued deferred inputs, to 4096: while that unresolved set is full, new side-effect attempts fail with an explicit zero-byte capacity error; settled receipts leave the set. Keep uncertain receipts until the Director records an evidence-based disposition through `input reconcile` (§6.3 Runtime event and input commands), which settles the key and permits cache retirement. For prompt/exec and permission responses, a consumed not-submitted key requires a new deliberate operation key. For previews, every `not_submitted` disposition, including reconciliation after possible bytes, permits the next send/wait to start N+1 in the same run; it grants no permission answer or prompt/exec replay.
+Bound unretired side-effect receipts, including queued deferred inputs, to 4096: while that unresolved set is full, new side-effect attempts fail with an explicit zero-byte capacity error; settled receipts leave the set. Keep uncertain receipts until the Director records an evidence-based disposition through `input reconcile` (§6.3 Runtime event and input commands), which settles the key and permits cache retirement. For prompt/exec and permission responses, a consumed not-submitted key requires a new deliberate operation key. For previews, every `not_submitted` disposition, including reconciliation after possible bytes, permits the runner sweep or the next send to start N+1 in the same run; it grants no permission answer or prompt/exec replay.
 
-For a preview stopped as `left_in_composer`, one immediate transaction settles attempt N and inserts N+1 as `ready`, with `deferred_at` and `defer_reason=redelivery`. The runner places its canonical base preview at the FIFO head, preserving message order, and selects rendering/framing/method afresh at zero bytes. It waits for a verified empty composer; ACK and target removal cancel it under § Runner-owned deferred delivery. Attempts have no cap. A settled left-in-composer latest attempt without this successor is an invariant violation.
+For a preview stopped as `left_in_composer`, one immediate transaction settles attempt N and inserts N+1 as `ready`, with `deferred_at` and `defer_reason=redelivery`. The runner places its canonical base preview at the FIFO head, preserving message order, and selects rendering/framing/method afresh at zero bytes. It waits for a verified empty composer; consumption and target removal cancel it under § Runner-owned deferred delivery. Attempts have no cap. A settled left-in-composer latest attempt without this successor is an invariant violation.
 
 `left_stage` records the exact complete prefix: `escape_only` for only fallback Escape, `partial` for less than the complete literal with no submit key, `literal_complete` for the entire closed literal with no submit key, and `submitted` for the complete literal and key whose effect is unconfirmed. The `submitted` stage pairs exactly with `submit_unconfirmed`, and `escape_only` requires method `fallback`; recording and receipt reads validate both associations. Escape-only typed no text. Prompt/exec left in the composer exit 1 and are retried only by a deliberate action; later input follows the held-composer rules. The runner sends no second submit key and leaves composer clearing to the human or Director.
 
@@ -3752,7 +3753,7 @@ Permission receipts use the ordinary query, reconciliation, receipt-only exclusi
 
 A process loss, ownership change or unavailable receipt preserves durable uncertainty and leaves notification unstamped. Preview retry follows the latest-attempt table after evidence-based settlement; explicit prompt/exec use generated keys and printed input IDs and require a separate deliberate action.
 
-Native-exec success means submission, not execution success. Queued and held messages keep `notified_at` unset, and only confirmed submission or ACK settlement (§6.3 `message ack`) stamps them. Queueing supplies no new permission event and never closes the native request.
+Native-exec success means submission, not execution success. Queued and held messages keep `notified_at` unset, and only confirmed submission or settlement of accepted delivery stamps them; a consuming poll (§6.3 `message poll`) removes them from preview eligibility. Queueing supplies no new permission event and never closes the native request.
 
 Screen observation cannot create an atomic native request API: unread child output may race with a write, an unknown CLI can redraw unexpectedly, and a person can type concurrently. The runner therefore guarantees zero ordinary-input bytes for detected and candidate interactions and refuses uncertain states; tested composer profiles bound the remaining race for profile delivery without asserting universal prompt preservation. Release evidence must include this race and preserve uncertainty instead of authorizing a second submission.
 
@@ -3793,15 +3794,16 @@ Only one ordinary request writes at a time, in enqueue order, and a request queu
 | The active input completes | Retry the queued head after rechecking the current interaction state |
 | A temporary zero-byte obstacle during an active attempt | Retry on a 100-millisecond timer within the same five-second attempt deadline |
 
-No external send/wait or Director wake is required to resume the accepted queue. On every queue turn, including each trigger and each 100 ms timer pass, check the head preview's ACK and target activity. ACK cancels its zero-byte receipt as `not_submitted/message_consumed`; removal cancels it as `not_submitted/target_inactive`, then advances the FIFO.
+No external send or Director wake is required to resume the accepted queue. On every queue turn, including each trigger and each 100 ms timer pass, check whether the head preview's message is consumed and whether its target is active. Consumption cancels its zero-byte receipt as `not_submitted/message_consumed`; removal cancels it as `not_submitted/target_inactive`, then advances the FIFO.
 
 A queued request outlives the originating CLI connection and command deadline. Each actual drain attempt has its own five-second budget, and waiting for an interaction consumes none of it. A client timeout after queue acceptance reports the known input ID and directs the caller to inspect the receipt instead of generating a new operation key. The timer retry runs even without child output or broker commands, preserving the input ID, FIFO position and `ready` receipt without renewing the deadline. A reappearing candidate or open interaction pauses dispatch and ends the zero-byte attempt; the next closure or clearance starts another bounded attempt.
 
 | Deferred-attempt condition | Receipt and queue outcome | Result publication |
 |---|---|---|
 | Busy pane lock or temporary storage/observer unavailability before the deadline, with zero bytes | Retain the queued head and retry on the timer | Input inspection remains `queued` with its original defer reason |
-| Five-second deadline expires with zero bytes | Settle `not_submitted`, clear the unused selected method, and advance after the terminal transaction commits | `input_delivery_result` with reason `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted`, according to the last obstacle |
-| Target/run/placement identity fails revalidation or a queued preview is consumed, with zero bytes | Settle `not_submitted` immediately and advance after commit | The result with reason `target_inactive`, `target_changed` or `message_consumed` and diagnostic context |
+| Five-second deadline expires with zero bytes | Settle `not_submitted` with reason `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted`, according to the last obstacle; clear the unused selected method, and advance after the terminal transaction commits | Prompt/exec: `input_delivery_result`; preview: none (a retried preview result, § Input delivery result event) |
+| Target/run/placement identity fails revalidation, with zero bytes | Settle `not_submitted` with reason `target_inactive` or `target_changed` immediately and advance after commit | The result with its reason and diagnostic context |
+| A queued preview's message is consumed, with zero bytes | Settle `not_submitted/message_consumed` immediately and advance after commit | None (a retried preview result) |
 | Queued prompt/exec exceeds its plain limit with no safe framing | Settle `not_submitted/plain_limit_exceeded` with zero bytes and advance | `input_delivery_result` |
 | A recorded complete prefix stops on a verified-composer run | Settle `left_in_composer`; previews atomically queue their successor at the head | The stopped input's result |
 | An attempt records `uncertain` on a verified-composer run | Advance past the head and set the held composer with that input as blocker | The uncertain result; later input waits for verified empty composer |
@@ -3813,7 +3815,36 @@ A head waiting 3 minutes solely on a held composer publishes one `input_delivery
 
 If storage prevents the terminal transaction, discard the zero-byte payload and retain a metadata-only pending finalization at the FIFO head. Retry that transaction on the 100 ms timer without sending bytes or starting another input; commit the receipt when storage recovers, then advance, and its result event follows from that durable receipt. While publication is unavailable, write a runner-stderr diagnostic naming the input ID and persistence failure; the Director receives the durable result after recovery. Ownership loss transfers finalization to fenced recovery. Accepted requests become queued, submitted, not submitted, left in the composer or uncertain; `held` describes work the runner did not accept.
 
-Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` with reason `runner_stopped`. After runner loss, recovery may settle a deferred `ready` receipt as not submitted with `runner_lost` once ownership fencing establishes its payload and writer are gone. Explicit payloads remain memory-only and require a new deliberate request. An unnotified preview settled not submitted is delivered again under the same run's next attempt key; a new run uses its own key.
+Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` with reason `runner_stopped`. After runner loss, recovery may settle a deferred `ready` receipt as not submitted with `runner_lost` once ownership fencing establishes its payload and writer are gone. Explicit payloads remain memory-only and require a new deliberate request. A preview settled with `runner_stopped` or `runner_lost` publishes no result (§ Input delivery result event). An unnotified preview settled not submitted is delivered again under the same run's next attempt key by the runner sweep (§ Runner pending-preview sweep); a new run sweeps it under its own key.
+
+##### Runner pending-preview sweep
+
+Each ordinary member's runner retries that member's own unnotified pending previews with no caller command. The sweep covers every message that never reached the runner FIFO: a busy pane lock through the send budget, a runner/transport/storage failure, `delivery_budget_exhausted`, a pending placement at send time, or a deferred preview settled `not_submitted`. `message send`'s synchronous drain (§6.5 Push notifications) remains the first attempt.
+
+| Property | Contract |
+|---|---|
+| Cadence | From the runner event loop, at most once per `PREVIEW_SWEEP_INTERVAL` (1 s), and not before the run-wide backoff expires |
+| Preconditions | The run is live and its native child is running; `pending_input_client` and `pending_sweep` are both empty; the runner FIFO holds no preview request |
+| Selection | One short read snapshot confirms that the run's member is an active ordinary member whose recorded run is this run with a concrete placement, then takes the oldest `to_member_id=<member> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
+| Attempt decision | The latest-attempt table of § Durable input receipts and settlement for `preview:<run_id>:<message_id>:<attempt>`: no receipt starts attempt 1, a not-submitted settlement starts N+1, and accepted or submitted history settles and stamps without typing |
+| Skips | Only a per-message hold of that table on a verified-composer run (an in-progress, uncertain or abandoned receipt) moves to the next message; every other hold, and every per-message hold on a run without composer verification, ends the sweep for this tick |
+
+Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected.
+
+**Submission.** The sweep acquires no lock beforehand. It hands the canonical preview to the same runner-internal entry point a control-socket preview request reaches, as an input control request built with the run's own control identity. That entry point reserves the `preview:` receipt, applies § Delivery method and interaction priority, and either submits immediately or queues with zero bytes. For actual stages the runner acquires the pane input lock nonblockingly from its event loop (§6.5 Pane input lock), so a merely queued sweep request holds no lock. A send's synchronous drain and the sweep serialize through that lock and the runner's under-lock revalidation of message status, notification stamp and receipt.
+
+**Clientless tracking.** A sweep request has no control-socket client, so it is never recorded in `pending_input_client`. The runner service keeps a distinct `pending_sweep` slot holding the attempt deadline:
+
+- When the entry point leaves an immediate sweep attempt awaiting its result, the service records `pending_sweep`. The completion path that drives client-owned attempts drives it to its reply and settles it without replying to any client, feeding the reply's delivery status and reason to the backoff.
+- A reply returned at once (queued or settled) is handled the same way, and no slot is recorded.
+- An accepted immediate attempt requires both slots empty. A control-socket request arriving while `pending_sweep` is set is handled exactly as one arriving while a client-owned attempt is in flight.
+- Orderly shutdown settles a pending sweep attempt like a client-owned one, with no reply.
+
+**Settlement.** The runner settles a sweep attempt: an accepted attempt's settlement transaction stamps `notified_at` and marks the receipt `settled/submitted`, the same transaction that settles a drained queued preview.
+
+**Run-wide backoff.** A sweep attempt that settles `not_submitted` with `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted` publishes no result (§ Input delivery result event) and sets a memory-only run-wide backoff: 1 s, doubling, capped at 30 s. An accepted sweep attempt, an `interaction_closed` or a candidate clearing resets it to zero. The message stays at the head, so strict oldest-first order is preserved. Each backed-off retry settles one more durable `not_submitted` receipt for the head message only, at most one per 30 s once the cap is reached.
+
+**Lifecycle.** Orderly shutdown and runner loss stop the sweep. A recovered or new run sweeps under its own run key. A member with no live runner keeps its messages pending.
 
 ##### Delivery reporting
 
@@ -3949,31 +3980,31 @@ Answer-profile capability belongs to the run's selected profile, rests on native
 
 #### Director consumption and continuation
 
-The Director consumes runtime events through `message listen`, `poll --json` and finite `wait`. Runtime events reach the Director's stdout receiver and durable inbox; they provide no composer injection, Escape-first wake, goal activation or host interrupt guarantee (latency targets: § Native acceptance and coverage). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
+The Director consumes runtime events through the `poll --json` each `message listen` notice prompts, or through manual `poll --json` when no receiver is available. Runtime events reach the Director's stdout receiver and durable inbox; they provide no composer injection, Escape-first wake, goal activation or host interrupt guarantee (latency targets: § Native acceptance and coverage). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
 
-On a wake or poll, the Director reads the complete event, verifies its durable event/message link with `event show`, reconciles the current run/interaction, records the unfinished action in host-owned state, and ACKs the message as consumption. An ordinary member can quote event JSON; a claimed event identity is verified against stored ownership, never trusted from message text alone. Old/closed events remain readable but are not a new request to answer.
+The poll consumes the message. Before running any other command after it, the Director records the unfinished action in host-owned state; it then reads the complete event, verifies its durable event/message link with `event show` and reconciles the current run/interaction. An ordinary member can quote event JSON; a claimed event identity is verified against stored ownership, never trusted from message text alone. Old/closed events remain readable but are not a new request to answer.
 
 | Stage | Observable evidence | What remains outstanding |
 |---|---|---|
 | Detection | Rule/profile and current episode evidence | Durability and Director reception. |
 | Persistence | Event ID plus committed inbox message ID | Director consumption. |
-| Consumption | ACK plus Director-owned pending-action record | Risk review, decision and actual operation outcome. |
+| Consumption | The consuming poll plus Director-owned pending-action record | Risk review, decision and actual operation outcome. |
 | Decision | Director auto-mode evidence and attributed decision, or the user's request-specific decision | Answer-key submission and native result. |
 | Answer-key submission | Bound durable receipt/stage, or attributed manual native input | Native decision evidence and actual operation result. |
 | Native decision observed | Explicit profile-supported native evidence, when available | Actual operation result and dependent continuation. |
 | Episode disappears | Closure reason and current screen | Decision and execution outcome may remain unknown. |
 | Continuation verified | Actual operation result/output and member's resumed dependent work | Any remaining task-specific work. |
 
-For a permission refusal returned to the member, the evidence route is the member's routed request: exact attempted command, absolute cwd, required environment overrides and actual refusal. A screen event can alert the Director earlier or supplement that route; it supplies no missing dispatch evidence. For a blocked request, follow the `review_permission_request` instruction (§ Request-bound permission responses); the native result it inspects is the native output/exit/error and the member's actual continuation. Previews, prompts and native commands the runner queued during the request drain automatically after the interaction closes (§ Runner-owned deferred delivery); a deferred input's eventual result arrives as an `input_delivery_result` event. Messages that were held rather than queued remain pending for the next send or a finite `message wait <DIRECTOR_ID>` rotation. A different command submitted through native exec is a separate authorized action, never proof that the original request was answered. Reconcile uncertain outcomes before retries, and preserve host/managed permission authority throughout.
+For a permission refusal returned to the member, the evidence route is the member's routed request: exact attempted command, absolute cwd, required environment overrides and actual refusal. A screen event can alert the Director earlier or supplement that route; it supplies no missing dispatch evidence. For a blocked request, follow the `review_permission_request` instruction (§ Request-bound permission responses); the native result it inspects is the native output/exit/error and the member's actual continuation. Previews, prompts and native commands the runner queued during the request drain automatically after the interaction closes (§ Runner-owned deferred delivery); a deferred input's eventual result arrives as an `input_delivery_result` event. Messages that were held rather than queued remain pending for the member runner's sweep (§ Runner pending-preview sweep). A different command submitted through native exec is a separate authorized action, never proof that the original request was answered. Reconcile uncertain outcomes before retries, and preserve host/managed permission authority throughout.
 
-The Director handles the automatic review events (§ Automatic review events) through the same wake, `event show` verification, ACK and host-owned pending-action record:
+The Director handles the automatic review events (§ Automatic review events) through the same wake, consuming poll, host-owned pending-action record and `event show` verification:
 
 | Event | Director procedure |
 |---|---|
 | `interaction_opened` in automatic mode | The permission-request procedure above, including `permission respond`. |
 | `interaction_opened` for a `question` | Follow the `review_question` instruction (§ Request-bound permission responses), submitting the choice with `permission respond --choice`. |
 | `automatic_refusal_observed` with a routed request | Dispatch evidence comes only from the routed request fields the `review_automatic_refusal` instruction names (§ Automatic refusal event); the event and captures corroborate it and supply no missing field. In verified auto mode decide to authorize through the routed-command dispatch (`member exec`) or to refuse with a broker reply; otherwise obtain the user's permission first, then inspect the actual result and continuation. |
-| `automatic_refusal_observed` without a routed request | Dispatch nothing, ACK and keep the event as an informational pending item. When the member next reports, routes a request or reaches an idle composer without addressing it, ask it through the broker whether the refused operation is still needed; the item closes when a routed request arrives or the member answers that it is not needed. |
+| `automatic_refusal_observed` without a routed request | Dispatch nothing and keep the event as an informational pending item. When the member next reports, routes a request or reaches an idle composer without addressing it, ask it through the broker whether the refused operation is still needed; the item closes when a routed request arrives or the member answers that it is not needed. |
 | Several `automatic_refusal_observed` events, then an idle member that sent no report | Codex 0.163.0 interrupts the turn after three consecutive automatic denials, so the member stops without routing a request (§ Annotation detection). Treat the events as one pending item and ask the member through the broker whether the refused operations are still needed; the broker message resumes it. |
 | `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user when the selected automatic mode cannot apply. No answer is sent. |
 
@@ -3996,7 +4027,7 @@ Minimum-version delivery acceptance covers every bundled backend on each registe
 | Native operation plans | Prompt preview and direct prompt create a native user turn; native exec runs a harmless marker command and exposes its result, with literal-to-submit timing recorded |
 | Fallback operation | Missing plan and failed-probe cases show the rule-5 fallback sequence (§ Delivery method and interaction priority) and explicit fallback results |
 | Busy composer | A busy composer with an executable plan follows rule 4 (`composer_busy` with zero bytes, profile drain, `idle_timeout` after 3 minutes) without any earlier Escape; a working member with an empty composer row receives profile delivery |
-| Interaction deferral | Permission and question remain open with no Escape/literal bytes; answering on the original native surface yields closure and exactly one queued delivery without another send/wait |
+| Interaction deferral | Permission and question remain open with no Escape/literal bytes; answering on the original native surface yields closure and exactly one queued delivery without another send |
 | Adversarial transition | Candidate/obscured/superseding interaction, keyboard/pointer input during chunks/settles, observer/owner loss and partial stages follow the complete-prefix stop outcomes |
 | Durable retry | A queued canonical preview drains by fallback and retains one ID/digest after composer changes and repeated queries; duplicate keys, conflicting digests, concurrent sender/drain, lost replies and stamp failures avoid duplicate dispatch |
 | Deferred failure and liveness | After closure with a busy pane lock and no further output/commands, the runner timer either delivers when the lock frees or publishes not submitted at the deadline; temporary storage/observer failure and terminal-commit recovery preserve FIFO/result visibility |
@@ -4011,7 +4042,7 @@ Composer-submit acceptance uses the installed evidence versions on both tmux and
 | Plain threshold | Codex previews of 1007 and 1037 bytes and Hermes previews of 2027 and 2057 characters submit using measured framing or pointer rendering |
 | Positive short writes | Japanese previews of 7987 and 12085 bytes continue chunks and submit within 5 s |
 | Ineffective submit key | Post-submit verification ends as `left_in_composer/submit_unconfirmed`, stage `submitted` |
-| Held composer | Re-delivery and heads behind uncertain bytes stay queued past `idle_timeout`; ACK cancels the next queue turn and a 3-minute held-composer wait emits one stalled event |
+| Held composer | Re-delivery and heads behind uncertain bytes stay queued past `idle_timeout`; consumption cancels it on the next queue turn and a 3-minute held-composer wait emits one stalled event |
 | Hermes deletion | Drafts of 2057 characters and 8192 scalars clear and work settlement completes; the larger draft clears within 10 s |
 
 Unit coverage replays each unsubmitted-literal fixture through post-submit verification and obtains `submit_unconfirmed`, and exercises complete-prefix stops, close-stage failures, latest-attempt decisions, schema constraints and projection/recovery actions.
@@ -4020,7 +4051,7 @@ Measurements establish submitted native input separately from model consumption,
 
 Live acceptance records carry the source/installed CAFleet version, native CLI version, native configuration/mode, detector and answer profiles, Director mode/provenance, attributed decision/evidence references, request identity/token, receipt/stage, multiplexer, terminal size, cwd and redacted evidence. They include a permitted operation, an ordinary command failure after allow, an actual permission refusal, an approval that blocks the model, both supported answer routes and observed continuation. The exercised cases cover stale tokens/epochs/events, same/different operation keys, conflicting decisions, partial writes/lost replies, redraw, fragmented ANSI/UTF-8, primary/alternate screens, resize, title-only prompts, question/trust/update screens, transcript quotes, identical requests, concurrent human/output/input, slow display, database locks, outbox pressure, startup compensation, runner hard kill and deletion. Unavailable native modes or unobserved cases remain explicit coverage limits and cannot pass that profile's release gate.
 
-Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the committed ID reaches receiver output in the next notice.
+Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the committed ID reaches receiver output in the next notice, after the receiver's poll releases the hold or the ceiling fires.
 
 - Exact child argv for the selected native policy, with native/managed restrictions and sandbox boundaries preserved.
 - Equal run IDs across sibling databases, and replacement at an unchanged path.
@@ -4303,7 +4334,7 @@ Baseline column semantics:
 | `fleets` | `director_member_id` is backfilled inside the bootstrap transaction. A live fleet has null `deleted_at` and an active valid Director with placement |
 | `members` | `status` decodes as `active` or `deregistered`; unknown values fail. Deregistration is soft and keeps the row |
 | `member_placements` | `mux_pane_id`, `mux_window_id` and `mux_window_name` are null exactly while member creation is pending. `mux_server` is the server every invocation for the fleet targets (§6.5 Multiplexer context); member placements copy the Director's |
-| `messages` | `status_state` decodes as `input_required` or `completed`. `notified_at` is internal preview state that the public message record omits; a self-send stamps it on insertion and stays pending for reception and explicit ACK |
+| `messages` | `status_state` decodes as `input_required` or `completed`; the recipient's consuming poll sets `completed`. `notified_at` is internal preview state that the public message record omits; a self-send stamps it on insertion and stays pending until a poll consumes it |
 | `asset_installs` | Each successful backend asset installation upserts its timestamp at `(coding_agent, path)`, independently of member registration |
 
 Window layout columns follow §6.5 Fleet window layout:
@@ -4327,4 +4358,4 @@ The DDL above owns every runtime table column, type, enum, nullability constrain
 
 ## 9. Testing strategy
 
-The test suite covers current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, stop-cause and left-stage recording, pointer accounting, framing/limits, chunk continuation, post-submit verification and preview re-delivery, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; caller-pane verification through injected process tables and fake multiplexers, with the process-entry parsers tested on every platform; backend/multiplexer smoke coverage; links, embedding and release builds; and general timed pipe draining and owned-child cleanup.
+The test suite covers current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/pending notification behavior and consuming-poll exactness; the runner pending-preview sweep, its strict oldest-first order, clientless tracking and run-wide backoff, and retried-preview result suppression; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, stop-cause and left-stage recording, pointer accounting, framing/limits, chunk continuation, post-submit verification and preview re-delivery, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, concurrent-poll races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; caller-pane verification through injected process tables and fake multiplexers, with the process-entry parsers tested on every platform; backend/multiplexer smoke coverage; links, embedding and release builds; and general timed pipe draining and owned-child cleanup.

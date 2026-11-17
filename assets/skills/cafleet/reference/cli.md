@@ -22,9 +22,9 @@ Exact command facts for running CAFleet and interpreting its results.
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request or question | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
-| `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
+| `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
 | `message listen` | Notify pending message IDs through stdout | `MEMBER_ID` | JSONL only |
-| `message ack` / `message show` | Consume / read one message | `MESSAGE_ID` | yes |
+| `message show` | Read one message | `MESSAGE_ID` | yes |
 
 `cafleet --version` prints `cafleet <version>` and exits 0.
 
@@ -50,11 +50,11 @@ Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DI
 
 Use JSON for complete untruncated text; text output truncates message bodies at a fixed 200 codepoints. Message records contain `message_id`, `from_member_id`, integer `to_member_id`, `created_at`, `status_state`, `status_timestamp` and `text`.
 
-Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/description/registration/placement; lists return records and show includes nullable `deleted_at`. Deletion returns `fleet_id`, `deregistered_count` and `members`. Send returns `message`, `notification_sent`, `input_id`, `delivery`; poll returns an array; ACK/show return `message`. Member deletion returns `member_id`, `pane_status`; capture returns `member_id`, `pane_id`, `lines`, `content`, `captured_at`, `content_sha256`. Runtime commands define their fields below.
+Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/description/registration/placement; lists return records and show includes nullable `deleted_at`. Deletion returns `fleet_id`, `deregistered_count` and `members`. Send returns `message`, `notification_sent`, `input_id`, `delivery`; poll returns an array of the records it consumed; show returns `message`. Member deletion returns `member_id`, `pane_status`; capture returns `member_id`, `pane_id`, `lines`, `content`, `captured_at`, `content_sha256`. Runtime commands define their fields below.
 
 ### Member list output
 
-Roster records contain `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack`, `idle`. Fleet-reference matches have kind `director`; others `member`. Missing activity may be null and pane placement pending.
+Roster records contain `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_consumed`, `idle`; `last_consumed` is when the member's poll last consumed an incoming message. Fleet-reference matches have kind `director`; others `member`. Missing activity may be null and pane placement pending.
 
 Every JSON `placement` has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id`, `mux_window_name` and `mux_pane_id` are null together while creation is pending. New fleets name windows `cafleet-<fleet_id>-<ordinal>`: `window_ordinal` is `0` for the Director window and `1` or greater for overflow windows; `column_side` is `left` or `right`. Members using an existing window copy its recorded name, including names from existing registrations.
 
@@ -73,7 +73,7 @@ Place `--json` before any `--` literal-key separator. JSON is compact UTF-8. Com
 
 ## `permissions.allow` coverage
 
-Broker prefix rules such as `Bash(cafleet message *)` cover finite wait/listen, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Literal IDs preserve matching. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each of the Director's explicit pane-input dispatches; ask outranks allow. Director permission responses remain subject to effective native/managed rules.
+Broker prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Literal IDs preserve matching. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each of the Director's explicit pane-input dispatches; ask outranks allow. Director permission responses remain subject to effective native/managed rules.
 
 Claude receives `Bash(cafleet message *)` at spawn, and setup installs the Codex and OpenCode allow rules (§ `setup` and `doctor`); the Director-only commands refuse a member's own ID (§ Director-only command guard). Members retain broker reception/evidence-routing authority.
 
@@ -135,11 +135,11 @@ With `--pane`, `fleet create` reads no process ancestry, and an environment nami
 
 Persist once, then deliver ordinary-recipient previews oldest-first. Self-sends return `delivery.status=not_applicable`, null method/input and reason `self_send`; other root-Director sends use reason `director_stdout`, without multiplexer or pane diagnostics.
 
-Commit succeeds with exit 0 even when notification is queued, held or unavailable. `notification_sent=true` means this invocation submitted the new message; another invocation's submission leaves it false without a diagnostic. `input_id` identifies the new message's nullable preview receipt; `delivery` describes that message even when older ones are retried. Pending previews retry on the next send/wait; runner-queued previews retry automatically.
+Commit succeeds with exit 0 even when notification is queued, held or unavailable. `notification_sent=true` means this invocation submitted the new message; another invocation's submission leaves it false without a diagnostic. `input_id` identifies the new message's nullable preview receipt; `delivery` describes that message even when older ones are retried. The recipient's runner retries every still-pending preview automatically, oldest first: a queued preview retries itself, and the runner's sweep retries one that never reached its queue. The next send also retries them.
 
 ### Delivery outcome
 
-Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` followed by `message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; the next send to member MEMBER_ID or the next message wait retries it.` `CAUSE` is `pane input remained busy` for a busy lock, otherwise a runner lock/transport/submission or storage error with known run/input context. Storage failures identify the current candidate or selected wait-rotation entry. An exhausted attempt retains its sent prefix and reports failure with current receipt context.
+Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` followed by `message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; member MEMBER_ID's runner retries it.` `CAUSE` is `pane input remained busy` for a busy lock, otherwise a runner lock/transport/submission or storage error with known run/input context. Storage failures identify the current candidate. An exhausted attempt retains its sent prefix and reports failure with current receipt context.
 
 Receipt retirement failure reports `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining `notification_sent=true`. Pre-commit storage failure exits 1. Consume each committed ID once.
 
@@ -157,17 +157,7 @@ Each attempted message left in the composer or held by its own in-progress, unce
 
 ### `message poll`
 
-`cafleet message poll MEMBER_ID [--json]` returns incoming `input_required` records descending by status timestamp/message ID. Unknown/inactive member: `Member ID not found`, exit 1.
-
-### `message wait`
-
-`cafleet message wait MEMBER_ID [--timeout SECONDS] [--json]`
-
-Timeout is integer `1..=1800`, default `300`. Pending messages return immediately; otherwise poll each second, retrying at most one other ordinary recipient per interval and each pending message once per invocation. It never ACKs.
-
-Result fields are `member_id`, `outcome`, `messages`, `notification_errors`; outcome is `messages` with full records or `timeout` with an empty array. Diagnostics contain `member_id`, `message_id`, `error`, ordered by message ID. Both outcomes exit 0; deleted subject/fleet or corrupt/unreadable state exits 1. Deadline allows one in-flight attempt/finalization of at most six seconds.
-
-`notification_errors` uses the exact scoped strings of [Delivery outcome](#delivery-outcome). A per-message hold permits trying later messages on a verified-composer run; a pane/run/observer/ownership/storage hold ends that member's drain.
+`cafleet message poll MEMBER_ID [--json]` returns every incoming `input_required` record descending by status timestamp/message ID and consumes exactly those records in one transaction: each returned record shows `status_state` `completed`, and no later poll or listener notice lists it. Two concurrent polls never return the same message. An empty inbox prints `[]` (text: `No messages found.`) and exits 0. Unknown/inactive member: `Member ID not found`, exit 1, consuming nothing. A failure before commit consumes nothing; output lost after commit leaves the messages consumed, and `message show MESSAGE_ID --json` reads each one again.
 
 ### `message listen`
 
@@ -181,19 +171,19 @@ Flush UTF-8 JSONL records: `ready` with `member_id,fleet_id` before replay; `pen
 {"event":"pending","member_id":1,"message_ids":[51,52,53]}
 ```
 
-A `pending` notice is a wake signal, never a payload: `message_ids` is the member's full unACKed set at that moment, ordered by creation/message ID, and is never empty. Read bodies with `cafleet message poll <member-id> --json`.
+A `pending` notice is a wake signal, never a payload: `message_ids` is the member's full unpolled set at that moment, ordered by creation/message ID, and is never empty. `cafleet message poll <member-id> --json` returns and consumes the bodies.
 
-**Hold.** After a notice is delivered, the listener holds later notices while any ID it named stays unACKed. ACKing every named ID releases the hold, and the next snapshot with pending messages emits one notice naming the full pending set. A hold lasting 300 s with IDs the notice did not name re-sends one notice naming the full set and restarts the 300 s; unACKed notified IDs alone never trigger a re-notice.
+**Hold.** After a notice is delivered, the listener holds later notices while any ID it named stays unpolled. Any poll consumes the whole pending set and so releases the hold; the next snapshot with pending messages emits one notice naming only messages committed after that poll. A hold lasting 300 s with IDs the notice did not name re-sends one bulk notice naming every unpolled ID, held and fresh, and restarts the 300 s; held IDs alone never trigger a re-notice.
 
-**Notice bound.** At most one new notice follows each hold release and each 300 s ceiling firing, so a burst of any size adds no notice beyond the outstanding one. A notice whose IDs you already handled through an earlier poll costs one empty or partial poll and needs no action. A restarted listener emits one notice naming every pending ID right after `ready`. IDs you poll and ACK before any notice names them are never notified.
+**Notice bound.** A listener emits at most 1 notice, plus one per poll that consumed held IDs, plus one per 300 s ceiling firing, so a burst of any size adds no notice beyond the outstanding one. Within one listener, an ID appears in two notices only through a ceiling re-notice. A turn with k mid-turn polls can queue at most k + 1 notices behind it; each names only IDs those polls already consumed. Message IDs follow commit order, so a notice whose every ID is at or below the highest ID your polls returned needs no command. A restarted listener emits one notice naming every unpolled ID right after `ready`. IDs you poll before any notice names them are never notified.
 
-Listening changes no consumption/notification state and retries no pane delivery; concurrent listeners are independent. Record deferred actions and ACK consumption once. Preserve incomplete JSONL across native reads.
+Listening changes no consumption/notification state and retries no pane delivery; concurrent listeners are independent. Preserve incomplete JSONL across native reads.
 
 `--codex-thread THREAD` forwards notices into a Codex thread and keeps the record, hold, replay, lease and idle contracts:
 
 - Stdout carries only `ready` and the final `closed` record, written right before exit with every reason, `session_exited` included.
 - Each `pending` notice, and each `closed` record with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, one at a time with a 10 s deadline each. `ready` and `closed` `session_exited` are never forwarded.
-- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal. A refused `pending` notice is rebuilt from a fresh snapshot after 1 s while the pinned session lives, and dropped when its IDs were ACKed meanwhile. A refused `closed` record is retried every 1 s with no time limit and, once accepted, still written to stdout. The pinned session's exit during either wait ends the listener with `session_exited`.
+- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal. A refused `pending` notice is rebuilt from a fresh snapshot after 1 s while the pinned session lives, and dropped when a poll consumed its IDs meanwhile or its re-notice no longer has fresh IDs. A refused `closed` record is retried every 1 s with no time limit and, once accepted, still written to stdout. The pinned session's exit during either wait ends the listener with `session_exited`.
 - At startup the listener pins its nearest ancestor whose argv[0] basename is exactly `codex`. When that process exits (a reused pid counts as exited), stdout gets `closed` `session_exited` and the listener exits 0.
 
 | Condition | Result |
@@ -211,13 +201,9 @@ The closed notice is one best-effort `codex queue` of `[cafleet listen closed] e
 
 For sandbox startup failures, confirm exit and follow the [Codex native reception recipe](coding-agents.md#codex-native-director-reception) for approved escalation and readiness checks.
 
-### `message ack`
-
-`cafleet message ack MESSAGE_ID [--json]` changes `input_required` to `completed`, stamping consumption independently of assignment progress.
-
 ### `message show`
 
-`cafleet message show MESSAGE_ID [--json]` returns its full record.
+`cafleet message show MESSAGE_ID [--json]` returns its full record in any state and changes no state; use it to read a consumed message again.
 
 ## Push notifications
 
@@ -239,11 +225,11 @@ Long input uses a plan's declared bracketed-paste framing when the child has ena
 
 ### Runner queue
 
-Accepted deferred input returns durable `ready`, `deferred_at`, `defer_reason` and its input ID; it outlives the invocation and drains automatically. Inspect `cafleet input show INPUT_ID --json`. The Director receives one `input_delivery_result` for its first submitted/not-submitted/uncertain/left-in-composer outcome and for every immediate stopped staged write.
+Accepted deferred input returns durable `ready`, `deferred_at`, `defer_reason` and its input ID; it outlives the invocation and drains automatically. Inspect `cafleet input show INPUT_ID --json`. The Director receives one `input_delivery_result` for its first submitted/not-submitted/uncertain/left-in-composer outcome and for every immediate stopped staged write, except a retried preview result: a preview settled `not_submitted` with `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `runner_stopped`, `runner_lost` or `message_consumed` publishes nothing, live or on shutdown and recovery, because the runner sweep retries its still-pending message or the member already consumed it. `target_inactive` and `target_changed` previews, prompt/exec results, `left_in_composer`, `uncertain` and deferred submissions publish; `input show` reports every receipt.
 
 Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `plain_limit_exceeded`, `message_consumed`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
 
-A left-in-composer preview settles its attempt and atomically queues a `redelivery` successor at the head. It waits for verified empty, with later input behind it; prompt/exec is retried deliberately. The runner checks a waiting head's ACK and target each queue turn, cancelling consumed/inactive previews with zero bytes. An uncertain head on a verified-composer run advances the FIFO but sets the held composer; other runs retain their FIFO/member-wide stop. A head stalled solely on that hold generates `input_delivery_stalled`; [Runtime events](#runtime-events) owns the recovery action.
+A left-in-composer preview settles its attempt and atomically queues a `redelivery` successor at the head. It waits for verified empty, with later input behind it; prompt/exec is retried deliberately. The runner checks whether a waiting head preview's message is consumed and its target active each queue turn; consumption cancels its zero-byte receipt as `not_submitted/message_consumed`, and removal as `not_submitted/target_inactive`. An uncertain head on a verified-composer run advances the FIFO but sets the held composer; other runs retain their FIFO/member-wide stop. A head stalled solely on that hold generates `input_delivery_stalled`; [Runtime events](#runtime-events) owns the recovery action.
 
 ### Held delivery
 
@@ -253,7 +239,7 @@ Degraded/recovering/lost observation, unavailable ownership/storage, uncertain r
 
 Delivery fallback can interrupt work, dismiss undetected prompts or combine unsent drafts. A host may need multiple Escapes; submission remains valid when the host queues instead of interrupting. Resume and dismissal clauses are conditional.
 
-Prompt/exec carry no clause, so inspect open prompts first. Repeated previews are consumed by ID; concurrent sends may interrupt earlier turns, and interruption can end shell tools. The CLI defers termination during pane input. OpenCode captures may show only a status bar; inspect retained sessions for omitted output and broker poll/ACK for consumption.
+Prompt/exec carry no clause, so inspect open prompts first. Repeated previews are consumed by ID; concurrent sends may interrupt earlier turns, and interruption can end shell tools. The CLI defers termination during pane input. OpenCode captures may show only a status bar; inspect retained sessions for omitted output and a message's `completed` state (`message show`) for its consumption.
 
 ## Member commands
 
@@ -422,7 +408,7 @@ Uncertain and left-in-composer prompt/exec errors exit 1 with known receipt/cont
 
 `delivery` contains `status,method,reason`. Method is `profile`, `fallback` or null before selection. Held prompt/exec exits 1; held send retains commit. `left_in_composer` is settled and needs no reconciliation; prompt/exec exits 1, while sends retain exit 0. `uncertain` requires reconciliation; `not_submitted` records cancellation or an evidence-based reconciliation; `not_applicable` is broker-only.
 
-Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,redelivery,delivery_budget_exhausted`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run hold or an earlier receipt on a run without composer verification), `notification_failed` (lock/transport/storage/submission failure). Queued previews stay unnotified until submission or ACK settlement; later results appear in receipts/events without changing original command output.
+Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,redelivery,delivery_budget_exhausted`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run hold or an earlier receipt on a run without composer verification), `notification_failed` (lock/transport/storage/submission failure). Queued previews stay unnotified until submission or settlement of accepted delivery; later results appear in receipts/events without changing original command output.
 
 ### Runtime events
 
@@ -445,7 +431,7 @@ Delivery results contain `input_id,message_id,delivery,stage`, null interaction/
 
 `director_action` is `{"kind":"review_left_input","instruction":INSTRUCTION,"press_argv":["cafleet","member","press","MEMBER_ID","--from-member-id","DIRECTOR_ID","Enter"]}` only for `left_in_composer` at `literal_complete`/`submitted` with cause `observer_unavailable`, `deadline_expired` or `submit_unconfirmed`. INSTRUCTION requires capture, `member show` confirmation of no current interaction, and whole-literal confirmation before pressing Enter; otherwise ask the user to clear/submit natively. All other causes/stages, including interaction stops, have null action; the runner supplies no second submit key.
 
-`input_delivery_stalled` reports a head waiting solely on a held composer for 3 minutes, once per head through recovery. It carries ordered `input_id,message_id,blocking_input_id,waiting_since,delivery`, where `waiting_since` is UTC RFC 3339 and delivery is queued; its null interaction/classification, lifecycle source and evidence shape match delivery results. Its action is `{"kind":"review_stalled_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKING_INPUT_ID","--json"],"press_argv":PRESS_ARGV}`. The instruction prescribes capture/inspection, submitting a whole retained literal with no current interaction or asking the user to clear/submit, reconciling an uncertain blocker from evidence, then ACKing a waiting preview whose delivery is unnecessary or whose cleared composer never verifies empty; the runner cancels an ACKed head on its next queue turn. PRESS_ARGV is the left-input action's argv only when the blocker qualifies, otherwise null; argv arrays append `--database-url URL` for a non-default database. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
+`input_delivery_stalled` reports a head waiting solely on a held composer for 3 minutes, once per head through recovery. It carries ordered `input_id,message_id,blocking_input_id,waiting_since,delivery`, where `waiting_since` is UTC RFC 3339 and delivery is queued; its null interaction/classification, lifecycle source and evidence shape match delivery results. Its action is `{"kind":"review_stalled_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKING_INPUT_ID","--json"],"press_argv":PRESS_ARGV}`. INSTRUCTION is exactly `Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.` A verified empty composer resumes the FIFO and the waiting head delivers next; if the member's poll already consumed the head's message, the runner cancels it as `not_submitted/message_consumed` instead. PRESS_ARGV is the left-input action's argv only when the blocker qualifies, otherwise null; argv arrays append `--database-url URL` for a non-default database. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
 
 ### `event show`
 
@@ -464,8 +450,8 @@ Read the latest preview attempt in the current run before choosing delivery:
 | None | Start attempt 1 |
 | Deferred `ready` | Leave queued; skip this message for this invocation |
 | Other `ready` | Reuse its key and reevaluate zero-byte eligibility |
-| `accepted` or submitted | Settle/stamp or verify ACK without typing |
-| Not submitted | Next send/wait automatically starts N+1, including after reconciliation |
+| `accepted` or submitted | Settle/stamp or verify consumption without typing |
+| Not submitted | The runner sweep or the next send starts N+1, including after reconciliation |
 | In-progress, uncertain or abandoned uncertain | Per-message hold on a verified-composer run; otherwise end the member's drain |
 | Left in composer | Its successor must already exist; absence fails with `preview input INPUT_ID was left in the composer without a re-delivery attempt` |
 
@@ -612,8 +598,7 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` |
-| `message ack` / `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` |
-| `message ack` | A message not in the `input_required` state | `Error: Cannot ACK message in state <state>` |
+| `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` |
 | `message send` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` |
 | `message send` | The recipient is unknown or inactive | `Error: Destination member not found: <to-member-id>` |
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` |
