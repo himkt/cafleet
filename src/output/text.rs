@@ -48,10 +48,6 @@ pub(crate) fn format_message_sent(
     )
 }
 
-pub(crate) fn format_message_acknowledged(message: &MessageRecord) -> String {
-    format!("Message acknowledged.\n{}", format_message(message))
-}
-
 pub(crate) fn format_message_wait(member_id: i64, messages: &[MessageRecord]) -> String {
     if messages.is_empty() {
         format!("Timed out waiting for member {member_id}.")

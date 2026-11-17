@@ -13,7 +13,6 @@ use crate::delivery::AttemptOutcome;
 use crate::delivery::BrokerReceiver;
 use crate::error::CafleetError;
 use crate::output::format_message;
-use crate::output::format_message_acknowledged;
 use crate::output::format_message_sent;
 use crate::output::format_message_wait;
 use crate::output::format_messages;
@@ -70,7 +69,7 @@ pub(crate) enum MessageCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Fetch un-acked incoming messages.
+    /// Fetch and consume incoming messages.
     Poll {
         /// Recipient whose inbox is fetched.
         #[arg(value_name = "MEMBER_ID")]
@@ -102,15 +101,6 @@ pub(crate) enum MessageCommand {
         /// Forward each record into this Codex thread through `codex queue`.
         #[arg(long = "codex-thread", value_name = "THREAD")]
         codex_thread: Option<String>,
-    },
-    /// Acknowledge a received message.
-    Ack {
-        /// Message to acknowledge.
-        #[arg(value_name = "MESSAGE_ID")]
-        message_id: i64,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
     },
     /// Show one message.
     Show {
@@ -221,14 +211,6 @@ pub(crate) fn run(
                 Some(thread) => run_forwarder(conn, member_id, timeout, &thread),
                 None => run_listener(conn, member_id, timeout),
             }
-        }
-        MessageCommand::Ack { message_id, json } => {
-            let message = broker::ack_message(conn, message_id)?;
-            emit(
-                json,
-                &crate::output::json::message_envelope(&message),
-                || format_message_acknowledged(&message),
-            )
         }
         MessageCommand::Show { message_id, json } => {
             let message = broker::get_message(conn, message_id)?;
@@ -365,9 +347,9 @@ struct Held {
     at: Instant,
 }
 
-/// The IDs of the last delivered notice that are still pending; while any remain, later
-/// arrivals wait for their release or the hold ceiling. Every notice names the full pending
-/// set, so the held IDs are exactly the notified IDs still pending.
+/// The IDs of the last delivered notice that are not yet polled; while any remain, later
+/// arrivals wait for a consuming poll or the hold ceiling. Every notice names the full pending
+/// set and a poll consumes that whole set, so any poll releases the hold.
 struct NoticeHold(Option<Held>);
 
 impl NoticeHold {
@@ -1815,7 +1797,7 @@ mod tests {
                 let clock = test_clock();
                 let mut output = RecordingOutput::new(&clock);
                 let broker = listen_broker(&clock, &mut output, 700, vec![(0, Act::Send(2))]);
-                assert_eq!(notices(&output), [broker.sent.clone()]);
+                assert_eq!(notices(&output), std::slice::from_ref(&broker.sent));
             }
 
             #[test]

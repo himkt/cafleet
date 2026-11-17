@@ -67,7 +67,7 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
     json!({"member_id":row.member.member_id,"name":row.member.name,
         "kind":row.member.kind.as_str(),"placement":placement(&row.member.placement),
-        "last_sent":row.last_sent,"last_recv":row.last_recv,"last_ack":row.last_ack,"idle":row.idle})
+        "last_sent":row.last_sent,"last_recv":row.last_recv,"last_consumed":row.last_consumed,"idle":row.idle})
 }
 
 pub(crate) fn message(row: &MessageRecord) -> Value {

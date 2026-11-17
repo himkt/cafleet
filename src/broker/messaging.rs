@@ -118,18 +118,31 @@ pub(crate) fn poll_messages(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    if crate::broker::members::active_member_fleet(conn, member_id)?.is_none() {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    if crate::broker::members::active_member_fleet(&tx, member_id)?.is_none() {
         return Err(CafleetError::App(format!("Member {member_id} not found")));
     }
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {MESSAGE_COLUMNS} FROM messages \
+    let pending_ids = tx
+        .prepare(
+            "SELECT message_id FROM messages \
              WHERE to_member_id=?1 AND status_state='input_required' \
-             ORDER BY status_timestamp DESC, message_id DESC"
-    ))?;
-    let rows = stmt
-        .query_map([member_id], map_message_row)?
+             ORDER BY status_timestamp DESC, message_id DESC",
+        )?
+        .query_map([member_id], |row| row.get::<_, i64>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
+    let consumed_at = now_stamp();
+    let consumed = {
+        let mut consume = tx.prepare(&format!(
+            "UPDATE messages SET status_state='completed', status_timestamp=?1 \
+             WHERE message_id=?2 AND status_state='input_required' RETURNING {MESSAGE_COLUMNS}"
+        ))?;
+        pending_ids
+            .into_iter()
+            .map(|message_id| consume.query_row(params![consumed_at, message_id], map_message_row))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    tx.commit()?;
+    Ok(consumed)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,30 +310,6 @@ fn select_listen_snapshot(
         messages.push(map_message_row(row)?);
     }
     Ok(InboxSnapshot::Open { fleet_id, messages })
-}
-
-pub(crate) fn ack_message(
-    conn: &mut Connection,
-    message_id: i64,
-) -> Result<MessageRecord, CafleetError> {
-    let now = now_stamp();
-    let updated = conn
-        .query_row(
-            &format!(
-                "UPDATE messages SET status_state='completed', status_timestamp=?1 \
-                WHERE message_id=?2 AND status_state='input_required' RETURNING {MESSAGE_COLUMNS}"
-            ),
-            params![now, message_id],
-            map_message_row,
-        )
-        .optional()?;
-    if let Some(message) = updated {
-        return Ok(message);
-    }
-    Err(CafleetError::App(format!(
-        "Cannot ACK message in state {}",
-        get_message(conn, message_id)?.status.as_str()
-    )))
 }
 
 pub(crate) fn pending_previews(
@@ -628,10 +617,12 @@ mod tests {
                 std::thread::spawn(move || {
                     let committed = Arc::new(Mutex::new(None));
                     let hook = Arc::clone(&committed);
-                    writer.commit_hook(Some(move || {
-                        *hook.lock().unwrap() = Some(commits.fetch_add(1, Ordering::SeqCst));
-                        false
-                    }));
+                    writer
+                        .commit_hook(Some(move || {
+                            *hook.lock().unwrap() = Some(commits.fetch_add(1, Ordering::SeqCst));
+                            false
+                        }))
+                        .unwrap();
                     barrier.wait();
                     (0..25)
                         .map(|index| {
@@ -676,7 +667,14 @@ mod tests {
         );
         assert_eq!(notified_at(&conn, assignment.message_id), None);
         assert_eq!(get_message(&conn, own.message_id).unwrap(), own);
-        assert_eq!(poll_messages(&conn, pending).unwrap(), [assignment]);
+        assert_eq!(
+            poll_messages(&conn, pending)
+                .unwrap()
+                .iter()
+                .map(|m| m.message_id)
+                .collect::<Vec<_>>(),
+            [assignment.message_id]
+        );
     }
 
     #[test]
@@ -1213,6 +1211,13 @@ mod tests {
             pending_previews(&conn, fleet, observer).unwrap(),
             vec![(former_director, ordinary.message_id)]
         );
-        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
+        assert_eq!(
+            broker::poll_messages(&conn, director)
+                .unwrap()
+                .iter()
+                .map(|m| m.message_id)
+                .collect::<Vec<_>>(),
+            [reply.message_id]
+        );
     }
 }

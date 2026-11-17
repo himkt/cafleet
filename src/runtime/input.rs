@@ -5875,7 +5875,7 @@ mod tests {
 
         mod composer_reliability {
             use crate::runtime::input::tests::ordinary_prompt::deferred_queue::{
-                form, queued, row,
+                form, queued, result_events, row,
             };
             use crate::runtime::input::tests::ordinary_prompt::*;
             use serde_json::{Value, json};
@@ -6862,6 +6862,77 @@ mod tests {
                         Some("message_consumed")
                     );
                     assert_eq!(host.pty.written, writes);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        result_events(host, next.input_id),
+                        0,
+                        "a consumed re-delivery successor publishes no delivery result"
+                    );
+                });
+            }
+
+            #[test]
+            fn an_enter_press_that_verifies_the_composer_empty_delivers_the_waiting_head_then_the_later_input()
+             {
+                with_host(|host| {
+                    let (message, stopped) = stopped_preview(host, false);
+                    let waiting = storage::find_latest_preview_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        message.message_id,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    let later = queued(
+                        host,
+                        request(host, "prompt:after-the-stalled-head", LITERAL),
+                        "earlier_input",
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(waiting.input_id, &old_wait());
+                    drain_stalled_events(host);
+                    readable_stalled_head(host, waiting.input_id, stopped);
+                    assert_eq!(
+                        row(host, waiting.input_id).state,
+                        storage::InputState::Ready
+                    );
+                    assert_eq!(row(host, later).state, storage::InputState::Ready);
+                    assert_eq!(
+                        host.coordinator.held_composer.map(|(input_id, _)| input_id),
+                        Some(stopped),
+                        "the left-in-composer blocker holds the composer"
+                    );
+                    let blocker = row(host, stopped);
+                    let canonical = canonical_preview(&message);
+                    let preview_program = [canonical.as_bytes(), b"~"].concat();
+                    host.confirm_submissions = true;
+                    host.confirm_after_programs([preview_program.clone(), encoded()]);
+                    let before = host.pty.written.len();
+                    host.type_human(b"\r");
+                    host.show(SCREEN.to_vec());
+                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
+                        host,
+                        |host| {
+                            matches!(
+                                row(host, later).state,
+                                storage::InputState::Accepted | storage::InputState::Settled
+                            )
+                        },
+                    );
+                    assert_eq!(
+                        host.coordinator.held_composer, None,
+                        "the verified empty composer clears the hold"
+                    );
+                    assert!(matches!(
+                        row(host, waiting.input_id).state,
+                        storage::InputState::Accepted | storage::InputState::Settled
+                    ));
+                    assert_eq!(
+                        host.pty.written[before..],
+                        [b"\r".as_slice(), &preview_program, &encoded()].concat(),
+                        "the press submits the retained literal, then the waiting head and the later input deliver in order"
+                    );
+                    assert_eq!(row(host, stopped), blocker);
                 });
             }
 
@@ -8568,7 +8639,7 @@ mod tests {
                 )
             }
 
-            fn result_events(host: &Host, input_id: i64) -> i64 {
+            pub(super) fn result_events(host: &Host, input_id: i64) -> i64 {
                 host.fixture
                     .conn
                     .query_row(
@@ -8812,6 +8883,105 @@ mod tests {
                         )
                         .unwrap();
                     assert!(notified.is_none());
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        result_events(host, id),
+                        0,
+                        "a preview consumed by poll publishes no delivery result"
+                    );
+                });
+            }
+
+            #[test]
+            fn a_preview_attempt_deadline_with_a_busy_pane_lock_settles_not_submitted_without_publishing()
+             {
+                with_permission_host(Duration::from_secs(30), |host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    let message = host.message("preview behind a busy pane lock");
+                    form(host);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical_preview(&message)),
+                        "interaction_open",
+                    );
+                    let prompt = queued(
+                        host,
+                        host.request("prompt:busy-control"),
+                        "interaction_open",
+                    );
+                    let _held = PaneLock::try_acquire(&url, &host.placement())
+                        .unwrap()
+                        .unwrap();
+                    close(host);
+                    turns_until(host, |host| {
+                        row(host, prompt).state == storage::InputState::Settled
+                    });
+                    assert_not_submitted(host, preview, "pane_input_busy");
+                    assert_not_submitted(host, prompt, "pane_input_busy");
+                    turns_until(host, |host| result_events(host, prompt) == 1);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        result_events(host, preview),
+                        0,
+                        "the transient preview outcome publishes nothing; the sweep retries it"
+                    );
+                    assert_eq!(result_events(host, prompt), 1, "a prompt still publishes");
+                    assert!(host.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
+            fn a_preview_whose_target_changed_still_publishes_its_delivery_result() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let message = host.message("preview for a moved target");
+                    form(host);
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical_preview(&message)),
+                        "interaction_open",
+                    );
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert_not_submitted(host, id, "target_changed");
+                    turns_until(host, |host| result_events(host, id) > 0);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                });
+            }
+
+            #[test]
+            fn orderly_shutdown_settles_a_queued_preview_runner_stopped_without_publishing() {
+                with_permission_host(Duration::from_secs(30), |host| {
+                    let message = host.message("preview queued at shutdown");
+                    form(host);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical_preview(&message)),
+                        "interaction_open",
+                    );
+                    let prompt = queued(
+                        host,
+                        host.request("prompt:shutdown-control"),
+                        "interaction_open",
+                    );
+                    let settled = shut_down(host);
+                    assert_eq!(settled, vec![preview, prompt]);
+                    assert_not_submitted(host, preview, "runner_stopped");
+                    assert_not_submitted(host, prompt, "runner_stopped");
+                    assert_eq!(result_events(host, prompt), 1, "a prompt still publishes");
+                    assert_eq!(
+                        result_events(host, preview),
+                        0,
+                        "the next run's sweep retries the still-pending message"
+                    );
+                    assert!(host.pty.offers.is_empty());
                 });
             }
 

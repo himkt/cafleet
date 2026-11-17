@@ -316,7 +316,7 @@ fn idle_seconds(
     let latest = [
         ("messages.created_at", &row.last_sent),
         ("messages.created_at", &row.last_recv),
-        ("messages.status_timestamp", &row.last_ack),
+        ("messages.status_timestamp", &row.last_consumed),
     ]
     .into_iter()
     .filter_map(|(field, value)| value.as_ref().map(|value| (field, value)))
@@ -352,7 +352,7 @@ pub(crate) fn list_members(
             member: member_row(row)?,
             last_sent: row.get(ACTIVITY_OFFSET)?,
             last_recv: row.get(ACTIVITY_OFFSET + 1)?,
-            last_ack: row.get(ACTIVITY_OFFSET + 2)?,
+            last_consumed: row.get(ACTIVITY_OFFSET + 2)?,
             idle: None,
         })
     })?;

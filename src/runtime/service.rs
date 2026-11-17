@@ -1373,6 +1373,32 @@ fn publish_stopped_results(
 
 const IDLE_TICK_SLEEP: Duration = Duration::from_millis(2);
 const DEFERRED_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+pub(crate) const PREVIEW_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
+const SWEEP_BACKOFF_FLOOR: Duration = Duration::from_secs(1);
+const SWEEP_BACKOFF_CAP: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Default)]
+pub(crate) struct SweepBackoff {
+    delay: Duration,
+}
+
+impl SweepBackoff {
+    pub(crate) fn delay(&self) -> Duration {
+        self.delay
+    }
+
+    pub(crate) fn transient(&mut self) {
+        self.delay = if self.delay.is_zero() {
+            SWEEP_BACKOFF_FLOOR
+        } else {
+            (self.delay * 2).min(SWEEP_BACKOFF_CAP)
+        };
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.delay = Duration::ZERO;
+    }
+}
 
 /// Paces queued-input retries on the 100 ms timer, waking early when the observed gate changes,
 /// such as an interaction closing or a candidate clearing, or when an active input completes.
@@ -2409,6 +2435,16 @@ pub(crate) mod test_support {
             with_configured_input_service(true, exit_code, body);
         }
 
+        /// Runs an input service whose deadline is `lifetime` instead of the default ten
+        /// seconds, for runner behavior that spans several retry intervals.
+        pub(crate) fn with_input_service_for(
+            lifetime: Duration,
+            detecting: bool,
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            with_input_service_lifetime(lifetime, detecting, 0, |_| {}, body);
+        }
+
         fn with_configured_input_service(
             detecting: bool,
             exit_code: i32,
@@ -2423,7 +2459,23 @@ pub(crate) mod test_support {
             configure_catalog: impl FnOnce(&mut Value),
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
-            let until = Instant::now() + Duration::from_secs(10);
+            with_input_service_lifetime(
+                Duration::from_secs(10),
+                detecting,
+                exit_code,
+                configure_catalog,
+                body,
+            );
+        }
+
+        fn with_input_service_lifetime(
+            lifetime: Duration,
+            detecting: bool,
+            exit_code: i32,
+            configure_catalog: impl FnOnce(&mut Value),
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            let until = Instant::now() + lifetime;
             let mut fixture = ServiceFixture::configured_until(false, until, |fixture, spec| {
                 configure_with(fixture, spec, until, detecting);
                 let path = fixture._dir.path().join("observation-services.json");
@@ -3801,6 +3853,420 @@ mod tests {
                     "the terminated native exit is preserved"
                 );
                 assert_stopped_result_before_exit(fixture, id);
+            });
+        }
+    }
+
+    mod preview_sweep {
+        use crate::broker::MessageRecord;
+        use crate::runtime::service::SweepBackoff;
+        use crate::runtime::service::test_support::input_service::*;
+        use crate::runtime::service::tests::*;
+
+        #[test]
+        fn the_run_wide_backoff_starts_at_one_second_doubles_to_thirty_and_resets() {
+            let mut backoff = SweepBackoff::default();
+            assert_eq!(backoff.delay(), Duration::ZERO);
+            let mut delays = Vec::new();
+            for _ in 0..8 {
+                backoff.transient();
+                delays.push(backoff.delay().as_secs());
+            }
+            assert_eq!(delays, [1, 2, 4, 8, 16, 30, 30, 30]);
+            backoff.reset();
+            assert_eq!(backoff.delay(), Duration::ZERO);
+            backoff.transient();
+            assert_eq!(backoff.delay(), Duration::from_secs(1));
+        }
+
+        #[test]
+        fn the_sweep_interval_is_one_second() {
+            assert_eq!(
+                crate::runtime::service::PREVIEW_SWEEP_INTERVAL,
+                Duration::from_secs(1)
+            );
+        }
+
+        fn send(fixture: &mut ServiceFixture, body: &str) -> MessageRecord {
+            let run = &fixture.fixture.run;
+            let (director, member) = (run.director_member_id, run.member_id);
+            crate::broker::send_message(&mut fixture.fixture.conn, director, member, body).unwrap()
+        }
+
+        fn previews(fixture: &ServiceFixture, message_id: i64) -> Vec<InputOperation> {
+            let conn = &fixture.fixture.conn;
+            conn.prepare(
+                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND message_id=?2 ORDER BY input_id",
+            )
+            .unwrap()
+            .query_map(
+                rusqlite::params![fixture.fixture.run.run_id, message_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+            .map(|id| storage::get_input(conn, id.unwrap()).unwrap())
+            .collect()
+        }
+
+        fn notified_at(fixture: &ServiceFixture, message_id: i64) -> Option<String> {
+            fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn result_events(fixture: &ServiceFixture, input_id: i64) -> i64 {
+            fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                    rusqlite::params![fixture.fixture.run.run_id, input_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn lines(fixture: &ServiceFixture) -> Vec<String> {
+            input_service_records(fixture)
+                .iter()
+                .map(|record| record["line"].as_str().unwrap().to_owned())
+                .collect()
+        }
+
+        fn line(message: &MessageRecord) -> String {
+            crate::delivery::canonical_preview_line(message)
+        }
+
+        fn wait_for(until: Instant, what: &str, mut done: impl FnMut() -> bool) {
+            while !done() {
+                assert!(Instant::now() < until, "{what}");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        fn wait_delivered(fixture: &mut ServiceFixture, message: &MessageRecord, until: Instant) {
+            wait_input_service_record(fixture, &line(message), until);
+            wait_for(until, "the delivered preview is stamped", || {
+                notified_at(fixture, message.message_id).is_some()
+            });
+        }
+
+        fn assert_runner_settled_submitted(fixture: &ServiceFixture, message: &MessageRecord) {
+            let receipts = previews(fixture, message.message_id);
+            let latest = receipts
+                .last()
+                .expect("the sweep reserved a preview receipt");
+            assert_eq!(latest.kind, InputKind::Preview);
+            assert_eq!(latest.state, InputState::Settled, "{latest:?}");
+            assert_eq!(latest.disposition, Some(InputDisposition::Submitted));
+            assert!(notified_at(fixture, message.message_id).is_some());
+        }
+
+        fn pane_lock(fixture: &ServiceFixture) -> crate::pane_lock::PaneLock {
+            let run = &fixture.fixture.run;
+            let placement =
+                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                    .unwrap()
+                    .unwrap()
+                    .placement;
+            let url = format!("sqlite:///{}", fixture.fixture.conn.path().unwrap());
+            crate::pane_lock::PaneLock::try_acquire(&url, &placement)
+                .unwrap()
+                .expect("the test takes the member's free pane input lock")
+        }
+
+        #[test]
+        fn the_sweep_submits_unnotified_previews_oldest_first_with_no_caller_command() {
+            with_input_service(|fixture, until| {
+                let first = send(fixture, "first swept preview");
+                let second = send(fixture, "second swept preview");
+                wait_delivered(fixture, &first, until);
+                wait_delivered(fixture, &second, until);
+                input_service_barrier(fixture, until);
+                assert_eq!(
+                    lines(fixture),
+                    [line(&first), line(&second), "barrier".to_owned()],
+                    "each preview is typed once, oldest first"
+                );
+                for message in [&first, &second] {
+                    let receipts = previews(fixture, message.message_id);
+                    assert_eq!(receipts.len(), 1, "{receipts:?}");
+                    assert_eq!(
+                        receipts[0].operation_key,
+                        storage::preview_operation_key(
+                            fixture.fixture.run.run_id,
+                            message.message_id,
+                            1
+                        )
+                        .unwrap(),
+                        "the runner reserves attempt 1 under its own run key"
+                    );
+                    assert_runner_settled_submitted(fixture, message);
+                }
+            });
+        }
+
+        #[test]
+        fn a_consumed_message_is_never_selected() {
+            with_input_service(|fixture, until| {
+                let run = fixture.fixture.run.clone();
+                let tx = fixture
+                    .fixture
+                    .conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .unwrap();
+                let consumed = crate::broker::messaging::insert_message_validated(
+                    &tx,
+                    run.director_member_id,
+                    run.member_id,
+                    "consumed before any sweep",
+                )
+                .unwrap();
+                tx.execute(
+                    "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                    [consumed.message_id],
+                )
+                .unwrap();
+                tx.commit().unwrap();
+                let later = send(fixture, "pending after the consumed message");
+                wait_delivered(fixture, &later, until);
+                input_service_barrier(fixture, until);
+                assert!(previews(fixture, consumed.message_id).is_empty());
+                assert_eq!(notified_at(fixture, consumed.message_id), None);
+                assert_eq!(lines(fixture), [line(&later), "barrier".to_owned()]);
+            });
+        }
+
+        #[test]
+        fn the_sweep_never_duplicates_a_preview_the_fifo_already_holds() {
+            with_detecting_input_service(|fixture, until| {
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
+                loop {
+                    assert!(Instant::now() < until, "the detected interaction opens");
+                    let health = NativeInputHost.health(&run, until).unwrap();
+                    let observation = health.observation.as_ref().unwrap();
+                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
+                        && observation.pending_count == 0
+                        && !observation.pending_evidence
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let message = send(fixture, "queued behind the form");
+                let settings =
+                    Settings::for_database(Path::new(fixture.fixture.conn.path().unwrap()));
+                crate::delivery::deliver_pending(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    None,
+                    crate::time::Deadline::until(
+                        until.min(Instant::now() + Duration::from_secs(5)),
+                    ),
+                    &std::collections::BTreeSet::new(),
+                )
+                .unwrap();
+                let queued = previews(fixture, message.message_id);
+                assert_eq!(queued.len(), 1, "{queued:?}");
+                assert_eq!(queued[0].state, InputState::Ready);
+                std::thread::sleep(Duration::from_millis(2500));
+                assert_eq!(
+                    previews(fixture, message.message_id),
+                    queued,
+                    "two sweep intervals add no receipt while the FIFO holds the preview"
+                );
+                assert!(input_service_records(fixture).is_empty());
+                input_service_barrier(fixture, until);
+                wait_delivered(fixture, &message, until);
+                assert_eq!(
+                    lines(fixture)
+                        .iter()
+                        .filter(|typed| **typed == line(&message))
+                        .count(),
+                    1
+                );
+                assert_eq!(previews(fixture, message.message_id).len(), 1);
+            });
+        }
+
+        #[test]
+        fn a_sweep_request_queues_with_zero_bytes_behind_a_held_pane_lock_and_delivers_once_free() {
+            with_input_service_for(Duration::from_secs(30), false, |fixture, until| {
+                let held = pane_lock(fixture);
+                let message = send(fixture, "swept behind a held pane lock");
+                wait_for(until, "the sweep reserves a receipt", || {
+                    !previews(fixture, message.message_id).is_empty()
+                });
+                std::thread::sleep(Duration::from_millis(1500));
+                let receipts = previews(fixture, message.message_id);
+                assert_eq!(receipts.len(), 1, "{receipts:?}");
+                assert_eq!(
+                    receipts[0].delivery().unwrap().status,
+                    DeliveryStatus::Queued,
+                    "the request queues with zero bytes while another process holds the lock"
+                );
+                assert!(input_service_records(fixture).is_empty());
+                assert_eq!(notified_at(fixture, message.message_id), None);
+                drop(held);
+                wait_delivered(fixture, &message, until);
+                assert_eq!(previews(fixture, message.message_id).len(), 1);
+                assert_runner_settled_submitted(fixture, &message);
+                pane_lock(fixture);
+            });
+        }
+
+        #[test]
+        fn a_transient_failure_backs_off_and_retries_the_same_head_before_a_newer_message() {
+            with_input_service_for(Duration::from_secs(45), false, |fixture, until| {
+                let held = pane_lock(fixture);
+                let head = send(fixture, "head behind a busy pane");
+                let newer = send(fixture, "newer message");
+                wait_for(
+                    until,
+                    "the head's first attempt settles not submitted",
+                    || {
+                        previews(fixture, head.message_id)
+                            .first()
+                            .is_some_and(|first| first.state == InputState::Settled)
+                    },
+                );
+                let first = previews(fixture, head.message_id).remove(0);
+                assert_eq!(first.disposition, Some(InputDisposition::NotSubmitted));
+                assert_eq!(first.delivery_reason.as_deref(), Some("pane_input_busy"));
+                assert!(previews(fixture, newer.message_id).is_empty());
+                wait_for(until, "the head is retried as attempt 2", || {
+                    previews(fixture, head.message_id).len() == 2
+                });
+                let retry = previews(fixture, head.message_id).remove(1);
+                assert_eq!(
+                    retry.operation_key,
+                    storage::preview_operation_key(fixture.fixture.run.run_id, head.message_id, 2)
+                        .unwrap()
+                );
+                let settled_at = crate::time::parse_lenient(&first.updated_at).unwrap();
+                let retried_at = crate::time::parse_lenient(&retry.created_at).unwrap();
+                assert!(
+                    retried_at - settled_at >= chrono::Duration::milliseconds(900),
+                    "the retry waits out the one-second backoff: {settled_at} -> {retried_at}"
+                );
+                assert!(
+                    previews(fixture, newer.message_id).is_empty(),
+                    "strict oldest-first: the newer message waits behind the head"
+                );
+                assert_eq!(
+                    result_events(fixture, first.input_id),
+                    0,
+                    "a retried preview publishes no delivery result"
+                );
+                drop(held);
+                wait_delivered(fixture, &head, until);
+                wait_delivered(fixture, &newer, until);
+                assert_eq!(lines(fixture), [line(&head), line(&newer)]);
+                assert_runner_settled_submitted(fixture, &head);
+                assert_runner_settled_submitted(fixture, &newer);
+                assert!(
+                    previews(fixture, newer.message_id)[0].input_id > retry.input_id,
+                    "the newer message is attempted only after the head"
+                );
+            });
+        }
+
+        /// Holds the synthetic native child stopped, so an attempt already written stays in
+        /// flight until the guard resumes it.
+        struct StoppedNative(nix::unistd::Pid);
+
+        impl StoppedNative {
+            fn stop(fixture: &ServiceFixture) -> Self {
+                let identity: ProcessIdentity = serde_json::from_slice(
+                    &std::fs::read(
+                        fixture
+                            .fixture
+                            ._dir
+                            .path()
+                            .join("service-input-native-identity.json"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+                let pid = nix::unistd::Pid::from_raw(i32::try_from(identity.pid).unwrap());
+                nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGSTOP).unwrap();
+                Self(pid)
+            }
+        }
+
+        impl Drop for StoppedNative {
+            fn drop(&mut self) {
+                nix::sys::signal::kill(self.0, nix::sys::signal::Signal::SIGCONT).unwrap();
+            }
+        }
+
+        #[test]
+        fn an_in_flight_sweep_attempt_blocks_a_second_sweep_and_queues_a_control_request_behind_it()
+        {
+            with_input_service_for(Duration::from_secs(30), false, |fixture, until| {
+                let stopped = StoppedNative::stop(fixture);
+                let head = send(fixture, "in flight while the native is stopped");
+                let newer = send(fixture, "second pending message");
+                wait_for(until, "the sweep starts its immediate attempt", || {
+                    previews(fixture, head.message_id)
+                        .first()
+                        .is_some_and(|attempt| attempt.state == InputState::InProgress)
+                });
+                let value = request(
+                    fixture,
+                    "prompt:behind-the-sweep",
+                    "control request behind the sweep",
+                    InputKind::Prompt,
+                    None,
+                    until.min(Instant::now() + Duration::from_secs(10)),
+                );
+                let reply = exchange(fixture, &value, until);
+                assert!(reply.get("error").is_none(), "{reply}");
+                let queued: SubmissionResult =
+                    serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
+                assert_eq!(queued.status, SubmissionStatus::Queued, "{reply}");
+                assert_eq!(
+                    queued
+                        .delivery
+                        .as_ref()
+                        .and_then(|delivery| delivery.reason.as_deref()),
+                    Some("earlier_input"),
+                    "a control request behind the in-flight sweep attempt waits for it"
+                );
+                std::thread::sleep(Duration::from_millis(1200));
+                assert!(
+                    previews(fixture, newer.message_id).is_empty(),
+                    "no second sweep attempt starts while one is in flight"
+                );
+                assert_eq!(previews(fixture, head.message_id).len(), 1);
+                drop(stopped);
+                wait_delivered(fixture, &head, until);
+                wait_delivered(fixture, &newer, until);
+                wait_input_service_record(fixture, "control request behind the sweep", until);
+                let typed = lines(fixture);
+                assert_eq!(typed[0], line(&head), "{typed:?}");
+                for expected in [
+                    line(&head),
+                    line(&newer),
+                    "control request behind the sweep".to_owned(),
+                ] {
+                    assert_eq!(
+                        typed.iter().filter(|typed| **typed == expected).count(),
+                        1,
+                        "{typed:?}"
+                    );
+                }
+                assert_runner_settled_submitted(fixture, &head);
+                assert_eq!(previews(fixture, head.message_id).len(), 1);
             });
         }
     }
