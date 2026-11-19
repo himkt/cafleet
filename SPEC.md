@@ -10,7 +10,7 @@ Reproduce the documented command/option/exit surface, configuration defaults, cu
 
 ## 2. Architecture stance
 
-The core is synchronous. A send previews pending ordinary-member messages within its budget, and each ordinary member's runner retries its own still-pending previews (§6.9 Runner pending-preview sweep). A persistent read-only listener notifies pending message IDs through JSONL without pane operations. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools own receiver handles and collect native results; a poll consumes every delivery it returns, and deferred actions and native handles remain in host-owned state. Automatic Director reception sends no Escape, text, Enter or queued composer input.
+The core is synchronous. A send previews pending ordinary-member messages within its budget, and each ordinary member's runner retries its own still-pending previews (§6.9 Runner pending-preview sweep). A persistent read-only listener notifies pending messages through JSONL without pane operations. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools own receiver handles and collect native results; a poll consumes every delivery it returns, and deferred actions and native handles remain in host-owned state. Automatic Director reception sends no Escape, text, Enter or queued composer input.
 
 ## 3. Module layout
 
@@ -133,7 +133,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
-| `message listen` | Notify pending message IDs through stdout | `MEMBER_ID` | JSONL only |
+| `message listen` | Notify pending messages through stdout | `MEMBER_ID` | JSONL only |
 | `message show` | Read one message | `MESSAGE_ID` | yes |
 
 #### Database selection
@@ -819,13 +819,13 @@ Other failures, including corrupt, incompatible or unreadable storage and a term
 4. Update exactly the selected IDs to `status_state='completed'` with one `status_timestamp` (now), and re-read them in the step-3 order.
 5. Commit, then print. JSON is the array of post-consumption records, each with `status_state` `completed`. Text keeps its 200-codepoint body truncation (§ Message Body Truncation), and `message show MESSAGE_ID --json` recovers a full body.
 
-Writers serialize on the transaction, so two concurrent polls of one member return disjoint sets whose union is the pending set. An empty inbox prints `[]` (text: `No messages found.`), commits a no-op and exits 0. A failure before commit rolls back and consumes nothing. A stdout failure after commit leaves the returned messages consumed; no later poll or listener notice lists them again, and `message show` still reads each one. Consumption is independent of the assignment's progress (§6.4 Persisted shape).
+Writers serialize on the transaction, so two concurrent polls of one member return disjoint sets whose union is the pending set. An empty inbox prints `[]` (text: `No messages found.`), commits a no-op and exits 0. A failure before commit rolls back and consumes nothing. A stdout failure after commit leaves the returned messages consumed; no later poll returns them and no later listener notice's pending set includes them, and `message show` still reads each one. Consumption is independent of the assignment's progress (§6.4 Persisted shape).
 
 ##### `message listen`
 
 `cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
 
-Notify any active member's pending message IDs as UTF-8 JSONL. Derive and pin its fleet at startup through the configured database and the ordinary schema-version guard. Require a live root Director with a concrete registered placement, without resolving a multiplexer or checking its executable/physical pane; the subject's own placement may be absent. Unknown/inactive startup subjects use `Member ID not found`, exit 1.
+Notify any active member's pending messages as UTF-8 JSONL. Derive and pin its fleet at startup through the configured database and the ordinary schema-version guard. Require a live root Director with a concrete registered placement, without resolving a multiplexer or checking its executable/physical pane; the subject's own placement may be absent. Unknown/inactive startup subjects use `Member ID not found`, exit 1.
 
 | Surface | Contract |
 |---|---|
@@ -841,23 +841,36 @@ The command always emits JSONL; text mode and `--json` are absent. Stdout contai
 
 ```json
 {"event":"ready","member_id":1,"fleet_id":1}
-{"event":"pending","member_id":1,"message_ids":[51,52,53]}
+{"event":"pending","next":"cafleet message poll 1 --json"}
 {"event":"closed","member_id":1,"reason":"timeout"}
 ```
 
-A `pending` record is an ID-only notice; it carries no message body, and the receiver consumes full records through `message poll` (or reads one through `message show`):
+A `pending` record is a wake notice: it carries no message ID or body, only the consuming command in `next`, and the receiver consumes full records by running that command:
 
 | Field | Type | Contract |
 |---|---|---|
 | `event` | string | `"pending"` |
-| `member_id` | integer | The listened subject (the pinned recipient) |
-| `message_ids` | array of integers, length ≥ 1 | The full `input_required` set for the subject at the snapshot that produced the notice, in snapshot order `(created_at ASC, message_id ASC)` |
+| `next` | string | The consuming command for the listened subject, identical for every notice of one listener process |
 
-Key order is `event`, `member_id`, `message_ids`. A `pending` record is never empty: an empty pending set emits nothing. `closed.reason` is `timeout`, `member_inactive`, `fleet_deleted` or, only in forwarding mode (§ Codex forwarding), `session_exited`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
+A notice's *pending set* is `P` of the snapshot that produced it (§ Notice hold). The listener keeps it internally for the hold; the record does not carry it. `pending(P)` denotes a `pending` notice whose pending set is `P`.
+
+`next` is built once at startup:
+
+1. Start with `cafleet message poll <MEMBER_ID> --json`, where `<MEMBER_ID>` is the listener's positional `MEMBER_ID` as an integer.
+2. When the listener process was invoked with `--database-url <url>`, append ` --database-url ` and the shell word for `<url>`, verbatim as supplied, even when it names the default database file. When `--database-url` was omitted, append nothing.
+
+**Shell word.** A value whose every character is in `[A-Za-z0-9_./:~@%+=,-]` is used as is. Any other value is POSIX single-quoted: `'`, then the value with each `'` replaced by `'\''`, then `'`. An empty URL never reaches emission, because startup fails opening the database before `ready`.
+
+```json
+{"event":"pending","next":"cafleet message poll 7 --json --database-url sqlite:///tmp/fleet.db"}
+{"event":"pending","next":"cafleet message poll 7 --json --database-url 'sqlite:///tmp/my fleet.db'"}
+```
+
+Key order is `event`, `next`. A `pending` record is never emitted for an empty pending set. `closed.reason` is `timeout`, `member_inactive`, `fleet_deleted` or, only in forwarding mode (§ Codex forwarding), `session_exited`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
 
 Each short read transaction validates identity and selects every `input_required` record for the pinned subject ordered by `(created_at ASC, message_id ASC)`, committing before output or sleep; a later commit with an earlier timestamp joins the pending set when first observed.
 
-**Notice hold.** The listener's only emission state is the *hold*. A hold exists exactly while some ID named by the last delivered notice is still pending; it carries the *held set* `H` (those IDs, never empty) and `held_at`, the monotonic instant that notice was delivered. The listener starts with no hold. `HOLD_CEILING` is 300 s. On every successful snapshot with ordered pending set `P`, in order:
+**Notice hold.** The listener's only emission state is the *hold*. A hold exists exactly while some ID in the last delivered notice's pending set is still pending; it carries the *held set* `H` (those IDs, never empty) and `held_at`, the monotonic instant that notice was delivered. The listener starts with no hold. `HOLD_CEILING` is 300 s. On every successful snapshot with ordered pending set `P`, in order:
 
 1. **Reconcile:** `H ← H ∩ P`. Consumed IDs leave the hold; when `H` becomes empty, the hold and its `held_at` end.
 2. **Fresh IDs:** `F ← P \ H`.
@@ -868,23 +881,23 @@ Each short read transaction validates identity and selects every `input_required
 |---|---|
 | `P` empty | Emit nothing |
 | No hold and `P` non-empty (hold released) | Emit `pending(P)` |
-| A hold, `F` non-empty and at least `HOLD_CEILING` since `held_at` | Emit `pending(P)`, the ceiling re-notice: one bulk record naming every unpolled ID |
+| A hold, `F` non-empty and at least `HOLD_CEILING` since `held_at` | Emit `pending(P)`, the ceiling re-notice: one bulk notice whose pending set is every unpolled ID |
 | Otherwise (a hold with `F` empty, or the ceiling not reached) | Emit nothing |
 
-Every notice carries the full pending set, so every pending ID an earlier notice named is in `H`; that one set separates notified from fresh IDs, and the listener keeps no per-ID history. A failed snapshot leaves the hold unchanged. A snapshot that emits nothing, or whose notice is refused, waits one second (shortened by the lease) before the next snapshot; one whose notice is delivered rechecks immediately.
+Every notice's pending set is the full pending set, so every pending ID in an earlier notice's pending set is in `H`; that one set separates notified from fresh IDs, and the listener keeps no per-ID history. A failed snapshot leaves the hold unchanged. A snapshot that emits nothing, or whose notice is refused, waits one second (shortened by the lease) before the next snapshot; one whose notice is delivered rechecks immediately.
 
-**Re-listing.** An ID leaves `P` only through a consuming `message poll`, which consumes the subject's whole pending set atomically, so a snapshot sees either all held IDs pending or none of them, and any poll by the receiver releases the hold. The next ordinary notice names only IDs committed after that poll. Within one listener process an ID appears in two notices only through a ceiling re-notice, which fires only when no poll has run for `HOLD_CEILING` since the held notice was delivered, so every ID it names, held or fresh, is unpolled. The only other re-listing is a new listener's startup replay of still-unpolled IDs. The ceiling is the liveness backstop for a delivered notice that no receiver turn acted on; without it, every later message would stay held.
+**Re-listing.** An ID leaves `P` only through a consuming `message poll`, which consumes the subject's whole pending set atomically, so a snapshot sees either all held IDs pending or none of them, and any poll by the receiver releases the hold. The next ordinary notice's pending set holds only IDs committed after that poll. Within one listener process an ID is in two notices' pending sets only through a ceiling re-notice, which fires only when no poll has run for `HOLD_CEILING` since the held notice was delivered, so every ID in its pending set, held or fresh, is unpolled. The only other re-listing is a new listener's startup replay of still-unpolled IDs. The ceiling is the liveness backstop for a delivered notice that no receiver turn acted on; without it, every later message would stay held.
 
-**Notice bound.** Each ordinary notice after the first requires a hold release, and each release requires a poll that consumed held IDs. Each ceiling firing emits at most one notice and restarts the ceiling. A listener therefore emits at most 1 notice, plus one per poll that consumed held IDs, plus one per ceiling firing (at most one per `HOLD_CEILING`, and only while held IDs stay unpolled with fresh IDs present). A receiver turn with k mid-turn polls can queue at most k + 1 notices behind it, each naming only IDs that turn already consumed. A burst of any size adds no notice beyond the one outstanding.
+**Notice bound.** Each ordinary notice after the first requires a hold release, and each release requires a poll that consumed held IDs. Each ceiling firing emits at most one notice and restarts the ceiling. A listener therefore emits at most 1 notice, plus one per poll that consumed held IDs, plus one per ceiling firing (at most one per `HOLD_CEILING`, and only while held IDs stay unpolled with fresh IDs present). A receiver turn with k mid-turn polls can queue at most k + 1 notices behind it, each whose pending set holds only IDs that turn already consumed, so the poll it prompts returns `[]` unless messages arrived since. A burst of any size adds no notice beyond the one outstanding.
 
 | Situation | Behavior |
 |---|---|
-| A delivered notice whose IDs are never polled, and a new message arrives | One ceiling re-notice naming the held and fresh IDs, at least `HOLD_CEILING` after `held_at` |
-| A delivered notice whose IDs are never polled, and nothing new arrives | No re-notice; the ceiling fires only when fresh IDs exist |
-| The receiver polls before any notice names an ID | That ID is never notified |
+| A delivered notice whose pending set is never polled, and a new message arrives | One ceiling re-notice whose pending set holds the held and fresh IDs, at least `HOLD_CEILING` after `held_at` |
+| A delivered notice whose pending set is never polled, and nothing new arrives | No re-notice; the ceiling fires only when fresh IDs exist |
+| The receiver polls before any notice's pending set includes an ID | That ID is never notified |
 | A message, including a runtime event such as `interaction_opened`, arrives while a notice is held | No notice until the receiver polls or the ceiling re-notice fires; any `poll` returns the ID immediately |
-| The receiver polls mid-turn, then a queued notice is delivered | The queued notice names only IDs that poll consumed |
-| Listener restart | The new process emits `ready`, then one notice naming every pending (unpolled) ID, including IDs a previous listener notified |
+| The receiver polls mid-turn, then a queued notice is delivered | The queued notice's pending set holds only IDs that poll consumed; the poll it prompts returns `[]` unless messages arrived since |
+| Listener restart | The new process emits `ready`, then one notice whose pending set is every pending (unpolled) ID, including IDs a previous listener notified |
 
 Listening leaves consumption and `notified_at` unchanged and performs no pane retry, lock or dispatch; stamped pending self-sends remain notice-eligible. Concurrent listeners are independent read-only observers with no consumer lock, each with its own hold.
 
@@ -900,12 +913,11 @@ Database contention retries stay inside the snapshot budget; exhaustion or anoth
 
 - **Stdout** carries only the `ready` record and the final `closed` record, so an unread PTY never stalls the five-second output deadline. Writing that `closed` record, with any reason including `session_exited`, is the listener's last action before exit; a write failure leaves the exit status unchanged.
 - **Forwarded events.** Each `pending` notice, and each `closed` record whose reason is `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in emission order. `ready` and `closed` `session_exited` are never forwarded.
-- **Forwarding command:** `codex queue --thread THREAD --message <text>`, where the text is `[cafleet listen record] <compact record JSON>`.
+- **Forwarding command:** `codex queue --thread THREAD --message <text>`, where the text is `[cafleet listen record] <compact record JSON>`, for example `[cafleet listen record] {"event":"pending","next":"cafleet message poll 7 --json"}`.
 - **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded.
 - **Full-queue refusal.** Codex refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure.
-- **Refused notice.** A `pending` notice gets one `codex queue` attempt. Exit 0 delivers it and commits the hold; a full-queue refusal refuses it immediately, leaving the hold as reconcile left it (§ `message listen`). The listener then waits one second, checks the pinned session (§ Liveness) and takes a fresh snapshot, so the retry is rebuilt from the then-current pending set, and a notice whose set has become empty because a poll consumed it, or whose re-notice no longer has fresh IDs, is abandoned. The pinned session's exit ends the listener with `session_exited`.
+- **Refused notice.** A `pending` notice gets one `codex queue` attempt. Exit 0 delivers it and commits the hold; a full-queue refusal refuses it immediately, leaving the hold as reconcile left it (§ `message listen`). The listener then waits one second, checks the pinned session (§ Liveness) and takes a fresh snapshot, so the retry is rebuilt from the then-current pending set, and a notice whose pending set has become empty because a poll consumed it, or whose re-notice no longer has fresh IDs, is abandoned. The pinned session's exit ends the listener with `session_exited`.
 - **Refused `closed` record.** A forwarded `closed` record is retried in place on every full-queue refusal after 1 s, checking the pinned session before each retry, with no time limit; the pinned session's exit ends the listener with `session_exited`. After acceptance the record is written to stdout under a fresh five-second output deadline taken when forwarding returns, so a refusal of any length still leaves the stdout `closed` record. The `session_exited` record written after a refused closing record meets the pinned session's exit uses the same fresh deadline.
-- **Argument size.** A notice's forwarded text grows by about one ID's digits plus a comma per pending message and is bounded only by the platform's single-argument limit (131,072 bytes on Linux, roughly 16,000 seven-digit IDs). A spawn failure such as `E2BIG` takes the `failed to forward record to codex thread <THREAD>: could not start codex: …` row below.
 - **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of §6.9 Native executable resolution.
 
 | Condition | Behavior |
@@ -1353,7 +1365,7 @@ The ordered public record is:
 build OK
 ```
 
-Text bodies use a fixed 200 codepoints plus `…`; `--json` preserves the complete exact text. Pane preview lines, their folding, inline limit and long-body `message show` pointer follow §6.5 Push notifications.
+Text bodies use a fixed 200 codepoints plus `…`; `--json` preserves the complete exact text. Pane preview lines, their folding, inline limit and long-body `message poll` pointer follow §6.5 Push notifications.
 
 #### Runtime observation messages
 
@@ -1535,7 +1547,7 @@ Delivery fallback (§6.9 Delivery method and interaction priority), whose submis
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where N counts stored text. A preview above its selected profile's measured plain-input limit uses bracketed paste when declared and enabled, otherwise this same pointer form (§6.9 Measured submission plans and settle intervals). This limit is independent of the 200-codepoint text-output limit (§6.4 Text-mode projection). The runner renders the form from the selected delivery method before its first byte.
+Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, where N counts stored text and `RECIPIENT_ID` is the message's `to_member_id`. The pointer is identical for every database and never carries `--database-url`. A preview above its selected profile's measured plain-input limit uses bracketed paste when declared and enabled, otherwise this same pointer form (§6.9 Measured submission plans and settle intervals). This limit is independent of the 200-codepoint text-output limit (§6.4 Text-mode projection). The runner renders the form from the selected delivery method before its first byte.
 
 One synchronous drain uses a five-second attempt budget and the runtime pane-lock protocol, committing short read snapshots before socket I/O.
 
@@ -1837,35 +1849,35 @@ A backend records the highest tier its evidence establishes, and tier 3 only tog
 - **Tier 2 negative evidence:** no extension surface (plugins, hooks, extensions, MCP notifications, any client/server protocol an extension can call) lets an extension do the same, checked in the native source at that version's tag or the official extension documentation.
 - **Recording:** each source is named with its version, plus `checked YYYY-MM-DD`.
 
-Both probes are stated in message-ID terms. A probe message ID is *observed in a notice* when a `pending` record (§6.3 `message listen`) in the listener's output, as delivered through the mechanism under test, names it.
+Both probes are stated in message-ID terms. A probe message ID is *observed through a notice* when the one `poll` that a delivered `pending` record (§6.3 `message listen`) prompts returns it, the record having reached the session from the listener's output through the mechanism under test.
 
 | Probe | Pass condition | Invalidation rule |
 |---|---|---|
-| Subscribe | Each probe message ID is first observed in a notice; the Director then consumes it through the poll that notice prompts | A `poll` or `show` that first reveals a probe ID without a preceding notice turn invalidates the run; a notice-prompted `poll` is part of consumption |
-| Stream | Each probe message ID is first observed in a notice in the running listener's output and is consumed by one notice-prompted poll while the same listener process still runs | Any other `poll` or `show` invalidates the run |
+| Subscribe | Each probe message ID is first returned by a notice-prompted poll | A `poll` or `show` that first reveals a probe ID without a preceding notice turn invalidates the run; a notice-prompted `poll` is part of consumption |
+| Stream | Each probe message ID is first returned by a poll that a notice in the running listener's output prompted, while the same listener process still runs | Any other `poll` or `show` invalidates the run |
 
 **Subscribe probe** (tier 1 or 2, on an installed native version). The candidate Director starts the receiver through its tier's mechanism while another member sends broker messages. After it consumes the probe member's ready, the Director runs under this instruction:
 
-> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, end the turn with no commands when every named ID is at or below your consumed watermark; otherwise run `cafleet message poll <director-id> --json` once and raise the watermark. Run no other `poll` or `show` unless a step below directs it. When I say `hold`, end only the next notice turn without polling, then apply the rule above to every later notice turn, including the ceiling re-notice.
+> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, run the command in the record's `next` field once. Run no other `poll` or `show` unless a step below directs it. When I say `hold`, end only the next notice turn without running its command, then apply the rule above to every later notice turn, including the ceiling re-notice.
 
 | Step | Procedure | Pass condition |
 |---|---|---|
-| Idle | Send one message to the idle Director | A notice naming it starts a turn without input; the poll it prompts returns it |
-| Busy | During a foreground command of at least 60 s, send two messages | The command is not interrupted; a notice arrives no later than the end of that turn, and its poll returns both IDs |
-| Burst | During a foreground command of at least 60 s and under 300 s, send 150 messages back to back | At most two notice turns arrive for the burst, and every ID is consumed through a notice-prompted poll. No ID appears in two notices. On Codex the forwarder stays alive and no `codex queue` refusal occurs. |
-| Consumed notice | Direct one turn: a 30 s foreground command while m1 is sent, one poll, a second 30 s command while m2 is sent, one poll, then end the turn | Every notice turn delivered after that turn names only consumed IDs and runs no command; no ID appears in two notices |
-| Hold ceiling | Say `hold`; send `hold-probe 1` to the idle Director and record t1, the time its notice turn starts (the Director ends it without polling). After that turn ends and 60 s have passed since t1, send `hold-probe 2`. | No notice arrives before t1 + 285 s. One notice naming both IDs arrives between t1 + 285 s and t1 + 315 s; its IDs are above the watermark, so the Director polls once and the poll returns both |
+| Idle | Send one message to the idle Director | A notice starts a turn without input; the poll it prompts returns the message |
+| Busy | During a foreground command of at least 60 s, send two messages | The command is not interrupted; a notice arrives no later than the end of that turn, and the poll it prompts returns both IDs |
+| Burst | During a foreground command of at least 60 s and under 300 s, send 150 messages back to back | At most two notice turns arrive for the burst, and every ID is returned by a notice-prompted poll. On Codex the forwarder stays alive and no `codex queue` refusal occurs. |
+| Consumed notice | Direct one turn: a 30 s foreground command while m1 is sent, one poll, a second 30 s command while m2 is sent, one poll, then end the turn | Every notice turn delivered after the directed turn runs one poll, which returns `[]` |
+| Hold ceiling | Say `hold`; send `hold-probe 1` to the idle Director and record t1, the time its notice turn starts (the Director ends it without polling). After that turn ends and 60 s have passed since t1, send `hold-probe 2`. | No notice arrives before t1 + 285 s. One notice arrives between t1 + 285 s and t1 + 315 s, and the poll it prompts returns both IDs |
 | Owner exit | End the Director session | No `cafleet message listen` survives (`ps`) |
 
 t1 observes the held notice's delivery from the session side. The listener sets `held_at` when delivery succeeds, which precedes t1 by the receiver latency, and checks the ceiling once per one-second idle interval; the ±15 s tolerance around t1 + 300 s covers both.
 
-**Stream probe** (tier 3, on an installed native version). The candidate Director starts `cafleet message listen` through its native background-execution facility and continues unrelated work in the same session under the task prompt "Learn about broker messages only from that listener's output; run no other `poll` or `show`. When a `pending` record appears there, run `cafleet message poll <director-id> --json` once and continue." The facility must deliver each record the running listener emits without waiting for the process to exit, at the latest at the session's next turn boundary, whether the host pushes records into the session or the model reads the running process's accumulated output on demand. Another member sends probe messages at separate times during that work. Output that reaches the session only when the process exits, including a completion notification for a finished background process, does not count as observation. Mid-turn delivery and waking an idle session are not required.
+**Stream probe** (tier 3, on an installed native version). The candidate Director starts `cafleet message listen` through its native background-execution facility and continues unrelated work in the same session under the task prompt "Learn about broker messages only from that listener's output; run no other `poll` or `show`. When a `pending` record appears there, run the command in its `next` field once and continue." The facility must deliver each record the running listener emits without waiting for the process to exit, at the latest at the session's next turn boundary, whether the host pushes records into the session or the model reads the running process's accumulated output on demand. Another member sends probe messages at separate times during that work. Output that reaches the session only when the process exits, including a completion notification for a finished background process, does not count as observation. Mid-turn delivery and waking an idle session are not required.
 
 | Stream-probe run | Classification |
 |---|---|
-| A probe ID first observed outside a notice, or any `poll` or `show` other than one notice-prompted poll | Invalid |
-| Every probe ID first observed in a notice and consumed by a notice-prompted poll before the listener exited | Pass |
-| A probe ID first observed only after the listener exited, or never observed in a notice | Fail |
+| A probe ID first revealed outside a notice-prompted poll, or any `poll` or `show` other than one notice-prompted poll | Invalid |
+| Every probe ID first returned by a notice-prompted poll before the listener exited | Pass |
+| A probe ID first returned only after the listener exited, or never returned by a notice-prompted poll | Fail |
 
 Each run records the mechanism, native version and check date.
 
@@ -1892,19 +1904,19 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 | `claude` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `claude` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
 | `codex` | Director | `goal` | `native` | — | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through the 200-record burst, idle and forced-failure steps, 0.165.0, checked 2026-11-06. |
-| `codex` | Director | `listen` | `native` | `subscribe` | `yes` | `cafleet message listen --codex-thread` forwarding through `codex queue` on the escalated path: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice with the forwarder alive and no queue refusal, queued consumed notices drained as zero-command turns, the 300 s hold ceiling and owner exit ending the forwarder), 0.167.0, checked 2026-11-17. The sandboxed path is unverified, and the run answered escalations through the `user` reviewer because automatic review refused them in an untrusted working directory. |
+| `codex` | Director | `listen` | `native` | `subscribe` | `yes` | `cafleet message listen --codex-thread` forwarding through `codex queue` on the escalated path: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice with the forwarder alive and no queue refusal, queued consumed notices drained one per turn, the 300 s hold ceiling and owner exit ending the forwarder), 0.167.0, checked 2026-11-17. The sandboxed path is unverified, and the run answered escalations through the `user` reviewer because automatic review refused them in an untrusted working directory. |
 | `codex` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `codex` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
 | `opencode` | Director | `goal` | `extension` | — | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
-| `opencode` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with queued `session.synthetic` delivery under `opencode mini --standalone`: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices ending turns with no command, the 300 s hold ceiling and client exit ending the child), 2.2.6, checked 2026-11-17. The supported minimum is 2.2.0. |
+| `opencode` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with queued `session.synthetic` delivery under `opencode mini --standalone`: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices delivered as separate turns, the 300 s hold ceiling and client exit ending the child), 2.2.6, checked 2026-11-17. The supported minimum is 2.2.0. |
 | `opencode` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `opencode` | Member | — | — | — | `yes` | PTY lifecycle and coverage declaration: live runner acceptance on herdr only (`coverage=tested`), 2.1.4, checked 2026-10-29. Default-mode approval-prompt coverage: the omitted `cafleet-ask` preset's shell permission form, whose detection and allow and deny answers the OpenCode profile from `2.1.4` declares `tested` (§6.9 Bundled profiles and native screen fixtures). Bundled support: the OpenCode profile from `2.1.4`. |
 | `hermes` | Director | `goal` | `native` | — | `yes` | Native `/goal` set, status, pause, resume and clear on the TUI client, 2026.9.24, checked 2026-11-06. |
-| `hermes` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with ordered gateway injection on the TUI client: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices ending turns with no command, the 300 s hold ceiling and `/exit` ending the child as the session finalized), 2026.9.24, checked 2026-11-17. |
+| `hermes` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with ordered gateway injection on the TUI client: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices delivered as separate turns, the 300 s hold ceiling and `/exit` ending the child as the session finalized), 2026.9.24, checked 2026-11-17. |
 | `hermes` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `hermes` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
 | `pi` | Director | `goal` | `extension` | — | `yes` | CAFleet pi extension `/cafleet-goal` and goal tools under plain `pi`: set, status, pause, resume, clear, complete, automatic continuation, the no-progress stop, an interrupt pausing, manual `/compact` and `/quit` then `pi --continue` on the same session, 1.5.0 (minimum), checked 2026-11-08. A threshold compaction inside a continuation chain and a continuation by the re-arm turn after restart were not separately observed. |
-| `pi` | Director | `listen` | `extension` | `subscribe` | `yes` | CAFleet pi extension `cafleet_listen` with `followUp` delivery under plain `pi`: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices ending turns with no command, the 300 s hold ceiling and `/quit` ending the child), 1.5.0 (minimum), checked 2026-11-17. The kimi-k2.6 Director model applied `hold` to the ceiling re-notice as well and polled both IDs after an explicit release; a pane kill ending the child and `/reload` delivering the runtime-replaced notice were checked 2026-11-08. |
+| `pi` | Director | `listen` | `extension` | `subscribe` | `yes` | CAFleet pi extension `cafleet_listen` with `followUp` delivery under plain `pi`: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices delivered as separate turns, the 300 s hold ceiling and `/quit` ending the child), 1.5.0 (minimum), checked 2026-11-17. The kimi-k2.6 Director model applied `hold` to the ceiling re-notice as well and polled both IDs after an explicit release; a pane kill ending the child and `/reload` delivering the runtime-replaced notice were checked 2026-11-08. |
 | `pi` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `pi` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet-ask` gate mode's approval form: live runner acceptance on tmux and herdr (protected directories, routed command and `member exec`, busy delivery, and `cafleet-ask` allow and deny answers), 1.5.0, checked 2026-11-08. Bundled support: the pi profile from `1.5.0`. |
 
@@ -2332,7 +2344,7 @@ The extensions §6.3 Asset installation installs supply Director reception for `
 
 | Extension | `cafleet_listen` description |
 |---|---|
-| Hermes plugin | `Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' carries a pending notice naming unpolled message IDs; when an ID is above your consumed watermark, run 'cafleet message poll <director_id> --json', which consumes what it returns.` |
+| Hermes plugin | `Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' carries a pending notice; run the command in its 'next' field once, which consumes and returns every unpolled message, and an empty [] result means an earlier poll already consumed them.` |
 | OpenCode plugin | The Hermes text |
 | pi extension | The Hermes text with `each turn beginning` replaced by `each message beginning` |
 
@@ -2364,7 +2376,7 @@ A rejected `synthetic` call kills the child. A Hermes injection that raises or e
 
 The `codex` 100-submission cap was measured live on Codex 0.165.0, checked 2026-11-06, and its refusal string is present in the installed Codex 0.166.0 source, checked 2026-11-15. The 2026-11-17 subscribe probe on Codex 0.167.0 observed no queue refusal.
 
-Claude Code Monitor also truncates each line at 500 characters and each event at 3,000. Its official documentation states no batching window, rate limit or truncation; those values come from the installed source. Under the §6.3 `message listen` notice bound, a notice stays far below the Monitor rate. A `pending` line longer than 500 characters (roughly 100 or more three-digit IDs) reaches the session truncated, and the poll it prompts still returns every pending record.
+Claude Code Monitor also truncates each line at 500 characters and each event at 3,000. Its official documentation states no batching window, rate limit or truncation; those values come from the installed source. Under the §6.3 `message listen` notice bound, a notice stays far below the Monitor rate.
 
 **Hermes plugin.** The plugin declares tool `cafleet_listen` and hook `on_session_finalize`. It depends on three private Hermes core seams outside the plugin API, which the tool resolves on every call:
 
@@ -4051,7 +4063,7 @@ Measurements establish submitted native input separately from model consumption,
 
 Live acceptance records carry the source/installed CAFleet version, native CLI version, native configuration/mode, detector and answer profiles, Director mode/provenance, attributed decision/evidence references, request identity/token, receipt/stage, multiplexer, terminal size, cwd and redacted evidence. They include a permitted operation, an ordinary command failure after allow, an actual permission refusal, an approval that blocks the model, both supported answer routes and observed continuation. The exercised cases cover stale tokens/epochs/events, same/different operation keys, conflicting decisions, partial writes/lost replies, redraw, fragmented ANSI/UTF-8, primary/alternate screens, resize, title-only prompts, question/trust/update screens, transcript quotes, identical requests, concurrent human/output/input, slow display, database locks, outbox pressure, startup compensation, runner hard kill and deletion. Unavailable native modes or unobserved cases remain explicit coverage limits and cannot pass that profile's release gate.
 
-Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the committed ID reaches receiver output in the next notice, after the receiver's poll releases the hold or the ceiling fires.
+Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the next notice announces the committed message, after the receiver's poll releases the hold or the ceiling fires.
 
 - Exact child argv for the selected native policy, with native/managed restrictions and sandbox boundaries preserved.
 - Equal run IDs across sibling databases, and replacement at an unchanged path.

@@ -1,7 +1,7 @@
 # Poll-Only Director Reception
 
 **Status**: Approved
-**Progress**: 0/30 tasks complete
+**Progress**: 16/30 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -220,28 +220,28 @@ Documentation first, in the order `.claude/rules/documentation-maintenance.md` p
 
 ### Step 1: SPEC.md
 
-- [ ] §1 core paragraph, §6.3 subcommand table and `message listen` intro: "pending message IDs" → "pending messages" <!-- completed: -->
-- [ ] §6.3 `message listen`: example, `pending` field table, key order, pending-set term, `next` construction and shell word per § `pending` record <!-- completed: -->
-- [ ] §6.3 `message listen` hold prose and §6.9 latency sentence per § SPEC hold prose restated <!-- completed: -->
-- [ ] §6.3 Codex forwarding: forwarded-text example with `next`; delete the "Argument size" bullet <!-- completed: -->
-- [ ] §6.5 Push notifications: pointer text <!-- completed: -->
-- [ ] §6.7: probe observation definition, pass conditions, stream outcome table, subscribe instruction, stream task prompt and step table per § Probe and evidence wording; Role eligibility clause rewording; extension description table; delete the 500-character `pending` line sentence <!-- completed: -->
-- [ ] Grep `SPEC.md` for `message_ids`, `watermark`, `ID-only`, `named ID`, `named by`, `naming`, `names only`, `names an ID`, `observed in a notice`, `message show MESSAGE_ID --json to read`; every remaining hit is unrelated to notices or the pointer <!-- completed: -->
+- [x] §1 core paragraph, §6.3 subcommand table and `message listen` intro: "pending message IDs" → "pending messages" <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.3 `message listen`: example, `pending` field table, key order, pending-set term, `next` construction and shell word per § `pending` record <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.3 `message listen` hold prose and §6.9 latency sentence per § SPEC hold prose restated <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.3 Codex forwarding: forwarded-text example with `next`; delete the "Argument size" bullet <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.5 Push notifications: pointer text <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.7: probe observation definition, pass conditions, stream outcome table, subscribe instruction, stream task prompt and step table per § Probe and evidence wording; Role eligibility clause rewording; extension description table; delete the 500-character `pending` line sentence <!-- completed: 2026-11-19T11:02 -->
+- [x] Grep `SPEC.md` for `message_ids`, `watermark`, `ID-only`, `named ID`, `named by`, `naming`, `names only`, `names an ID`, `observed in a notice`, `message show MESSAGE_ID --json to read`; every remaining hit is unrelated to notices or the pointer <!-- completed: 2026-11-19T11:02 -->
 
 ### Step 2: docs/ and README.md
 
-- [ ] `docs/docs/mixed-backend-team.md` § Receive results rewritten per § Documentation surfaces <!-- completed: -->
-- [ ] `docs/docs/contributing.md` subscribe probe steps 2–8 and Director instruction per § Probe and evidence wording <!-- completed: -->
-- [ ] `docs/docs/concepts/overview.md`, `coding-agents.md` and `members.md` term and pointer wording <!-- completed: -->
-- [ ] Confirm `README.md` needs no change (no listen/notice/pointer mention) <!-- completed: -->
+- [x] `docs/docs/mixed-backend-team.md` § Receive results rewritten per § Documentation surfaces <!-- completed: 2026-11-19T11:08 -->
+- [x] `docs/docs/contributing.md` subscribe probe steps 2–8 and Director instruction per § Probe and evidence wording <!-- completed: 2026-11-19T11:08 -->
+- [x] `docs/docs/concepts/overview.md`, `coding-agents.md` and `members.md` term and pointer wording <!-- completed: 2026-11-19T11:08 -->
+- [x] Confirm `README.md` needs no change (no listen/notice/pointer mention) <!-- completed: 2026-11-19T11:08 -->
 
 ### Step 3: Skills
 
-- [ ] `assets/skills/cafleet/roles/director.md` § Director wake steps 2–4 per § Director wake procedure <!-- completed: -->
-- [ ] `assets/skills/cafleet/reference/coding-agents.md`: Claude, Codex, OpenCode, Hermes and pi reception recipes; Claude Monitor note clause deletion <!-- completed: -->
-- [ ] `assets/skills/cafleet/reference/cli.md`: subcommand row, `message listen` section per § `cli.md` `message listen` section, pointer text, "short `poll` pointer" <!-- completed: -->
-- [ ] `assets/skills/cafleet/SKILL.md` § Send pointer wording; `assets/skills/cafleet/roles/member.md` pointer wording and empty-poll `show` sentence <!-- completed: -->
-- [ ] Grep `assets/skills/` and `docs/` for `watermark`, `message_ids`, `highest ID`, `named ID`, `named by`, `names only`, `naming unpolled`, `notices naming`, `notice naming`, `show` pointer; every remaining hit is unrelated to notices or the pointer <!-- completed: -->
+- [x] `assets/skills/cafleet/roles/director.md` § Director wake steps 2–4 per § Director wake procedure <!-- completed: 2026-11-19T11:15 -->
+- [x] `assets/skills/cafleet/reference/coding-agents.md`: Claude, Codex, OpenCode, Hermes and pi reception recipes; Claude Monitor note clause deletion <!-- completed: 2026-11-19T11:15 -->
+- [x] `assets/skills/cafleet/reference/cli.md`: subcommand row, `message listen` section per § `cli.md` `message listen` section, pointer text, "short `poll` pointer" <!-- completed: 2026-11-19T11:15 -->
+- [x] `assets/skills/cafleet/SKILL.md` § Send pointer wording; `assets/skills/cafleet/roles/member.md` pointer wording and empty-poll `show` sentence <!-- completed: 2026-11-19T11:15 -->
+- [x] Grep `assets/skills/` and `docs/` for `watermark`, `message_ids`, `highest ID`, `named ID`, `named by`, `names only`, `naming unpolled`, `notices naming`, `notice naming`, `show` pointer; every remaining hit is unrelated to notices or the pointer <!-- completed: 2026-11-19T11:15 -->
 
 ### Step 4: Listener `next`
 

@@ -63,13 +63,13 @@ The send persists the assignment and reports how the runner delivered its previe
 
 ### Receive results
 
-The Director reads each notice from its listener; the installed CAFleet skill's backend recipe owns the tool calls, and reception sends no input into the Director's pane. A notice names unpolled message IDs only. The Director remembers the highest message ID its polls have returned, so a notice naming only IDs at or below it needs no command. Otherwise it polls once:
+The Director reads each notice from its listener; the installed CAFleet skill's backend recipe owns the tool calls, and reception sends no input into the Director's pane. Each notice carries the command that consumes it, and the Director runs it once:
 
 ```bash
 cafleet message poll 2 --json
 ```
 
-The poll consumes every message it returns, so the Director records each one's sender, required action and artifact pointers before running any other command. After a poll, the listener's next notice names only messages committed after it; while a notice stays unpolled, later messages wait for a single bulk re-notice several minutes later, so a burst of replies arrives as one notice rather than one per message. Keep deferred questions and approvals in host-owned task state; broker events leave pending user decisions pending. `message show MESSAGE_ID --json` reads a consumed message again. The [message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) and [Director consumption](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) contracts own the full procedure.
+A notice queued behind a turn that already polled returns `[]`, which is normal. The poll consumes every message it returns, so the Director records each one's sender, required action and artifact pointers before running any other command. After a poll, the listener's next notice announces only messages committed after it; while a notice stays unpolled, later messages wait for a single bulk re-notice several minutes later, so a burst of replies arrives as one notice rather than one per message. Keep deferred questions and approvals in host-owned task state; broker events leave pending user decisions pending. `message show MESSAGE_ID --json` reads a consumed message again. The [message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) and [Director consumption](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) contracts own the full procedure.
 
 The Director keeps its listener for the fleet's lifetime, renewing an expired lease while the fleet exists; after an unexpected exit it polls the inbox and replaces the listener only once the old process has ended. Unpolled messages survive damaged output. [Director requirements](concepts/coding-agents.md#director-requirements) lists each backend's reception mechanism.
 
