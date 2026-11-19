@@ -518,6 +518,12 @@ impl Transport {
             .as_ref()
             .is_some_and(|hooks| hooks.order_shutdown_parsing_after_native_exit(deadline))
     }
+    pub(crate) fn outer_closed(&self) -> bool {
+        self.outer_eof
+    }
+    pub(crate) fn child_closed(&self) -> bool {
+        self.child_eof
+    }
     pub(crate) fn pending_input_bytes(&self) -> usize {
         self.input.len()
     }
@@ -4763,13 +4769,14 @@ pub(crate) mod test_support {
         }
     }
 
-    /// Terminal input that yields its queued chunks one per read, then `WouldBlock`, or
-    /// end of file once `eof` is set.
+    /// Terminal input that first fails `interruptions` reads with `EINTR`, then yields its
+    /// queued chunks one per read, then `WouldBlock`, or end of file once `eof` is set.
     #[derive(Default)]
     pub(crate) struct FakeInput {
         pub(crate) chunks: VecDeque<Vec<u8>>,
         pub(crate) eof: bool,
         pub(crate) consumed: Vec<u8>,
+        pub(crate) interruptions: usize,
     }
 
     impl FakeInput {
@@ -4784,6 +4791,10 @@ pub(crate) mod test_support {
 
     impl ByteInput for FakeInput {
         fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
+            if self.interruptions > 0 {
+                self.interruptions -= 1;
+                return Err(ErrorKind::Interrupted.into());
+            }
             let Some(mut chunk) = self.chunks.pop_front() else {
                 return if self.eof {
                     Ok(0)

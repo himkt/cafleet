@@ -107,6 +107,11 @@ fn director_only(command: &Command) -> Option<DirectorOnly> {
             director_member_id,
             ..
         }) => ("member press", MEMBER_FLEET, member_id, director_member_id),
+        Command::Member(M::Flush {
+            member_id,
+            director_member_id,
+            ..
+        }) => ("member flush", MEMBER_FLEET, member_id, director_member_id),
         Command::Member(M::Recover {
             member_id,
             director_member_id,
@@ -225,6 +230,16 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
                 })?;
             require_director(&conn, director.as_ref())?;
             member::press(&mut conn, settings, member_id, &keys, json, deadline)
+        }
+        Command::Member(member::MemberCommand::Flush {
+            member_id, json, ..
+        }) => {
+            let deadline = crate::time::Deadline::until(
+                std::time::Instant::now() + crate::runtime::flush::FLUSH_DEADLINE,
+            );
+            let mut conn = invocation_connection(&settings.database_url, deadline)?;
+            require_director(&conn, director.as_ref())?;
+            member::flush(&mut conn, settings, member_id, json, deadline)
         }
         Command::Permission(command) => {
             let deadline = crate::time::Deadline::new();

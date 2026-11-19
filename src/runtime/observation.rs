@@ -140,6 +140,56 @@ pub(crate) struct ObservationController {
     #[cfg(test)]
     observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
 }
+#[cfg(test)]
+impl ObservationController {
+    fn held_update(&mut self) -> &mut EpisodeUpdate {
+        let (visibility, eligibility) = (self.visibility, self.eligibility);
+        &mut self
+            .pending
+            .get_or_insert_with(|| PendingEpisodeUpdate {
+                update: EpisodeUpdate::new(visibility, eligibility),
+                next_draft: 0,
+                materialized: None,
+            })
+            .update
+    }
+    /// Holds one transition the event writer has not persisted yet.
+    pub(crate) fn hold_pending_transition(&mut self) {
+        let run_id = self.run.run_id;
+        self.held_update().transitions.push(TransitionDraft {
+            run_id,
+            episode_seq: Some(1),
+            kind: RuntimeEventKind::InteractionOpened,
+            classification: Some(InteractionClass::PermissionRequest),
+            observed_at: crate::time::now_stamp(),
+            evidence_json: serde_json::Value::Null,
+            close_reason: None,
+            cause_json: None,
+        });
+    }
+    /// Holds interaction evidence the event writer has not persisted yet.
+    pub(crate) fn hold_pending_evidence(&mut self) {
+        let run_id = self.run.run_id;
+        self.held_update().latest_evidence = Some(InteractionEvidenceUpdate {
+            run_id,
+            episode_seq: 1,
+            output_seq: 0,
+            evidence_json: serde_json::Value::Null,
+        });
+    }
+    /// Reports the observer degraded with `code`, as an observer failure leaves it.
+    pub(crate) fn degrade(&mut self, code: &str) {
+        self.diagnostic = Some(code.into());
+    }
+    /// Loses the screen's visibility classification.
+    pub(crate) fn lose_visibility(&mut self) {
+        self.visibility = Visibility::Unknown;
+    }
+    /// Drops every held update, so the controller finishes with nothing to persist.
+    pub(crate) fn release_held_health(&mut self) {
+        self.pending = None;
+    }
+}
 struct RequestRegion {
     top: usize,
     rows: Vec<String>,

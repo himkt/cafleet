@@ -322,10 +322,27 @@ impl BackendCore {
         argv: &[String],
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
+        self.acknowledged_write(argv, deadline, "key")
+    }
+
+    fn send_text(
+        &self,
+        argv: &[String],
+        deadline: crate::time::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        self.acknowledged_write(argv, deadline, "text")
+    }
+
+    fn acknowledged_write(
+        &self,
+        argv: &[String],
+        deadline: crate::time::Deadline,
+        what: &str,
+    ) -> Result<(), MultiplexerError> {
         let output = self.press_run(argv, deadline, true)?;
         if !output.trim().is_empty() {
             return Err(MultiplexerError::new(format!(
-                "{} key acknowledgment was unreadable",
+                "{} {what} acknowledgment was unreadable",
                 self.name
             ))
             .after_write());
@@ -418,6 +435,14 @@ pub(crate) trait Multiplexer {
         &self,
         pane_id: &str,
         keys: &PressKeys,
+        deadline: crate::time::Deadline,
+    ) -> Result<(), MultiplexerError>;
+
+    /// Writes `text` literally into `pane_id` as one argv element.
+    fn send_text(
+        &self,
+        pane_id: &str,
+        text: &str,
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError>;
 

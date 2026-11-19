@@ -1,7 +1,7 @@
 # Held runner queue drain and Director forced flush
 
 **Status**: Approved
-**Progress**: 22/43 tasks complete
+**Progress**: 39/43 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -16,7 +16,7 @@ The member runner's deferred-input FIFO can stop reaching its queue turn (GitHub
 - [ ] A queue head that has not started an attempt for 3 minutes publishes exactly one `input_delivery_stalled` carrying a `cause`. Time during which an open interaction blocks the head is excluded, as a deliberate scope decision (§ Stall watchdog).
 - [ ] A composer that shows only a native suggestion is classified empty for every backend whose native CLI renders suggestions, proven by bundled native fixtures including Claude Code 2.1.322 on Herdr 0.9.5.
 - [ ] `cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID` submits ` [cafleet: ignore any text before this marker, if present] ` followed by the queued preview lines in the runner's in-memory FIFO order, then the profile submit key, through the outer pane. It sends no Escape and no clear key. It flushes every queued preview, or the longest FIFO prefix within the plain limit, and reports the rest in `remaining_input_ids`. Each flushed receipt is settled `submitted` with `method=forced`.
-- [ ] The flush works while the runner's queue turn is stalled. Its runner actions are served on the control-socket path, which runs before and outside `tick_running`, `retry_deferred`, the drain and `start_deferred`. A unit test holds the queue turn on each gate in § Gate tolerance and shows the flush either succeeding or refusing with that row's named cause.
+- [ ] The flush works while the runner's queue turn is stalled. Its runner actions are served on the control-socket path, which runs before and outside `tick_running`, `retry_deferred`, the drain and `start_deferred`. Unit tests show the flush either succeeding or refusing with each § Gate tolerance row's named cause through `flush_received`, and prove the control-socket dispatch path while the queue turn is held.
 - [ ] The flush refuses, writing zero bytes, on every condition in § Refusals.
 - [ ] Each flushed preview publishes one `input_delivery_result` with `delivery.method=forced` and its `flush_input_id`.
 - [ ] `SPEC.md`, `docs/`, `assets/skills/cafleet/reference/cli.md` and the Director and member roles describe the new behavior; `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
@@ -98,7 +98,7 @@ The fix in § Runner queue housekeeping takes the consumption check, the stall w
 
 ### Runner: queue housekeeping (D3, D4, D5)
 
-A new coordinator operation `queue_housekeeping` runs from `tick_running` every `QUEUE_HOUSEKEEPING_INTERVAL` (1 s) while the FIFO is non-empty and input is not fenced. It runs before the pending-client branch and independently of `retry_deferred`, the drain and the `finalization` / `pending_stamp` retries. It writes no PTY byte and takes no pane lock.
+A new coordinator operation `queue_housekeeping` runs from `tick_running` every `QUEUE_HOUSEKEEPING_INTERVAL` (1 s) while the FIFO is non-empty or a flush slot is outstanding, and input is not fenced, so a flush's expiry applies even after the flush emptied the FIFO (Director decision). It runs before the pending-client branch and independently of `retry_deferred`, the drain and the `finalization` / `pending_stamp` retries. It writes no PTY byte and takes no pane lock.
 
 The 1 s cadence bounds consumption-detection latency to about one second while adding one read transaction per second per queued member. The write path keeps its own pre-write recheck, so housekeeping latency never causes a consumed preview to be typed.
 
@@ -190,7 +190,7 @@ The `review_stalled_queue` INSTRUCTION is exactly: `Capture the member's pane, i
 ### Profiles: suggestion-only composer
 
 - A native suggestion is text the native CLI draws in the composer that is not part of the input buffer. A composer showing only a suggestion is empty for every purpose: deferred delivery, held-composer clearing and flush draft extraction.
-- `composer_empty` rules gain an optional `suggestion` object: `{"style": STYLE}`. STYLE is either `{"faint": true}` or `{"foreground": {"kind": "indexed", "index": N}}`.
+- `composer_empty` rules gain an optional `suggestion` object: `{"style": STYLE}`. STYLE is either `{"faint": true}` or `{"foreground": COLOUR}`, with `COLOUR` in the `cell_backgrounds` colour form (indexed or rgb).
   - The prompt marker of a `suggestion` rule is the match of the region's `start_pattern` on the region's first row (Director decision).
   - A rule with `suggestion` matches when its region matches and every cell from the column right after that match up to the row's last non-blank cell carries STYLE.
   - The cursor must sit on that row at the column right after the match. This is a new `CursorRule::AfterPrompt` (`"cursor": "after_prompt"`).
@@ -230,7 +230,8 @@ Each backend profile gains a `composer_draft` section. Only the runner's forced-
 
   | Backend | Region | `draft_rows` |
   |---|---|---|
-  | claude, codex, opencode | One prompt row | `start` / `end` |
+  | claude, codex | One prompt row | `start` / `end` |
+  | opencode | Prompt rows through the normal-mode footer row | `start` / `before_end` |
   | hermes | Prompt row plus up to two continuation rows (`max_rows: 3`) | `start` / `end` |
   | pi | `─` rule, editor rows, `─` rule | `after_start` / `before_end` |
 
@@ -241,12 +242,12 @@ Each backend profile gains a `composer_draft` section. Only the runner's forced-
 - **Mode check:** only the first scalar of the first draft row is compared, because a native mode switch is decided by the buffer's first character. An empty draft never matches.
 - **Candidates:** each is kept only when verified against the profile's native version, and the set is extended by any further prefix the research finds.
 
-| Backend | Candidate prefixes |
+| Backend | Verified prefixes |
 |---|---|
-| claude | `!` (bash mode), `/` (slash command), `#` (memory) |
+| claude | `!` (bash mode), `/` (slash command) |
 | codex | `!` (shell), `/` (slash command) |
 | opencode | `!` (shell), `/` (slash command) |
-| hermes | `/` (slash command) |
+| hermes | `!` (shell), `/` (slash command) |
 | pi | `!` (shell), `/` (slash command) |
 
 - **Interface (Director decision):** `enum ComposerDraft { Readable(String), Unreadable }`, `ProfileCatalog::composer_draft(&self, backend: CodingAgent, native_version: &str, screen: &ScreenSnapshot) -> ComposerDraft` and `ProfileCatalog::mode_switch_prefix(&self, backend: CodingAgent, native_version: &str, draft: &str) -> Option<&str>`. The second returns the declared prefix matching the draft's first scalar, or `None` for an empty draft. Step 8's `Reserve` calls both.
@@ -275,7 +276,7 @@ This doc uses the second, for three reasons:
 
 ### Forced flush in the runner
 
-New control operation `InputControlOperation::Flush(FlushAction)`, served by `InputCoordinator::flush_received(conn, action, observation, transport_snapshot, deadline)`:
+New control operation `InputControlOperation::Flush(FlushAction)`, served by `InputCoordinator::flush_received(&mut self, conn, action, observation, transport: &Transport, deadline) -> Result<FlushReply, InputFailure>` and answered as `InputControlReply::Flush(FlushReply)` (Director decision, adopting the Tester's skeleton):
 
 ```rust
 enum FlushAction {
@@ -283,7 +284,19 @@ enum FlushAction {
     Settle { flush_input_id: i64, outcome: FlushWriteOutcome },
 }
 enum FlushWriteOutcome { Acknowledged, NotStarted, Uncertain }
+enum FlushReply {
+    Refused { cause: String },
+    Empty,
+    Reserved { flush_input_id: i64, literal: String, submit_key: String, settle_ms: u64,
+               flushed_input_ids: Vec<i64>, message_ids: Vec<i64>, remaining_input_ids: Vec<i64> },
+    Settled { flush_input_id: i64 },
+    NotOutstanding { flush_input_id: i64, state: InputState, disposition: Option<InputDisposition> },
+}
+const FLUSH_LITERAL_LIMIT: usize = 65_536;
+struct PendingFlush { flush_input_id: i64, entries: Vec<QueuedInput>, expires_at: Instant }
 ```
+
+The coordinator keeps `flush: Option<PendingFlush>`, and `queue_housekeeping` applies its expiry.
 
 #### `Reserve`
 
@@ -293,14 +306,14 @@ enum FlushWriteOutcome { Acknowledged, NotStarted, Uncertain }
 2. `self.pending` is `None`: no runner attempt holds a written or in-flight composer write.
 3. No ordinary receipt of the run is `in_progress`, `accepted` or `uncertain`. The one exception is the `accepted` preview held as `pending_stamp`, which is excluded: its bytes are complete and only its notification stamp awaits storage.
 4. No queued `ready` prompt or exec in the FIFO.
-5. Observation permits a forced write (§ Gate tolerance): no current interaction or candidate, visibility `Visible`, no degraded observation, both terminal ends open.
+5. Observation permits a forced write (§ Gate tolerance): no current interaction or candidate (visibility `Visible` or `Obscured`, or eligibility `Hold(Interaction)` or `Hold(Candidate)`), visibility not `Unknown`, no degraded observation, both terminal ends open. `Visibility` describes the interaction, so an idle `NotVisible` screen proceeds (Director decision).
 6. The draft is readable (`composer_draft` on the current snapshot), and its first row does not start with a mode-switch prefix.
 7. The profile has a prompt composer plan for the recorded native version.
 8. The FIFO holds at least one preview whose message is `input_required`. Consumed ones are left for housekeeping. With none, reply `FlushReply::Empty`.
 
 #### Gate tolerance
 
-The flush is meant for a queue turn held by a gate that does not make a forced write unsafe. The table states, for each D4 gate and each drain blocker, whether `Reserve` proceeds and which `ObservationStatus` / `ObservationHealth` / transport field it reads. The served-while-stalled test in `src/runtime/service.rs` covers every row.
+The flush is meant for a queue turn held by a gate that does not make a forced write unsafe. The table states, for each D4 gate and each drain blocker, whether `Reserve` proceeds and which `ObservationStatus` / `ObservationHealth` / transport field it reads. `src/runtime/input.rs` covers every row through `flush_received`, and `src/runtime/service.rs` proves the dispatch path with four deterministic cases.
 
 | Gate | Field read by `Reserve` | Reserve | Reason |
 |---|---|---|---|
@@ -314,8 +327,8 @@ The flush is meant for a queue turn held by a gate that does not make a forced w
 | (b) `observation degraded: CODE` | `ObservationHealth.degraded`, `ObservationStatus.diagnostic` | Refuses: `the member's screen observation is unavailable: observation degraded: CODE` | Interactions and the draft cannot be classified reliably |
 | (b) `outer terminal closed` | transport `outer_eof` | Refuses: `the member's screen observation is unavailable: outer terminal closed` | The outer-pane write would reach no runner input |
 | (b) `native output closed` | transport `child_eof` | Refuses: `the member's screen observation is unavailable: native output closed` | The child has exited |
-| — interaction or candidate on screen | `ObservationStatus.eligibility` = `Hold(Interaction)` or `Hold(Candidate)`, or a recorded `current_interaction_id` | Refuses: `an interaction is open (CLASSIFICATION)` | User request: refuse an open interaction |
-| — screen not visible | `ObservationStatus.visibility` ≠ `Visible` | Refuses: `the member's screen observation is unavailable: VISIBILITY` | The draft and interactions cannot be read |
+| — interaction or candidate on screen | `ObservationStatus.visibility` = `Visible` or `Obscured`, `ObservationStatus.eligibility` = `Hold(Interaction)` or `Hold(Candidate)`, or a recorded `current_interaction_id` | Refuses: `an interaction is open (CLASSIFICATION)` | User request: refuse an open interaction |
+| — visibility unknown | `ObservationStatus.visibility` = `Unknown` | Refuses: `the member's screen observation is unavailable: VISIBILITY` | The draft and interactions cannot be read; an idle `NotVisible` screen proceeds |
 | (c) `input_fenced` | `input_fenced` | Refuses: `the member's input is fenced` | The runner is stopping or failed permanently |
 | (c) `finalization` retry | `finalization` | Proceeds | A zero-byte settlement of an entry already out of the FIFO |
 | (c) `pending_stamp` retry | `pending_stamp` | Proceeds (check 3 exception) | A submitted preview awaiting its stamp |
@@ -364,7 +377,7 @@ The selected entries move from `queue` into a new coordinator slot `flush: Optio
 cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID [--json]
 ```
 
-`member flush` joins the Director-only command guard, and its implementation lives in `src/runtime/flush.rs`. The command runs under one 10-second `Deadline`, which covers the lock wait, both control exchanges, both multiplexer processes and the settle interval. There is no `--timeout` flag. The reserved slot's `expires_at` is that deadline plus `DEFERRED_FINALIZATION`.
+`member flush` joins the Director-only command guard, and its implementation lives in `src/runtime/flush.rs`, mirroring `press.rs`: `FlushOutcome` (with `to_json` and `text`), a `FlushChannel` trait whose `exchange` carries the control frames, `flush_member_with(conn, settings, member, deadline, mux, channel, sleep)` and the production `flush_member`, whose channel is `crate::runtime::flush::ControlFlushChannel` implementing `FlushChannel` over the run's control socket. `FlushAction`, `FlushReply` and `FlushWriteOutcome` are re-exported from `crate::runtime`; `FLUSH_LITERAL_LIMIT`, `PendingFlush`, `PendingStamp` and `PendingFinalization` are reachable in `crate::runtime::input` (Director decision). The command runs under one 10-second `Deadline`, which covers the lock wait, both control exchanges, both multiplexer processes and the settle interval. There is no `--timeout` flag. The reserved slot's `expires_at` is that deadline plus `DEFERRED_FINALIZATION`.
 
 #### Procedure
 
@@ -536,7 +549,8 @@ Every test is an in-file `#[cfg(test)] mod tests` unit in the file owning the as
 | `composer_draft` validation, single-row and framed extraction, mode-switched marker unreadable, prefix match; `cell_styles` build-guard validation and replay | `src/coding_agent/catalog.rs` |
 | `send_text` argv and acknowledgment mapping | `src/multiplexer/tmux.rs`, `src/multiplexer/herdr.rs` |
 | `Flush::Reserve` refusals in order, selection in in-memory FIFO order including a head requeued by `push_front` with a higher receipt ID, plain-limit fallbacks and `FLUSH_LITERAL_LIMIT`, `Settle` per outcome with events, expiry → uncertain, late or mismatched `Settle` → `NotOutstanding` with no write, `Reconcile` refused while a slot is outstanding, `fence()` cascade | `src/runtime/input.rs` |
-| `Flush` served while the queue turn is held, one case per § Gate tolerance row, asserting proceed or the row's refusal cause | `src/runtime/service.rs` |
+| `Flush` served on the control-socket dispatch path while the queue turn is held, with four deterministic cases (Director decision) | `src/runtime/service.rs` |
+| Every § Gate tolerance row through `flush_received`, asserting proceed or the row's refusal cause | `src/runtime/input.rs` |
 | CLI exit and error for each `NotOutstanding` state | `src/runtime/flush.rs` |
 | CLI procedure: step order, refusal mapping, settle sleep, placement revalidation, write-failure errors, output shapes, with a fake multiplexer and runner | `src/runtime/flush.rs` |
 | Flush reconcile cascade and single-preview refusal | `src/runtime/input.rs` |
@@ -587,32 +601,53 @@ This step commits no code. A scratch test may be used locally and discarded; the
 - [x] Derive and publish `input_delivery_stalled` with `cause` from housekeeping, replacing the held-composer-only publication <!-- completed: 2026-11-19T14:22 -->
 - [x] Change `stalled_delivery` validation per `cause.kind` and carry `cause` through the outbox `cause_json` in `src/broker/runtime/events.rs` <!-- completed: 2026-11-19T14:22 -->
 - [x] Add the `review_stalled_queue` action and INSTRUCTION <!-- completed: 2026-11-19T14:22 -->
-- [ ] Add the watchdog and event validation tests <!-- completed: -->
+- [x] Add the watchdog and event validation tests <!-- completed: 2026-11-19T23:40 -->
 
 ### Step 6: Profiles
 
-- [ ] Research inline-suggestion rendering on each backend's supported native version, and record the result in `SPEC.md` §6.7 <!-- completed: -->
-- [ ] Add `CursorRule::AfterPrompt` and the `suggestion` style field to `composer_empty` rules in the catalog and detector, and the optional fixture `cell_styles` runs to capture conversion, replay and the build guard <!-- completed: -->
-- [ ] Verify each candidate mode-switch prefix and each mode's marker behavior against each backend's native CLI <!-- completed: -->
-- [ ] Capture the suggestion, draft and mode-switched fixtures for every backend, including Claude Code 2.1.322 / Herdr 0.9.5; register them in `assets/profiles/bundled.json` and add `composer_draft` to every profile <!-- completed: -->
-- [ ] Add catalog validation and detector/extraction tests <!-- completed: -->
+- [x] Research inline-suggestion rendering on each backend's supported native version, and record the result in `SPEC.md` §6.7 <!-- completed: 2026-11-19T23:40 -->
+- [x] Add `CursorRule::AfterPrompt` and the `suggestion` style field to `composer_empty` rules in the catalog and detector, and the optional fixture `cell_styles` runs to capture conversion, replay and the build guard <!-- completed: 2026-11-19T23:40 -->
+- [x] Verify each candidate mode-switch prefix and each mode's marker behavior against each backend's native CLI <!-- completed: 2026-11-19T23:40 -->
+- [x] Capture the suggestion, draft and mode-switched fixtures for every backend, including Claude Code 2.1.322 / Herdr 0.9.5; register them in `assets/profiles/bundled.json` and add `composer_draft` to every profile <!-- completed: 2026-11-19T23:40 -->
+- [x] Add catalog validation and detector/extraction tests <!-- completed: 2026-11-19T23:40 -->
+
+**Native research access (user decision):** Step 6 research uses the shared HOME configuration with minimal writes (trusting only a `/tmp` research folder) and copies no credentials. Model turns are authorized on each backend's cheapest model with one-word prompts and a few turns per backend. The Programmer runs the native capture driver with a private case, and herdr runs in a separate `cafleet-programmer-research` session; fleet 2's herdr session and panes are never touched.
+
+**Step 6 research results and decisions:** Research notes for this step stay under `/tmp/cafleet-programmer-research/`.
+
+| Backend (version) | Empty-composer hint | Verified mode prefixes |
+|---|---|---|
+| claude (2.1.322; tmux and Herdr 0.9.5) | Startup hint `Try "…"`, faint, cursor right after `❯\u{a0}`; no post-turn suggestion in 4 turns, with and without `--prompt-suggestions false` | `!` (consumed; marker becomes `!`), `/`; `#` is plain text and is dropped |
+| codex (0.167.0) | `Ask Codex to do anything`, faint, at startup and after every turn | `!` (marker becomes a red `!`), `/` |
+| opencode (2.2.7) | `Ask anything, / for commands, @ for context…`, foreground rgb(128,128,128), at startup only | `!` (same `┃` glyph; footer becomes `Shell · esc normal`), `/` |
+| hermes (2026.9.24) | Rotating placeholder, italic with indexed foreground 136, at startup and after the failed turn | `!` (added; hint `! shell`), `/` |
+| pi (1.5.2) | None | `!` (border recolours only), `/` |
+
+- (Director) The Claude Code 2.1.322 / Herdr 0.9.5 startup-hint screen is the Claude suggestion-only fixture, and `SPEC.md` §6.7 records that the post-turn suggestion was not reproduced in 4 runs.
+- (Director) STYLE takes the full colour form: `{"foreground": COLOUR}` with `COLOUR` in the `cell_backgrounds` form (indexed or rgb), beside `{"faint": true}`.
+- (User) OpenCode shell mode is fixed in this change. The OpenCode `composer_draft` region spans the composer row through the footer row and ends on the normal-mode footer, with `draft_rows` `start`/`before_end`. The `composer_empty` rule gets the same footer guard, so a shell-mode composer never counts as empty. Fixtures cover both.
+- (User) Hermes stays at what is researchable: the placeholder that returns after the failed turn is captured, and post-turn rendering is recorded as not researched because the configured provider has no token.
+
+**Fixture capture method (Director decision):** the native capture driver runs only its permission-probe case registry, so the Step 6 composer fixtures are captured outside it. Each native CLI runs under `script -q -f -O RAW -c CMD` at the pane geometry, in the research tmux server or the `cafleet-programmer-research` herdr session, and is driven with send-keys. The byte offset of each target state is recorded, and that stream prefix is converted by a scratch converter under `/tmp` built on the runner's parser (`vt100` 0.18.1). The converter emits the screen object with `cell_backgrounds` and `cell_styles` and computes the registry digest in the build guard's canonical form. It stays out of the repository; the build guard and the Tester's replay tests validate every fixture.
+
+**Composer-draft regions (Director decision):** each `composer_draft` region uses `cursor: inside`, because history rows such as hermes `❯ hi` also match the start pattern. claude and codex read one prompt row; hermes reads `^❯ ` through the `─` rule below it (`start`/`before_end`, `max_rows` 4), because a hermes continuation row does not repeat `❯`; pi reads between its `─` rules. OpenCode draws `┃ ` at the start of every composer row, so a draft that wraps onto a second row yields two candidate regions and is Unreadable; the flush refuses it with zero bytes, matching the rule to refuse an unreadable draft. A wrapped-draft fixture records that result.
 
 ### Step 7: Schema, receipts and multiplexer
 
-- [ ] Edit `assets/migrations/V1__baseline.sql` per § Data model and update the setup/guard required column shapes <!-- completed: -->
-- [ ] Extend `InputKind`, `DeliveryMethod`, `StopCause` and the receipt record with `flush`, `forced`, `runner_lost` and `flush_input_id`; update `input show` and the delivery projection <!-- completed: -->
-- [ ] Change `has_unresolved_ordinary_attempt` to `kind IN ('preview','prompt','exec')`, audit the other kind-agnostic queries, and record each decision in `SPEC.md` §6.9 <!-- completed: -->
-- [ ] Implement the flush reconcile cascade and the single forced-preview refusal <!-- completed: -->
-- [ ] Verify the herdr `pane send-text` form against Herdr 0.9.5 help; add `Multiplexer::send_text` for tmux and herdr <!-- completed: -->
-- [ ] Add the schema, reconcile and `send_text` tests <!-- completed: -->
+- [x] Edit `assets/migrations/V1__baseline.sql` per § Data model and update the setup/guard required column shapes <!-- completed: 2026-11-19T15:00 -->
+- [x] Extend `InputKind`, `DeliveryMethod`, `StopCause` and the receipt record with `flush`, `forced`, `runner_lost` and `flush_input_id`; update `input show` and the delivery projection <!-- completed: 2026-11-19T15:00 -->
+- [x] Change `has_unresolved_ordinary_attempt` to `kind IN ('preview','prompt','exec')`, audit the other kind-agnostic queries, and record each decision in `SPEC.md` §6.9 <!-- completed: 2026-11-19T15:00 -->
+- [x] Implement the flush reconcile cascade and the single forced-preview refusal <!-- completed: 2026-11-19T15:12 -->
+- [x] Verify the herdr `pane send-text` form against Herdr 0.9.5 help; add `Multiplexer::send_text` for tmux and herdr <!-- completed: 2026-11-19T14:56 -->
+- [x] Add the schema, reconcile and `send_text` tests <!-- completed: 2026-11-19T23:40 -->
 
 ### Step 8: Forced flush
 
-- [ ] Add `InputControlOperation::Flush`, its codec, and dispatch in `serve_input` with no `quiesce` <!-- completed: -->
-- [ ] Implement `Reserve`, the `flush` slot, `Settle`, expiry, and the `fence()` and recovery cascades in `InputCoordinator` <!-- completed: -->
-- [ ] Add the `Flush` subcommand to `src/cli/member.rs` and the Director-only guard list <!-- completed: -->
-- [ ] Implement the CLI procedure, output and error strings in `src/runtime/flush.rs` <!-- completed: -->
-- [ ] Add the runner flush tests, the served-while-stalled tests and the CLI tests <!-- completed: -->
+- [x] Add `InputControlOperation::Flush`, its codec, and dispatch in `serve_input` with no `quiesce` <!-- completed: 2026-11-19T15:12 -->
+- [x] Implement `Reserve`, the `flush` slot, `Settle`, expiry, and the `fence()` and recovery cascades in `InputCoordinator` <!-- completed: 2026-11-19T15:12 -->
+- [x] Add the `Flush` subcommand to `src/cli/member.rs` and the Director-only guard list <!-- completed: 2026-11-19T15:12 -->
+- [x] Implement the CLI procedure, output and error strings in `src/runtime/flush.rs` <!-- completed: 2026-11-19T15:12 -->
+- [x] Add the runner flush tests, the served-while-stalled tests and the CLI tests <!-- completed: 2026-11-19T23:40 -->
 
 ### Step 9: Validation
 
@@ -632,3 +667,4 @@ This step commits no code. A scratch test may be used locally and discarded; the
 | 2026-11-19 | Review round 2: flush order defined as the runner's in-memory FIFO order (replacing `input_id` ascending); explicit `draft_rows`; § Gate tolerance per D4 gate and drain blocker; `settle_ms` fixed at `STAGE_SETTLE`; late `Settle` handling |
 | 2026-11-19 | Step 1 finding: gate (b) `observation incomplete` latch in `Transport::observe_drain_child` recorded in § Root cause; user decisions: § Runner: interrupted drain feed retains and later feeds the unfed remainder, and the § Gate tolerance `observation incomplete` row proceeds as a user-accepted last-resort override |
 | 2026-11-19 | Director decisions: optional fixture `cell_styles` runs so suggestion fixtures reproduce cell style; a terminal parser failure keeps the lifetime observation fence |
+| 2026-11-19 | Step 6 research results; Director and user decisions: Claude startup-hint suggestion fixture, full-colour suggestion STYLE, OpenCode normal-mode footer guard for `composer_draft` and `composer_empty`, Hermes post-turn rendering not researched |

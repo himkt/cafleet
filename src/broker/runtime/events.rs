@@ -267,6 +267,7 @@ fn published_delivery(
         cause: result_stop_cause(&input, published.status),
         action: left_input_action(conn, &get_run(conn, event.run_id)?, &input)?,
         stalled: None,
+        flush_input_id: input.flush_input_id,
         delivery: published,
         stage: payload["stage"].clone(),
     })
@@ -717,6 +718,7 @@ struct DeliveryFields {
     cause: Option<StopCause>,
     action: Value,
     stalled: Option<StalledFields>,
+    flush_input_id: Option<i64>,
 }
 
 struct StalledFields {
@@ -888,6 +890,7 @@ fn stalled_delivery(
             waiting_since,
             cause: record["cause"].clone(),
         }),
+        flush_input_id: None,
         action,
     })
 }
@@ -959,7 +962,10 @@ fn payload(
         payload["delivery"] = fields.delivery.to_json();
         match &fields.stalled {
             Some(stalled) => payload["cause"] = stalled.cause.clone(),
-            None => payload["stage"] = fields.stage.clone(),
+            None => {
+                payload["stage"] = fields.stage.clone();
+                payload["flush_input_id"] = json!(fields.flush_input_id);
+            }
         }
     }
     payload["director_action"] = if let Some(fields) = delivery {
@@ -1068,6 +1074,7 @@ pub(crate) fn persist_transition_in_transaction(
                 cause: result_stop_cause(&input, delivery.status),
                 action: left_input_action(conn, run, &input)?,
                 stalled: None,
+                flush_input_id: input.flush_input_id,
                 delivery,
                 stage: record["stage"].clone(),
             })
@@ -5087,6 +5094,7 @@ mod tests {
             object.insert("message_id".into(), message_id);
             object.insert("delivery".into(), delivery);
             object.insert("stage".into(), json!(stage));
+            object.insert("flush_input_id".into(), Value::Null);
             object.insert("director_action".into(), Value::Null);
             Value::Object(object)
         }
@@ -5154,12 +5162,13 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>();
             assert_eq!(
-                keys[keys.len() - 5..],
+                keys[keys.len() - 6..],
                 [
                     "input_id",
                     "message_id",
                     "delivery",
                     "stage",
+                    "flush_input_id",
                     "director_action"
                 ]
             );

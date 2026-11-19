@@ -237,6 +237,32 @@ impl RunnerLoop<'_> {
             )
             .map_err(CafleetError::from)
     }
+    /// Serves a forced flush action with no input drain, so no queue-turn gate holds it.
+    fn flush(
+        &mut self,
+        request: InputControlRequest,
+        admitted_at: Instant,
+    ) -> Result<InputControlReply> {
+        let deadline = input_deadline(&request, admitted_at)?;
+        request.identity.validate(&self.run)?;
+        let InputControlOperation::Flush(action) = request.operation else {
+            unreachable!("a flush receives a flush operation");
+        };
+        let coordinator = self
+            .coordinator
+            .as_mut()
+            .ok_or_else(|| error("native input has not started"))?;
+        coordinator
+            .flush_received(
+                self.conn,
+                action,
+                self.native.controller,
+                self.native.transport,
+                deadline,
+            )
+            .map(InputControlReply::Flush)
+            .map_err(CafleetError::from)
+    }
     fn submit(
         &mut self,
         request: InputControlRequest,
@@ -1059,6 +1085,10 @@ impl RunnerLoop<'_> {
             InputControlOperation::PermissionInspect(_)
         ) {
             let result = self.inspect(request, admitted_at);
+            return self.clients[index].answer_input(result.as_ref());
+        }
+        if matches!(request.operation, InputControlOperation::Flush(_)) {
+            let result = self.flush(request, admitted_at);
             return self.clients[index].answer_input(result.as_ref());
         }
         let result = self.submit(request, admitted_at, client_id);
@@ -4669,7 +4699,7 @@ mod tests {
         mod queue_housekeeping {
             use crate::runtime::service::tests::preview_sweep::*;
 
-            fn queue_preview(
+            pub(super) fn queue_preview(
                 fixture: &ServiceFixture,
                 message: &MessageRecord,
                 until: Instant,
@@ -4722,7 +4752,7 @@ mod tests {
                 }
             }
 
-            fn input(fixture: &ServiceFixture, input_id: i64) -> InputOperation {
+            pub(super) fn input(fixture: &ServiceFixture, input_id: i64) -> InputOperation {
                 storage::get_input(&fixture.fixture.conn, input_id).unwrap()
             }
 
@@ -4773,7 +4803,7 @@ mod tests {
                 );
             }
 
-            fn open_form(fixture: &mut ServiceFixture, until: Instant) {
+            pub(super) fn open_form(fixture: &mut ServiceFixture, until: Instant) {
                 manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
                 loop {
                     assert!(Instant::now() < until, "the detected interaction opens");
@@ -4869,6 +4899,188 @@ mod tests {
                     drop(outage);
                     await_housekeeping(fixture, [queue[0].1, queue[2].1], |_| {});
                     assert_housekept(fixture, &queue);
+                });
+            }
+        }
+
+        mod forced_flush_dispatch {
+            use crate::runtime::FlushAction;
+            use crate::runtime::FlushReply;
+            use crate::runtime::FlushWriteOutcome;
+            use crate::runtime::flush::ControlFlushChannel;
+            use crate::runtime::flush::FlushChannel;
+            use crate::runtime::service::tests::preview_sweep::queue_housekeeping::input;
+            use crate::runtime::service::tests::preview_sweep::queue_housekeeping::open_form;
+            use crate::runtime::service::tests::preview_sweep::queue_housekeeping::queue_preview;
+            use crate::runtime::service::tests::preview_sweep::*;
+
+            fn exchange(
+                fixture: &ServiceFixture,
+                action: FlushAction,
+                until: Instant,
+            ) -> FlushReply {
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                ControlFlushChannel
+                    .exchange(
+                        &run,
+                        action,
+                        crate::time::Deadline::until(
+                            until.min(Instant::now() + Duration::from_secs(5)),
+                        ),
+                    )
+                    .unwrap_or_else(|cause| {
+                        panic!("the runner serves the flush: {}", cause.message())
+                    })
+            }
+
+            fn reserve(fixture: &ServiceFixture, until: Instant) -> FlushReply {
+                exchange(
+                    fixture,
+                    FlushAction::Reserve {
+                        director_member_id: fixture.fixture.run.director_member_id,
+                        expires_at_mono_ns: expiration(until),
+                    },
+                    until,
+                )
+            }
+
+            fn refusal(reply: FlushReply) -> String {
+                match reply {
+                    FlushReply::Refused { cause } => cause,
+                    _ => panic!("the flush is refused"),
+                }
+            }
+
+            /// Reserves, checks the selection and settles `NotStarted`, so the run keeps no slot.
+            fn assert_reserves(fixture: &ServiceFixture, previews: &[i64], until: Instant) {
+                let flush_input_id = match reserve(fixture, until) {
+                    FlushReply::Reserved {
+                        flush_input_id,
+                        flushed_input_ids,
+                        ..
+                    } => {
+                        assert_eq!(flushed_input_ids, previews);
+                        flush_input_id
+                    }
+                    FlushReply::Refused { cause } => panic!("the flush is refused: {cause}"),
+                    _ => panic!("the flush reserves the queued previews"),
+                };
+                assert!(matches!(
+                    exchange(
+                        fixture,
+                        FlushAction::Settle {
+                            flush_input_id,
+                            outcome: FlushWriteOutcome::NotStarted,
+                        },
+                        until,
+                    ),
+                    FlushReply::Settled { .. }
+                ));
+                for id in previews {
+                    assert_eq!(input(fixture, *id).state, InputState::Ready);
+                }
+            }
+
+            /// Keeps a lone Escape reply prefix pending for `hold`, so every drain stays `Pending`.
+            fn hold_drain(fixture: &mut ServiceFixture, hold: Duration, until: Instant) {
+                let stop = Instant::now() + hold;
+                while Instant::now() < stop {
+                    manual(fixture, b"\x1b", until);
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+
+            /// Closes the form while the drain stays held, so no queue turn delivers the queue.
+            fn close_form_holding_the_drain(fixture: &mut ServiceFixture, until: Instant) {
+                hold_drain(fixture, Duration::from_millis(200), until);
+                manual(fixture, b"\r", until);
+                hold_drain(fixture, Duration::from_millis(400), until);
+            }
+
+            #[test]
+            fn a_flush_is_served_while_the_drain_holds_the_queue_turn() {
+                with_detecting_input_service(|fixture, until| {
+                    open_form(fixture, until);
+                    let message = send(fixture, "stalled behind a held drain");
+                    let preview = queue_preview(fixture, &message, until);
+                    close_form_holding_the_drain(fixture, until);
+                    manual(fixture, b"\x1b", until);
+                    assert_reserves(fixture, &[preview], until);
+                    manual(fixture, b"\r", until);
+                });
+            }
+
+            #[test]
+            fn a_flush_is_refused_while_an_immediate_attempt_is_in_flight() {
+                with_input_service(|fixture, until| {
+                    let stopped = StoppedNative::stop(fixture);
+                    let key = "prompt:in-flight-before-the-flush";
+                    let value = request(
+                        fixture,
+                        key,
+                        "in flight while the native is stopped",
+                        InputKind::Prompt,
+                        None,
+                        until.min(Instant::now() + Duration::from_secs(8)),
+                    );
+                    let mut client = Peer::connect(fixture);
+                    client.send(&encode_control_frame(&value).unwrap(), until);
+                    wait_for(until, "the immediate attempt starts writing", || {
+                        storage::find_input(&fixture.fixture.conn, fixture.fixture.run.run_id, key)
+                            .unwrap()
+                            .is_some_and(|input| input.state == InputState::InProgress)
+                    });
+                    assert_eq!(
+                        refusal(reserve(fixture, until)),
+                        "a runner input attempt is in flight; retry"
+                    );
+                    drop(stopped);
+                    drop(client);
+                });
+            }
+
+            #[test]
+            fn a_flush_is_refused_while_an_interaction_is_open() {
+                with_detecting_input_service(|fixture, until| {
+                    open_form(fixture, until);
+                    let message = send(fixture, "queued behind the form");
+                    queue_preview(fixture, &message, until);
+                    let cause = refusal(reserve(fixture, until));
+                    assert!(
+                        cause.starts_with("an interaction is open (") && cause.ends_with(')'),
+                        "{cause}"
+                    );
+                });
+            }
+
+            #[test]
+            fn a_flush_is_served_after_a_storage_outage_leaves_a_finalization_retry() {
+                with_detecting_input_service(|fixture, until| {
+                    open_form(fixture, until);
+                    let consumed = send(fixture, "consumed during the outage");
+                    queue_preview(fixture, &consumed, until);
+                    let live = send(fixture, "live behind the outage");
+                    let preview = queue_preview(fixture, &live, until);
+                    close_form_holding_the_drain(fixture, until);
+                    fixture
+                        .fixture
+                        .conn
+                        .execute(
+                            "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                            [consumed.message_id],
+                        )
+                        .unwrap();
+                    let url = format!("sqlite:///{}", fixture.fixture.conn.path().unwrap());
+                    let mut writer = crate::db::connect(&url).unwrap();
+                    let outage = writer
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .unwrap();
+                    hold_drain(fixture, Duration::from_millis(1500), until);
+                    drop(outage);
+                    manual(fixture, b"\x1b", until);
+                    assert_reserves(fixture, &[preview], until);
+                    manual(fixture, b"\r", until);
                 });
             }
         }

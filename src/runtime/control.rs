@@ -368,6 +368,51 @@ pub(crate) enum ReceiptAction {
         evidence_ref: String,
     },
 }
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FlushWriteOutcome {
+    Acknowledged,
+    NotStarted,
+    Uncertain,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub(crate) enum FlushAction {
+    Reserve {
+        director_member_id: i64,
+        #[serde(rename = "reservation_expires_at_mono_ns")]
+        expires_at_mono_ns: u64,
+    },
+    Settle {
+        flush_input_id: i64,
+        outcome: FlushWriteOutcome,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum FlushReply {
+    Refused {
+        cause: String,
+    },
+    Empty,
+    Reserved {
+        flush_input_id: i64,
+        literal: String,
+        submit_key: String,
+        settle_ms: u64,
+        flushed_input_ids: Vec<i64>,
+        message_ids: Vec<i64>,
+        remaining_input_ids: Vec<i64>,
+    },
+    Settled {
+        flush_input_id: i64,
+    },
+    NotOutstanding {
+        flush_input_id: i64,
+        state: InputState,
+        disposition: Option<InputDisposition>,
+    },
+}
 #[derive(Serialize, Deserialize)]
 pub(crate) struct InputControlRequest {
     pub(crate) identity: ControlIdentity,
@@ -383,6 +428,7 @@ pub(crate) enum InputControlOperation {
     PermissionInspect(PermissionInspectInput),
     PermissionRespond(PermissionRespondInput),
     Receipt(ReceiptAction),
+    Flush(FlushAction),
 }
 pub(crate) enum ReceiptReply {
     Missing,
@@ -402,6 +448,7 @@ pub(crate) enum InputControlReply {
     Inspection(Box<PermissionInspection>),
     PermissionResponse(PermissionResponseResult),
     Receipt(ReceiptReply),
+    Flush(FlushReply),
 }
 
 struct UniqueValue(Value);
@@ -514,6 +561,7 @@ impl<'de> Deserialize<'de> for InputRoute {
                                     | "permission_inspect"
                                     | "permission_respond"
                                     | "receipt"
+                                    | "flush"
                             )
                         });
                     } else {
@@ -650,6 +698,22 @@ impl InputControlRequest {
                 validate_permission_reference(evidence_ref)?;
                 positive(&[*input_id])
             }
+            InputControlOperation::Flush(FlushAction::Reserve {
+                director_member_id,
+                expires_at_mono_ns,
+            }) => {
+                ensure(
+                    *director_member_id == identity.director_member_id,
+                    "control Director identity mismatch",
+                )?;
+                ensure(
+                    *expires_at_mono_ns > 0,
+                    "positive flush reservation expiration required",
+                )
+            }
+            InputControlOperation::Flush(FlushAction::Settle { flush_input_id, .. }) => {
+                positive(&[*flush_input_id])
+            }
         }
     }
 }
@@ -761,6 +825,7 @@ enum ResultWire {
     Inspection { request: Value },
     PermissionResponse { response: Value },
     Receipt { receipt: ReceiptWire },
+    Flush { flush: FlushReply },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -892,6 +957,30 @@ fn validate_reply(reply: &InputControlReply) -> Result<()> {
         InputControlReply::Receipt(
             ReceiptReply::Retired { input_id } | ReceiptReply::Settled { input_id },
         ) => positive(&[*input_id]),
+        InputControlReply::Flush(FlushReply::Refused { cause }) => {
+            ensure(!cause.trim().is_empty(), "a flush refusal names its cause")
+        }
+        InputControlReply::Flush(FlushReply::Empty) => Ok(()),
+        InputControlReply::Flush(FlushReply::Reserved {
+            flush_input_id,
+            flushed_input_ids,
+            message_ids,
+            remaining_input_ids,
+            ..
+        }) => {
+            positive(&[*flush_input_id])?;
+            positive(flushed_input_ids)?;
+            positive(message_ids)?;
+            positive(remaining_input_ids)?;
+            ensure(
+                !flushed_input_ids.is_empty() && flushed_input_ids.len() == message_ids.len(),
+                "a flush reservation pairs each preview with its message",
+            )
+        }
+        InputControlReply::Flush(
+            FlushReply::Settled { flush_input_id }
+            | FlushReply::NotOutstanding { flush_input_id, .. },
+        ) => positive(&[*flush_input_id]),
     }
 }
 
@@ -929,6 +1018,7 @@ fn decode_result(result: ResultWire) -> Result<InputControlReply> {
             ReceiptWire::Retired { input_id, .. } => ReceiptReply::Retired { input_id },
             ReceiptWire::Settled { input_id, .. } => ReceiptReply::Settled { input_id },
         }),
+        ResultWire::Flush { flush } => InputControlReply::Flush(flush),
     })
 }
 
@@ -992,6 +1082,23 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
                 _ => false,
             }
         }
+        (InputControlOperation::Flush(action), InputControlReply::Flush(result)) => {
+            match (action, result) {
+                (
+                    FlushAction::Reserve { .. },
+                    FlushReply::Refused { .. } | FlushReply::Empty | FlushReply::Reserved { .. },
+                ) => true,
+                (
+                    FlushAction::Settle {
+                        flush_input_id: expected,
+                        ..
+                    },
+                    FlushReply::Settled { flush_input_id }
+                    | FlushReply::NotOutstanding { flush_input_id, .. },
+                ) => expected == flush_input_id,
+                _ => false,
+            }
+        }
         _ => false,
     };
     ensure(matches, "control reply kind or request identity mismatch")
@@ -1046,6 +1153,9 @@ fn encode_result(reply: &InputControlReply) -> Result<ResultWire> {
                     submission: (),
                 },
             },
+        },
+        InputControlReply::Flush(flush) => ResultWire::Flush {
+            flush: flush.clone(),
         },
     })
 }
@@ -2297,6 +2407,7 @@ mod tests {
                 Ok(InputControlReply::Inspection(_)) => "Ok(Inspection)".into(),
                 Ok(InputControlReply::PermissionResponse(_)) => "Ok(PermissionResponse)".into(),
                 Ok(InputControlReply::Receipt(_)) => "Ok(Receipt)".into(),
+                Ok(InputControlReply::Flush(reply)) => format!("Ok(Flush {reply:?})"),
             }
         }
         /// Runs `work` as a scoped peer while `exchange` runs here, then stops and joins the peer.
@@ -2947,7 +3058,7 @@ mod tests {
         fixture: Fixture,
     }
 
-    const OPERATIONS: [(&str, Option<&str>); 7] = [
+    const OPERATIONS: [(&str, Option<&str>); 9] = [
         ("submit_prompt", None),
         ("submit_exec", None),
         ("permission_inspect", None),
@@ -2955,6 +3066,8 @@ mod tests {
         ("receipt", Some("query")),
         ("receipt", Some("retire")),
         ("receipt", Some("reconcile")),
+        ("flush", Some("reserve")),
+        ("flush", Some("settle")),
     ];
 
     #[test]
@@ -3005,6 +3118,15 @@ mod tests {
                     "retire" => json!({"action":"retire","input_id":13}),
                     "reconcile" => {
                         json!({"action":"reconcile","input_id":13,"expected_state":"uncertain","disposition":"submitted","evidence_ref":"fixture:settlement"})
+                    }
+                    _ => unreachable!(),
+                },
+                "flush" => match action.expect("flush fixture specifies its action") {
+                    "reserve" => {
+                        json!({"action":"reserve","director_member_id":run.director_member_id,"reservation_expires_at_mono_ns":40_000_000_000u64})
+                    }
+                    "settle" => {
+                        json!({"action":"settle","flush_input_id":15,"outcome":"acknowledged"})
                     }
                     _ => unreachable!(),
                 },
@@ -3218,6 +3340,20 @@ mod tests {
                     assert_eq!(expected, InputState::Uncertain);
                     assert_eq!(disposition, InputDisposition::Submitted);
                     assert_eq!(evidence_ref, "fixture:settlement");
+                }
+                InputControlOperation::Flush(FlushAction::Reserve {
+                    director_member_id,
+                    expires_at_mono_ns,
+                }) => {
+                    assert_eq!(director_member_id, case.fixture.run.director_member_id);
+                    assert_eq!(expires_at_mono_ns, 40_000_000_000);
+                }
+                InputControlOperation::Flush(FlushAction::Settle {
+                    flush_input_id,
+                    outcome,
+                }) => {
+                    assert_eq!(flush_input_id, 15);
+                    assert_eq!(outcome, FlushWriteOutcome::Acknowledged);
                 }
             }
             assert!(matches!(

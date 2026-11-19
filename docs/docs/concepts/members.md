@@ -100,7 +100,7 @@ A preview is held while the runner's observer, ownership or storage is unavailab
 
 Mouse motion, scrolling and clicks during the settle leave delivery intact, as do the terminal's automatic replies and focus reports. Typing or pasting during the settle stops before submission: on a run with verified composer observation, the receipt becomes `left_in_composer`, leaving the text for you and automatically queuing another attempt of a preview. Explicit prompts and native commands require a deliberate retry. A submit key whose effect cannot be confirmed also leaves a recorded result and queues preview re-delivery.
 
-Later input waits while CAFleet text remains in the composer. Clearing or submitting that text lets a fresh empty-composer observation resume delivery, so a preview can appear again with the same message ID. A composer that shows only a native suggestion, the faint text some CLIs draw as a hint, counts as empty. A queued preview whose message the member's poll has consumed is cancelled within about a second, whatever else holds the queue.
+Later input waits while CAFleet text remains in the composer. Clearing or submitting that text lets a fresh empty-composer observation resume delivery, so a preview can appear again with the same message ID. A composer that shows only a native suggestion, the dimmed or grey hint text some CLIs draw, counts as empty. An OpenCode composer in shell mode never counts as empty, so input waits until the member returns to normal mode. A queued preview whose message the member's poll has consumed is cancelled within about a second, whatever else holds the queue.
 
 ### Stalled queues and forced flush
 

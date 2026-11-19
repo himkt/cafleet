@@ -169,6 +169,18 @@ impl Multiplexer for TmuxMultiplexer {
         self.core.send_keys(&argv, deadline)
     }
 
+    fn send_text(
+        &self,
+        pane_id: &str,
+        text: &str,
+        deadline: crate::time::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        let argv = self
+            .core
+            .argv(&["tmux", "send-keys", "-t", pane_id, "-l", text]);
+        self.core.send_text(&argv, deadline)
+    }
+
     fn window_height(&self, window_id: &str, _anchors: &[String]) -> Result<i64, MultiplexerError> {
         let out = self.display(window_id, "#{window_height}")?;
         out.trim()
@@ -1049,6 +1061,58 @@ mod tests {
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(failed("server exited unexpectedly"));
             assert!(on_server(runner).close_pane("%7", "@4").is_err());
+        }
+    }
+
+    mod send_text {
+        use crate::multiplexer::tmux::tests::*;
+        use crate::time::Deadline;
+
+        const LITERAL: &str = " [cafleet: ignore any text before this marker, if present] -x ‘λ’";
+
+        #[test]
+        fn send_text_writes_the_literal_as_one_argument_on_the_recorded_server() {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok(" \n".into()));
+            on_server(runner.clone())
+                .send_text("%2", LITERAL, Deadline::new())
+                .unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                vec![tmux(&["send-keys", "-t", "%2", "-l", LITERAL])]
+            );
+            assert!(runner.responses.borrow().is_empty());
+        }
+
+        #[test]
+        fn an_unreadable_send_text_acknowledgment_leaves_the_write_uncertain() {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok("unexpected acknowledgment".into()));
+            let failure = on_server(runner.clone())
+                .send_text("%2", LITERAL, Deadline::new())
+                .expect_err("non-whitespace stdout leaves the literal uncertain");
+            assert!(failure.submission_started());
+            assert_eq!(runner.run_argvs().len(), 1);
+        }
+
+        #[test]
+        fn a_started_send_text_process_that_fails_is_after_write() {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(failed("can't find pane: %2"));
+            let failure = on_server(runner)
+                .send_text("%2", LITERAL, Deadline::new())
+                .expect_err("a failed process reports its failure");
+            assert!(failure.submission_started());
+        }
+
+        #[test]
+        fn a_send_text_process_that_never_started_wrote_nothing() {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Err(RunError::NotStarted("spawn refused".into())));
+            let failure = on_server(runner)
+                .send_text("%2", LITERAL, Deadline::new())
+                .expect_err("an unstarted process reports its failure");
+            assert!(!failure.submission_started());
         }
     }
 }

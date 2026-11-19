@@ -2381,14 +2381,24 @@ The form has no timeout. Concurrent bash calls of one assistant message are eval
 
 A native suggestion is text the native CLI draws in the composer that is not part of its input buffer. A composer showing only a suggestion is empty for every purpose: deferred delivery, held-composer clearing and forced-flush draft extraction (§6.9 Forced flush).
 
-A `composer_empty` rule may declare an optional `suggestion` object, `{"style": STYLE}`, where STYLE is `{"faint": true}` or `{"foreground": {"kind": "indexed", "index": N}}`. The rule's prompt marker is the match of its region's `start_pattern` on the region's first row. Such a rule matches when its region matches, the cursor sits on that row at the column right after the match (the rule cursor value `after_prompt`), and every cell from that column up to the row's last non-blank cell carries STYLE. Each backend whose native CLI renders inline suggestions on its supported versions has a fixture-backed suggestion rule. Claude Code renders them even though members launch with `--prompt-suggestions false`.
+A `composer_empty` rule may declare an optional `suggestion` object, `{"style": STYLE}`, where STYLE is `{"faint": true}` or `{"foreground": COLOUR}` with `COLOUR` in the fixture `cell_backgrounds` colour form (§6.9 Bundled profiles and native screen fixtures), indexed or rgb. The rule's prompt marker is the match of its region's `start_pattern` on the region's first row. Such a rule matches when its region matches, the cursor sits on that row at the column right after the match (the rule cursor value `after_prompt`), and every cell from that column up to the row's last non-blank cell carries STYLE. Each backend whose native CLI renders inline suggestions on its supported versions has a fixture-backed suggestion rule:
+
+| Backend | Checked version | Suggestion rendering | STYLE |
+|---|---|---|---|
+| `claude` | 2.1.322 on tmux and Herdr 0.9.5 | A startup hint `Try "…"` after `❯\u{a0}`. The post-turn suggestion was not reproduced in 4 runs, with and without `--prompt-suggestions false` | `{"faint": true}` |
+| `codex` | 0.167.0 | `Ask Codex to do anything` at startup and after every turn | `{"faint": true}` |
+| `opencode` | 2.2.7 | `Ask anything, / for commands, @ for context…` at startup only | `{"foreground": {"kind": "rgb", "r": 128, "g": 128, "b": 128}}` |
+| `hermes` | 2026.9.24 | A rotating italic placeholder at startup and after a failed turn; post-turn rendering after a completed turn is not researched, because the checked installation has no provider token | `{"foreground": {"kind": "indexed", "index": 136}}` |
+| `pi` | 1.5.2 | None | — |
+
+The OpenCode `composer_empty` rule's region spans the composer row through the footer row and ends on the normal-mode footer, which names the member's agent (`cafleet` or `cafleet-ask`). Shell mode keeps the `┃` marker and replaces that footer with an `esc normal` footer, so a shell-mode composer never counts as empty.
 
 Every backend profile declares a `composer_draft` section, which only the runner's forced-flush reservation evaluates, against the runner's emulated screen with its screen identity, cursor and cell styles:
 
 ```json
 "composer_draft": {
   "region": {"screen": "either", "start_pattern": "^❯\\u{a0}", "end_pattern": "^❯\\u{a0}",
-             "max_rows": 1, "cursor": "any"},
+             "max_rows": 1, "cursor": "inside"},
   "draft_rows": {"first": "start", "last": "end"},
   "prompt_pattern": "^❯\\u{a0}",
   "mode_switch_prefixes": ["!", "/"],
@@ -2404,15 +2414,18 @@ Every backend profile declares a `composer_draft` section, which only the runner
 | `mode_switch_prefixes` | Nonempty array of strings of 1–4 Unicode scalars | Draft prefixes that switch the native input mode, each verified against the native CLI |
 | `fixture_ids` | Nonempty array | Native fixtures proving extraction, including a suggestion-only fixture where the backend renders suggestions and a mode-switched fixture where the mode changes the marker |
 
-The region matcher yields the inclusive row span `[S, E]` from start row `S` to end row `E`, exactly as `composer_empty` evaluation computes it; identical start and end patterns can still cover several rows up to `max_rows`. `draft_rows` selects `S` for `start` and `S+1` for `after_start` as the first row, and `E` for `end` and `E-1` for `before_end` as the last row. An empty selected span is an empty draft.
+The region matcher yields the inclusive row span `[S, E]` from start row `S` to end row `E`, exactly as `composer_empty` evaluation computes it; identical start and end patterns can still cover several rows up to `max_rows`. `draft_rows` selects `S` for `start` and `S+1` for `after_start` as the first row, and `E` for `end` and `E-1` for `before_end` as the last row. An empty selected span is an empty draft. Every bundled region uses the cursor value `inside`, so a history row that also matches the start pattern yields no second candidate.
+
+OpenCode draws `┃ ` at the start of every composer row, so a draft that wraps onto a second row yields two candidate regions, and such a draft is unreadable.
 
 | Backend | Region | `draft_rows` |
 |---|---|---|
-| `claude`, `codex`, `opencode` | One prompt row | `start` / `end` |
-| `hermes` | Prompt row plus up to two continuation rows (`max_rows: 3`) | `start` / `end` |
+| `claude`, `codex` | One prompt row | `start` / `end` |
+| `opencode` | Prompt rows through the normal-mode footer row, as its `composer_empty` region | `start` / `before_end` |
+| `hermes` | Prompt row through the `─` rule below it, covering up to two continuation rows (`max_rows: 4`) | `start` / `before_end` |
 | `pi` | `─` rule, editor rows, `─` rule | `after_start` / `before_end` |
 
-Extraction removes the `prompt_pattern` match from the first draft row, removes every cell in the profile's suggestion style from each row, trims trailing blanks, joins the rows with `\n` and drops leading and trailing blank rows. No matching region makes the draft unreadable, including a composer whose mode changed its prompt marker, such as a bash-mode marker. The mode check compares only the first scalar of the first draft row against `mode_switch_prefixes`, because the native mode switch is decided by the buffer's first character; an empty draft never matches. Every backend whose region can span several rows cites a multi-row draft fixture.
+Extraction removes the `prompt_pattern` match from the first draft row, removes every cell in the profile's suggestion style from each row, trims trailing blanks, joins the rows with `\n` and drops leading and trailing blank rows. A screen with no matching region or with several makes the draft unreadable, including a composer whose mode changed its prompt marker, such as a bash-mode marker. The mode check compares only the first scalar of the first draft row against `mode_switch_prefixes`, because the native mode switch is decided by the buffer's first character; an empty draft never matches. Every backend whose region can span several rows cites a multi-row draft fixture.
 
 Each catalog fixture entry that a `composer_draft.fixture_ids` cites records its expected result as `"composer_draft": {"text": "…"}` or `"composer_draft": "unreadable"`. The catalog validator rejects a profile that lacks `composer_draft` or its `draft_rows`, declares an empty `mode_switch_prefixes` or a prefix outside 1–4 scalars, or cites a fixture without an expected result or whose extraction or unreadable classification does not reproduce it.
 
@@ -3997,7 +4010,7 @@ Every path that ends an immediate ordinary (`preview`, `prompt` or `exec`) attem
 
 ##### Queue housekeeping
 
-Queue housekeeping runs from the runner event loop every `QUEUE_HOUSEKEEPING_INTERVAL` (1 s) while the FIFO is non-empty and ordinary input is not fenced. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization and stamp retries, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds consumption-detection latency to about one second, at one read transaction per second per queued member.
+Queue housekeeping runs from the runner event loop every `QUEUE_HOUSEKEEPING_INTERVAL` (1 s) while the FIFO is non-empty or a forced flush reservation is outstanding, and ordinary input is not fenced, so a reservation's expiry applies even after the flush emptied the FIFO. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization and stamp retries, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds consumption-detection latency to about one second, at one read transaction per second per queued member.
 
 Each sweep:
 
@@ -4056,7 +4069,7 @@ Stamped self-sends are excluded by `notified_at`, and a consumed message is neve
 2. No runner attempt holds a written or in-flight composer write.
 3. No ordinary receipt of the run is `in_progress`, `accepted` or `uncertain`, except the `accepted` preview whose notification stamp awaits storage.
 4. The FIFO holds no queued `ready` prompt or exec.
-5. Observation permits a forced write: no current interaction or candidate, visibility `Visible`, no degraded observation, and both terminal ends open.
+5. Observation permits a forced write: no current interaction or candidate (visibility `Visible` or `Obscured`, or eligibility held on an interaction or candidate), visibility not `Unknown`, no degraded observation, and both terminal ends open. Visibility describes the interaction, so an idle screen with no visible interaction proceeds.
 6. The draft is readable (§6.7 Composer drafts and native suggestions), and its first row does not start with a mode-switch prefix.
 7. The profile has a prompt composer plan for the recorded native version.
 8. The FIFO holds at least one preview whose message is `input_required`; otherwise the reply is `empty`, and consumed previews are left to housekeeping.
@@ -4071,8 +4084,8 @@ The flush is meant for a queue turn held by a gate that does not make a forced w
 | Drain blocker `observation transitions pending` or `observation evidence pending` | Proceeds | Event or evidence persistence lags; screen classification does not |
 | Drain blocker `observation degraded: CODE` | Refuses: `the member's screen observation is unavailable: observation degraded: CODE` | Interactions and the draft cannot be classified reliably |
 | Drain blocker `outer terminal closed` or `native output closed` | Refuses: `the member's screen observation is unavailable: REASON` | The write would reach no runner input, or the child has exited |
-| An interaction or candidate on screen | Refuses: `an interaction is open (CLASSIFICATION)` | An open interaction is never typed into |
-| Screen not visible | Refuses: `the member's screen observation is unavailable: VISIBILITY` | The draft and interactions cannot be read |
+| An interaction or candidate on screen, visible or obscured | Refuses: `an interaction is open (CLASSIFICATION)` | An open interaction is never typed into |
+| Visibility unknown | Refuses: `the member's screen observation is unavailable: VISIBILITY` | The draft and interactions cannot be read |
 | Ordinary input fenced | Refuses: `the member's input is fenced` | The runner is stopping or failed permanently |
 | A pending zero-byte finalization or notification-stamp retry | Proceeds | It settles an entry already out of the FIFO, or a submitted preview awaiting its stamp |
 | An unresolved `in_progress` blocker | Refuses: `input INPUT_IDS is unresolved; …` | The blocker may still be writing; the Director reconciles it first |
@@ -4108,6 +4121,7 @@ Storage queries treat `flush` receipts as follows:
 | FIFO barriers: the unresolved-ordinary blocker, the latest preview attempt and the unresolved-ordinary-attempt check | Excluded; each reads `kind IN ('preview','prompt','exec')` | A flush blocks through its `in_progress` forced previews while it writes |
 | The 4096 unresolved side-effect bound (§ Durable input receipts and settlement) | Counted | An unresolved flush is outstanding run input |
 | `unresolved_input_ids` | Included while `in_progress` or `uncertain` | The Director reconciles an uncertain flush |
+| Unpublished delivery results scanned at shutdown and recovery | Excluded; the scan reads `kind IN ('preview','prompt','exec')` | The flush receipt publishes no result; its forced previews publish their own |
 
 ##### Delivery reporting
 

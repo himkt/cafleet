@@ -142,7 +142,7 @@ CREATE TABLE member_input_operations (
     input_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     operation_key TEXT NOT NULL CHECK(length(trim(operation_key)) > 0),
-    kind TEXT NOT NULL CHECK(kind IN ('preview','prompt','exec','permission_response')),
+    kind TEXT NOT NULL CHECK(kind IN ('preview','prompt','exec','permission_response','flush')),
     payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64 AND payload_digest NOT GLOB '*[^0-9a-f]*'),
     state TEXT NOT NULL CHECK(state IN ('ready','in_progress','accepted','uncertain','settled')),
     created_at TEXT NOT NULL,
@@ -152,7 +152,7 @@ CREATE TABLE member_input_operations (
     preview_attempt INTEGER CHECK((kind = 'preview') = (preview_attempt IS NOT NULL)
         AND (preview_attempt IS NULL OR preview_attempt >= 1)),
     evidence_ref TEXT,
-    delivery_method TEXT CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback')),
+    delivery_method TEXT CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback','forced')),
     delivery_reason TEXT CHECK(delivery_reason IS NULL OR length(trim(delivery_reason)) > 0),
     deferred_at TEXT,
     defer_reason TEXT CHECK((deferred_at IS NULL AND defer_reason IS NULL)
@@ -162,10 +162,14 @@ CREATE TABLE member_input_operations (
         OR (stop_cause IN ('manual_input','manual_accounting_failed','pointer_input',
                           'interaction_candidate','interaction_open','observer_unavailable',
                           'deadline_expired','submit_unconfirmed','short_write','write_failed',
-                          'runner_stopped')
+                          'runner_stopped','runner_lost')
             AND state IN ('uncertain','settled'))),
     left_stage TEXT CHECK(left_stage IS NULL
         OR left_stage IN ('escape_only','partial','literal_complete','submitted')),
+    flush_input_id INTEGER REFERENCES member_input_operations(input_id) ON DELETE RESTRICT,
+    CHECK(flush_input_id IS NULL OR (kind = 'preview' AND delivery_method IS 'forced')),
+    CHECK(kind != 'flush' OR (message_id IS NULL AND delivery_method IS 'forced' AND deferred_at IS NULL)),
+    CHECK(delivery_method IS NOT 'forced' OR kind IN ('preview','flush')),
     CHECK(disposition IS NOT 'left_in_composer'
         OR (kind IN ('preview','prompt','exec') AND stop_cause IS NOT NULL AND stop_cause IN
             ('manual_input','manual_accounting_failed','pointer_input','interaction_candidate',
@@ -177,6 +181,9 @@ CREATE TABLE member_input_operations (
     CHECK(kind != 'preview' OR message_id IS NOT NULL),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
+
+CREATE INDEX member_input_operations_flush ON member_input_operations(flush_input_id)
+    WHERE flush_input_id IS NOT NULL;
 
 CREATE TABLE member_permission_responses (
     input_id INTEGER PRIMARY KEY REFERENCES member_input_operations(input_id) ON DELETE RESTRICT,
