@@ -1,7 +1,7 @@
 # Held runner queue drain and Director forced flush
 
 **Status**: Approved
-**Progress**: 15/43 tasks complete
+**Progress**: 22/43 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -191,8 +191,9 @@ The `review_stalled_queue` INSTRUCTION is exactly: `Capture the member's pane, i
 
 - A native suggestion is text the native CLI draws in the composer that is not part of the input buffer. A composer showing only a suggestion is empty for every purpose: deferred delivery, held-composer clearing and flush draft extraction.
 - `composer_empty` rules gain an optional `suggestion` object: `{"style": STYLE}`. STYLE is either `{"faint": true}` or `{"foreground": {"kind": "indexed", "index": N}}`.
-  - A rule with `suggestion` matches when its region matches and every cell after the prompt marker, up to the row's last non-blank cell, carries STYLE.
-  - The cursor must sit immediately after the prompt marker. This is a new `CursorRule::AfterPrompt`, evaluated at the end of the rule's prompt matcher.
+  - The prompt marker of a `suggestion` rule is the match of the region's `start_pattern` on the region's first row (Director decision).
+  - A rule with `suggestion` matches when its region matches and every cell from the column right after that match up to the row's last non-blank cell carries STYLE.
+  - The cursor must sit on that row at the column right after the match. This is a new `CursorRule::AfterPrompt` (`"cursor": "after_prompt"`).
 - Step 6 researches which backends render inline suggestions on their supported native versions. Claude Code renders them even though members launch with `--prompt-suggestions false`, as the issue observed. Each backend that renders them gains a fixture-backed rule; one that never does is recorded as such in `SPEC.md` §6.7.
 - The Claude Code 2.1.322 / Herdr 0.9.5 suggestion rendering is captured as a native fixture in `assets/profiles/native/claude.json` and registered in `assets/profiles/bundled.json`.
 - **Fixture cell styles:** a native screen object gains optional `cell_styles` beside `cell_backgrounds`, so fixtures reproduce the styles a `suggestion` rule reads.
@@ -248,11 +249,16 @@ Each backend profile gains a `composer_draft` section. Only the runner's forced-
 | hermes | `/` (slash command) |
 | pi | `!` (shell), `/` (slash command) |
 
+- **Interface (Director decision):** `enum ComposerDraft { Readable(String), Unreadable }`, `ProfileCatalog::composer_draft(&self, backend: CodingAgent, native_version: &str, screen: &ScreenSnapshot) -> ComposerDraft` and `ProfileCatalog::mode_switch_prefix(&self, backend: CodingAgent, native_version: &str, draft: &str) -> Option<&str>`. The second returns the declared prefix matching the draft's first scalar, or `None` for an empty draft. Step 8's `Reserve` calls both.
+- **Expected extraction (Director decision):** each catalog fixture entry listed in a `composer_draft.fixture_ids` records its expected result as `"composer_draft": {"text": "…"}` or `"composer_draft": "unreadable"`.
+
 The catalog validator rejects a profile that:
 
 - lacks `composer_draft`, or its `draft_rows`;
 - has an empty `mode_switch_prefixes`, or a prefix outside 1–4 scalars;
-- has a fixture whose extraction or unreadable classification does not reproduce.
+- cites a fixture without an expected `composer_draft` result, or one whose extraction or unreadable classification does not reproduce it.
+
+**Ownership (Director decision):** the Programmer implements the production catalog and detector code, the profile JSON, the native fixtures and `SPEC.md`. The Tester implements every `#[cfg(test)]` `test_support` piece: `cell_styles` replay, the `verify_native_screen` build guard, capture conversion and the synthetic test definitions, which also gain `composer_draft`.
 
 ### Forced flush: design choice
 
@@ -561,10 +567,10 @@ This step commits no code. A scratch test may be used locally and discarded; the
 
 ### Step 3: Reproduction and failure bookkeeping
 
-- [ ] Commit the run 34 reproduction test in `src/runtime/input.rs` (in-process `Host`, production entry points in `tick_running` order) on the Step 1 gate, asserting the post-fix outcome; confirm it fails on the pre-change code <!-- completed: -->
+- [x] Commit the run 34 reproduction test in `src/runtime/input.rs` (in-process `Host`, production entry points in `tick_running` order) on the Step 1 gate, asserting the post-fix outcome; confirm it fails on the pre-change code <!-- completed: 2026-11-19T14:06 -->
 - [x] Add the ordinary-attempt `uncertain/write_failed` branch to `InputCoordinator::advance`'s error mapping, with the fallback bookkeeping deadline <!-- completed: 2026-11-19T13:55 -->
 - [x] Route `complete_pending_input` `quiesce` failures through the coordinator bookkeeping <!-- completed: 2026-11-19T13:55 -->
-- [ ] Add the D1/D2 unit tests in `src/runtime/input.rs` <!-- completed: -->
+- [x] Add the D1/D2 unit tests in `src/runtime/input.rs` <!-- completed: 2026-11-19T14:06 -->
 
 ### Step 4: Queue housekeeping
 
@@ -573,14 +579,14 @@ This step commits no code. A scratch test may be used locally and discarded; the
 - [x] Record `attempt_failed` and `last_drain_blocker` in `retry_deferred` <!-- completed: 2026-11-19T14:04 -->
 - [x] Make the receipt `Reconcile` action pop settled queued entries and accept `ready` prompt/exec cancellation <!-- completed: 2026-11-19T14:04 -->
 - [x] Repair the `observation incomplete` latch per § Runner: interrupted drain feed so a healthy queue turn resumes on it <!-- completed: 2026-11-19T13:55 -->
-- [ ] Add the housekeeping and reconcile tests; confirm the reproduction test passes <!-- completed: -->
+- [x] Add the housekeeping and reconcile tests; confirm the reproduction test passes <!-- completed: 2026-11-19T14:06 -->
 
 ### Step 5: Stall watchdog
 
-- [ ] Add `head_since`, obstacle tracking and the interaction reset to `QueuedInput` <!-- completed: -->
-- [ ] Derive and publish `input_delivery_stalled` with `cause` from housekeeping, replacing the held-composer-only publication <!-- completed: -->
-- [ ] Change `stalled_delivery` validation per `cause.kind` and carry `cause` through the outbox `cause_json` in `src/broker/runtime/events.rs` <!-- completed: -->
-- [ ] Add the `review_stalled_queue` action and INSTRUCTION <!-- completed: -->
+- [x] Add `head_since`, obstacle tracking and the interaction reset to `QueuedInput` <!-- completed: 2026-11-19T14:22 -->
+- [x] Derive and publish `input_delivery_stalled` with `cause` from housekeeping, replacing the held-composer-only publication <!-- completed: 2026-11-19T14:22 -->
+- [x] Change `stalled_delivery` validation per `cause.kind` and carry `cause` through the outbox `cause_json` in `src/broker/runtime/events.rs` <!-- completed: 2026-11-19T14:22 -->
+- [x] Add the `review_stalled_queue` action and INSTRUCTION <!-- completed: 2026-11-19T14:22 -->
 - [ ] Add the watchdog and event validation tests <!-- completed: -->
 
 ### Step 6: Profiles
@@ -610,7 +616,7 @@ This step commits no code. A scratch test may be used locally and discarded; the
 
 ### Step 9: Validation
 
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
+- [ ] Run `mise //:test` and `mise //:lint`. Environment limitation: under host load (load average 184 on 64 cores during Steps 3–4) the default 32 test threads time out in unrelated timing-bound tests, so run with `RUST_TEST_THREADS=8` and record the thread count used <!-- completed: -->
 - [ ] Run `mise //docs:build` <!-- completed: -->
 - [ ] Reinstall the CLI and re-run the issue #623 reproduction live on Claude Code 2.1.322 / Herdr 0.9.5; confirm the queue drains or publishes `input_delivery_stalled`, and `member flush` delivers the queued previews <!-- completed: -->
 - [ ] Mark the design doc complete <!-- completed: -->

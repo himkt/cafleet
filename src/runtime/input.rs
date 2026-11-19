@@ -104,7 +104,6 @@ pub(crate) struct InputCoordinator {
     output_seq: u64,
     bracketed_paste: bool,
     last_drain_blocker: Option<String>,
-    head_attempt_failure: Option<(i64, String)>,
 }
 
 /// An accepted deferred preview whose notification stamp and settlement storage prevented; like
@@ -155,6 +154,21 @@ struct QueuedInput {
     composer_busy_since: Option<Instant>,
     attempt_deadline: Option<Instant>,
     obstacle: &'static str,
+    /// When this entry last became a head that no interaction blocks; the stall watchdog runs
+    /// from here, and an attempt start or a blocking interaction clears it.
+    head_since: Option<Instant>,
+    recorded: Option<HeadObstacle>,
+}
+
+/// The obstacle the latest queue turn met at the head, which the stall watchdog reports when no
+/// live state explains the stall.
+#[derive(Clone)]
+enum HeadObstacle {
+    PaneInputBusy,
+    DeliveryBudgetExhausted,
+    StorageUnavailable,
+    AttemptFailed(String),
+    ComposerBusy,
 }
 
 type DeliverySelection = (
@@ -2278,6 +2292,8 @@ impl InputCoordinator {
                             composer_busy_since: None,
                             attempt_deadline: None,
                             obstacle: "delivery_budget_exhausted",
+                            head_since: None,
+                            recorded: None,
                         });
                         operation
                     }
@@ -2446,7 +2462,7 @@ impl InputCoordinator {
 
     /// Records a non-fatal queue-turn attempt error against the current head.
     pub(super) fn record_attempt_failure(&mut self, failure: &CafleetError) {
-        let Some(head) = self.queue.front() else {
+        let Some(head) = self.queue.front_mut() else {
             return;
         };
         let message = failure.message();
@@ -2454,7 +2470,7 @@ impl InputCoordinator {
         while !message.is_char_boundary(end) {
             end -= 1;
         }
-        self.head_attempt_failure = Some((head.input_id, message[..end].to_owned()));
+        head.recorded = Some(HeadObstacle::AttemptFailed(message[..end].to_owned()));
     }
 
     /// The runner already owns a preview's delivery: one waits in the FIFO or is being drained
@@ -2605,6 +2621,7 @@ impl InputCoordinator {
                 pending.reason,
             )?;
             if self.finalization.is_some() {
+                self.watch_head(observation, None);
                 return Ok(());
             }
         }
@@ -2621,13 +2638,20 @@ impl InputCoordinator {
                 sweep.push((*input_id, state, message_consumed(&tx, *message_id)?));
             }
             let target = self.deferred_target(&tx)?;
+            let head = entries.first().map(|(input_id, _)| *input_id);
+            let unresolved: Option<i64> = rusqlite::OptionalExtension::optional(tx.query_row(
+                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND state='in_progress' AND kind IN ('preview','prompt','exec') AND input_id IS NOT ?2 ORDER BY input_id LIMIT 1",
+                rusqlite::params![self.run.run_id, head],
+                |row| row.get(0),
+            ))?;
             tx.commit()?;
-            Ok((sweep, target))
+            Ok((sweep, target, unresolved))
         });
-        let (sweep, target) = match read {
+        let (sweep, target, unresolved) = match read {
             Ok(read) => read,
             Err(cause) if storage_failure(&cause) => {
                 self.note_head_obstacle("storage_unavailable");
+                self.watch_head(observation, None);
                 return Ok(());
             }
             Err(cause) => return Err(cause),
@@ -2656,6 +2680,7 @@ impl InputCoordinator {
                 "message_consumed",
             )?;
             if self.finalization.is_some() {
+                self.watch_head(observation, unresolved);
                 return Ok(());
             }
         }
@@ -2669,8 +2694,84 @@ impl InputCoordinator {
                 storage::InputState::Ready,
                 reason,
             )?;
+            return Ok(());
         }
+        self.watch_head(observation, unresolved);
         Ok(())
+    }
+
+    /// Publishes one `input_delivery_stalled` for a head that has started no attempt within
+    /// `COMPOSER_BUSY_BOUND` of becoming the head; time an interaction blocks it does not count.
+    fn watch_head(&mut self, observation: &ObservationController, unresolved: Option<i64>) {
+        let now = Instant::now();
+        let interaction = matches!(
+            ordinary_blocker(&observation.status()),
+            Some(OrdinaryBlocker::Interaction)
+        );
+        let Some(head) = self.queue.front_mut() else {
+            return;
+        };
+        if interaction {
+            head.head_since = None;
+            head.stalled = false;
+            return;
+        }
+        let since = *head.head_since.get_or_insert(now);
+        if head.stalled || now.duration_since(since) < COMPOSER_BUSY_BOUND {
+            return;
+        }
+        head.stalled = true;
+        let input_id = head.input_id;
+        let recorded = head.recorded.clone();
+        let (kind, blocking_input_id, detail) = self.stall_cause(unresolved, recorded);
+        let waiting_since = chrono::Utc::now()
+            - chrono::Duration::from_std(now.duration_since(since)).expect("bounded head wait");
+        observation.publish_delivery_stalled(serde_json::json!({
+            "kind":"input_delivery_stalled", "input_id":input_id,
+            "blocking_input_id":blocking_input_id,
+            "waiting_since":crate::time::format_utc(waiting_since),
+            "cause":{"kind":kind,"detail":detail},
+        }));
+    }
+
+    /// The first stall cause that holds: live runner state, then the head's recorded obstacle.
+    fn stall_cause(
+        &self,
+        unresolved: Option<i64>,
+        recorded: Option<HeadObstacle>,
+    ) -> (&'static str, Option<i64>, Option<String>) {
+        if let Some(pending) = self
+            .pending
+            .as_ref()
+            .filter(|pending| pending.deferred().is_none())
+        {
+            return ("immediate_attempt", pending.input_id(), None);
+        }
+        if let Some(finalization) = &self.finalization {
+            return ("pending_finalization", Some(finalization.input_id), None);
+        }
+        if let Some(stamp) = &self.pending_stamp {
+            return ("pending_finalization", Some(stamp.input_id), None);
+        }
+        if let Some((blocker, _)) = self.held_composer {
+            return ("held_composer", Some(blocker), None);
+        }
+        if let Some(blocker) = unresolved {
+            return ("unresolved_input", Some(blocker), None);
+        }
+        if let Some(blocker) = &self.last_drain_blocker {
+            return ("drain_pending", None, Some(blocker.clone()));
+        }
+        match recorded {
+            Some(HeadObstacle::PaneInputBusy) => ("pane_input_busy", None, None),
+            Some(HeadObstacle::DeliveryBudgetExhausted) => {
+                ("delivery_budget_exhausted", None, None)
+            }
+            Some(HeadObstacle::StorageUnavailable) => ("storage_unavailable", None, None),
+            Some(HeadObstacle::AttemptFailed(message)) => ("attempt_failed", None, Some(message)),
+            Some(HeadObstacle::ComposerBusy) => ("composer_busy", None, None),
+            None => ("queue_turn_not_reached", None, None),
+        }
     }
 
     fn hold_possible_ordinary_input(&mut self, input_id: i64) {
@@ -2789,7 +2890,6 @@ impl InputCoordinator {
             Err(cause) => return Err(cause),
         }
         let blocker = ordinary_blocker(&observation.status());
-        let consumed_held_blocker = self.consumed_held_blocker();
         let head = self
             .queue
             .front_mut()
@@ -2800,38 +2900,9 @@ impl InputCoordinator {
             return Ok(());
         }
         if blocker.is_none() {
-            if let Some((blocking_input_id, _)) = self.held_composer {
-                let since = *head.composer_busy_since.get_or_insert(now);
+            if self.held_composer.is_some() {
+                head.composer_busy_since.get_or_insert(now);
                 head.attempt_deadline = None;
-                if now.duration_since(since) >= COMPOSER_BUSY_BOUND && !head.stalled {
-                    let blocking =
-                        match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-                            storage::get_input(conn, blocking_input_id)
-                        }) {
-                            Ok(blocking) => blocking,
-                            Err(cause) if storage_failure(&cause) => {
-                                head.obstacle = "storage_unavailable";
-                                return Ok(());
-                            }
-                            Err(cause) => return Err(cause),
-                        };
-                    ensure(
-                        blocking.run_id == self.run.run_id,
-                        "held composer blocker belongs to its run",
-                    )?;
-                    ensure(
-                        blocking.has_stalled_blocker_provenance()
-                            && (blocking.state != storage::InputState::InProgress
-                                || consumed_held_blocker == Some(blocking_input_id)),
-                        "held composer blocker retains its selected consumed attempt provenance",
-                    )?;
-                    head.stalled = true;
-                    observation.publish_delivery_stalled(serde_json::json!({
-                        "kind":"input_delivery_stalled", "input_id":input_id,
-                        "blocking_input_id":blocking_input_id,
-                        "waiting_since":crate::time::format_utc(chrono::Utc::now() - chrono::Duration::from_std(now.duration_since(since)).expect("bounded composer wait"))
-                    }));
-                }
                 return Ok(());
             }
             let (kind, literal) = (head.request.kind, head.literal.clone());
@@ -2873,6 +2944,7 @@ impl InputCoordinator {
                         .expect("the waiting queue head remains");
                     head.composer_busy_since.get_or_insert(now);
                     head.attempt_deadline = None;
+                    head.recorded = Some(HeadObstacle::ComposerBusy);
                     return Ok(());
                 }
             }
@@ -3093,6 +3165,7 @@ impl InputCoordinator {
             self.operations.remove(&id);
             let mut queued = deferred.queued;
             queued.attempt_deadline = None;
+            queued.head_since = None;
             queued.composer_busy_since = if composer_busy {
                 queued.composer_busy_since.or(Some(now))
             } else {
@@ -3191,6 +3264,8 @@ impl InputCoordinator {
             composer_busy_since: None,
             attempt_deadline: None,
             obstacle: "delivery_budget_exhausted",
+            head_since: None,
+            recorded: None,
         });
         Ok(Some(InputControlReply::Submission(self.result(&operation))))
     }
@@ -3327,10 +3402,14 @@ impl InputCoordinator {
     }
 
     fn note_head_obstacle(&mut self, obstacle: &'static str) {
-        self.queue
-            .front_mut()
-            .expect("queued head remains")
-            .obstacle = obstacle;
+        let head = self.queue.front_mut().expect("queued head remains");
+        head.obstacle = obstacle;
+        head.recorded = match obstacle {
+            "pane_input_busy" => Some(HeadObstacle::PaneInputBusy),
+            "delivery_budget_exhausted" => Some(HeadObstacle::DeliveryBudgetExhausted),
+            "storage_unavailable" => Some(HeadObstacle::StorageUnavailable),
+            _ => head.recorded.take(),
+        };
     }
 
     /// Records the zero-byte obstacle a started deferred attempt last met, which its expiry
@@ -4627,6 +4706,8 @@ impl InputCoordinator {
                 composer_busy_since: None,
                 attempt_deadline: None,
                 obstacle: "redelivery",
+                head_since: None,
+                recorded: None,
             });
         }
         self.checkpoint(
@@ -5031,7 +5112,6 @@ impl InputCoordinator {
             output_seq: 0,
             bracketed_paste: false,
             last_drain_blocker: None,
-            head_attempt_failure: None,
         })
     }
 
@@ -6381,6 +6461,7 @@ mod tests {
                 {
                     composer.settle_until = Some(Instant::now());
                 }
+                crate::runtime::input::tests::ordinary_prompt::deferred_queue::housekeep(host);
                 host.drain();
                 host.advance().map(submitted)
             }
@@ -7136,6 +7217,7 @@ mod tests {
                     );
                     host.coordinator
                         .set_queued_composer_busy_since(waiting.input_id, &old_wait());
+                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, waiting.input_id);
                     drain_stalled_events(host);
                     readable_stalled_head(host, waiting.input_id, stopped);
                     assert_eq!(
@@ -7195,6 +7277,7 @@ mod tests {
                     .unwrap();
                     host.coordinator
                         .set_queued_composer_busy_since(next.input_id, &old_wait());
+                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, next.input_id);
                     for _ in 0..64 {
                         let _ = turn(host);
                     }
@@ -7374,6 +7457,10 @@ mod tests {
                 assert_eq!(payload["input_id"], head);
                 assert_eq!(payload["blocking_input_id"], blocker);
                 assert_eq!(payload["message_id"], json!(row(host, head).message_id));
+                assert_eq!(
+                    payload["cause"],
+                    json!({"kind":"held_composer","detail":null})
+                );
                 assert_eq!(payload["director_action"]["kind"], "review_stalled_input");
                 payload
             }
@@ -7391,6 +7478,7 @@ mod tests {
                                 let blocker = held_blocker_for_stalled_heads(host, immediate);
                                 let head = queued(host, request(host, "prompt:stalled-after-reconcile", LITERAL), "earlier_input");
                                 host.coordinator.set_queued_composer_busy_since(head, &old_wait());
+                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
                                 let since = host.coordinator.queue.front().unwrap().composer_busy_since;
                                 let reconciled = reconcile_stalled_blocker(host, blocker, disposition);
                                 assert_eq!(host.coordinator.queue.front().unwrap().composer_busy_since, since);
@@ -7442,6 +7530,7 @@ mod tests {
                             );
                             host.coordinator
                                 .set_queued_composer_busy_since(first, &old_wait());
+                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, first);
                             let offers = host.pty.offers.clone();
                             let written = host.pty.written.clone();
                             drain_stalled_events(host);
@@ -7483,6 +7572,7 @@ mod tests {
                             );
                             host.coordinator
                                 .set_queued_composer_busy_since(later, &old_wait());
+                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, later);
                             drain_stalled_events(host);
                             assert_eq!(host.pty.offers, offers);
                             assert_eq!(host.pty.written, written);
@@ -7515,6 +7605,7 @@ mod tests {
                         );
                         host.coordinator
                             .set_queued_composer_busy_since(head, &old_wait());
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
                         let offers = host.pty.offers.clone();
                         let written = host.pty.written.clone();
                         drain_stalled_events(host);
@@ -7556,7 +7647,8 @@ mod tests {
             }
 
             #[test]
-            fn consumed_held_blocker_exclusion_preserves_an_unrelated_in_progress_barrier() {
+            fn a_consumed_in_progress_held_blocker_stalls_as_held_composer_while_an_unrelated_barrier_blocks_progress()
+             {
                 crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
                     permission_configured("plain", Value::Null),
                     encoded(),
@@ -7582,30 +7674,25 @@ mod tests {
                         );
                         host.coordinator
                             .set_queued_composer_busy_since(head, &old_wait());
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
                         let offers = host.pty.offers.clone();
                         let written = host.pty.written.clone();
                         drain_stalled_events(host);
-                        let events: i64 = host.fixture.conn.query_row(
-                            "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
-                            rusqlite::params![host.fixture.run.run_id, head], |row| row.get(0),
-                        ).unwrap();
-                        assert_eq!(
-                            events, 0,
-                            "an unrelated active writer still blocks held-only progress"
-                        );
+                        let event = readable_stalled_head(host, head, blocker);
                         assert_eq!(row(host, head).state, storage::InputState::Ready);
                         assert_eq!(row(host, unrelated.input_id), unrelated);
-                        assert_eq!(host.pty.offers, offers);
+                        assert_eq!(
+                            host.pty.offers, offers,
+                            "an unrelated active writer still blocks held-only progress"
+                        );
                         assert_eq!(host.pty.written, written);
                         reconcile_stalled_blocker(
                             host,
                             unrelated.input_id,
                             storage::InputDisposition::NotSubmitted,
                         );
-                        host.coordinator
-                            .set_queued_composer_busy_since(head, &old_wait());
                         drain_stalled_events(host);
-                        let event = readable_stalled_head(host, head, blocker);
+                        assert_eq!(readable_stalled_head(host, head, blocker), event);
                         assert_eq!(host.pty.offers, offers);
                         assert_eq!(host.pty.written, written);
                         let reconciled = reconcile_stalled_blocker(
@@ -7844,6 +7931,7 @@ mod tests {
                                 host.show(DRAFT.to_vec());
                                 host.coordinator
                                     .set_queued_composer_busy_since(next, &old_wait());
+                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, next);
                                 let before = host.pty.written.clone();
                                 for _ in 0..64 {
                                     let _ = turn(host);
@@ -8262,6 +8350,7 @@ mod tests {
                         .unwrap();
                         host.coordinator
                             .set_queued_composer_busy_since(waiting.input_id, &old_wait());
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, waiting.input_id);
                         form(host);
                         for _ in 0..64 {
                             let _ = turn(host);
@@ -9000,10 +9089,12 @@ mod tests {
                 reply.input_id.expect("queued work has a durable input ID")
             }
 
-            /// Drives runner turns with no further request until `done` holds.
+            /// Drives runner turns, each housekeeping the queue first as `tick_running` does, with
+            /// no further request until `done` holds.
             pub(super) fn turns_until(host: &mut Host, mut done: impl FnMut(&Host) -> bool) {
                 while !done(host) {
                     assert!(Instant::now() < host.until, "queued work resolves in time");
+                    housekeep(host);
                     host.drain();
                     host.advance();
                     std::thread::sleep(Duration::from_millis(5));
@@ -9553,6 +9644,432 @@ mod tests {
                         "the violation fences ordinary input permanently"
                     );
                 });
+            }
+
+            /// Backdates the queued head's wait past the three-minute stall bound.
+            pub(super) fn backdate_head_since(host: &mut Host, input_id: i64) {
+                let since = Instant::now()
+                    .checked_sub(Duration::from_secs(181))
+                    .expect("the host has run past the stall bound");
+                let head = host.coordinator.queue.front_mut().expect("a queued head");
+                assert_eq!(head.input_id, input_id, "only the head carries head_since");
+                head.head_since = Some(since);
+            }
+
+            pub(super) fn housekeep(host: &mut Host) {
+                host.coordinator
+                    .queue_housekeeping(&mut host.fixture.conn, &host.controller)
+                    .unwrap();
+            }
+
+            pub(super) fn stalled_payloads(host: &Host, head: i64) -> Vec<serde_json::Value> {
+                host.fixture
+                    .conn
+                    .prepare(
+                        "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2 ORDER BY event_id",
+                    )
+                    .unwrap()
+                    .query_map(rusqlite::params![host.fixture.run.run_id, head], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .unwrap()
+                    .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                    .collect()
+            }
+
+            pub(super) mod stall_watchdog {
+                use crate::pane_lock::PaneLock;
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::*;
+                use serde_json::Value;
+                use serde_json::json;
+
+                const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.";
+
+                /// A head queued behind an interaction that has since closed, so no queue turn
+                /// has started it and no live gate holds it.
+                pub(in crate::runtime::input) fn waiting_head(host: &mut Host, key: &str) -> i64 {
+                    form(host);
+                    let id = queued(host, host.request(key), "interaction_open");
+                    close_observed(host);
+                    id
+                }
+
+                /// Closes the interaction and drives frames until the observer no longer reports
+                /// it, so the head's wait is no longer reset by an obscured interaction.
+                fn close_observed(host: &mut Host) {
+                    close(host);
+                    while crate::runtime::input::ordinary_blocker(&host.controller.status())
+                        .is_some()
+                    {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the observer reports the interaction closed"
+                        );
+                        std::thread::sleep(Duration::from_millis(5));
+                        host.drain();
+                    }
+                }
+
+                fn reserve_unrelated(host: &mut Host, key: &str) -> i64 {
+                    let owner = host.fixture.run.owner();
+                    let input = storage::test_support::reserve_input(
+                        &mut host.fixture.conn,
+                        &owner,
+                        &storage::NewInput {
+                            operation_key: key.into(),
+                            kind: storage::InputKind::Prompt,
+                            payload_digest: "e".repeat(64),
+                            message_id: None,
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(input.state, storage::InputState::InProgress);
+                    input.input_id
+                }
+
+                fn await_stalled(host: &mut Host, head: i64) -> Value {
+                    loop {
+                        host.drain();
+                        let mut payloads = stalled_payloads(host, head);
+                        if !payloads.is_empty() {
+                            assert_eq!(payloads.len(), 1, "{payloads:?}");
+                            return payloads.remove(0);
+                        }
+                        assert!(
+                            Instant::now() < host.until,
+                            "the watchdog publishes the stalled head"
+                        );
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
+
+                fn settle_publications(host: &mut Host) {
+                    let until = Instant::now() + Duration::from_millis(300);
+                    while Instant::now() < until {
+                        host.drain();
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+
+                fn assert_unpublished(host: &mut Host, head: i64) {
+                    settle_publications(host);
+                    assert!(stalled_payloads(host, head).is_empty());
+                }
+
+                fn review_stalled_queue(host: &Host, head: i64) -> Value {
+                    let run = &host.fixture.run;
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    json!({
+                        "kind":"review_stalled_queue",
+                        "instruction":REVIEW_STALLED_QUEUE,
+                        "inspect_argv":["cafleet","input","show",head.to_string(),"--json","--database-url",url],
+                        "flush_argv":["cafleet","member","flush",run.member_id.to_string(),
+                            "--from-member-id",run.director_member_id.to_string(),"--database-url",url],
+                    })
+                }
+
+                /// Backdates the head, runs housekeeping and checks the single published event.
+                pub(in crate::runtime::input) fn assert_stalled_by(
+                    host: &mut Host,
+                    head: i64,
+                    kind: &str,
+                    blocking: Option<i64>,
+                    detail: Value,
+                ) {
+                    backdate_head_since(host, head);
+                    housekeep(host);
+                    let payload = await_stalled(host, head);
+                    assert_eq!(
+                        payload["cause"],
+                        json!({"kind":kind,"detail":detail}),
+                        "{payload}"
+                    );
+                    assert_eq!(payload["blocking_input_id"], json!(blocking), "{payload}");
+                    assert_eq!(payload["director_action"], review_stalled_queue(host, head));
+                    let waiting = chrono::DateTime::parse_from_rfc3339(
+                        payload["waiting_since"].as_str().unwrap(),
+                    )
+                    .unwrap();
+                    assert!(
+                        chrono::Utc::now().signed_duration_since(waiting)
+                            >= chrono::Duration::seconds(180),
+                        "waiting_since is the head's wait start: {payload}"
+                    );
+                    housekeep(host);
+                    housekeep(host);
+                    settle_publications(host);
+                    assert_eq!(
+                        stalled_payloads(host, head).len(),
+                        1,
+                        "the watchdog publishes once per head"
+                    );
+                }
+
+                fn until_head_obstacle(host: &mut Host, obstacle: &str) {
+                    while host.coordinator.queue.front().unwrap().obstacle != obstacle {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the queue turn records {obstacle}"
+                        );
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
+
+                #[test]
+                fn a_head_no_listed_gate_explains_stalls_as_queue_turn_not_reached() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:unexplained");
+                        assert_stalled_by(host, head, "queue_turn_not_reached", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_an_in_flight_immediate_attempt_stalls_as_immediate_attempt() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        assert!(
+                            host.handle(host.request("prompt:in-flight"))
+                                .unwrap()
+                                .is_none()
+                        );
+                        while host.pty.stages.is_empty() {
+                            assert!(Instant::now() < host.until, "the attempt starts writing");
+                            host.drain();
+                            assert!(host.advance().is_none());
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        let attempt = host.hooks.input_id();
+                        let head =
+                            queued(host, host.request("prompt:behind-attempt"), "earlier_input");
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "immediate_attempt",
+                            Some(attempt),
+                            Value::Null,
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_a_pending_finalization_stalls_as_pending_finalization() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                        form(host);
+                        let finalizing =
+                            queued(host, host.request("prompt:finalizing"), "interaction_open");
+                        let head = queued(
+                            host,
+                            host.request("prompt:behind-finalization"),
+                            "interaction_open",
+                        );
+                        close_observed(host);
+                        assert_eq!(
+                            host.coordinator.queue.pop_front().unwrap().input_id,
+                            finalizing
+                        );
+                        host.coordinator.finalization =
+                            Some(crate::runtime::input::PendingFinalization {
+                                input_id: finalizing,
+                                expected: storage::InputState::Ready,
+                                reason: "target_changed",
+                            });
+                        backdate_head_since(host, head);
+                        let mut outage = crate::db::connect(&url).unwrap();
+                        let exclusive = outage
+                            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+                            .unwrap();
+                        housekeep(host);
+                        drop(exclusive);
+                        assert!(
+                            host.coordinator.finalization.is_some(),
+                            "storage kept the finalization retry outstanding"
+                        );
+                        let payload = await_stalled(host, head);
+                        assert_eq!(
+                            payload["cause"],
+                            json!({"kind":"pending_finalization","detail":null})
+                        );
+                        assert_eq!(payload["blocking_input_id"], finalizing);
+                        assert_eq!(payload["director_action"], review_stalled_queue(host, head));
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_unresolved_inputs_names_the_lowest_unresolved_receipt() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-unresolved");
+                        let first = reserve_unrelated(host, "prompt:first-unresolved");
+                        reserve_unrelated(host, "prompt:second-unresolved");
+                        assert_stalled_by(host, head, "unresolved_input", Some(first), Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_a_pending_drain_stalls_as_drain_pending_with_its_blocker() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-drain");
+                        host.type_human(b"\x1b");
+                        assert_eq!(host.quiesce_once(), InputDrain::Pending);
+                        host.coordinator.record_queue_drain(InputDrain::Pending);
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "drain_pending",
+                            None,
+                            json!("terminal reply pending"),
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_head_whose_queue_turn_met_a_busy_pane_lock_stalls_as_pane_input_busy() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                        let head = waiting_head(host, "prompt:behind-busy-pane");
+                        let _held = PaneLock::try_acquire(&url, &host.placement())
+                            .unwrap()
+                            .unwrap();
+                        until_head_obstacle(host, "pane_input_busy");
+                        assert_stalled_by(host, head, "pane_input_busy", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_whose_attempt_budget_cannot_fit_its_stages_stalls_as_delivery_budget_exhausted()
+                 {
+                    with_profile_host_until(
+                        crate::runtime::input::tests::ordinary_prompt::staged_delivery::permission_catalog(),
+                        encoded(),
+                        HostProfile {
+                            stage_settle: Duration::from_secs(6),
+                            ..HostProfile::metadata()
+                        },
+                        Instant::now() + Duration::from_secs(20),
+                        |host| {
+                            let head = waiting_head(host, "prompt:over-budget");
+                            for _ in 0..8 {
+                                host.drain();
+                                host.advance();
+                            }
+                            assert!(host.pty.offers.is_empty(), "the head never starts");
+                            assert_eq!(row(host, head).state, storage::InputState::Ready);
+                            assert_stalled_by(
+                                host,
+                                head,
+                                "delivery_budget_exhausted",
+                                None,
+                                Value::Null,
+                            );
+                        },
+                    );
+                }
+
+                #[test]
+                fn a_head_whose_housekeeping_read_met_a_storage_outage_stalls_as_storage_unavailable()
+                 {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                        let head = waiting_head(host, "prompt:behind-outage");
+                        let mut outage = crate::db::connect(&url).unwrap();
+                        let exclusive = outage
+                            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+                            .unwrap();
+                        housekeep(host);
+                        drop(exclusive);
+                        assert_eq!(row(host, head).state, storage::InputState::Ready);
+                        assert_stalled_by(host, head, "storage_unavailable", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_whose_queue_turn_failed_stalls_as_attempt_failed_with_the_bounded_error()
+                {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-failure");
+                        host.coordinator
+                            .record_attempt_failure(&CafleetError::App("é".repeat(200)));
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "attempt_failed",
+                            None,
+                            json!("é".repeat(128)),
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_live_cause_takes_precedence_over_a_recorded_obstacle() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:live-and-recorded");
+                        host.coordinator
+                            .record_attempt_failure(&CafleetError::App("recorded".into()));
+                        let unresolved = reserve_unrelated(host, "prompt:live-unresolved");
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "unresolved_input",
+                            Some(unresolved),
+                            Value::Null,
+                        );
+                    });
+                }
+
+                #[test]
+                fn an_interaction_resets_the_head_wait_and_a_fresh_wait_publishes_after_it_closes()
+                {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-reopened-form");
+                        backdate_head_since(host, head);
+                        form(host);
+                        housekeep(host);
+                        host.advance();
+                        assert_eq!(
+                            host.coordinator.queue.front().unwrap().head_since,
+                            None,
+                            "an interaction blocking the head excludes its time"
+                        );
+                        assert_unpublished(host, head);
+                        close_observed(host);
+                        housekeep(host);
+                        let restarted = host
+                            .coordinator
+                            .queue
+                            .front()
+                            .unwrap()
+                            .head_since
+                            .expect("the head's wait restarts when the interaction closes");
+                        assert!(restarted.elapsed() < Duration::from_secs(10));
+                        assert_unpublished(host, head);
+                        assert_stalled_by(host, head, "queue_turn_not_reached", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn each_head_publishes_its_own_single_event() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        form(host);
+                        let first =
+                            queued(host, host.request("prompt:first-head"), "interaction_open");
+                        let second =
+                            queued(host, host.request("prompt:second-head"), "interaction_open");
+                        close_observed(host);
+                        assert_stalled_by(host, first, "queue_turn_not_reached", None, Value::Null);
+                        cancel_queued(host, first);
+                        housekeep(host);
+                        assert_unpublished(host, second);
+                        assert_stalled_by(
+                            host,
+                            second,
+                            "queue_turn_not_reached",
+                            None,
+                            Value::Null,
+                        );
+                        assert_eq!(stalled_payloads(host, first).len(), 1);
+                    });
+                }
             }
 
             #[test]
@@ -10655,6 +11172,40 @@ mod tests {
                     row(host, input_id).state,
                     storage::InputState::Accepted | storage::InputState::Settled
                 )
+            }
+
+            #[test]
+            fn a_head_waiting_on_a_busy_composer_stalls_as_composer_busy() {
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::stall_watchdog;
+                with_busy_host(busy_catalog(), encoded(), |host| {
+                    busy(host);
+                    let head =
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued(
+                            host,
+                            host.request("prompt:behind-draft"),
+                            "composer_busy",
+                        );
+                    while host
+                        .coordinator
+                        .queue
+                        .front()
+                        .unwrap()
+                        .composer_busy_since
+                        .is_none()
+                    {
+                        assert!(Instant::now() < host.until, "the queue turn waits");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    stall_watchdog::assert_stalled_by(
+                        host,
+                        head,
+                        "composer_busy",
+                        None,
+                        serde_json::Value::Null,
+                    );
+                });
             }
 
             #[test]
