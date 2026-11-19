@@ -942,7 +942,7 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 | Argument | Required | Notes |
 |---|---|---|
 | `--fleet-id` | yes | The fleet the new member joins. |
-| `--name` | yes | Display name; per-backend pane-title behavior: §6.7 Backend capabilities. |
+| `--name` | yes | Display name; the member pane name derives from it (§6.5 Window and pane naming). Per-backend pane-title behavior: §6.7 Backend capabilities. |
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | A backend registry token; when omitted, the member inherits the spawning Director's placement backend. Availability failures exit 1 (below). |
 | `--model` | no | Forwarded to the backend binary's own `--model` flag; opencode requires `<provider-id>/<model-id>`, and pi refuses a `:<thinking>` suffix. Per-backend formats and create-time validation: §6.7 Model selection. |
@@ -1653,7 +1653,7 @@ Each scanned window's height is read live before registration (§ Backend operat
 |---|---|---|
 | Overflow window | `cafleet-<fleet_id>-<ordinal>`, e.g. `cafleet-3-1` | tmux `new-window -n`, which also turns `automatic-rename` off for that window; herdr `tab create --label` |
 | Director window | `cafleet-<fleet_id>-0` | tmux `rename-window`, which also turns `automatic-rename` off for that window; herdr `tab rename`; verify the name before registration commits (§ Backend operations) |
-| Member pane | The member name | tmux `select-pane -T`; herdr `pane rename` |
+| Member pane | `<member_id> - <member_name>`, e.g. `12 - drafter` | tmux `select-pane -T`; herdr `pane rename` |
 
 Window names are creation-time placement snapshots; existing registrations retain their recorded names, and renaming a window later leaves the registry unchanged. Fleet deletion leaves the Director window's current name in place. Director window naming and verification are required for successful registration. Ordinary member pane naming is best effort. A tmux pane title is visible only when `pane-border-status` is on, and a coding agent may retitle its pane (§6.7 Backend capabilities); a herdr pane label is independent of the agent's terminal title.
 
@@ -1714,7 +1714,7 @@ Process failures preserve their context in the multiplexer error:
 
 #### Member pane creation
 
-The spawn creates the member pane for its pane target (§ Multiplexer context) without stealing focus, names it after the member and equalizes every column of its window. Naming, equalization and herdr re-parenting are best effort: their failures never fail the spawn.
+The spawn creates the member pane for its pane target (§ Multiplexer context) without stealing focus, names it with the member pane name (§ Window and pane naming) and equalizes every column of its window. Naming, equalization and herdr re-parenting are best effort: their failures never fail the spawn.
 
 tmux creates the pane with one argv per target:
 
@@ -1725,7 +1725,7 @@ tmux creates the pane with one argv per target:
 | Empty `left` column (an overflow window whose left column emptied) | `tmux split-window -h -f -b -l 50% -d -t <first opposite pane> -P -F "#{pane_id}" <command>...` |
 | New window | <code>tmux new-window -d -t &lt;session&gt;: -n &lt;window_name&gt; -c &lt;cwd&gt; -P -F "#{window_id}&#124;#{pane_id}" &lt;command&gt;...</code> |
 
-A Column target's window ID is the target's own. A `new-window` reply splits on the first `|` and requires both fields non-empty; any other reply fails with `unexpected tmux new-window output: <quoted>` and an unknown pane-cleanup outcome. After creation tmux runs `tmux select-pane -t <new pane> -T <member name>`, then equalizes every column of the window: `tmux list-panes -t <window> -F "#{pane_id}|#{pane_left}"` groups the panes by `pane_left`, and `tmux select-layout -E -t <first pane of the group>` runs for each group of 2 or more panes. Deletion runs the same equalization (§ Delete-time pane layout).
+A Column target's window ID is the target's own. A `new-window` reply splits on the first `|` and requires both fields non-empty; any other reply fails with `unexpected tmux new-window output: <quoted>` and an unknown pane-cleanup outcome. After creation tmux runs `tmux select-pane -t <new pane> -T <member pane name>`, then equalizes every column of the window: `tmux list-panes -t <window> -F "#{pane_id}|#{pane_left}"` groups the panes by `pane_left`, and `tmux select-layout -E -t <first pane of the group>` runs for each group of 2 or more panes. Deletion runs the same equalization (§ Delete-time pane layout).
 
 herdr reads every column order (top to bottom: `L1..Lk` in the left column, `R1..Rm` in the right column, the bottom pane last) from a live `herdr pane layout` read, as the panes at the column's `rect.x` sorted by `rect.y`; the target's pane lists supply only the anchor for that read. Every split, move and tab creation passes `--no-focus`, and `pane swap` is never used.
 
@@ -1740,7 +1740,7 @@ herdr reads every column order (top to bottom: `L1..Lk` in the left column, `R1.
 A `tab create` reply without either field fails with `herdr tab create missing '<key>' field` and an unknown pane-cleanup outcome. After creation, in order:
 
 1. `herdr pane run <new pane> "<shell-quoted command>"`. On failure the backend closes the new pane (§ Pane ownership during creation) and returns the run error; no re-parenting has run, so every other pane stays where it was.
-2. `herdr pane rename <new pane> <member name>`.
+2. `herdr pane rename <new pane> <member pane name>`.
 3. Right or Left re-parenting, when the target requires it (§ herdr re-parenting).
 4. Equalize every column of the tab (§ herdr column equalization), anchored at the new pane.
 
@@ -1926,7 +1926,7 @@ A coding-agent backend is a stateless value selected per member at spawn time, w
 - **`ensure_available()`** — fails on the first unmet spawn precondition, in order: the config directory resolves per §6.3 CLI *Config-dir resolution* (an invalid config-location variable fails first); the binary resolves on `PATH`; the backend's own check (opencode: the selected preset file is readable; hermes: the effective approvals configuration passes § Hermes availability preflight; pi: the CAFleet pi extension `<pi base>/extensions/cafleet.ts` is readable). A shared helper resolves `binary_name` to an absolute path per §6.9 Member PTY runtime *Native executable resolution*, failing with `binary {binary_name} not found on PATH`. Preconditions read the host through a **spawn probe** (binary lookup, home directory, `env_var(name) -> optional string`); the system probe reads the process environment.
 - **`validate_model(model)`**, **`validate_effort(effort)`** — raise a value-error for a value malformed or unacceptable for this backend; `None` (flag omitted) is always valid. A backend without a reasoning-effort control rejects every non-`None` effort.
 - **`validate_prompt(prompt)`** — raises a value-error for a spawn-prompt body this backend cannot carry as its prompt argument; only pi rejects a body (§ Per-backend `build_spawn_argv`), and every other backend accepts every prompt. `member create` checks the raw body, before placeholder substitution.
-- **`build_spawn_argv(prompt, display_name, cwd, model, effort)`** — the full argv (binary + flags + prompt) for the multiplexer's member pane spawn. Its leading token is `binary_name`; the launched `argv[0]` follows §6.9 Native executable resolution and later tokens are unchanged. `cwd` is the member's resolved absolute working directory (§6.5 Pane spawn working directory); only hermes emits it, and every other backend's argv is independent of it.
+- **`build_spawn_argv(prompt, display_name, cwd, model, effort)`** — the full argv (binary + flags + prompt) for the multiplexer's member pane spawn. Its leading token is `binary_name`; the launched `argv[0]` follows §6.9 Native executable resolution and later tokens are unchanged. `display_name` is the member pane name (§6.5 Window and pane naming). `cwd` is the member's resolved absolute working directory (§6.5 Pane spawn working directory); only hermes emits it, and every other backend's argv is independent of it.
 
 **Ordering invariant:** `member create` MUST call `validate_model` → `validate_effort` → `validate_prompt` → `ensure_available` → `build_spawn_argv`, so a malformed model, effort or prompt fails before any precondition check or side effect, as a usage error (exit 2) with the backend's message; broker value-errors (§7.2) exit 1. `validate_prompt` runs on the resolved prompt body before the Director placement lookup and registration.
 
@@ -2048,13 +2048,13 @@ pi clamps a thinking level to the model's capability, and a non-reasoning model 
 
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset or config prerequisite |
 |---|---|---|---|---|
-| `claude` | None | Yes, via `--name <member-name>` | Runs its spawn-time allow rules and every command matching `permissions.allow`; auto mode's classifier reviews the rest, and a refused command routes to the Director | A Claude Code permission profile and native directory consent when requested; a permission posture, not a spawn dependency |
+| `claude` | None | Yes, via `--name <member pane name>` | Runs its spawn-time allow rules and every command matching `permissions.allow`; auto mode's classifier reviews the rest, and a refused command routes to the Director | A Claude Code permission profile and native directory consent when requested; a permission posture, not a spawn dependency |
 | `codex` | Kernel-enforced workspace-write sandbox; matching allow rules and approved escalations authorize commands outside it | No; `member list` `window` and `pane_id` locate the pane | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `<codex home>/rules/cafleet.rules`, applicable sandbox access below and native directory consent when requested; a permission posture, not a spawn dependency |
 | `opencode` | None | No; `member list` `window` and `pane_id` locate the pane | `cafleet-ask` (default): the member broker commands run and every other shell command opens a native permission form; `cafleet`: the same broker commands, every other command denied | The selected policy's preset `<preset base>/agents/<mode>.md`; a spawn precondition |
 | `hermes` | None | No; `member list` `window` and `pane_id` locate the pane | `smart`: commands outside Hermes's dangerous-command patterns run unreviewed, and the guardian model reviews the rest and may open an approval prompt. Hardline floors, the sudo guard and `approvals.deny` block before any review | The operator configuration's `approvals.mode` |
-| `pi` | None | Yes, via `--name <member-name>`; pi titles the terminal `π - <name> - <cwd basename>` | `cafleet-ask` (default): the member broker commands run and every other bash command opens a native permission form, the gate's approval form for a command without a control character (§ pi member gate); `cafleet`: the same broker commands, every other command denied | The CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a spawn precondition |
+| `pi` | None | Yes, via `--name <member pane name>`; pi titles the terminal `π - <member pane name> - <cwd basename>` | `cafleet-ask` (default): the member broker commands run and every other bash command opens a native permission form, the gate's approval form for a command without a control character (§ pi member gate); `cafleet`: the same broker commands, every other command denied | The CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a spawn precondition |
 
-"Sets the pane title" is the backend's own title mechanism. Independently of it, CAFleet names every member pane after the member on the multiplexer, as a tmux pane title or a herdr pane label (§6.5 Fleet window layout); a backend that sets its own title can retitle the tmux pane, while the herdr label stays independent of the agent's terminal title.
+"Sets the pane title" is the backend's own title mechanism. Independently of it, CAFleet names every member pane with the member pane name on the multiplexer, as a tmux pane title or a herdr pane label (§6.5 Window and pane naming); a backend that sets its own title can retitle the tmux pane, while the herdr label stays independent of the agent's terminal title.
 
 The omitted claude and codex policies are native automatic approval modes (§6.9 Launch policy and capability registry). The omitted hermes policy `smart` is also an `auto` mode: an ESCALATE or a guardian DENY opens a native approval prompt that the Director answers allow once or deny through the permission commands (§6.9 Bundled profiles and native screen fixtures), and an unanswered prompt fails closed after the configuration's `approvals.timeout`. Every session that reads a Hermes configuration applies its `approvals.deny`, so an operator glob there that matches a Director-only command also blocks it in a Hermes Director's own session, reported as `BLOCKED: this command matches the user-defined deny rule '<glob>' …`. CAFleet needs no `approvals.deny` entry, because the runner guard covers members (§6.3 Director-only command guard). The omitted OpenCode and pi policy `cafleet-ask` is a `manual` mode whose form the Director answers; explicit `cafleet` is an `auto` mode with a fixed allow/deny policy that renders no approval form (§ opencode preset, § pi member gate).
 

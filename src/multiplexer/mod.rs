@@ -227,6 +227,10 @@ pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|part| part.to_string()).collect()
 }
 
+pub(crate) fn member_pane_name(member_id: i64, member_name: &str) -> String {
+    format!("{member_id} - {member_name}")
+}
+
 /// The runner, server selector and error mapping shared by every backend; a
 /// backend adds only its own argv construction and output parsing.
 pub(crate) struct BackendCore {
@@ -920,6 +924,14 @@ mod tests {
 
     fn adapter(backend: &str, runner: Rc<FakeRunner>) -> Box<dyn Multiplexer> {
         multiplexer_for_server(backend, server(backend), runner).unwrap()
+    }
+
+    #[test]
+    fn member_pane_name_joins_the_member_id_and_name_with_a_spaced_hyphen() {
+        assert_eq!(member_pane_name(12, "drafter"), "12 - drafter");
+        assert_eq!(member_pane_name(7, "lead reviewer"), "7 - lead reviewer");
+        assert_eq!(member_pane_name(3, "a - b"), "3 - a - b");
+        assert_eq!(member_pane_name(1000, " padded "), "1000 -  padded ");
     }
 
     #[test]

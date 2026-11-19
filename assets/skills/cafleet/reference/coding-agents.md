@@ -27,7 +27,7 @@ Members need a runner-compatible PTY, an explicit detection-coverage declaration
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
 | `{permission_flags}` | `--permission-mode auto` (default mode `auto`, class `auto`) |
-| `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
+| `{pane_title}` | `claude --name "<member_id> - <member-name>"` sets `#{pane_title}` to that value |
 | `{skill_loader}` | the Skill tool |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
 
@@ -443,7 +443,7 @@ Reception makes no pane input and leaves `/goal` authority with the host.
 |---|---|
 | `{decision_surface}` | the `cafleet_ask` tool of the CAFleet pi extension, with the literal Director ID, one question and its choices; an `answered` result records the decision (members relay) |
 | `{permission_flags}` | `--cafleet-gate cafleet-ask` (default mode `cafleet-ask`, class `manual`: the CAFleet member gate runs the member broker commands, opens its approval form for every other bash command and protects `.git`/`.pi`/`.agents`/`.claude`/`.codex`/`.opencode`); `--cafleet-gate cafleet` (class `auto`: every other bash command is blocked without a form) when `--permission-mode cafleet` is selected |
-| `{pane_title}` | `pi --name <member-name>`; pi titles the terminal `π - <name> - <cwd basename>` |
+| `{pane_title}` | `pi --name "<member_id> - <member-name>"`; pi titles the terminal `π - <member_id> - <member-name> - <cwd basename>` |
 | `{skill_loader}` | pi's skill loader: pi lists each installed skill's name, description and `SKILL.md` path; read that `SKILL.md`, its own backend section and role-required references with the `read` tool |
 | `{effort_levels}` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`, forwarded as `--thinking <level>`; pi clamps the level to the model) |
 
@@ -470,7 +470,7 @@ No maintained catalog. `--model VALUE` passes through verbatim as pi's `--model 
 | The gate refuses a bash command holding a newline, so a pi member sends a one-line body as the positional `TEXT`, and a multi-line body with `--file PATH` from a file it writes inside the working directory. | [Send](../SKILL.md#send-unicast); [message send](cli.md#message-send) |
 | Default `cafleet-ask` (class `manual`): an unmatched bash command without a control character opens the `CAFleet member gate` form. The member waits while the Director answers it; a deny returns `the operator denied this command` to the member, which continues its run. | `{permission_flags}`; [runtime procedure](../roles/director.md#consume-observed-interactions); [native interactions](../roles/member.md#native-interactions) |
 | The bundled pi profile detects the gate form at every pane width of at least `W_min` = 49 columns, and its deny answer moves the focus with `j` before Enter, never sending Escape. A narrower pane, a command line that wraps or a form taller than the pane opens no `interaction_opened` event and is answered manually on the native surface. | [Runtime procedure](../roles/director.md#consume-observed-interactions) |
-| A pane runs `pi --cafleet-gate <mode> --no-approve --tui-mode fullscreen --name <name>`; optional `--model` and `--thinking` follow, then `--` and the prompt, as a fresh session. `member create` forwards a set `PI_CODING_AGENT_DIR`, and a gated member whose extension cannot register `--cafleet-gate` exits at startup (`runner_exited`). | `{permission_flags}`; [member create](cli.md#member-create) |
+| A pane runs `pi --cafleet-gate <mode> --no-approve --tui-mode fullscreen --name "<member_id> - <name>"`; optional `--model` and `--thinking` follow, then `--` and the prompt, as a fresh session. `member create` forwards a set `PI_CODING_AGENT_DIR`, and a gated member whose extension cannot register `--cafleet-gate` exits at startup (`runner_exited`). | `{permission_flags}`; [member create](cli.md#member-create) |
 | Leading-`!` input runs the command and stores its output without starting a turn. After `member exec`, send an explicit continuation message so the member acts on the output. | [Director dispatch](../roles/director.md#director-side-dispatch); [member exec](cli.md#member-exec) |
 | Escape interrupts a running pi turn and dismisses an open gate form, and Enter while the member works queues the text as a steering message. | [Command execution](../roles/member.md#command-execution); [member prompt](cli.md#member-prompt) |
 | pi 1.5.0 holds `followUp` messages in an in-memory queue with no cap or refusal and, under the default `followUpMode` `one-at-a-time`, delivers one per agent stop, so every queued notice costs one turn and none is refused. | [Native reception](#pi-native-director-reception); [Director wake](../roles/director.md#director-wake) |

@@ -6058,6 +6058,7 @@ pub(crate) mod native_capture {
             }
             fn split_runner(
                 &mut self,
+                pane_name: &str,
                 argv: &[String],
                 until: Instant,
             ) -> Result<crate::multiplexer::SpawnedPane> {
@@ -6112,7 +6113,8 @@ pub(crate) mod native_capture {
                     "--nocapture".into(),
                     "--test-threads=1".into(),
                 ];
-                self.inner.split_runner(&child, until.min(self.case_until))
+                self.inner
+                    .split_runner(pane_name, &child, until.min(self.case_until))
             }
             fn wait_prepared(
                 &mut self,
@@ -7191,7 +7193,7 @@ pub(crate) mod native_capture {
                 .to_string_lossy()
                 .into_owned();
             let mut host = CaptureVerificationLaunchHost {
-                inner: NativeLaunchHost::new(&*mux, &target, "native-capture", &cwd),
+                inner: NativeLaunchHost::new(&*mux, &target, &cwd),
                 case,
                 case_until,
             };
