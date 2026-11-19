@@ -77,7 +77,7 @@ Evidence of insufficient capability can trigger a replacement with a strictly st
 
 ## Backend differences
 
-The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. herdr labels every member pane with the member name and tmux titles it, though an agent may retitle a tmux pane; `cafleet member list` shows each member's `window` and `pane_id`.
+The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. herdr labels every member pane with its member ID and name and tmux titles it, though an agent may retitle a tmux pane; `cafleet member list` shows each member's `window` and `pane_id`.
 
 A backend whose measured plain-input limit is below the longest preview receives long previews by bracketed paste or a short pointer to the full message; the [bundled profile contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the measured values.
 
