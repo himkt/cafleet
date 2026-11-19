@@ -1,6 +1,6 @@
 # Poll-Only Director Reception
 
-**Status**: Approved
+**Status**: In Progress
 **Progress**: 29/30 tasks complete
 **Last Updated**: 2026-11-19
 
@@ -10,15 +10,15 @@ Every Director wake consumes through `cafleet message poll`. A `message listen` 
 
 ## Success Criteria
 
-- [ ] `message listen` emits `pending` records of exactly `{"event":"pending","next":"<command>"}` (key order `event`, `next`), where `<command>` is `cafleet message poll <MEMBER_ID> --json`, followed by ` --database-url <url>` exactly when the listener was started with `--database-url`
-- [ ] The `--codex-thread` forwarder queues `[cafleet listen record] <that same compact record>`
-- [ ] Notice hold, ceiling re-notice, startup replay, lease, idle cadence and the Codex refused-notice retry behave as before (existing hold tests pass against the internal pending-ID decision)
-- [ ] `ready` and `closed` records are unchanged
-- [ ] No Director instruction (director.md, every backend reception recipe in coding-agents.md, `cli.md`, the hermes/opencode/pi `cafleet_listen` descriptions, `SPEC.md`, `docs/`) mentions a consumed watermark or tells the Director to skip a notice; every notice triggers exactly one poll, and an empty poll (`[]`) is described as the normal outcome for a stale notice
-- [ ] No contract or agent-facing sentence describes a notice as naming, listing or carrying message IDs
-- [ ] The long-body preview pointer reads `Body is N characters; run cafleet message poll <recipient-id> --json to read it.` for every database
-- [ ] `message show` behavior and output are unchanged
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass
+- [x] `message listen` emits `pending` records of exactly `{"event":"pending","next":"<command>"}` (key order `event`, `next`), where `<command>` is `cafleet message poll <MEMBER_ID> --json`, followed by ` --database-url <url>` exactly when the listener was started with `--database-url`
+- [x] The `--codex-thread` forwarder queues `[cafleet listen record] <that same compact record>`
+- [x] Notice hold, ceiling re-notice, startup replay, lease, idle cadence and the Codex refused-notice retry behave as before (existing hold tests pass against the internal pending-ID decision)
+- [x] `ready` and `closed` records are unchanged
+- [x] No Director instruction (director.md, every backend reception recipe in coding-agents.md, `cli.md`, the hermes/opencode/pi `cafleet_listen` descriptions, `SPEC.md`, `docs/`) mentions a consumed watermark or tells the Director to skip a notice; every notice triggers exactly one poll, and an empty poll (`[]`) is described as the normal outcome for a stale notice
+- [x] No contract or agent-facing sentence describes a notice as naming, listing or carrying message IDs
+- [x] The long-body preview pointer reads `Body is N characters; run cafleet message poll <recipient-id> --json to read it.` for every database
+- [x] `message show` behavior and output are unchanged
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass
 
 ---
 
