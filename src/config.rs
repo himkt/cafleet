@@ -117,6 +117,26 @@ mod tests {
             "a user-supplied URL gets no ~ expansion and no rewriting"
         );
     }
+
+    #[test]
+    fn database_url_explicit_records_whether_database_url_was_supplied() {
+        assert!(!Settings::new(None).unwrap().database_url_explicit);
+        assert!(
+            Settings::new(Some("sqlite:///tmp/fleet.db".to_string()))
+                .unwrap()
+                .database_url_explicit
+        );
+        assert!(
+            Settings::new(Some(default_database_url().unwrap()))
+                .unwrap()
+                .database_url_explicit,
+            "a supplied URL naming the default database is still explicit"
+        );
+        assert!(
+            Settings::for_database(Path::new("/tmp/fleet.db")).database_url_explicit,
+            "for_database supplies its URL through new"
+        );
+    }
     use std::path::Path;
     use std::path::PathBuf;
 

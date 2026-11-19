@@ -1190,10 +1190,12 @@ mod tests {
     use nix::fcntl::OFlag;
     use nix::fcntl::fcntl;
     use std::cell::Cell;
+    use std::cell::RefCell;
     use std::io;
     use std::io::Write;
     use std::os::fd::AsFd;
     use std::os::fd::OwnedFd;
+    use std::rc::Rc;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -1219,10 +1221,34 @@ mod tests {
         TestClock::starting_at(Instant::now() + Duration::from_secs(10_000))
     }
 
+    const NEXT: &str = "cafleet message poll 1 --json --database-url 'sqlite:///tmp/my fleet.db'";
+
+    /// The ordered message IDs of the latest open snapshot, shared by the scripted inbox that
+    /// writes them and the recording output that copies them beside each `pending` record.
+    type SnapshotIds = Rc<RefCell<Vec<i64>>>;
+
+    fn record_snapshot_ids(ids: &SnapshotIds, snapshot: &InboxSnapshot) {
+        if let InboxSnapshot::Open { messages, .. } = snapshot {
+            *ids.borrow_mut() = messages.iter().map(|m| m.message_id).collect();
+        }
+    }
+
     struct ScriptedInbox<'a, F> {
         clock: &'a TestClock,
         snapshots: Vec<(Duration, Duration)>,
+        snapshot_ids: SnapshotIds,
         script: F,
+    }
+
+    impl<'a, F> ScriptedInbox<'a, F> {
+        fn new(clock: &'a TestClock, output: &RecordingOutput<'_>, script: F) -> Self {
+            Self {
+                clock,
+                snapshots: Vec::new(),
+                snapshot_ids: output.snapshot_ids.clone(),
+                script,
+            }
+        }
     }
 
     impl<F> ListenIo for ScriptedInbox<'_, F>
@@ -1237,22 +1263,27 @@ mod tests {
                 self.snapshots.len() < 1_000,
                 "a held notice must allow idle sleeps"
             );
-            (self.script)(now, self.snapshots.len())
+            let snapshot = (self.script)(now, self.snapshots.len())?;
+            record_snapshot_ids(&self.snapshot_ids, &snapshot);
+            Ok(snapshot)
         }
     }
 
-    /// Records every delivered record with the clock time it was delivered at. A `pending`
-    /// attempt is refused when its index in `pending_refusals` is `true`; any other record
-    /// is refused when its event is `refused_event`.
+    /// Records every delivered record with the clock time it was delivered at, and beside each
+    /// delivered or refused `pending` record the pending set of the snapshot that produced it.
+    /// A `pending` attempt is refused when its index in `pending_refusals` is `true`; any other
+    /// record is refused when its event is `refused_event`.
     struct RecordingOutput<'a> {
         clock: &'a TestClock,
+        snapshot_ids: SnapshotIds,
         records: Vec<Value>,
         delivered_at: Vec<Duration>,
+        notice_ids: Vec<Vec<i64>>,
         budgets: Vec<Duration>,
         fail_at: Option<usize>,
         pending_refusals: Vec<bool>,
         pending_attempts: usize,
-        refused: Vec<(Duration, Value)>,
+        refused: Vec<(Duration, Vec<i64>)>,
         refused_event: Option<&'static str>,
     }
 
@@ -1260,8 +1291,10 @@ mod tests {
         fn new(clock: &'a TestClock) -> Self {
             Self {
                 clock,
+                snapshot_ids: SnapshotIds::default(),
                 records: Vec::new(),
                 delivered_at: Vec::new(),
+                notice_ids: Vec::new(),
                 budgets: Vec::new(),
                 fail_at: None,
                 pending_refusals: Vec::new(),
@@ -1285,7 +1318,11 @@ mod tests {
             if self.fail_at == Some(self.records.len()) {
                 return Err(CafleetError::App("injected output failure".into()));
             }
-            let refuse = if record["event"] == "pending" {
+            let pending = record["event"] == "pending";
+            if pending {
+                assert_eq!(record, &json!({"event":"pending", "next":NEXT}));
+            }
+            let refuse = if pending {
                 self.pending_attempts += 1;
                 self.pending_refusals
                     .get(self.pending_attempts - 1)
@@ -1295,9 +1332,14 @@ mod tests {
                 self.refused_event == record["event"].as_str()
             };
             if refuse {
-                self.refused
-                    .push((self.clock.elapsed.get(), record.clone()));
+                if pending {
+                    self.refused
+                        .push((self.clock.elapsed.get(), self.snapshot_ids.borrow().clone()));
+                }
                 return Ok(Delivery::Refused);
+            }
+            if pending {
+                self.notice_ids.push(self.snapshot_ids.borrow().clone());
             }
             self.records.push(record.clone());
             self.delivered_at.push(self.clock.elapsed.get());
@@ -1320,24 +1362,9 @@ mod tests {
         }
     }
 
-    fn notice_ids(record: &Value) -> Vec<i64> {
-        assert_eq!(record["event"], "pending", "{record}");
-        record["message_ids"]
-            .as_array()
-            .unwrap_or_else(|| panic!("a pending record lists its message IDs: {record}"))
-            .iter()
-            .map(|id| id.as_i64().unwrap())
-            .collect()
-    }
-
-    /// The ID list of every delivered `pending` notice, in delivery order.
+    /// The pending set of every delivered `pending` notice, in delivery order.
     fn notices(output: &RecordingOutput<'_>) -> Vec<Vec<i64>> {
-        output
-            .records
-            .iter()
-            .filter(|record| record["event"] == "pending")
-            .map(notice_ids)
-            .collect()
+        output.notice_ids.clone()
     }
 
     /// The whole second at which each delivered `pending` notice was delivered.
@@ -1351,12 +1378,12 @@ mod tests {
             .collect()
     }
 
-    /// The whole second and ID list of every refused `pending` attempt.
+    /// The whole second and pending set of every refused `pending` attempt.
     fn refusals(output: &RecordingOutput<'_>) -> Vec<(u64, Vec<i64>)> {
         output
             .refused
             .iter()
-            .map(|(at, record)| (at.as_secs(), notice_ids(record)))
+            .map(|(at, ids)| (at.as_secs(), ids.clone()))
             .collect()
     }
 
@@ -1368,17 +1395,16 @@ mod tests {
         lease_secs: u64,
         script: impl Fn(u64) -> Vec<i64>,
     ) {
-        let mut io = ScriptedInbox {
-            clock,
-            snapshots: Vec::new(),
-            script: |at: Duration, _| Ok(open(messages(&script(at.as_secs())))),
-        };
+        let mut io = ScriptedInbox::new(clock, output, |at: Duration, _| {
+            Ok(open(messages(&script(at.as_secs()))))
+        });
         listen(
             clock,
             &mut io,
             output,
             1,
             Some(Duration::from_secs(lease_secs)),
+            NEXT,
         )
         .unwrap();
         assert_eq!(
@@ -1400,37 +1426,85 @@ mod tests {
         }
     }
 
+    mod next_command {
+        use crate::cli::message::tests::*;
+
+        #[test]
+        fn an_omitted_database_url_appends_nothing() {
+            assert_eq!(poll_command(7, None), "cafleet message poll 7 --json");
+        }
+
+        #[test]
+        fn a_database_url_of_only_safe_characters_is_appended_verbatim() {
+            assert_eq!(
+                poll_command(7, Some("sqlite:///tmp/fleet.db")),
+                "cafleet message poll 7 --json --database-url sqlite:///tmp/fleet.db"
+            );
+            let every_safe_class = "sqlite:///Home/u_1/~x/a-b.c@d%e+f=g,h.db";
+            assert_eq!(
+                poll_command(42, Some(every_safe_class)),
+                format!("cafleet message poll 42 --json --database-url {every_safe_class}")
+            );
+        }
+
+        #[test]
+        fn a_database_url_with_a_space_is_single_quoted() {
+            assert_eq!(
+                poll_command(7, Some("sqlite:///tmp/my fleet.db")),
+                "cafleet message poll 7 --json --database-url 'sqlite:///tmp/my fleet.db'"
+            );
+        }
+
+        #[test]
+        fn a_single_quote_in_the_database_url_is_closed_escaped_and_reopened() {
+            assert_eq!(
+                poll_command(7, Some("sqlite:///tmp/it's.db")),
+                r"cafleet message poll 7 --json --database-url 'sqlite:///tmp/it'\''s.db'"
+            );
+        }
+
+        #[test]
+        fn every_character_outside_the_safe_set_quotes_the_whole_url() {
+            for unsafe_char in ['$', ';', '*', '"', '\\', '&', '|', '`', '#', '!', '\t', 'é'] {
+                let url = format!("sqlite:///tmp/a{unsafe_char}b.db");
+                assert_eq!(
+                    poll_command(3, Some(&url)),
+                    format!("cafleet message poll 3 --json --database-url '{url}'"),
+                    "{unsafe_char:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_held_notice_blocks_a_new_arrival_and_allows_one_second_idle_sleeps() {
         let clock = test_clock();
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |at, _| {
-                Ok(open(if at < Duration::from_secs(2) {
-                    messages(&[10])
-                } else {
-                    messages(&[10, 11])
-                }))
-            },
-        };
         let mut output = RecordingOutput::new(&clock);
+        let mut io = ScriptedInbox::new(&clock, &output, |at, _| {
+            Ok(open(if at < Duration::from_secs(2) {
+                messages(&[10])
+            } else {
+                messages(&[10, 11])
+            }))
+        });
         listen(
             &clock,
             &mut io,
             &mut output,
             1,
             Some(Duration::from_secs(3)),
+            NEXT,
         )
         .unwrap();
         assert_eq!(
             output.records,
             [
                 json!({"event":"ready", "member_id":1, "fleet_id":7}),
-                json!({"event":"pending", "member_id":1, "message_ids":[10]}),
+                json!({"event":"pending", "next":NEXT}),
                 json!({"event":"closed", "member_id":1, "reason":"timeout"}),
             ]
         );
+        assert_eq!(notices(&output), [vec![10]]);
         assert_eq!(*clock.sleeps.borrow(), vec![Duration::from_secs(1); 3]);
         assert_eq!(
             io.snapshots
@@ -1450,10 +1524,7 @@ mod tests {
             let clock = test_clock();
             let mut output = RecordingOutput::new(&clock);
             listen_over(&clock, &mut output, 3, |_| vec![12, 10, 11]);
-            assert_eq!(
-                output.records[1],
-                json!({"event":"pending", "member_id":1, "message_ids":[12, 10, 11]})
-            );
+            assert_eq!(output.records[1], json!({"event":"pending", "next":NEXT}));
             assert_eq!(notices(&output), [vec![12, 10, 11]]);
         }
 
@@ -1533,7 +1604,10 @@ mod tests {
             let mut restarted = RecordingOutput::new(&clock);
             listen_over(&clock, &mut restarted, 2, |_| vec![10, 11, 12]);
             assert_eq!(restarted.records[0]["event"], "ready");
-            assert_eq!(notice_ids(&restarted.records[1]), [10, 11, 12]);
+            assert_eq!(
+                restarted.records[1],
+                json!({"event":"pending", "next":NEXT})
+            );
             assert_eq!(notices(&restarted), [vec![10, 11, 12]]);
         }
 
@@ -1599,6 +1673,7 @@ mod tests {
                 script: Vec<(u64, Act)>,
                 applied: usize,
                 snapshots: usize,
+                snapshot_ids: SnapshotIds,
                 sent: Vec<i64>,
                 polls: Vec<Vec<i64>>,
             }
@@ -1639,7 +1714,10 @@ mod tests {
                         }
                         self.applied += 1;
                     }
-                    listen_snapshot(&mut self.conn, self.director, Some(self.fleet), deadline)
+                    let snapshot =
+                        listen_snapshot(&mut self.conn, self.director, Some(self.fleet), deadline)?;
+                    record_snapshot_ids(&self.snapshot_ids, &snapshot);
+                    Ok(snapshot)
                 }
             }
 
@@ -1660,6 +1738,7 @@ mod tests {
                     script,
                     applied: 0,
                     snapshots: 0,
+                    snapshot_ids: output.snapshot_ids.clone(),
                     sent: Vec::new(),
                     polls: Vec::new(),
                 };
@@ -1669,6 +1748,7 @@ mod tests {
                     output,
                     director,
                     Some(Duration::from_secs(lease_secs)),
+                    NEXT,
                 )
                 .unwrap();
                 assert_eq!(
@@ -1840,18 +1920,15 @@ mod tests {
     #[test]
     fn idle_checks_use_the_remaining_monotonic_lease_without_heartbeats() {
         let clock = test_clock();
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |_, _| Ok(open(Vec::new())),
-        };
         let mut output = RecordingOutput::new(&clock);
+        let mut io = ScriptedInbox::new(&clock, &output, |_, _| Ok(open(Vec::new())));
         listen(
             &clock,
             &mut io,
             &mut output,
             1,
             Some(Duration::from_millis(2500)),
+            NEXT,
         )
         .unwrap();
         assert_eq!(clock.elapsed.get(), Duration::from_millis(2500));
@@ -1880,20 +1957,17 @@ mod tests {
     #[test]
     fn activity_keeps_the_original_expiry_and_every_work_budget_is_at_most_five_seconds() {
         let clock = test_clock();
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |at: Duration, _: usize| {
-                Ok(open(vec![message(i64::try_from(at.as_secs()).unwrap())]))
-            },
-        };
         let mut output = RecordingOutput::new(&clock);
+        let mut io = ScriptedInbox::new(&clock, &output, |at: Duration, _: usize| {
+            Ok(open(vec![message(i64::try_from(at.as_secs()).unwrap())]))
+        });
         listen(
             &clock,
             &mut io,
             &mut output,
             1,
             Some(Duration::from_secs(8)),
+            NEXT,
         )
         .unwrap();
         assert_eq!(clock.elapsed.get(), Duration::from_secs(8));
@@ -1922,22 +1996,18 @@ mod tests {
             (InboxClosure::FleetDeleted, "fleet_deleted"),
         ] {
             let clock = test_clock();
-            let mut io = ScriptedInbox {
-                clock: &clock,
-                snapshots: Vec::new(),
-                script: |at, _| {
-                    if at < Duration::from_secs(2) {
-                        Ok(open(Vec::new()))
-                    } else {
-                        Ok(InboxSnapshot::Closed {
-                            fleet_id: 7,
-                            reason: closure,
-                        })
-                    }
-                },
-            };
             let mut output = RecordingOutput::new(&clock);
-            listen(&clock, &mut io, &mut output, 1, None).unwrap();
+            let mut io = ScriptedInbox::new(&clock, &output, |at, _| {
+                if at < Duration::from_secs(2) {
+                    Ok(open(Vec::new()))
+                } else {
+                    Ok(InboxSnapshot::Closed {
+                        fleet_id: 7,
+                        reason: closure,
+                    })
+                }
+            });
+            listen(&clock, &mut io, &mut output, 1, None, NEXT).unwrap();
             assert_eq!(
                 output.records,
                 [
@@ -1957,22 +2027,21 @@ mod tests {
     fn startup_validation_errors_precede_ready_and_midstream_errors_preserve_complete_records() {
         for fail_at in [1, 2] {
             let clock = test_clock();
-            let mut io = ScriptedInbox {
-                clock: &clock,
-                snapshots: Vec::new(),
-                script: |_, check| match (check == fail_at, fail_at) {
+            let mut output = RecordingOutput::new(&clock);
+            let mut io = ScriptedInbox::new(&clock, &output, |_, check| {
+                match (check == fail_at, fail_at) {
                     (true, 1) => Err(CafleetError::App("snapshot failed".into())),
                     (true, _) => Err(CafleetError::DeadlineExceeded),
                     (false, _) => Ok(open(vec![message(10)])),
-                },
-            };
-            let mut output = RecordingOutput::new(&clock);
+                }
+            });
             let error = listen(
                 &clock,
                 &mut io,
                 &mut output,
                 1,
                 Some(Duration::from_secs(3)),
+                NEXT,
             )
             .unwrap_err();
             if fail_at == 1 {
@@ -1996,23 +2065,20 @@ mod tests {
     #[test]
     fn a_startup_snapshot_that_outlives_the_lease_fails_before_emitting_ready() {
         let clock = test_clock();
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |_, check| {
-                assert_eq!(check, 1);
-                clock.elapsed.set(Duration::from_secs(2));
-                Ok(open(Vec::new()))
-            },
-        };
         let mut output = RecordingOutput::new(&clock);
+        let mut io = ScriptedInbox::new(&clock, &output, |_, check| {
+            assert_eq!(check, 1);
+            clock.elapsed.set(Duration::from_secs(2));
+            Ok(open(Vec::new()))
+        });
         assert!(matches!(
             listen(
                 &clock,
                 &mut io,
                 &mut output,
                 1,
-                Some(Duration::from_secs(1))
+                Some(Duration::from_secs(1)),
+                NEXT
             ),
             Err(CafleetError::DeadlineExceeded)
         ));
@@ -2024,12 +2090,10 @@ mod tests {
     fn output_failure_stops_before_another_snapshot_and_retains_only_flushed_records() {
         for fail_at in [0, 1] {
             let clock = test_clock();
-            let mut io = ScriptedInbox {
-                clock: &clock,
-                snapshots: Vec::new(),
-                script: |_, _| Ok(open(vec![message(10), message(11)])),
-            };
             let mut output = RecordingOutput::new(&clock);
+            let mut io = ScriptedInbox::new(&clock, &output, |_, _| {
+                Ok(open(vec![message(10), message(11)]))
+            });
             output.fail_at = Some(fail_at);
             let error = listen(
                 &clock,
@@ -2037,6 +2101,7 @@ mod tests {
                 &mut output,
                 1,
                 Some(Duration::from_secs(2)),
+                NEXT,
             )
             .unwrap_err();
             assert!(error.message().contains("injected output failure"));
@@ -2049,17 +2114,14 @@ mod tests {
     fn a_poll_output_race_preserves_the_snapshot_notice() {
         let clock = test_clock();
         let consumed = Cell::new(false);
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |_, _| {
-                Ok(open(if consumed.get() {
-                    Vec::new()
-                } else {
-                    messages(&[10, 11])
-                }))
-            },
-        };
+        let recording = RecordingOutput::new(&clock);
+        let mut io = ScriptedInbox::new(&clock, &recording, |_, _| {
+            Ok(open(if consumed.get() {
+                Vec::new()
+            } else {
+                messages(&[10, 11])
+            }))
+        });
         struct PollDuringReady<'a> {
             output: RecordingOutput<'a>,
             consumed: &'a Cell<bool>,
@@ -2081,7 +2143,7 @@ mod tests {
             }
         }
         let mut output = PollDuringReady {
-            output: RecordingOutput::new(&clock),
+            output: recording,
             consumed: &consumed,
         };
         listen(
@@ -2090,6 +2152,7 @@ mod tests {
             &mut output,
             1,
             Some(Duration::from_secs(1)),
+            NEXT,
         )
         .unwrap();
         assert_eq!(
@@ -2102,12 +2165,8 @@ mod tests {
     #[test]
     fn a_failed_final_closed_record_is_an_output_error() {
         let clock = test_clock();
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |_, _| Ok(open(Vec::new())),
-        };
         let mut output = RecordingOutput::new(&clock);
+        let mut io = ScriptedInbox::new(&clock, &output, |_, _| Ok(open(Vec::new())));
         output.fail_at = Some(1);
         let error = listen(
             &clock,
@@ -2115,6 +2174,7 @@ mod tests {
             &mut output,
             1,
             Some(Duration::from_secs(1)),
+            NEXT,
         )
         .unwrap_err();
         assert!(error.message().contains("injected output failure"));
@@ -2235,6 +2295,7 @@ mod tests {
                 &mut conn,
                 director,
                 Some(Duration::from_millis(100)),
+                NEXT,
                 write_end.as_fd(),
             )
             .unwrap_err();
@@ -2299,6 +2360,7 @@ mod tests {
             &mut conn,
             director,
             Some(Duration::from_millis(500)),
+            NEXT,
             write_end.as_fd(),
         )
         .unwrap();
@@ -2306,16 +2368,20 @@ mod tests {
         drop(write_end);
         drop(retained);
         let bytes = consumer.join().unwrap();
-        let records: Vec<Value> = bytes
+        let lines: Vec<&[u8]> = bytes
             .split(|byte| *byte == b'\n')
             .filter(|line| !line.is_empty())
+            .collect();
+        let records: Vec<Value> = lines
+            .iter()
             .map(|line| serde_json::from_slice(line).unwrap())
             .collect();
         assert_eq!(records.len(), 3);
         assert_eq!(records[0]["event"], "ready");
         assert_eq!(
-            records[1],
-            crate::output::json::listen_pending(director, &[pending.message_id])
+            std::str::from_utf8(lines[1]).unwrap(),
+            format!(r#"{{"event":"pending","next":"{NEXT}"}}"#),
+            "the notice line is the compact record carrying the supplied next command"
         );
         assert_eq!(records[2]["reason"], "timeout");
         assert_eq!(
@@ -2632,10 +2698,12 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             }
         }
 
-        fn pending_text(member_id: i64, message_ids: &[i64]) -> String {
+        /// The harness always starts the forwarder with an explicit `--database-url`, so its
+        /// notice's `next` carries that URL as a shell word.
+        fn pending_text(broker: &Broker, member_id: i64) -> String {
             format!(
-                "{RECORD_PREFIX}{}",
-                crate::output::json::listen_pending(member_id, message_ids)
+                r#"{RECORD_PREFIX}{{"event":"pending","next":"cafleet message poll {member_id} --json --database-url {}"}}"#,
+                shell_word(&broker.url)
             )
         }
 
@@ -2772,7 +2840,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             std::thread::sleep(Duration::from_millis(1500));
             assert_eq!(
                 forwarder.forwarded(),
-                [queued(&pending_text(director, &backlog))],
+                [queued(&pending_text(&broker, director))],
                 "arrivals while the notice is held are not forwarded"
             );
             let consumed = broker::poll_messages(&broker.conn, director)
@@ -2785,21 +2853,24 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 backlog.into_iter().chain([held, later]).collect(),
                 "one poll consumes the held and later arrivals together"
             );
-            let after = ["sixth", "seventh"].map(|body| broker.send(worker, director, body));
+            for body in ["sixth", "seventh"] {
+                broker.send(worker, director, body);
+            }
             assert_eq!(
                 forwarder.wait_exit(Duration::from_secs(15)),
                 0,
                 "{}",
                 forwarder.stderr()
             );
+            let notice = queued(&pending_text(&broker, director));
             assert_eq!(
                 forwarder.forwarded(),
                 [
-                    queued(&pending_text(director, &backlog)),
-                    queued(&pending_text(director, &after)),
+                    notice.clone(),
+                    notice,
                     queued(&closed_text(director, "timeout")),
                 ],
-                "ready is never forwarded, and polled IDs are never forwarded again"
+                "ready is never forwarded, and the poll releases the hold for one later notice"
             );
             assert_eq!(
                 forwarder.stdout_records(),
@@ -2925,7 +2996,9 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         fn a_refused_notice_is_retried_each_second_from_the_current_pending_set_until_accepted() {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
-            let backlog = ["first", "second"].map(|body| broker.send(worker, director, body));
+            for body in ["first", "second"] {
+                broker.send(worker, director, body);
+            }
             let forwarder = start(
                 &broker,
                 &listen_args(director, Some(5)),
@@ -2933,23 +3006,23 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 Launch::Session,
             );
             forwarder.wait_forwarded(1);
-            let arrival = broker.send(worker, director, "third");
+            broker.send(worker, director, "third");
             assert_eq!(
                 forwarder.wait_exit(Duration::from_secs(15)),
                 0,
                 "{}",
                 forwarder.stderr()
             );
-            let rebuilt = queued(&pending_text(director, &[backlog[0], backlog[1], arrival]));
+            let notice = queued(&pending_text(&broker, director));
             assert_eq!(
                 forwarder.forwarded(),
                 [
-                    queued(&pending_text(director, &backlog)),
-                    rebuilt.clone(),
-                    rebuilt,
+                    notice.clone(),
+                    notice.clone(),
+                    notice,
                     queued(&closed_text(director, "timeout")),
                 ],
-                "two refusals rebuilt from fresh snapshots, one acceptance, then the closing record"
+                "two refusals, one acceptance, then the closing record"
             );
             let gaps = forwarder.invocation_gaps();
             assert!(
@@ -2998,7 +3071,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 "{}",
                 forwarder.stderr()
             );
-            let notice = queued(&pending_text(director, &[message]));
+            let notice = queued(&pending_text(&broker, director));
             assert_eq!(
                 forwarder.forwarded(),
                 [
@@ -3022,7 +3095,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
          {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "waiting");
+            broker.send(worker, director, "waiting");
             let mut forwarder = start(
                 &broker,
                 &listen_args(director, None),
@@ -3050,7 +3123,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                     crate::output::json::listen_closed(director, "session_exited"),
                 ]
             );
-            let notice = queued(&pending_text(director, &[message]));
+            let notice = queued(&pending_text(&broker, director));
             let forwarded = forwarder.forwarded();
             assert!(
                 forwarded.iter().all(|invocation| *invocation == notice),
@@ -3063,7 +3136,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
          {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "in flight");
+            broker.send(worker, director, "in flight");
             let mut forwarder = start(
                 &broker,
                 &listen_args(director, None),
@@ -3084,7 +3157,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             assert_closed_with_session_exited(&forwarder, &broker, director);
             assert_eq!(
                 forwarder.forwarded(),
-                [queued(&pending_text(director, &[message]))],
+                [queued(&pending_text(&broker, director))],
                 "no closed notice goes to the exited session"
             );
         }
@@ -3223,7 +3296,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         fn a_non_full_queue_failure_after_a_refusal_fails_without_another_wait() {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "refused");
+            broker.send(worker, director, "refused");
             let wait = Duration::from_secs(3);
             let forwarder = start_with_env(
                 &broker,
@@ -3251,7 +3324,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 diagnostic.contains(&format!("thread {THREAD} not found")),
                 "{stderr}"
             );
-            let notice = queued(&pending_text(director, &[message]));
+            let notice = queued(&pending_text(&broker, director));
             let forwarded = forwarder.forwarded();
             assert_eq!(forwarded.len(), 3, "{forwarded:?}");
             assert_eq!(forwarded[..2], [notice.clone(), notice]);

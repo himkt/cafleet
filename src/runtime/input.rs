@@ -6692,8 +6692,8 @@ mod tests {
                         assert_eq!(reply.status, SubmissionStatus::Accepted);
                         let text = String::from_utf8(host.pty.written.clone()).unwrap();
                         assert!(text.contains(&format!(
-                            "cafleet message show {} --json",
-                            message.message_id
+                            "Body is 3000 characters; run cafleet message poll {} --json to read it.",
+                            message.to_member_id
                         )));
                         assert!(!text.contains(&message.text));
                         assert_eq!(stored(host, &reply).payload_digest, expected_digest);

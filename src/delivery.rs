@@ -2441,7 +2441,18 @@ mod tests {
     }
 
     fn pointer(stored_chars: usize) -> String {
-        format!("Body is {stored_chars} characters; run cafleet message show 57 --json to read it.")
+        format!("Body is {stored_chars} characters; run cafleet message poll 16 --json to read it.")
+    }
+
+    #[test]
+    fn the_pointer_preview_line_names_the_recipients_poll() {
+        assert_eq!(
+            pointer_preview_line(&record("短い本文")),
+            format!(
+                "[cafleet msg 57 from 15 {TS}] {} [cafleet] Resume your work if something was still running.",
+                pointer(4)
+            )
+        );
     }
 
     #[test]

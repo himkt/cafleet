@@ -305,15 +305,14 @@ mod tests {
     }
 
     #[test]
-    fn listen_pending_names_the_member_then_the_message_ids_in_the_given_order() {
-        let value = crate::output::json::listen_pending(4, &[12, 10, 11]);
-        crate::broker::runtime::test_support::assert_key_order(
-            &value,
-            &["event", "member_id", "message_ids"],
-        );
+    fn listen_pending_is_exactly_the_event_then_the_given_next_command() {
+        let next = "cafleet message poll 4 --json --database-url 'sqlite:///tmp/my fleet.db'";
+        let value = crate::output::json::listen_pending(next);
+        crate::broker::runtime::test_support::assert_key_order(&value, &["event", "next"]);
+        assert_eq!(value, json!({"event":"pending","next":next}));
         assert_eq!(
-            value,
-            json!({"event":"pending","member_id":4,"message_ids":[12,10,11]})
+            serde_json::to_string(&value).unwrap(),
+            r#"{"event":"pending","next":"cafleet message poll 4 --json --database-url 'sqlite:///tmp/my fleet.db'"}"#
         );
     }
 
