@@ -923,6 +923,14 @@ mod tests {
     }
 
     #[test]
+    fn member_pane_name_joins_the_member_id_and_name_with_a_spaced_hyphen() {
+        assert_eq!(member_pane_name(12, "drafter"), "12 - drafter");
+        assert_eq!(member_pane_name(7, "lead reviewer"), "7 - lead reviewer");
+        assert_eq!(member_pane_name(3, "a - b"), "3 - a - b");
+        assert_eq!(member_pane_name(1000, " padded "), "1000 -  padded ");
+    }
+
+    #[test]
     fn press_adapters_request_only_the_ordered_keys_and_qualify_stdout_acknowledgment() {
         let keys = parse(&[
             "A",

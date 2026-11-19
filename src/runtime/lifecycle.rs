@@ -855,7 +855,6 @@ mod tests {
             let result = operation(&mut NativeLaunchHost::new(
                 &mux,
                 &target,
-                "readiness-fixture",
                 "/readiness-fixture",
             ));
             assert!(runner.events().is_empty(), "{:?}", runner.events());
@@ -1124,6 +1123,7 @@ mod tests {
         delay: Duration,
         calls: Vec<&'static str>,
         deadlines: Vec<(&'static str, Instant)>,
+        pane_name: Option<String>,
         argv: Vec<String>,
         child_argv: Vec<String>,
         spawn_count: usize,
@@ -1147,6 +1147,7 @@ mod tests {
                 delay: Duration::ZERO,
                 calls: Vec::new(),
                 deadlines: Vec::new(),
+                pane_name: None,
                 argv: Vec::new(),
                 child_argv: Vec::new(),
                 spawn_count: 0,
@@ -1200,10 +1201,12 @@ mod tests {
         }
         fn split_runner(
             &mut self,
+            pane_name: &str,
             argv: &[String],
             deadline: Instant,
         ) -> Result<SpawnedPane, CafleetError> {
             self.phase("split", deadline)?;
+            self.pane_name = Some(pane_name.to_owned());
             self.argv = argv.to_vec();
             assert_eq!(argv[0], "/absolute/cafleet");
             assert_eq!(argv[1], "--database-url");
@@ -1668,6 +1671,19 @@ mod tests {
         );
         assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 0);
         assert_eq!(host.calls, ["split", "prepared", "start"]);
+    }
+
+    #[test]
+    fn runner_creation_names_the_split_pane_with_the_allocated_member_id_and_member_name() {
+        let (mut fixture, mut host, deadline) = launch_case();
+        let outcome = launch(&mut fixture, &mut host, deadline).unwrap();
+        let allocated = pending_run(&fixture).member_id;
+        assert_eq!(outcome.member.member_id, allocated);
+        assert_eq!(outcome.member.name, "pending-worker");
+        assert_eq!(
+            host.pane_name.as_deref(),
+            Some(format!("{allocated} - pending-worker").as_str())
+        );
     }
 
     #[test]

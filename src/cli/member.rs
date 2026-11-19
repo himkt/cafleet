@@ -1666,6 +1666,16 @@ mod tests {
             "{:?}",
             descriptor.spawn.argv
         );
+        let pane_name = format!("{member_id} - worker");
+        assert!(
+            descriptor
+                .spawn
+                .argv
+                .windows(2)
+                .any(|pair| pair[0] == "--name" && pair[1] == pane_name),
+            "{:?}",
+            descriptor.spawn.argv
+        );
         assert_eq!(
             descriptor.spawn.environment,
             vec![(
