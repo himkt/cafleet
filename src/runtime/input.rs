@@ -8311,6 +8311,111 @@ mod tests {
                 });
             }
 
+            mod immediate_failure_bookkeeping {
+                use crate::runtime::input::tests::ordinary_prompt::staged_delivery::*;
+
+                fn expired() -> Instant {
+                    let deadline = Instant::now();
+                    std::thread::sleep(Duration::from_millis(2));
+                    deadline
+                }
+
+                fn fail_advance_at_an_expired_deadline(host: &mut Host) {
+                    host.drain();
+                    let failed = host.coordinator.advance(
+                        &mut host.fixture.conn,
+                        &mut host.transport,
+                        &mut host.pty,
+                        &host.controller,
+                        expired(),
+                    );
+                    assert!(
+                        failed.is_err(),
+                        "a written attempt fails at its expired deadline"
+                    );
+                }
+
+                fn assert_recorded_uncertain_write_failed(host: &Host, input_id: i64) {
+                    let row = storage::get_input(&host.fixture.conn, input_id).unwrap();
+                    assert_eq!(row.state, storage::InputState::Uncertain, "{row:?}");
+                    assert_eq!(
+                        row.stop_cause,
+                        Some(storage::StopCause::WriteFailed),
+                        "{row:?}"
+                    );
+                    assert!(row.has_stalled_blocker_provenance(), "{row:?}");
+                    assert_eq!(
+                        host.coordinator.held_composer.map(|(blocker, _)| blocker),
+                        Some(input_id),
+                        "the written attempt still holds the composer"
+                    );
+                }
+
+                #[test]
+                fn a_written_immediate_prompt_failing_in_advance_after_its_literal_records_uncertain_write_failed()
+                 {
+                    with_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:d1-literal"));
+                        let id = host.hooks.input_id();
+                        fail_advance_at_an_expired_deadline(host);
+                        assert_recorded_uncertain_write_failed(host, id);
+                    });
+                }
+
+                #[test]
+                fn a_written_immediate_prompt_failing_in_advance_after_its_submit_key_records_uncertain_write_failed()
+                 {
+                    with_host(|host| {
+                        host.confirm_submissions = false;
+                        until_literal_written(host, prompt_request(host, "prompt:d1-submit"));
+                        let id = host.hooks.input_id();
+                        std::thread::sleep(host.stage_settle + Duration::from_millis(50));
+                        while host.pty.stage_bytes().len() < 2 {
+                            assert!(Instant::now() < host.until, "the submit stage is written");
+                            host.drain();
+                            assert!(host.advance().is_none(), "no reply before verification");
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        fail_advance_at_an_expired_deadline(host);
+                        assert_recorded_uncertain_write_failed(host, id);
+                    });
+                }
+
+                #[test]
+                fn a_written_immediate_prompt_failing_in_its_pre_write_drain_records_uncertain_write_failed()
+                 {
+                    with_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:d2-drain"));
+                        let id = host.hooks.input_id();
+                        host.child_output(b"echo");
+                        let drained = host.coordinator.progress_with_manual(
+                            &mut host.transport,
+                            |transport| {
+                                transport.quiesce_for_input(
+                                    &mut host.human,
+                                    &mut host.pty,
+                                    &mut host.output,
+                                    &mut host.controller.observer(
+                                        &host.writer,
+                                        &crate::runtime::RealObservationClock,
+                                    ),
+                                    expired(),
+                                )
+                            },
+                        );
+                        let failure =
+                            drained.expect_err("the pre-write drain fails at its deadline");
+                        let _reply = host.coordinator.pending_attempt_failed(
+                            &mut host.fixture.conn,
+                            &host.controller,
+                            failure,
+                        );
+                        host.coordinator.finish_pending_attempt();
+                        assert_recorded_uncertain_write_failed(host, id);
+                    });
+                }
+            }
+
             mod stop_cause {
                 use crate::runtime::input::tests::ordinary_prompt::staged_delivery::*;
 
@@ -8937,6 +9042,156 @@ mod tests {
                         0,
                         "a preview consumed by poll publishes no delivery result"
                     );
+                });
+            }
+
+            /// Lets each screen reach the controller, then outlives the drain deadline, as a slow
+            /// observer callback does while injected keystrokes keep the child echoing.
+            struct ExpiringObserver<O> {
+                inner: O,
+                deadline: Instant,
+            }
+            impl<O: crate::runtime::transport::ScreenObserver>
+                crate::runtime::transport::ScreenObserver for ExpiringObserver<O>
+            {
+                fn observe(&mut self, screen: &crate::runtime::ScreenSnapshot) -> Result<()> {
+                    let observed = self.inner.observe(screen);
+                    std::thread::sleep(
+                        self.deadline.saturating_duration_since(Instant::now())
+                            + Duration::from_millis(1),
+                    );
+                    observed
+                }
+                fn input_health(&self) -> crate::runtime::ObservationHealth {
+                    self.inner.input_health()
+                }
+                fn parser_failure(&mut self) -> Result<()> {
+                    self.inner.parser_failure()
+                }
+            }
+
+            /// `complete_pending_input` on a written immediate attempt whose drain deadline expires
+            /// inside the observer callback.
+            fn fail_pending_drain_mid_observation(host: &mut Host) {
+                host.child_output(b"echo of injected keys");
+                let deadline = Instant::now() + Duration::from_millis(30);
+                let drained =
+                    host.coordinator
+                        .progress_with_manual(&mut host.transport, |transport| {
+                            transport.quiesce_for_input(
+                                &mut host.human,
+                                &mut host.pty,
+                                &mut host.output,
+                                &mut ExpiringObserver {
+                                    inner: host.controller.observer(
+                                        &host.writer,
+                                        &crate::runtime::RealObservationClock,
+                                    ),
+                                    deadline,
+                                },
+                                deadline,
+                            )
+                        });
+                let failure = drained.expect_err("the pre-write drain fails at its deadline");
+                let _reply = host.coordinator.pending_attempt_failed(
+                    &mut host.fixture.conn,
+                    &host.controller,
+                    failure,
+                );
+                host.coordinator.finish_pending_attempt();
+            }
+
+            /// One `tick_running` turn with no client attempt in flight: the transport tick, the
+            /// observation poll, then the queue turn, which advances only on a quiescent drain.
+            fn queue_turn(host: &mut Host) {
+                host.coordinator
+                    .progress_with_manual(&mut host.transport, |transport| {
+                        transport.tick(
+                            &mut host.human,
+                            &mut host.pty,
+                            &mut host.output,
+                            &mut host
+                                .controller
+                                .observer(&host.writer, &crate::runtime::RealObservationClock),
+                        )
+                    })
+                    .unwrap();
+                host.controller
+                    .poll(
+                        &host.transport.snapshot(),
+                        &host.writer,
+                        &crate::runtime::RealObservationClock,
+                    )
+                    .unwrap();
+                if matches!(host.quiesce_once(), InputDrain::Quiescent) {
+                    let _ = host.try_advance();
+                }
+            }
+
+            #[test]
+            fn run_34_a_deadline_expired_immediate_write_releases_its_consumed_queued_head() {
+                with_permission_host(Duration::from_secs(30), |host| {
+                    assert!(
+                        host.handle(host.request("prompt:run-34-blocker"))
+                            .unwrap()
+                            .is_none()
+                    );
+                    while host.pty.stages.is_empty() {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the blocker's literal is written"
+                        );
+                        host.drain();
+                        assert!(host.advance().is_none());
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    let blocker = host.hooks.input_id();
+                    fail_pending_drain_mid_observation(host);
+                    let blocking = row(host, blocker);
+                    assert_eq!(blocking.state, storage::InputState::Uncertain);
+                    assert_eq!(blocking.stop_cause, Some(storage::StopCause::WriteFailed));
+
+                    let message = host.message("queued behind the blocker");
+                    let request = preview_request(host, &message, &canonical_preview(&message));
+                    let head = queued(host, request, "earlier_input");
+                    let offers = host.pty.offers.len();
+                    assert!(matches!(
+                        host.receipt(crate::runtime::ReceiptAction::Reconcile {
+                            input_id: blocker,
+                            expected: storage::InputState::Uncertain,
+                            disposition: storage::InputDisposition::Submitted,
+                            evidence_ref: "audit:pane-shows-submitted".into(),
+                        })
+                        .unwrap(),
+                        InputControlReply::Receipt(crate::runtime::ReceiptReply::Settled {
+                            input_id
+                        }) if input_id == blocker
+                    ));
+                    assert!(
+                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
+                            .unwrap()
+                            .iter()
+                            .any(|consumed| consumed.message_id == message.message_id)
+                    );
+
+                    host.child_output(SCREEN);
+                    let bound = Instant::now() + Duration::from_secs(3);
+                    while row(host, head).state == storage::InputState::Ready {
+                        assert!(
+                            Instant::now() < bound,
+                            "the consumed head is released; drain blocker {:?}",
+                            host.transport.drain_blocker()
+                        );
+                        queue_turn(host);
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    assert_not_submitted(host, head, "message_consumed");
+                    assert_eq!(
+                        host.pty.offers.len(),
+                        offers,
+                        "the consumed preview is never typed"
+                    );
+                    assert_eq!(result_events(host, head), 0);
                 });
             }
 
