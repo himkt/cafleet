@@ -6386,6 +6386,232 @@
           "kind": "unsubmitted_literal"
         }
       ]
+    },
+    {
+      "id": "claude-2.1.322-suggestion-herdr-094-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 38,
+      "cols": 94,
+      "source_ref": "native/claude.json",
+      "sha256": "1c2b8e72ba7c5adb2b76dd1af50e36c8c2766d3a2301b36fb933033350acc500",
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "claude-2.1.322-draft-herdr-094-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 38,
+      "cols": 94,
+      "source_ref": "native/claude.json",
+      "sha256": "d5c72b675c77ea3ce289ea494d63b55e7d5ffc44b27c9e1a6b3311ccbaa959b9",
+      "composer_draft": {
+        "text": "draft text"
+      }
+    },
+    {
+      "id": "claude-2.1.322-shell-mode-herdr-094-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 38,
+      "cols": 94,
+      "source_ref": "native/claude.json",
+      "sha256": "5a6ac3eff6453055895abc5b14d2385a5fe330ddab96a350557a6b8ced35776a",
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "codex-0.167.0-suggestion-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "6e4a47c3a8477a3cf33b516dd021640ee6cfefb298b67a4ce31d5d0bef725cbc",
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "codex-0.167.0-draft-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "110d136803b16de1e3a8b11f94ba2cad6a0704ca6b0a7bc5b1e7a25d0025074f",
+      "composer_draft": {
+        "text": "draft text"
+      }
+    },
+    {
+      "id": "codex-0.167.0-shell-mode-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "c26198f0d96518c93e0475932061e9e919068962fe3e572309e73c7050382c35",
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "opencode-2.2.7-suggestion-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "c9a9caa99a161f129edbe7a6340c4f735df3a7a384d1313c1cab7b554dcd1945",
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "opencode-2.2.7-draft-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "e405f8cc73c91d8913f29059333b1814871a590e78d8f10bfe1958d1e3736fe0",
+      "composer_draft": {
+        "text": "draft text"
+      }
+    },
+    {
+      "id": "opencode-2.2.7-wrapped-draft-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "9f0f51e6d1ce3ce4330905e1211ca131dd2dd09f1193969297054a9fa57b0293",
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "opencode-2.2.7-shell-mode-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "c08493f3cdc3768d948bcd702bb4a3ddf6429fcadd286dc0c086914a5255730e",
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "hermes-2026.9.24-suggestion-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "172448c73f48e5ac3d9e6d1e06b42bc149d51c5c6edfd544d5c5370647e150c1",
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "hermes-2026.9.24-draft-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "2798505854684c13bb203ec6882d70bbe6be051d940cf5b9aa358a92af31d748",
+      "composer_draft": {
+        "text": "draft text"
+      }
+    },
+    {
+      "id": "hermes-2026.9.24-multi-row-draft-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "f200ffabb915e9b494b719ac5f0521466a81b5383c0469e5ce25d371ea8b116d",
+      "composer_draft": {
+        "text": "draft text that wraps onto a continuation row because it is longer than the composer is wide, so the draft spans sever\nal rows"
+      }
+    },
+    {
+      "id": "hermes-2026.9.24-shell-prefix-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "33cd0bc7bcf41bb6d69cf70488ba25f842b1b3f774f860c9855f6a120cfd9d09",
+      "composer_draft": {
+        "text": "!ls"
+      }
+    },
+    {
+      "id": "pi-1.5.2-empty-composer-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.2",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "9d4d75f994a578df9c048e0fe12a38ac689e7ccf91da10948490e5917b7ef4da",
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "pi-1.5.2-draft-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.2",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "d7ddeac5a6b004f6c7252c179567e30c3aa1dc0bb97cf37a62b6479f6a6f4f67",
+      "composer_draft": {
+        "text": "draft text"
+      }
+    },
+    {
+      "id": "pi-1.5.2-multi-row-draft-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.2",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "46a0ecdb3386d1366c80e978830502f6ecf970cc8132fa130abeba16066417a8",
+      "composer_draft": {
+        "text": "draft text that wraps onto a second editor row because it is longer than the editor is wide, so the draft spans\nseveral rows of the editor"
+      }
+    },
+    {
+      "id": "pi-1.5.2-shell-prefix-tmux-120-1",
+      "kind": "native",
+      "backend": "pi",
+      "native_version": "1.5.2",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/pi.json",
+      "sha256": "8b9c6e74195642e54eb61c0bb452ae72d10060859dc52403497853605020b834",
+      "composer_draft": {
+        "text": "!ls"
+      }
     }
   ],
   "profiles": [
@@ -6492,6 +6718,35 @@
             "choices": []
           },
           "verified_noninteraction": true
+        },
+        {
+          "id": "claude-suggestion-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^❯\\u{a0}",
+            "end_pattern": "^❯\\u{a0}",
+            "max_rows": 1,
+            "cursor": "after_prompt"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^❯\\u{a0}"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true,
+          "suggestion": {
+            "style": {
+              "faint": true
+            }
+          }
         },
         {
           "id": "claude-auto-ask-permission",
@@ -7451,7 +7706,8 @@
         },
         "composer": {
           "rule_ids": [
-            "claude-idle-composer"
+            "claude-idle-composer",
+            "claude-suggestion-composer"
           ],
           "fixture_ids": [
             "claude-2.1.302-idle-composer-1",
@@ -7491,7 +7747,8 @@
             "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
             "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
             "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
-            "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
+            "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+            "claude-2.1.322-suggestion-herdr-094-1"
           ],
           "submission": {
             "prompt": {
@@ -7909,6 +8166,29 @@
             ]
           }
         ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "either",
+          "start_pattern": "^❯\\u{a0}",
+          "end_pattern": "^❯\\u{a0}",
+          "max_rows": 1,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "start",
+          "last": "end"
+        },
+        "prompt_pattern": "^❯\\u{a0}",
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
+          "claude-2.1.322-suggestion-herdr-094-1",
+          "claude-2.1.322-draft-herdr-094-1",
+          "claude-2.1.322-shell-mode-herdr-094-1"
+        ]
       }
     },
     {
@@ -8014,6 +8294,35 @@
           "verified_noninteraction": true
         },
         {
+          "id": "codex-suggestion-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^› ",
+            "end_pattern": "^› ",
+            "max_rows": 1,
+            "cursor": "after_prompt"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^› "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true,
+          "suggestion": {
+            "style": {
+              "faint": true
+            }
+          }
+        },
+        {
           "id": "codex-auto-review-refusal",
           "priority": 40,
           "observation": "automatic_refusal",
@@ -8113,7 +8422,8 @@
         },
         "composer": {
           "rule_ids": [
-            "codex-idle-composer"
+            "codex-idle-composer",
+            "codex-suggestion-composer"
           ],
           "fixture_ids": [
             "codex-0.163.0-idle-composer-1",
@@ -8158,7 +8468,8 @@
             "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
             "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
             "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
-            "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
+            "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
+            "codex-0.167.0-suggestion-tmux-120-1"
           ],
           "submission": {
             "prompt": {
@@ -8296,6 +8607,29 @@
               "codex-0.163.0-deny-pre-stage-1"
             ]
           }
+        ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^› ",
+          "end_pattern": "^› ",
+          "max_rows": 1,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "start",
+          "last": "end"
+        },
+        "prompt_pattern": "^› ",
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
+          "codex-0.167.0-suggestion-tmux-120-1",
+          "codex-0.167.0-draft-tmux-120-1",
+          "codex-0.167.0-shell-mode-tmux-120-1"
         ]
       }
     },
@@ -8544,9 +8878,9 @@
           "region": {
             "screen": "primary",
             "start_pattern": "^┃ ",
-            "end_pattern": "^┃ ",
-            "max_rows": 1,
-            "cursor": "at_end"
+            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+            "max_rows": 3,
+            "cursor": "after_prompt"
           },
           "matchers": [
             {
@@ -8560,6 +8894,40 @@
             "choices": []
           },
           "verified_noninteraction": true
+        },
+        {
+          "id": "opencode-suggestion-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^┃ ",
+            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+            "max_rows": 3,
+            "cursor": "after_prompt"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^┃ "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true,
+          "suggestion": {
+            "style": {
+              "foreground": {
+                "kind": "rgb",
+                "r": 128,
+                "g": 128,
+                "b": 128
+              }
+            }
+          }
         }
       ],
       "capabilities": {
@@ -8578,7 +8946,8 @@
         },
         "composer": {
           "rule_ids": [
-            "opencode-idle-composer"
+            "opencode-idle-composer",
+            "opencode-suggestion-composer"
           ],
           "fixture_ids": [
             "opencode-2.1.4-idle-composer-1",
@@ -8614,7 +8983,9 @@
             "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
             "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
             "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
-            "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
+            "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+            "opencode-2.2.7-suggestion-tmux-120-1",
+            "opencode-2.2.7-shell-mode-tmux-120-1"
           ],
           "submission": {
             "prompt": {
@@ -8815,6 +9186,30 @@
             ]
           }
         ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^┃ ",
+          "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+          "max_rows": 8,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "start",
+          "last": "before_end"
+        },
+        "prompt_pattern": "^┃ ",
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
+          "opencode-2.2.7-suggestion-tmux-120-1",
+          "opencode-2.2.7-draft-tmux-120-1",
+          "opencode-2.2.7-wrapped-draft-tmux-120-1",
+          "opencode-2.2.7-shell-mode-tmux-120-1"
+        ]
       }
     },
     {
@@ -9008,6 +9403,38 @@
           "verified_noninteraction": true
         },
         {
+          "id": "hermes-suggestion-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^❯ ",
+            "end_pattern": "^❯ ",
+            "max_rows": 1,
+            "cursor": "after_prompt"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^❯ "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true,
+          "suggestion": {
+            "style": {
+              "foreground": {
+                "kind": "indexed",
+                "index": 136
+              }
+            }
+          }
+        },
+        {
           "id": "hermes-working-composer",
           "priority": 50,
           "observation": "composer_empty",
@@ -9063,6 +9490,7 @@
         "composer": {
           "rule_ids": [
             "hermes-idle-composer",
+            "hermes-suggestion-composer",
             "hermes-working-composer"
           ],
           "fixture_ids": [
@@ -9113,7 +9541,8 @@
             "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
             "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43",
             "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-tmux-120-94",
-            "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93"
+            "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93",
+            "hermes-2026.9.24-suggestion-tmux-120-1"
           ],
           "submission": {
             "prompt": {
@@ -9329,6 +9758,30 @@
               "hermes-2026.9.24-override-deny-focus-tmux-057-1"
             ]
           }
+        ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^❯ ",
+          "end_pattern": "^─+ *$",
+          "max_rows": 4,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "start",
+          "last": "before_end"
+        },
+        "prompt_pattern": "^❯ ",
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
+          "hermes-2026.9.24-suggestion-tmux-120-1",
+          "hermes-2026.9.24-draft-tmux-120-1",
+          "hermes-2026.9.24-multi-row-draft-tmux-120-1",
+          "hermes-2026.9.24-shell-prefix-tmux-120-1"
         ]
       }
     },
@@ -9687,6 +10140,30 @@
               "pi-1.5.0-deny-pre-stage-2-herdr-049-1"
             ]
           }
+        ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^─+ *$",
+          "end_pattern": "^─+ *$",
+          "max_rows": 10,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "after_start",
+          "last": "before_end"
+        },
+        "prompt_pattern": null,
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
+          "pi-1.5.2-empty-composer-tmux-120-1",
+          "pi-1.5.2-draft-tmux-120-1",
+          "pi-1.5.2-multi-row-draft-tmux-120-1",
+          "pi-1.5.2-shell-prefix-tmux-120-1"
         ]
       }
     }

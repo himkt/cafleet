@@ -5597,6 +5597,948 @@
           "reason": "reviewed_privacy"
         }
       ]
+    },
+    "codex-0.167.0-suggestion-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/codex-work",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna high · /tmp/cafleet-programmer-research/codex-work · Context 0% used · Standard",
+        "  ← for agents · ? for shortcuts                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 4,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 48,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 20,
+          "end_col": 63,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 66,
+          "end_col": 81,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 84,
+          "end_col": 92,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-draft-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 12,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/codex-work",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› draft text",
+        " ",
+        "  GPT-6-Luna high · /tmp/cafleet-programmer-research/codex-work · Context 0% used · Standard",
+        "                                                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 4,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 48,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 20,
+          "end_col": 63,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 66,
+          "end_col": 81,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 84,
+          "end_col": 92,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-shell-mode-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/codex-work",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "!",
+        " ",
+        "  GPT-6-Luna high · /tmp/cafleet-programmer-research/codex-work · Context 0% used · Standard",
+        "                                                                                Shell mode    ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 4,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 48,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 20,
+          "end_col": 63,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 66,
+          "end_col": 81,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 84,
+          "end_col": 92,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 80,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
     }
   }
 }

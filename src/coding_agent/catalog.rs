@@ -6,6 +6,7 @@ use crate::coding_agent::NativeVersion;
 use crate::coding_agent::detector::ObservationKind;
 use crate::error::CafleetError;
 use crate::error::Result;
+use crate::runtime::ScreenSnapshot;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -156,6 +157,14 @@ fn nonblank<'de, D: Deserializer<'de>>(d: D) -> Field<String, D::Error> {
 fn pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Regex, D::Error> {
     Regex::new(&nonblank(d)?).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
 }
+/// A required key holding a pattern or `null`.
+fn optional_pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Option<Regex>, D::Error> {
+    Option::<NonBlank>::deserialize(d)?
+        .map(|text| {
+            Regex::new(&text.0).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
+        })
+        .transpose()
+}
 fn patterns<'de, D: Deserializer<'de>>(d: D) -> Field<Vec<Regex>, D::Error> {
     Vec::<NonBlank>::deserialize(d)?
         .into_iter()
@@ -230,6 +239,79 @@ struct RawProfile {
     min_version: NativeVersion,
     rules: Vec<RawRule>,
     capabilities: RawCapabilities,
+    composer_draft: RawComposerDraft,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawComposerDraft {
+    region: Region,
+    draft_rows: DraftRows,
+    #[serde(deserialize_with = "optional_pattern")]
+    prompt_pattern: Option<Regex>,
+    mode_switch_prefixes: Vec<String>,
+    #[serde(rename = "fixture_ids")]
+    _fixture_ids: IgnoredAny,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DraftRows {
+    pub(crate) first: DraftFirst,
+    pub(crate) last: DraftLast,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DraftFirst {
+    Start,
+    AfterStart,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DraftLast {
+    End,
+    BeforeEnd,
+}
+
+/// Where a profile's composer draft is read from the emulated screen.
+#[derive(Clone)]
+pub(super) struct ComposerDraftSpec {
+    pub(crate) region: Region,
+    pub(crate) rows: DraftRows,
+    pub(crate) prompt: Option<Regex>,
+    pub(crate) mode_switch_prefixes: Vec<String>,
+    pub(crate) suggestion: Option<SuggestionStyle>,
+}
+
+/// The composer text a forced flush appends to, as read from the emulated screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ComposerDraft {
+    Readable(String),
+    Unreadable,
+}
+
+fn compile_composer_draft(raw: RawComposerDraft, rules: &[Rule]) -> Result<ComposerDraftSpec> {
+    require(
+        !raw.mode_switch_prefixes.is_empty()
+            && raw
+                .mode_switch_prefixes
+                .iter()
+                .all(|prefix| (1..=4).contains(&prefix.chars().count())),
+        "composer_draft declares 1–4-scalar mode_switch_prefixes",
+    )?;
+    let mut styles = rules.iter().filter_map(|rule| rule.suggestion);
+    let suggestion = styles.next();
+    require(
+        styles.all(|style| Some(style) == suggestion),
+        "a profile's composer rules share one suggestion style",
+    )?;
+    Ok(ComposerDraftSpec {
+        region: raw.region,
+        rows: raw.draft_rows,
+        prompt: raw.prompt_pattern,
+        mode_switch_prefixes: raw.mode_switch_prefixes,
+        suggestion,
+    })
 }
 
 #[derive(Deserialize)]
@@ -250,6 +332,8 @@ struct RawRule {
     continues_choice_id: Option<NonBlank>,
     #[serde(default, deserialize_with = "present")]
     fixture_ids: Option<IgnoredAny>,
+    #[serde(default, deserialize_with = "present")]
+    suggestion: Option<RawSuggestion>,
 }
 
 #[derive(Deserialize)]
@@ -435,8 +519,50 @@ pub(super) enum ScreenSelector {
 #[serde(rename_all = "snake_case")]
 pub(super) enum CursorRule {
     AtEnd,
+    /// On the region's first row, right after the region's `start_pattern` match.
+    AfterPrompt,
     Inside,
     Any,
+}
+/// The cell style a native CLI draws an inline suggestion in; such cells are not input.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SuggestionStyle {
+    Faint,
+    Foreground(vt100::Color),
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSuggestion {
+    style: RawSuggestionStyle,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSuggestionStyle {
+    #[serde(default, deserialize_with = "present")]
+    faint: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    foreground: Option<RawColour>,
+}
+/// The fixture `cell_backgrounds` colour form.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum RawColour {
+    Indexed { index: u8 },
+    Rgb { r: u8, g: u8, b: u8 },
+}
+fn suggestion_style(raw: RawSuggestion) -> Result<SuggestionStyle> {
+    match (raw.style.faint, raw.style.foreground) {
+        (Some(true), None) => Ok(SuggestionStyle::Faint),
+        (None, Some(RawColour::Indexed { index })) => {
+            Ok(SuggestionStyle::Foreground(vt100::Color::Idx(index)))
+        }
+        (None, Some(RawColour::Rgb { r, g, b })) => {
+            Ok(SuggestionStyle::Foreground(vt100::Color::Rgb(r, g, b)))
+        }
+        _ => Err(invalid(
+            "a suggestion style is exactly {\"faint\": true} or one indexed or rgb foreground",
+        )),
+    }
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -472,6 +598,7 @@ pub(super) struct Rule {
     pub(crate) verified: bool,
     pub(crate) continuation: Option<Continuation>,
     pub(crate) frame: Option<Frame>,
+    pub(crate) suggestion: Option<SuggestionStyle>,
 }
 #[derive(Clone)]
 pub(super) struct Capability {
@@ -555,6 +682,7 @@ pub(super) struct Profile {
     pub(crate) annotations: Option<Capability>,
     pub(crate) submissions: [Option<ComposerSubmission>; 2],
     pub(crate) answers: Vec<Answer>,
+    pub(crate) composer_draft: ComposerDraftSpec,
 }
 impl Profile {
     pub(super) fn answer_plan(
@@ -735,6 +863,11 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         }
         (None, false, _) => {}
     }
+    let suggestion = raw.suggestion.map(suggestion_style).transpose()?;
+    require(
+        suggestion.is_none() || kind == ObservationKind::ComposerEmpty,
+        "only composer_empty rules declare a suggestion style",
+    )?;
     Ok(Rule {
         id: raw.id.0,
         priority: raw.priority,
@@ -746,6 +879,7 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         verified,
         continuation,
         frame: raw.frame,
+        suggestion,
     })
 }
 fn validate_gates(
@@ -1057,6 +1191,7 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
         .into_iter()
         .map(|answer| compile_answer(answer, &rules, &mut identities, &mut keys))
         .collect::<Result<Vec<_>>>()?;
+    let composer_draft = compile_composer_draft(raw.composer_draft, &rules)?;
     Ok(Profile {
         backend,
         min_version_text: min.0.to_string(),
@@ -1067,6 +1202,7 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
         annotations,
         submissions,
         answers,
+        composer_draft,
     })
 }
 
@@ -1119,6 +1255,33 @@ impl ProfileCatalog {
             #[cfg(test)]
             capture_origin: "synthetic",
         })
+    }
+    /// The draft the selected profile reads from `screen`; an unselected version, or a screen
+    /// whose composer region does not match exactly once, is unreadable.
+    pub(crate) fn composer_draft(
+        &self,
+        backend: CodingAgent,
+        native_version: &str,
+        screen: &ScreenSnapshot,
+    ) -> ComposerDraft {
+        self.matching(backend, Some(native_version))
+            .map_or(ComposerDraft::Unreadable, |profile| {
+                crate::coding_agent::detector::composer_draft(&profile.composer_draft, screen)
+            })
+    }
+    /// The declared mode-switch prefix `draft` starts with; an empty draft matches none.
+    pub(crate) fn mode_switch_prefix(
+        &self,
+        backend: CodingAgent,
+        native_version: &str,
+        draft: &str,
+    ) -> Option<&str> {
+        self.matching(backend, Some(native_version))?
+            .composer_draft
+            .mode_switch_prefixes
+            .iter()
+            .find(|prefix| draft.starts_with(prefix.as_str()))
+            .map(String::as_str)
     }
     pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
         let version = NativeVersion::parse(version?)?;
@@ -1240,6 +1403,21 @@ pub(crate) struct ComposerPlan {
 impl ComposerPlan {
     pub(crate) fn literal_framing(&self) -> LiteralFraming {
         self.literal_framing
+    }
+
+    pub(crate) fn submit_bytes(&self) -> &[u8] {
+        &self.submit
+    }
+
+    /// The plan's plain literal limit as its maximum and unit word (`bytes` or `characters`).
+    pub(crate) fn plain_bound(&self) -> Option<(u64, &'static str)> {
+        self.plain_literal_limit.map(|limit| {
+            let unit = match limit.unit {
+                LiteralUnit::Bytes => "bytes",
+                LiteralUnit::Scalars => "characters",
+            };
+            (limit.max.get(), unit)
+        })
     }
 
     pub(crate) fn plain_literal_allowed(&self, literal: &str) -> bool {
@@ -1440,6 +1618,61 @@ pub(crate) mod test_support {
         Ok(())
     }
 
+    /// Replays every native fixture a profile's `composer_draft` cites and requires the
+    /// profile's extraction to reproduce the fixture's recorded draft.
+    fn verify_bundled_drafts(
+        catalog: &ProfileCatalog,
+        definitions: &Value,
+        embedded: &[(&str, &[u8])],
+    ) -> Result<()> {
+        let raw = ProvenanceCatalog::deserialize(definitions)
+            .map_err(|cause| invalid(cause.to_string()))?;
+        for profile in &raw.profiles {
+            for id in &profile.composer_draft.fixture_ids.0 {
+                let fixture = raw
+                    .fixtures
+                    .iter()
+                    .find(|fixture| &fixture.id.0 == id)
+                    .expect("provenance validated every composer draft citation");
+                if fixture.kind != FixtureKind::Native {
+                    continue;
+                }
+                let expected = fixture
+                    .composer_draft
+                    .as_ref()
+                    .expect("provenance validated every composer draft expectation");
+                let entry = array(&definitions["fixtures"])?
+                    .iter()
+                    .find(|entry| entry["id"] == id.as_str())
+                    .expect("a validated fixture has its catalog entry");
+                let source = text(&entry["source_ref"])?;
+                let (_, bytes) = embedded
+                    .iter()
+                    .find(|(reference, _)| *reference == source)
+                    .expect("verified bundled fixtures are embedded");
+                let file: Value = serde_json::from_slice(bytes)
+                    .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
+                let screen = &file["screens"][id.as_str()];
+                let snapshot = crate::coding_agent::detector::test_support::replay_native_fixture(
+                    &crate::digest::canonical_json(screen),
+                    |_| {},
+                    boolean(&screen["alternate_screen"])?,
+                    None,
+                );
+                let extracted = catalog.composer_draft(
+                    fixture.backend,
+                    &text(&entry["native_version"])?,
+                    &snapshot,
+                );
+                require(
+                    expected.matches(&extracted),
+                    &format!("composer draft fixture {id} does not reproduce its expected draft"),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     fn verify_native_fixture_file<'a>(
         file: &'a Value,
         entries: &[&Value],
@@ -1488,10 +1721,12 @@ pub(crate) mod test_support {
             ),
         )?;
         let backgrounds = screen.get("cell_backgrounds").is_some();
+        let styles = screen.get("cell_styles").is_some();
         let fields = SCREEN_FIELDS
             .iter()
             .copied()
             .chain(backgrounds.then_some("cell_backgrounds"))
+            .chain(styles.then_some("cell_styles"))
             .collect::<Vec<_>>();
         let m = object(screen, &fields)?;
         require(
@@ -1538,6 +1773,75 @@ pub(crate) mod test_support {
         }
         if backgrounds {
             verify_cell_backgrounds(&m["cell_backgrounds"], rows, cols, &masked)?;
+        }
+        if styles {
+            verify_cell_styles(&m["cell_styles"], rows, cols, &masked)?;
+        }
+        Ok(())
+    }
+
+    fn verify_colour(value: &Value) -> Result<()> {
+        let channel = |value: &Value| {
+            value
+                .as_u64()
+                .filter(|n| *n <= 255)
+                .ok_or_else(|| invalid("fixture colour channel outside 0..=255"))
+        };
+        match value.get("kind").and_then(Value::as_str) {
+            Some("indexed") => {
+                channel(&object(value, &["kind", "index"])?["index"])?;
+            }
+            Some("rgb") => {
+                let m = object(value, &["kind", "r", "g", "b"])?;
+                for name in ["r", "g", "b"] {
+                    channel(&m[name])?;
+                }
+            }
+            _ => return Err(invalid("fixture colour must be indexed or rgb")),
+        }
+        Ok(())
+    }
+
+    fn verify_cell_styles(
+        value: &Value,
+        rows: u16,
+        cols: u16,
+        masked: &BTreeSet<usize>,
+    ) -> Result<()> {
+        let index = |value: &Value, bound: u64| {
+            value
+                .as_u64()
+                .filter(|n| *n <= bound)
+                .ok_or_else(|| invalid("style run coordinate outside its geometry"))
+        };
+        let mut spans = BTreeMap::<u64, Vec<(u64, u64)>>::new();
+        for run in array(value)? {
+            let run = object(run, &["row", "start_col", "end_col", "faint", "foreground"])?;
+            let row = index(&run["row"], u64::from(rows) - 1)?;
+            let start = index(&run["start_col"], u64::from(cols))?;
+            let end = index(&run["end_col"], u64::from(cols))?;
+            require(start < end, "style run requires start below end")?;
+            require(
+                !masked.contains(&usize::try_from(row).expect("bounded row")),
+                "style run inside a masked row",
+            )?;
+            let faint = boolean(&run["faint"])?;
+            let foreground = &run["foreground"];
+            if !foreground.is_null() {
+                verify_colour(foreground)?;
+            }
+            require(
+                faint || !foreground.is_null(),
+                "style run requires a non-default attribute",
+            )?;
+            spans.entry(row).or_default().push((start, end));
+        }
+        for runs in spans.values_mut() {
+            runs.sort_unstable();
+            require(
+                runs.windows(2).all(|pair| pair[0].1 <= pair[1].0),
+                "style runs overlap",
+            )?;
         }
         Ok(())
     }
@@ -1629,6 +1933,55 @@ pub(crate) mod test_support {
         sha256: NonBlank,
         #[serde(default, deserialize_with = "present")]
         composer_evidence: Option<Vec<ComposerEvidence>>,
+        #[serde(default, deserialize_with = "present")]
+        composer_draft: Option<ExpectedDraft>,
+    }
+
+    /// The draft a cited fixture's screen must extract to, or its unreadable classification.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum ExpectedDraft {
+        Text(String),
+        Unreadable,
+    }
+
+    impl<'de> Deserialize<'de> for ExpectedDraft {
+        fn deserialize<D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> std::result::Result<Self, D::Error> {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Text {
+                text: String,
+            }
+            #[derive(Deserialize)]
+            #[serde(untagged)]
+            enum Raw {
+                Marker(String),
+                Text(Text),
+            }
+            match Raw::deserialize(deserializer)? {
+                Raw::Marker(marker) if marker == "unreadable" => Ok(Self::Unreadable),
+                Raw::Marker(_) => Err(serde::de::Error::custom(
+                    "an expected composer draft is {\"text\": …} or \"unreadable\"",
+                )),
+                Raw::Text(Text { text }) => Ok(Self::Text(text)),
+            }
+        }
+    }
+
+    impl ExpectedDraft {
+        fn matches(&self, extracted: &ComposerDraft) -> bool {
+            match (self, extracted) {
+                (Self::Text(expected), ComposerDraft::Readable(text)) => expected == text,
+                (Self::Unreadable, ComposerDraft::Unreadable) => true,
+                _ => false,
+            }
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct ProvenanceDraft {
+        fixture_ids: Ids,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -1718,6 +2071,7 @@ pub(crate) mod test_support {
         min_version: NativeVersion,
         rules: Vec<ProvenanceRule>,
         capabilities: ProvenanceCapabilities,
+        composer_draft: ProvenanceDraft,
     }
 
     #[derive(Deserialize)]
@@ -1928,6 +2282,15 @@ pub(crate) mod test_support {
             for answer in &capabilities.answers {
                 cite(&answer.fixture_ids)?;
             }
+            cite(&profile.composer_draft.fixture_ids)?;
+            require(
+                profile.composer_draft.fixture_ids.0.iter().all(|id| {
+                    raw.fixtures
+                        .iter()
+                        .any(|fixture| &fixture.id.0 == id && fixture.composer_draft.is_some())
+                }),
+                "composer draft fixtures record their expected draft",
+            )?;
         }
         Ok(())
     }
@@ -2016,6 +2379,7 @@ pub(crate) mod test_support {
         ) -> Result<Self> {
             let catalog = load(definitions)?;
             verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
+            verify_bundled_drafts(&catalog, definitions, embedded)?;
             let catalog = Self {
                 capture_origin: "bundled_unknown",
                 ..catalog
@@ -2057,6 +2421,7 @@ pub(crate) mod test_support {
                 .as_array_mut()
                 .unwrap()
                 .push(composer.clone());
+            profile["composer_draft"]["fixture_ids"] = json!([id]);
             let capabilities = &mut profile["capabilities"];
             capabilities["detection"]["fixture_ids"] = json!([id]);
             capabilities["annotations"]["fixture_ids"] = json!([id]);
@@ -2110,8 +2475,15 @@ pub(crate) mod test_support {
     pub(crate) fn synthetic_definitions() -> Value {
         json!({
             "schema_version":1,
-            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
+            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773","composer_draft":"unreadable"}],
             "profiles":[{"backend":"codex","min_version":"0.0.1-synthetic",
+                "composer_draft":{
+                    "region":{"screen":"either","start_pattern":"^Synthetic state$","end_pattern":"^State end$","max_rows":4,"cursor":"any"},
+                    "draft_rows":{"first":"after_start","last":"before_end"},
+                    "prompt_pattern":null,
+                    "mode_switch_prefixes":["!"],
+                    "fixture_ids":["synthetic-permission-1"]
+                },
                 "rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
                     "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
                     "matchers":[
@@ -3690,6 +4062,243 @@ mod tests {
         }
     }
 
+    mod composer_draft {
+        use crate::coding_agent::CodingAgent;
+        use crate::coding_agent::catalog::ComposerDraft;
+        use crate::coding_agent::catalog::ProfileCatalog;
+        use crate::coding_agent::catalog::test_support::VERSION;
+        use crate::coding_agent::catalog::test_support::load;
+        use crate::coding_agent::catalog::test_support::simple_definition;
+        use crate::coding_agent::catalog::test_support::synthetic_definitions;
+        use crate::runtime::ScreenSnapshot;
+        use crate::runtime::TerminalSize;
+        use crate::runtime::TerminalState;
+        use serde_json::Value;
+        use serde_json::json;
+
+        const FAINT: &str = "\x1b[2m";
+        const RESET: &str = "\x1b[0m";
+
+        fn single_row() -> Value {
+            json!({
+                "region":{"screen":"either","start_pattern":"^> ","end_pattern":"^> ","max_rows":1,"cursor":"any"},
+                "draft_rows":{"first":"start","last":"end"},
+                "prompt_pattern":"^> ",
+                "mode_switch_prefixes":["!", "/", "❯"],
+                "fixture_ids":["synthetic-permission-1"]
+            })
+        }
+
+        fn framed() -> Value {
+            json!({
+                "region":{"screen":"either","start_pattern":"^=== editor ===$","end_pattern":"^=== end ===$","max_rows":8,"cursor":"any"},
+                "draft_rows":{"first":"after_start","last":"before_end"},
+                "prompt_pattern":null,
+                "mode_switch_prefixes":["!"],
+                "fixture_ids":["synthetic-permission-1"]
+            })
+        }
+
+        /// A composer catalog whose empty-composer rule declares a faint suggestion style, so
+        /// draft extraction removes faint cells.
+        fn suggesting(draft: Value) -> Value {
+            let mut definition = simple_definition("composer_empty", true);
+            let rule = &mut definition["profiles"][0]["rules"][0];
+            rule["region"] = json!({"screen":"either","start_pattern":"^> ","end_pattern":"^> ","max_rows":1,"cursor":"after_prompt"});
+            rule["matchers"] = json!([{"id":"prompt","scope":"line","pattern":"^> "}]);
+            rule["suggestion"] = json!({"style":{"faint":true}});
+            definition["profiles"][0]["composer_draft"] = draft;
+            definition
+        }
+
+        fn with_draft(draft: Value) -> Value {
+            let mut definition = synthetic_definitions();
+            definition["profiles"][0]["composer_draft"] = draft;
+            definition
+        }
+
+        fn catalog(definition: &Value) -> ProfileCatalog {
+            load(definition).unwrap_or_else(|cause| panic!("{}", cause.message()))
+        }
+
+        /// Paints `rows` from the screen's first row, each already carrying its SGR styling.
+        fn screen(rows: &[&str]) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            state.feed(b"\x1b[2J").unwrap();
+            for (index, row) in rows.iter().enumerate() {
+                state
+                    .feed(format!("\x1b[{};1H{row}{RESET}", index + 1).as_bytes())
+                    .unwrap();
+            }
+            state.snapshot()
+        }
+
+        fn extracted(definition: &Value, rows: &[&str]) -> ComposerDraft {
+            catalog(definition).composer_draft(CodingAgent::Codex, VERSION, &screen(rows))
+        }
+
+        fn readable(draft: ComposerDraft) -> String {
+            match draft {
+                ComposerDraft::Readable(text) => text,
+                ComposerDraft::Unreadable => panic!("the composer draft is readable"),
+            }
+        }
+
+        fn rejected(definition: &Value) -> bool {
+            load(definition).is_err()
+        }
+
+        #[test]
+        fn a_single_row_draft_strips_the_prompt_marker_and_trailing_blanks() {
+            let definition = with_draft(single_row());
+            assert_eq!(
+                readable(extracted(
+                    &definition,
+                    &["transcript", "> fix the build   "]
+                )),
+                "fix the build"
+            );
+            assert_eq!(readable(extracted(&definition, &["transcript", "> "])), "");
+        }
+
+        #[test]
+        fn suggestion_styled_cells_are_removed_from_the_draft() {
+            let definition = suggesting(single_row());
+            let suggestion = format!("> {FAINT}fix the failing build");
+            assert_eq!(readable(extracted(&definition, &[&suggestion])), "");
+            let typed = format!("> fix{FAINT} the failing build");
+            assert_eq!(readable(extracted(&definition, &[&typed])), "fix");
+        }
+
+        #[test]
+        fn a_framed_draft_selects_the_rows_between_its_rules_and_drops_outer_blank_rows() {
+            let definition = with_draft(framed());
+            let rows = [
+                "=== editor ===",
+                "",
+                "first line",
+                "",
+                "third line",
+                "",
+                "=== end ===",
+            ];
+            assert_eq!(
+                readable(extracted(&definition, &rows)),
+                "first line\n\nthird line"
+            );
+            assert_eq!(
+                readable(extracted(&definition, &["=== editor ===", "=== end ==="])),
+                "",
+                "an empty selected span is an empty draft"
+            );
+        }
+
+        #[test]
+        fn a_composer_without_its_normal_mode_marker_is_unreadable() {
+            let definition = with_draft(single_row());
+            for rows in [
+                &["transcript", "! ls -la"][..],
+                &["transcript only"][..],
+                &[][..],
+            ] {
+                assert!(
+                    matches!(extracted(&definition, rows), ComposerDraft::Unreadable),
+                    "{rows:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn the_mode_switch_prefix_matches_only_the_drafts_first_scalar() {
+            let catalog = catalog(&with_draft(single_row()));
+            let prefix = |draft: &str| {
+                catalog
+                    .mode_switch_prefix(CodingAgent::Codex, VERSION, draft)
+                    .map(str::to_owned)
+            };
+            assert_eq!(prefix("!ls"), Some("!".into()));
+            assert_eq!(prefix("/help me"), Some("/".into()));
+            assert_eq!(prefix("❯x"), Some("❯".into()));
+            assert_eq!(prefix(""), None, "an empty draft never matches");
+            assert_eq!(prefix("ls !"), None);
+            assert_eq!(prefix(" !ls"), None);
+            assert_eq!(prefix("#note"), None, "an undeclared prefix never matches");
+        }
+
+        #[test]
+        fn the_shared_test_definitions_declare_a_valid_composer_draft() {
+            assert!(!rejected(&synthetic_definitions()));
+            assert!(!rejected(&with_draft(framed())));
+        }
+
+        #[test]
+        fn a_profile_without_a_composer_draft_or_its_draft_rows_is_rejected() {
+            let mut missing = synthetic_definitions();
+            missing["profiles"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("composer_draft");
+            assert!(rejected(&missing), "a profile requires composer_draft");
+            let mut rowless = single_row();
+            rowless.as_object_mut().unwrap().remove("draft_rows");
+            assert!(
+                rejected(&with_draft(rowless)),
+                "composer_draft requires draft_rows"
+            );
+            for (first, last) in [("end", "end"), ("start", "start"), ("after_end", "end")] {
+                let mut draft = single_row();
+                draft["draft_rows"] = json!({"first":first,"last":last});
+                assert!(rejected(&with_draft(draft)), "draft_rows {first}/{last}");
+            }
+        }
+
+        #[test]
+        fn mode_switch_prefixes_are_a_nonempty_list_of_one_to_four_scalars() {
+            for prefixes in [json!(["!!!!"]), json!(["❯❯❯❯"]), json!(["!", "/", "#"])] {
+                let mut draft = single_row();
+                draft["mode_switch_prefixes"] = prefixes.clone();
+                assert!(!rejected(&with_draft(draft)), "{prefixes}");
+            }
+            for prefixes in [json!([]), json!([""]), json!(["!!!!!"]), json!(["❯❯❯❯❯"])] {
+                let mut draft = single_row();
+                draft["mode_switch_prefixes"] = prefixes.clone();
+                assert!(rejected(&with_draft(draft)), "{prefixes}");
+            }
+        }
+
+        #[test]
+        fn composer_draft_fixtures_are_cited_and_record_an_expected_draft() {
+            let mut uncited = single_row();
+            uncited["fixture_ids"] = json!([]);
+            assert!(rejected(&with_draft(uncited)), "a draft cites its fixtures");
+            let mut unknown = single_row();
+            unknown["fixture_ids"] = json!(["synthetic-unknown"]);
+            assert!(rejected(&with_draft(unknown)), "a cited fixture exists");
+            let mut unrecorded = with_draft(single_row());
+            unrecorded["fixtures"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("composer_draft");
+            assert!(
+                rejected(&unrecorded),
+                "a cited fixture records its expected draft"
+            );
+            for expectation in [
+                json!("readable"),
+                json!({"text":1}),
+                json!({"text":"x","extra":1}),
+                Value::Null,
+            ] {
+                let mut malformed = with_draft(single_row());
+                malformed["fixtures"][0]["composer_draft"] = expectation.clone();
+                assert!(rejected(&malformed), "{expectation}");
+            }
+            let mut text = with_draft(single_row());
+            text["fixtures"][0]["composer_draft"] = json!({"text":"fix the build"});
+            assert!(!rejected(&text));
+        }
+    }
+
     mod bundled_backend_files {
         use crate::coding_agent::catalog::ProfileCatalog;
         use crate::coding_agent::catalog::test_support::BUNDLED_FIXTURES;
@@ -3744,6 +4353,7 @@ mod tests {
                 definitions["profiles"][0]["min_version"] = json!("1.2.3");
                 definitions["profiles"][0]["capabilities"]["detection"]["fixture_ids"] =
                     json!([PRIMARY]);
+                definitions["profiles"][0]["composer_draft"]["fixture_ids"] = json!([PRIMARY]);
 
                 let mut screens = serde_json::Map::new();
                 screens.insert(PRIMARY.to_owned(), primary);
@@ -4076,6 +4686,184 @@ mod tests {
             ] {
                 assert!(load(runs).is_err(), "{case} must be rejected");
             }
+        }
+
+        fn style_run(row: u64, start: u64, end: u64, faint: bool, foreground: &Value) -> Value {
+            json!({"row":row,"start_col":start,"end_col":end,"faint":faint,"foreground":foreground})
+        }
+
+        #[test]
+        fn cell_styles_outside_the_reviewed_shape_are_rejected() {
+            let rgb = json!({"kind":"rgb","r":1,"g":2,"b":3});
+            let indexed = json!({"kind":"indexed","index":8});
+            let load = |runs: Value| {
+                let mut fixture = NativeFixtureCatalog::masked();
+                fixture.change_primary(|s| s["cell_styles"] = runs);
+                fixture.load()
+            };
+            assert_eq!(
+                failure_message(load(json!([
+                    style_run(0, 0, 4, true, &Value::Null),
+                    style_run(0, 4, 80, false, &indexed),
+                    style_run(23, 0, 80, true, &rgb)
+                ]))),
+                None,
+                "adjacent full-geometry faint, foreground and combined runs are reviewed"
+            );
+            let mut layered = NativeFixtureCatalog::masked();
+            layered.change_primary(|s| {
+                s["cell_backgrounds"] = json!([{"row":0,"start_col":0,"end_col":4,"bg":rgb}]);
+                s["cell_styles"] = json!([style_run(0, 0, 4, true, &indexed)]);
+            });
+            assert_eq!(
+                failure_message(layered.load()),
+                None,
+                "style runs may cover background runs"
+            );
+            for (case, runs) in [
+                ("not an array", json!({"row":0})),
+                (
+                    "run missing a field",
+                    json!([{"row":0,"start_col":0,"end_col":4,"faint":true}]),
+                ),
+                (
+                    "run with an extra field",
+                    json!([{"row":0,"start_col":0,"end_col":4,"faint":true,"foreground":null,"bold":true}]),
+                ),
+                (
+                    "row below the geometry",
+                    json!([style_run(24, 0, 4, true, &Value::Null)]),
+                ),
+                (
+                    "start past the width",
+                    json!([style_run(0, 81, 82, true, &Value::Null)]),
+                ),
+                (
+                    "end past the width",
+                    json!([style_run(0, 0, 81, true, &Value::Null)]),
+                ),
+                ("empty run", json!([style_run(0, 4, 4, true, &Value::Null)])),
+                (
+                    "masked row",
+                    json!([style_run(5, 0, 4, true, &Value::Null)]),
+                ),
+                (
+                    "default style",
+                    json!([style_run(0, 0, 4, false, &Value::Null)]),
+                ),
+                (
+                    "non-boolean faint",
+                    json!([{"row":0,"start_col":0,"end_col":4,"faint":1,"foreground":null}]),
+                ),
+                (
+                    "default foreground colour",
+                    json!([style_run(0, 0, 4, false, &json!({"kind":"default"}))]),
+                ),
+                (
+                    "indexed foreground out of range",
+                    json!([style_run(
+                        0,
+                        0,
+                        4,
+                        false,
+                        &json!({"kind":"indexed","index":256})
+                    )]),
+                ),
+                (
+                    "rgb foreground channel out of range",
+                    json!([style_run(
+                        0,
+                        0,
+                        4,
+                        false,
+                        &json!({"kind":"rgb","r":0,"g":256,"b":0})
+                    )]),
+                ),
+                (
+                    "overlapping runs",
+                    json!([
+                        style_run(0, 0, 6, true, &Value::Null),
+                        style_run(0, 5, 9, false, &indexed)
+                    ]),
+                ),
+            ] {
+                assert!(load(runs).is_err(), "{case} must be rejected");
+            }
+        }
+
+        #[test]
+        fn fixture_replay_applies_each_style_run_and_keeps_its_background() {
+            let mut fixture = screen("faint grey both plain");
+            fixture["cell_backgrounds"] =
+                json!([{"row":0,"start_col":11,"end_col":15,"bg":{"kind":"indexed","index":4}}]);
+            fixture["cell_styles"] = json!([
+                style_run(0, 0, 5, true, &Value::Null),
+                style_run(0, 6, 10, false, &json!({"kind":"indexed","index":8})),
+                style_run(0, 11, 15, true, &json!({"kind":"rgb","r":10,"g":20,"b":30})),
+            ]);
+            let replayed = crate::coding_agent::detector::test_support::replay_native_fixture(
+                &crate::digest::canonical_json(&fixture),
+                |_| {},
+                true,
+                None,
+            );
+            let cell = |col: u16| replayed.screen.cell(0, col).unwrap().clone();
+            assert_eq!(
+                replayed.screen.contents_between(0, 0, 0, 21),
+                "faint grey both plain"
+            );
+            for col in 0..5 {
+                assert!(cell(col).dim(), "column {col} is faint");
+                assert_eq!(cell(col).fgcolor(), vt100::Color::Default);
+            }
+            for col in 6..10 {
+                assert!(!cell(col).dim(), "column {col}");
+                assert_eq!(cell(col).fgcolor(), vt100::Color::Idx(8));
+            }
+            for col in 11..15 {
+                assert!(cell(col).dim(), "column {col}");
+                assert_eq!(cell(col).fgcolor(), vt100::Color::Rgb(10, 20, 30));
+                assert_eq!(cell(col).bgcolor(), vt100::Color::Idx(4));
+            }
+            for col in [5, 10, 15, 16, 20] {
+                assert!(!cell(col).dim(), "column {col} keeps the default style");
+                assert_eq!(cell(col).fgcolor(), vt100::Color::Default);
+                assert_eq!(cell(col).bgcolor(), vt100::Color::Default);
+            }
+        }
+
+        #[test]
+        fn a_native_composer_draft_fixture_must_reproduce_its_expected_draft() {
+            let typed = |expectation: Value| {
+                let mut fixture = NativeFixtureCatalog::new();
+                fixture.change_primary(|s| {
+                    s["lines"][21] = json!("Synthetic state");
+                    s["lines"][22] = json!("fix the build");
+                    s["lines"][23] = json!("State end");
+                });
+                fixture.definitions["fixtures"][0]["composer_draft"] = expectation;
+                fixture.load()
+            };
+            assert_eq!(
+                failure_message(typed(json!({"text":"fix the build"}))),
+                None
+            );
+            for expectation in [json!({"text":"another draft"}), json!("unreadable")] {
+                let failure = failure_message(typed(expectation.clone()))
+                    .unwrap_or_else(|| panic!("{expectation} must be rejected"));
+                assert!(
+                    failure.contains(&format!(
+                        "composer draft fixture {PRIMARY} does not reproduce its expected draft"
+                    )),
+                    "{failure}"
+                );
+            }
+            let mut unreadable = NativeFixtureCatalog::new();
+            unreadable.definitions["fixtures"][0]["composer_draft"] = json!({"text":""});
+            assert!(
+                unreadable.load().is_err(),
+                "a screen without the composer marker is unreadable, not an empty draft"
+            );
         }
 
         #[test]
@@ -7497,6 +8285,71 @@ mod tests {
                 );
                 assert_ne!(observation.rule_id, PERMISSION_RULE, "{case}");
                 assert_ne!(observation.rule_id, REASON_RULE, "{case}");
+            }
+        }
+
+        const PADDING: &str = "    ";
+
+        /// An OpenCode composer row `composer` painted with trailing blanks and the cursor at
+        /// `cursor_col`, then `footer` two rows below.
+        fn composer_screen(
+            composer: &str,
+            cursor_col: u16,
+            footer: &str,
+        ) -> crate::runtime::ScreenSnapshot {
+            let mut state = crate::runtime::TerminalState::new(crate::runtime::TerminalSize {
+                rows: 36,
+                cols: 120,
+            })
+            .unwrap();
+            state
+                .feed(
+                    format!(
+                        "\x1b[2J\x1b[32;1H{composer}{PADDING}\x1b[34;1H{footer}\x1b[32;{}H",
+                        cursor_col + 1
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            state.snapshot()
+        }
+
+        fn bundled_draft(composer: &str, cursor_col: u16, footer: &str) -> ComposerDraft {
+            ProfileCatalog::bundled().composer_draft(
+                CodingAgent::Opencode,
+                OPENCODE_VERSION,
+                &composer_screen(composer, cursor_col, footer),
+            )
+        }
+
+        #[test]
+        fn a_normal_mode_composer_draft_is_readable_up_to_the_footer() {
+            for agent in ["cafleet", "cafleet-ask"] {
+                let footer = format!("{agent} · Big Pickle · OpenCode · ctrl+p menu");
+                assert!(
+                    matches!(bundled_draft("┃", 2, &footer), ComposerDraft::Readable(draft) if draft.is_empty()),
+                    "{agent} empty composer"
+                );
+                assert!(
+                    matches!(
+                        bundled_draft("┃ fix the failing build", 23, &footer),
+                        ComposerDraft::Readable(draft) if draft == "fix the failing build"
+                    ),
+                    "{agent} typed draft"
+                );
+            }
+        }
+
+        #[test]
+        fn a_shell_mode_composer_with_the_normal_glyph_is_an_unreadable_draft() {
+            for (composer, cursor_col) in [("┃", 2), ("┃  touch fx-mark", 16)] {
+                assert!(
+                    matches!(
+                        bundled_draft(composer, cursor_col, "Shell · esc normal"),
+                        ComposerDraft::Unreadable
+                    ),
+                    "{composer}"
+                );
             }
         }
     }
