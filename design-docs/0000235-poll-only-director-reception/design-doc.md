@@ -1,7 +1,7 @@
 # Poll-Only Director Reception
 
 **Status**: Approved
-**Progress**: 16/30 tasks complete
+**Progress**: 29/30 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -245,26 +245,26 @@ Documentation first, in the order `.claude/rules/documentation-maintenance.md` p
 
 ### Step 4: Listener `next`
 
-- [ ] `src/config.rs`: `Settings.database_url_explicit` and its test; add the field to the two `Settings` struct literals in `src/runtime/input_client.rs` tests <!-- completed: -->
-- [ ] `src/cli/message.rs`: `shell_word`, `poll_command` and their tests <!-- completed: -->
-- [ ] `src/output/json.rs`: `listen_pending(next)` and its shape test <!-- completed: -->
-- [ ] `src/cli/message.rs`: `run_listener`/`run_forwarder` build `next`; `listen` takes `next` and keeps committing decided IDs <!-- completed: -->
-- [ ] `src/cli/message.rs` tests: shared snapshot-ID cell between `ScriptedInbox` and `RecordingOutput`; rework `notice_ids`/`notices`/`refusals`; assert record equality with `next`; forwarder text test with the URL form <!-- completed: -->
+- [x] `src/config.rs`: `Settings.database_url_explicit` and its test; add the field to the two `Settings` struct literals in `src/runtime/input_client.rs` tests <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/cli/message.rs`: `shell_word`, `poll_command` and their tests <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/output/json.rs`: `listen_pending(next)` and its shape test <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/cli/message.rs`: `run_listener`/`run_forwarder` build `next`; `listen` takes `next` and keeps committing decided IDs <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/cli/message.rs` tests: shared snapshot-ID cell between `ScriptedInbox` and `RecordingOutput`; rework `notice_ids`/`notices`/`refusals`; assert record equality with `next`; forwarder text test with the URL form <!-- completed: 2026-11-19T11:20 -->
 
 ### Step 5: Preview pointer
 
-- [ ] `src/delivery.rs`: pointer through `poll_command(message.to_member_id, None)` in both preview-line functions; update the existing pointer assertion <!-- completed: -->
-- [ ] `src/runtime/input.rs`: update the 3000×`あ` over-plain-limit preview test's pointer assertion <!-- completed: -->
+- [x] `src/delivery.rs`: pointer through `poll_command(message.to_member_id, None)` in both preview-line functions; update the existing pointer assertion <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/runtime/input.rs`: update the 3000×`あ` over-plain-limit preview test's pointer assertion <!-- completed: 2026-11-19T11:20 -->
 
 ### Step 6: Extensions
 
-- [ ] Update the `cafleet_listen` description in `assets/extensions/hermes/cafleet/__init__.py`, `assets/extensions/opencode/cafleet.ts` and `assets/extensions/pi/cafleet.ts`, matching `SPEC.md` verbatim <!-- completed: -->
-- [ ] Grep `assets/extensions/` for `watermark` and `naming unpolled`; no hit remains <!-- completed: -->
+- [x] Update the `cafleet_listen` description in `assets/extensions/hermes/cafleet/__init__.py`, `assets/extensions/opencode/cafleet.ts` and `assets/extensions/pi/cafleet.ts`, matching `SPEC.md` verbatim <!-- completed: 2026-11-19T11:12 -->
+- [x] Grep `assets/extensions/` for `watermark` and `naming unpolled`; no hit remains <!-- completed: 2026-11-19T11:12 -->
 
 ### Step 7: Validation
 
-- [ ] `mise //:test` passes <!-- completed: -->
-- [ ] `mise //:lint` passes <!-- completed: -->
-- [ ] `mise //docs:build` passes <!-- completed: -->
-- [ ] Repository-wide grep (excluding `design-docs/`) for `"message_ids"`, `message_ids:`, `watermark`, `naming unpolled`, `message show MESSAGE_ID --json to read it` and `message show {} --json`; no hit remains. The `message_ids` identifiers in `src/broker/messaging.rs` (test `message_ids_from_interleaved_inserts_increase_in_commit_order`) and the local variable in `src/runtime/recovery.rs` are unrelated and stay <!-- completed: -->
+- [x] `mise //:test` passes <!-- completed: 2026-11-19T11:20 -->
+- [x] `mise //:lint` passes <!-- completed: 2026-11-19T11:20 -->
+- [x] `mise //docs:build` passes <!-- completed: 2026-11-19T11:20 -->
+- [x] Repository-wide grep (excluding `design-docs/`) for `"message_ids"`, `message_ids:`, `watermark`, `naming unpolled`, `message show MESSAGE_ID --json to read it` and `message show {} --json`; no hit remains. The `message_ids` identifiers in `src/broker/messaging.rs` (test `message_ids_from_interleaved_inserts_increase_in_commit_order`) and the local variable in `src/runtime/recovery.rs` are unrelated and stay <!-- completed: 2026-11-19T11:20 -->
 - [ ] Reinstall the CLI through the task registry (`mise tasks --all`) only after the executing fleet ends, preserving its installed runtime/assets meanwhile <!-- completed: -->

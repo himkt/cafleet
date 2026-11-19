@@ -31,6 +31,7 @@ use nix::poll::PollTimeout;
 use nix::poll::poll;
 use rusqlite::Connection;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io;
@@ -172,8 +173,8 @@ pub(crate) fn run(
         } => {
             let timeout = timeout.map(std::time::Duration::from_secs);
             match codex_thread {
-                Some(thread) => run_forwarder(conn, member_id, timeout, &thread),
-                None => run_listener(conn, member_id, timeout),
+                Some(thread) => run_forwarder(conn, settings, member_id, timeout, &thread),
+                None => run_listener(conn, settings, member_id, timeout),
             }
         }
         MessageCommand::Show { message_id, json } => {
@@ -385,6 +386,7 @@ pub(crate) fn listen(
     output: &mut impl ListenOutput,
     member_id: i64,
     timeout: Option<Duration>,
+    next: &str,
 ) -> Result<(), CafleetError> {
     assert!(timeout.is_none_or(|timeout| !timeout.is_zero()));
     let expiry = timeout.map(|timeout| clock.now() + timeout);
@@ -429,7 +431,7 @@ pub(crate) fn listen(
                     if expired(clock.now(), expiry) {
                         return close(clock, output, member_id, "timeout");
                     }
-                    let record = crate::output::json::listen_pending(member_id, &ids);
+                    let record = crate::output::json::listen_pending(next);
                     let delivery = output.emit(&record, work_deadline(clock.now(), expiry))?;
                     if output.session_exited() {
                         return close(clock, output, member_id, "session_exited");
@@ -539,18 +541,54 @@ impl ListenOutput for DescriptorOutput<'_> {
     }
 }
 
+/// The command a `pending` record names: the listened subject's consuming poll, carrying the
+/// database URL exactly when the listener was started with `--database-url`.
+pub(crate) fn poll_command(member_id: i64, database_url: Option<&str>) -> String {
+    let command = format!("cafleet message poll {member_id} --json");
+    match database_url {
+        Some(url) => format!("{command} --database-url {}", shell_word(url)),
+        None => command,
+    }
+}
+
+fn shell_word(value: &str) -> Cow<'_, str> {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "_./:~@%+=,-".contains(c);
+    if value.chars().all(safe) {
+        Cow::Borrowed(value)
+    } else {
+        Cow::Owned(format!("'{}'", value.replace('\'', r"'\''")))
+    }
+}
+
+fn listener_next(settings: &Settings, member_id: i64) -> String {
+    poll_command(
+        member_id,
+        settings
+            .database_url_explicit
+            .then_some(settings.database_url.as_str()),
+    )
+}
+
 pub(crate) fn run_listener(
     conn: &mut Connection,
+    settings: &Settings,
     member_id: i64,
     timeout: Option<Duration>,
 ) -> Result<(), CafleetError> {
-    run_on_descriptor(conn, member_id, timeout, io::stdout().as_fd())
+    run_on_descriptor(
+        conn,
+        member_id,
+        timeout,
+        &listener_next(settings, member_id),
+        io::stdout().as_fd(),
+    )
 }
 
 fn run_on_descriptor(
     conn: &mut Connection,
     member_id: i64,
     timeout: Option<Duration>,
+    next: &str,
     descriptor: BorrowedFd<'_>,
 ) -> Result<(), CafleetError> {
     with_nonblocking(descriptor, || {
@@ -564,6 +602,7 @@ fn run_on_descriptor(
             &mut DescriptorOutput(descriptor),
             member_id,
             timeout,
+            next,
         )
     })
 }
@@ -630,6 +669,7 @@ fn millis_override(name: &str, production: Duration) -> Duration {
 /// goes through `codex queue`, and stdout keeps only the `ready` and final `closed` records.
 fn run_forwarder(
     conn: &mut Connection,
+    settings: &Settings,
     member_id: i64,
     timeout: Option<Duration>,
     thread: &str,
@@ -641,6 +681,7 @@ fn run_forwarder(
     let session = pin_codex_session()?.ok_or_else(|| {
         CafleetError::App("--codex-thread requires a codex ancestor process".into())
     })?;
+    let next = listener_next(settings, member_id);
     let descriptor = io::stdout();
     let mut output = CodexForwarding {
         stdout: DescriptorOutput(descriptor.as_fd()),
@@ -666,6 +707,7 @@ fn run_forwarder(
             &mut output,
             member_id,
             timeout,
+            &next,
         )
     });
     match result {

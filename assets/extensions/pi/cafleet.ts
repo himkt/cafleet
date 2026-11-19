@@ -443,8 +443,8 @@ export default function (pi: ExtensionAPI) {
     label: "CAFleet listen",
     description:
       "Start CAFleet Director reception for this session: each message beginning '[cafleet listen record]' " +
-      "carries a pending notice naming unpolled message IDs; when an ID is above your consumed watermark, " +
-      "run 'cafleet message poll <director_id> --json', which consumes what it returns.",
+      "carries a pending notice; run the command in its 'next' field once, which consumes and returns " +
+      "every unpolled message, and an empty [] result means an earlier poll already consumed them.",
     parameters: Type.Object(directorParameters),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const input = params as DirectorInput

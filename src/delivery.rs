@@ -57,11 +57,7 @@ pub(crate) fn canonical_preview_line(message: &broker::MessageRecord) -> String 
     let body = if folded.chars().count() <= INLINE_BODY_LIMIT {
         folded
     } else {
-        format!(
-            "Body is {} characters; run cafleet message show {} --json to read it.",
-            message.text.chars().count(),
-            message.message_id
-        )
+        body_pointer(message)
     };
     format!(
         "[cafleet msg {} from {} {}] {body} {RESUME_CLAUSE}",
@@ -71,12 +67,19 @@ pub(crate) fn canonical_preview_line(message: &broker::MessageRecord) -> String 
 
 pub(crate) fn pointer_preview_line(message: &broker::MessageRecord) -> String {
     format!(
-        "[cafleet msg {} from {} {}] Body is {} characters; run cafleet message show {} --json to read it. {RESUME_CLAUSE}",
+        "[cafleet msg {} from {} {}] {} {RESUME_CLAUSE}",
         message.message_id,
         message.from_member_id,
         message.created_at,
+        body_pointer(message)
+    )
+}
+
+fn body_pointer(message: &broker::MessageRecord) -> String {
+    format!(
+        "Body is {} characters; run {} to read it.",
         message.text.chars().count(),
-        message.message_id
+        crate::cli::poll_command(message.to_member_id, None)
     )
 }
 

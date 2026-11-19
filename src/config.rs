@@ -5,17 +5,22 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub(crate) struct Settings {
     pub(crate) database_url: String,
+    pub(crate) database_url_explicit: bool,
 }
 
 impl Settings {
     /// Selects `--database-url` verbatim, or the running version's default database; the default
     /// is the only place the home directory is expanded.
     pub(crate) fn new(database_url: Option<String>) -> Result<Settings, CafleetError> {
+        let database_url_explicit = database_url.is_some();
         let database_url = match database_url {
             Some(url) => url,
             None => default_database_url()?,
         };
-        Ok(Settings { database_url })
+        Ok(Settings {
+            database_url,
+            database_url_explicit,
+        })
     }
 }
 

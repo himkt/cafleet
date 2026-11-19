@@ -80,8 +80,8 @@ pub(crate) fn listen_ready(member_id: i64, fleet_id: i64) -> Value {
     json!({"event":"ready", "member_id":member_id, "fleet_id":fleet_id})
 }
 
-pub(crate) fn listen_pending(member_id: i64, message_ids: &[i64]) -> Value {
-    json!({"event":"pending", "member_id":member_id, "message_ids":message_ids})
+pub(crate) fn listen_pending(next: &str) -> Value {
+    json!({"event":"pending", "next":next})
 }
 
 pub(crate) fn listen_closed(member_id: i64, reason: &str) -> Value {

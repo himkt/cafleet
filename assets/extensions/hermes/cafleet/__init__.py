@@ -339,9 +339,9 @@ _SCHEMA = {
     "name": "cafleet_listen",
     "description": (
         "Start CAFleet Director reception for this session: each turn beginning "
-        "'[cafleet listen record]' carries a pending notice naming unpolled message IDs; when an "
-        "ID is above your consumed watermark, run 'cafleet message poll <director_id> --json', "
-        "which consumes what it returns."
+        "'[cafleet listen record]' carries a pending notice; run the command in its 'next' "
+        "field once, which consumes and returns every unpolled message, and an empty [] result "
+        "means an earlier poll already consumed them."
     ),
     "parameters": {
         "type": "object",
