@@ -1,7 +1,7 @@
 # Member pane ID naming
 
 **Status**: Approved
-**Progress**: 7/16 tasks complete
+**Progress**: 16/16 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -114,21 +114,21 @@ The formatter lives in the multiplexer module because the pane name is a multipl
 
 ### Step 4: Add the formatter
 
-- [ ] Add `member_pane_name` to `src/multiplexer/mod.rs` with a unit test asserting `member_pane_name(12, "drafter") == "12 - drafter"` and that a name containing spaces or ` - ` is kept verbatim <!-- completed: -->
+- [x] Add `member_pane_name` to `src/multiplexer/mod.rs` with a unit test asserting `member_pane_name(12, "drafter") == "12 - drafter"` and that a name containing spaces or ` - ` is kept verbatim <!-- completed: 2026-11-19T10:48 -->
 
 ### Step 5: Pass the name through the launch path
 
-- [ ] Change `LaunchHost::split_runner` to take `pane_name`, drop `NativeLaunchHost`'s `pane_name` field and constructor parameter, rewrite its doc comment for the new shape, and forward the received name to `spawn_member_pane` <!-- completed: -->
-- [ ] Make `launch_registered` call `split_runner` with `member_pane_name(pending.member.member_id, &pending.member.name)` <!-- completed: -->
-- [ ] Adopt the new signature in `LaunchFixtureHost`, `with_native_host` and `CaptureVerificationLaunchHost` <!-- completed: -->
-- [ ] Record the received `pane_name` in `LaunchFixtureHost` and add a `src/runtime/lifecycle.rs` unit test asserting it equals `<allocated member_id> - <member name>` for a created member <!-- completed: -->
+- [x] Change `LaunchHost::split_runner` to take `pane_name`, drop `NativeLaunchHost`'s `pane_name` field and constructor parameter, rewrite its doc comment for the new shape, and forward the received name to `spawn_member_pane` <!-- completed: 2026-11-19T10:48 -->
+- [x] Make `launch_registered` call `split_runner` with `member_pane_name(pending.member.member_id, &pending.member.name)` <!-- completed: 2026-11-19T10:48 -->
+- [x] Adopt the new signature in `LaunchFixtureHost`, `with_native_host` and `CaptureVerificationLaunchHost` <!-- completed: 2026-11-19T10:48 -->
+- [x] Record the received `pane_name` in `LaunchFixtureHost` and add a `src/runtime/lifecycle.rs` unit test asserting it equals `<allocated member_id> - <member name>` for a created member <!-- completed: 2026-11-19T10:48 -->
 
 ### Step 6: Use the name for the backend `--name`
 
-- [ ] In `src/cli/member.rs`, construct `NativeLaunchHost` without the name and pass `member_pane_name(pending.member.member_id, name)` as `launch_argv`'s `display_name` <!-- completed: -->
-- [ ] Extend `member_create_renders_identity_and_database_into_the_prompt_and_the_runner_argv` to assert the descriptor argv contains `--name` followed by `<member_id> - worker` <!-- completed: -->
+- [x] In `src/cli/member.rs`, construct `NativeLaunchHost` without the name and pass `member_pane_name(pending.member.member_id, name)` as `launch_argv`'s `display_name` <!-- completed: 2026-11-19T10:48 -->
+- [x] Extend `member_create_renders_identity_and_database_into_the_prompt_and_the_runner_argv` to assert the descriptor argv contains `--name` followed by `<member_id> - worker` <!-- completed: 2026-11-19T10:48 -->
 
 ### Step 7: Verify
 
-- [ ] Run `mise //:test` and `mise //:lint` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] Run `mise //:test` and `mise //:lint` <!-- completed: 2026-11-19T10:48 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-19T10:48 -->

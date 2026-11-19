@@ -227,6 +227,10 @@ pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|part| part.to_string()).collect()
 }
 
+pub(crate) fn member_pane_name(member_id: i64, member_name: &str) -> String {
+    format!("{member_id} - {member_name}")
+}
+
 /// The runner, server selector and error mapping shared by every backend; a
 /// backend adds only its own argv construction and output parsing.
 pub(crate) struct BackendCore {

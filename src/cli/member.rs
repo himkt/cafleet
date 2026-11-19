@@ -17,6 +17,7 @@ use crate::multiplexer::layout::ColumnSide;
 use crate::multiplexer::layout::SlotChoice;
 use crate::multiplexer::layout::WindowOccupancy;
 use crate::multiplexer::layout::choose_slot;
+use crate::multiplexer::member_pane_name;
 use crate::output;
 use crate::output::format_member;
 use crate::output::format_member_delete;
@@ -649,7 +650,7 @@ pub(crate) fn create_with_layout_wait(
             ))
         })?
         .to_owned();
-    let mut host = runner::NativeLaunchHost::new(&*mux, &target.pane, name, &cwd_text);
+    let mut host = runner::NativeLaunchHost::new(&*mux, &target.pane, &cwd_text);
     let created = runner::create_registered(
         conn,
         &pending,
@@ -675,8 +676,15 @@ pub(crate) fn create_with_layout_wait(
                 agent_name,
                 &prompt_database_url,
             )?;
-            let argv =
-                backend.launch_argv(&executable, &prompt, name, &cwd, model, effort, &policy)?;
+            let argv = backend.launch_argv(
+                &executable,
+                &prompt,
+                &member_pane_name(pending.member.member_id, name),
+                &cwd,
+                model,
+                effort,
+                &policy,
+            )?;
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
