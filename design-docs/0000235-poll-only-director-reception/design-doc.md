@@ -166,6 +166,7 @@ The Claude row ("consumed notices delivered between tool calls of the directed t
 | Surface | Change |
 |---|---|
 | `SPEC.md` §1 core paragraph, §6.3 subcommand table, `message listen` intro | "notifies pending message IDs" → "notifies pending messages" |
+| `SPEC.md` §6.2 Broker § Messaging | Delete the closing sentence "A receiver that records the highest message ID its polls returned therefore knows that every pending ID at or below that value was consumed by an earlier poll."; the commit-order fact before it stays, because `message_ids_from_interleaved_inserts_increase_in_commit_order` still asserts it |
 | `SPEC.md` §6.3 `message listen` | Example line, `pending` field table, key order, pending-set term, `next` construction and shell word; hold prose per § SPEC hold prose restated |
 | `SPEC.md` §6.3 Codex forwarding | Forwarded-text example; delete "Argument size" bullet |
 | `SPEC.md` §6.5 Push notifications | Pointer text |
