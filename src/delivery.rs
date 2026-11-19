@@ -57,11 +57,7 @@ pub(crate) fn canonical_preview_line(message: &broker::MessageRecord) -> String 
     let body = if folded.chars().count() <= INLINE_BODY_LIMIT {
         folded
     } else {
-        format!(
-            "Body is {} characters; run cafleet message show {} --json to read it.",
-            message.text.chars().count(),
-            message.message_id
-        )
+        body_pointer(message)
     };
     format!(
         "[cafleet msg {} from {} {}] {body} {RESUME_CLAUSE}",
@@ -71,12 +67,19 @@ pub(crate) fn canonical_preview_line(message: &broker::MessageRecord) -> String 
 
 pub(crate) fn pointer_preview_line(message: &broker::MessageRecord) -> String {
     format!(
-        "[cafleet msg {} from {} {}] Body is {} characters; run cafleet message show {} --json to read it. {RESUME_CLAUSE}",
+        "[cafleet msg {} from {} {}] {} {RESUME_CLAUSE}",
         message.message_id,
         message.from_member_id,
         message.created_at,
+        body_pointer(message)
+    )
+}
+
+fn body_pointer(message: &broker::MessageRecord) -> String {
+    format!(
+        "Body is {} characters; run {} to read it.",
         message.text.chars().count(),
-        message.message_id
+        crate::cli::poll_command(message.to_member_id, None)
     )
 }
 
@@ -2441,7 +2444,18 @@ mod tests {
     }
 
     fn pointer(stored_chars: usize) -> String {
-        format!("Body is {stored_chars} characters; run cafleet message show 57 --json to read it.")
+        format!("Body is {stored_chars} characters; run cafleet message poll 16 --json to read it.")
+    }
+
+    #[test]
+    fn the_pointer_preview_line_names_the_recipients_poll() {
+        assert_eq!(
+            pointer_preview_line(&record("短い本文")),
+            format!(
+                "[cafleet msg 57 from 15 {TS}] {} [cafleet] Resume your work if something was still running.",
+                pointer(4)
+            )
+        );
     }
 
     #[test]

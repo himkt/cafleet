@@ -5,17 +5,22 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub(crate) struct Settings {
     pub(crate) database_url: String,
+    pub(crate) database_url_explicit: bool,
 }
 
 impl Settings {
     /// Selects `--database-url` verbatim, or the running version's default database; the default
     /// is the only place the home directory is expanded.
     pub(crate) fn new(database_url: Option<String>) -> Result<Settings, CafleetError> {
+        let database_url_explicit = database_url.is_some();
         let database_url = match database_url {
             Some(url) => url,
             None => default_database_url()?,
         };
-        Ok(Settings { database_url })
+        Ok(Settings {
+            database_url,
+            database_url_explicit,
+        })
     }
 }
 
@@ -115,6 +120,26 @@ mod tests {
         assert_eq!(
             s.database_url, "sqlite:///~/custom/path.db",
             "a user-supplied URL gets no ~ expansion and no rewriting"
+        );
+    }
+
+    #[test]
+    fn database_url_explicit_records_whether_database_url_was_supplied() {
+        assert!(!Settings::new(None).unwrap().database_url_explicit);
+        assert!(
+            Settings::new(Some("sqlite:///tmp/fleet.db".to_string()))
+                .unwrap()
+                .database_url_explicit
+        );
+        assert!(
+            Settings::new(Some(default_database_url().unwrap()))
+                .unwrap()
+                .database_url_explicit,
+            "a supplied URL naming the default database is still explicit"
+        );
+        assert!(
+            Settings::for_database(Path::new("/tmp/fleet.db")).database_url_explicit,
+            "for_database supplies its URL through new"
         );
     }
     use std::path::Path;

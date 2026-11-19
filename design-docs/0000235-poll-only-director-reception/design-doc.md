@@ -1,7 +1,7 @@
 # Poll-Only Director Reception
 
-**Status**: Approved
-**Progress**: 0/30 tasks complete
+**Status**: In Progress
+**Progress**: 29/30 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -10,15 +10,15 @@ Every Director wake consumes through `cafleet message poll`. A `message listen` 
 
 ## Success Criteria
 
-- [ ] `message listen` emits `pending` records of exactly `{"event":"pending","next":"<command>"}` (key order `event`, `next`), where `<command>` is `cafleet message poll <MEMBER_ID> --json`, followed by ` --database-url <url>` exactly when the listener was started with `--database-url`
-- [ ] The `--codex-thread` forwarder queues `[cafleet listen record] <that same compact record>`
-- [ ] Notice hold, ceiling re-notice, startup replay, lease, idle cadence and the Codex refused-notice retry behave as before (existing hold tests pass against the internal pending-ID decision)
-- [ ] `ready` and `closed` records are unchanged
-- [ ] No Director instruction (director.md, every backend reception recipe in coding-agents.md, `cli.md`, the hermes/opencode/pi `cafleet_listen` descriptions, `SPEC.md`, `docs/`) mentions a consumed watermark or tells the Director to skip a notice; every notice triggers exactly one poll, and an empty poll (`[]`) is described as the normal outcome for a stale notice
-- [ ] No contract or agent-facing sentence describes a notice as naming, listing or carrying message IDs
-- [ ] The long-body preview pointer reads `Body is N characters; run cafleet message poll <recipient-id> --json to read it.` for every database
-- [ ] `message show` behavior and output are unchanged
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass
+- [x] `message listen` emits `pending` records of exactly `{"event":"pending","next":"<command>"}` (key order `event`, `next`), where `<command>` is `cafleet message poll <MEMBER_ID> --json`, followed by ` --database-url <url>` exactly when the listener was started with `--database-url`
+- [x] The `--codex-thread` forwarder queues `[cafleet listen record] <that same compact record>`
+- [x] Notice hold, ceiling re-notice, startup replay, lease, idle cadence and the Codex refused-notice retry behave as before (existing hold tests pass against the internal pending-ID decision)
+- [x] `ready` and `closed` records are unchanged
+- [x] No Director instruction (director.md, every backend reception recipe in coding-agents.md, `cli.md`, the hermes/opencode/pi `cafleet_listen` descriptions, `SPEC.md`, `docs/`) mentions a consumed watermark or tells the Director to skip a notice; every notice triggers exactly one poll, and an empty poll (`[]`) is described as the normal outcome for a stale notice
+- [x] No contract or agent-facing sentence describes a notice as naming, listing or carrying message IDs
+- [x] The long-body preview pointer reads `Body is N characters; run cafleet message poll <recipient-id> --json to read it.` for every database
+- [x] `message show` behavior and output are unchanged
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass
 
 ---
 
@@ -166,6 +166,7 @@ The Claude row ("consumed notices delivered between tool calls of the directed t
 | Surface | Change |
 |---|---|
 | `SPEC.md` §1 core paragraph, §6.3 subcommand table, `message listen` intro | "notifies pending message IDs" → "notifies pending messages" |
+| `SPEC.md` §6.2 Broker § Messaging | Delete the closing sentence "A receiver that records the highest message ID its polls returned therefore knows that every pending ID at or below that value was consumed by an earlier poll."; the commit-order fact before it stays, because `message_ids_from_interleaved_inserts_increase_in_commit_order` still asserts it |
 | `SPEC.md` §6.3 `message listen` | Example line, `pending` field table, key order, pending-set term, `next` construction and shell word; hold prose per § SPEC hold prose restated |
 | `SPEC.md` §6.3 Codex forwarding | Forwarded-text example; delete "Argument size" bullet |
 | `SPEC.md` §6.5 Push notifications | Pointer text |
@@ -220,51 +221,51 @@ Documentation first, in the order `.claude/rules/documentation-maintenance.md` p
 
 ### Step 1: SPEC.md
 
-- [ ] §1 core paragraph, §6.3 subcommand table and `message listen` intro: "pending message IDs" → "pending messages" <!-- completed: -->
-- [ ] §6.3 `message listen`: example, `pending` field table, key order, pending-set term, `next` construction and shell word per § `pending` record <!-- completed: -->
-- [ ] §6.3 `message listen` hold prose and §6.9 latency sentence per § SPEC hold prose restated <!-- completed: -->
-- [ ] §6.3 Codex forwarding: forwarded-text example with `next`; delete the "Argument size" bullet <!-- completed: -->
-- [ ] §6.5 Push notifications: pointer text <!-- completed: -->
-- [ ] §6.7: probe observation definition, pass conditions, stream outcome table, subscribe instruction, stream task prompt and step table per § Probe and evidence wording; Role eligibility clause rewording; extension description table; delete the 500-character `pending` line sentence <!-- completed: -->
-- [ ] Grep `SPEC.md` for `message_ids`, `watermark`, `ID-only`, `named ID`, `named by`, `naming`, `names only`, `names an ID`, `observed in a notice`, `message show MESSAGE_ID --json to read`; every remaining hit is unrelated to notices or the pointer <!-- completed: -->
+- [x] §1 core paragraph, §6.3 subcommand table and `message listen` intro: "pending message IDs" → "pending messages" <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.3 `message listen`: example, `pending` field table, key order, pending-set term, `next` construction and shell word per § `pending` record <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.3 `message listen` hold prose and §6.9 latency sentence per § SPEC hold prose restated <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.3 Codex forwarding: forwarded-text example with `next`; delete the "Argument size" bullet <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.5 Push notifications: pointer text <!-- completed: 2026-11-19T11:02 -->
+- [x] §6.7: probe observation definition, pass conditions, stream outcome table, subscribe instruction, stream task prompt and step table per § Probe and evidence wording; Role eligibility clause rewording; extension description table; delete the 500-character `pending` line sentence <!-- completed: 2026-11-19T11:02 -->
+- [x] Grep `SPEC.md` for `message_ids`, `watermark`, `ID-only`, `named ID`, `named by`, `naming`, `names only`, `names an ID`, `observed in a notice`, `message show MESSAGE_ID --json to read`; every remaining hit is unrelated to notices or the pointer <!-- completed: 2026-11-19T11:02 -->
 
 ### Step 2: docs/ and README.md
 
-- [ ] `docs/docs/mixed-backend-team.md` § Receive results rewritten per § Documentation surfaces <!-- completed: -->
-- [ ] `docs/docs/contributing.md` subscribe probe steps 2–8 and Director instruction per § Probe and evidence wording <!-- completed: -->
-- [ ] `docs/docs/concepts/overview.md`, `coding-agents.md` and `members.md` term and pointer wording <!-- completed: -->
-- [ ] Confirm `README.md` needs no change (no listen/notice/pointer mention) <!-- completed: -->
+- [x] `docs/docs/mixed-backend-team.md` § Receive results rewritten per § Documentation surfaces <!-- completed: 2026-11-19T11:08 -->
+- [x] `docs/docs/contributing.md` subscribe probe steps 2–8 and Director instruction per § Probe and evidence wording <!-- completed: 2026-11-19T11:08 -->
+- [x] `docs/docs/concepts/overview.md`, `coding-agents.md` and `members.md` term and pointer wording <!-- completed: 2026-11-19T11:08 -->
+- [x] Confirm `README.md` needs no change (no listen/notice/pointer mention) <!-- completed: 2026-11-19T11:08 -->
 
 ### Step 3: Skills
 
-- [ ] `assets/skills/cafleet/roles/director.md` § Director wake steps 2–4 per § Director wake procedure <!-- completed: -->
-- [ ] `assets/skills/cafleet/reference/coding-agents.md`: Claude, Codex, OpenCode, Hermes and pi reception recipes; Claude Monitor note clause deletion <!-- completed: -->
-- [ ] `assets/skills/cafleet/reference/cli.md`: subcommand row, `message listen` section per § `cli.md` `message listen` section, pointer text, "short `poll` pointer" <!-- completed: -->
-- [ ] `assets/skills/cafleet/SKILL.md` § Send pointer wording; `assets/skills/cafleet/roles/member.md` pointer wording and empty-poll `show` sentence <!-- completed: -->
-- [ ] Grep `assets/skills/` and `docs/` for `watermark`, `message_ids`, `highest ID`, `named ID`, `named by`, `names only`, `naming unpolled`, `notices naming`, `notice naming`, `show` pointer; every remaining hit is unrelated to notices or the pointer <!-- completed: -->
+- [x] `assets/skills/cafleet/roles/director.md` § Director wake steps 2–4 per § Director wake procedure <!-- completed: 2026-11-19T11:15 -->
+- [x] `assets/skills/cafleet/reference/coding-agents.md`: Claude, Codex, OpenCode, Hermes and pi reception recipes; Claude Monitor note clause deletion <!-- completed: 2026-11-19T11:15 -->
+- [x] `assets/skills/cafleet/reference/cli.md`: subcommand row, `message listen` section per § `cli.md` `message listen` section, pointer text, "short `poll` pointer" <!-- completed: 2026-11-19T11:15 -->
+- [x] `assets/skills/cafleet/SKILL.md` § Send pointer wording; `assets/skills/cafleet/roles/member.md` pointer wording and empty-poll `show` sentence <!-- completed: 2026-11-19T11:15 -->
+- [x] Grep `assets/skills/` and `docs/` for `watermark`, `message_ids`, `highest ID`, `named ID`, `named by`, `names only`, `naming unpolled`, `notices naming`, `notice naming`, `show` pointer; every remaining hit is unrelated to notices or the pointer <!-- completed: 2026-11-19T11:15 -->
 
 ### Step 4: Listener `next`
 
-- [ ] `src/config.rs`: `Settings.database_url_explicit` and its test; add the field to the two `Settings` struct literals in `src/runtime/input_client.rs` tests <!-- completed: -->
-- [ ] `src/cli/message.rs`: `shell_word`, `poll_command` and their tests <!-- completed: -->
-- [ ] `src/output/json.rs`: `listen_pending(next)` and its shape test <!-- completed: -->
-- [ ] `src/cli/message.rs`: `run_listener`/`run_forwarder` build `next`; `listen` takes `next` and keeps committing decided IDs <!-- completed: -->
-- [ ] `src/cli/message.rs` tests: shared snapshot-ID cell between `ScriptedInbox` and `RecordingOutput`; rework `notice_ids`/`notices`/`refusals`; assert record equality with `next`; forwarder text test with the URL form <!-- completed: -->
+- [x] `src/config.rs`: `Settings.database_url_explicit` and its test; add the field to the two `Settings` struct literals in `src/runtime/input_client.rs` tests <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/cli/message.rs`: `shell_word`, `poll_command` and their tests <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/output/json.rs`: `listen_pending(next)` and its shape test <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/cli/message.rs`: `run_listener`/`run_forwarder` build `next`; `listen` takes `next` and keeps committing decided IDs <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/cli/message.rs` tests: shared snapshot-ID cell between `ScriptedInbox` and `RecordingOutput`; rework `notice_ids`/`notices`/`refusals`; assert record equality with `next`; forwarder text test with the URL form <!-- completed: 2026-11-19T11:20 -->
 
 ### Step 5: Preview pointer
 
-- [ ] `src/delivery.rs`: pointer through `poll_command(message.to_member_id, None)` in both preview-line functions; update the existing pointer assertion <!-- completed: -->
-- [ ] `src/runtime/input.rs`: update the 3000×`あ` over-plain-limit preview test's pointer assertion <!-- completed: -->
+- [x] `src/delivery.rs`: pointer through `poll_command(message.to_member_id, None)` in both preview-line functions; update the existing pointer assertion <!-- completed: 2026-11-19T11:20 -->
+- [x] `src/runtime/input.rs`: update the 3000×`あ` over-plain-limit preview test's pointer assertion <!-- completed: 2026-11-19T11:20 -->
 
 ### Step 6: Extensions
 
-- [ ] Update the `cafleet_listen` description in `assets/extensions/hermes/cafleet/__init__.py`, `assets/extensions/opencode/cafleet.ts` and `assets/extensions/pi/cafleet.ts`, matching `SPEC.md` verbatim <!-- completed: -->
-- [ ] Grep `assets/extensions/` for `watermark` and `naming unpolled`; no hit remains <!-- completed: -->
+- [x] Update the `cafleet_listen` description in `assets/extensions/hermes/cafleet/__init__.py`, `assets/extensions/opencode/cafleet.ts` and `assets/extensions/pi/cafleet.ts`, matching `SPEC.md` verbatim <!-- completed: 2026-11-19T11:12 -->
+- [x] Grep `assets/extensions/` for `watermark` and `naming unpolled`; no hit remains <!-- completed: 2026-11-19T11:12 -->
 
 ### Step 7: Validation
 
-- [ ] `mise //:test` passes <!-- completed: -->
-- [ ] `mise //:lint` passes <!-- completed: -->
-- [ ] `mise //docs:build` passes <!-- completed: -->
-- [ ] Repository-wide grep (excluding `design-docs/`) for `"message_ids"`, `message_ids:`, `watermark`, `naming unpolled`, `message show MESSAGE_ID --json to read it` and `message show {} --json`; no hit remains. The `message_ids` identifiers in `src/broker/messaging.rs` (test `message_ids_from_interleaved_inserts_increase_in_commit_order`) and the local variable in `src/runtime/recovery.rs` are unrelated and stay <!-- completed: -->
+- [x] `mise //:test` passes <!-- completed: 2026-11-19T11:20 -->
+- [x] `mise //:lint` passes <!-- completed: 2026-11-19T11:20 -->
+- [x] `mise //docs:build` passes <!-- completed: 2026-11-19T11:20 -->
+- [x] Repository-wide grep (excluding `design-docs/`) for `"message_ids"`, `message_ids:`, `watermark`, `naming unpolled`, `message show MESSAGE_ID --json to read it` and `message show {} --json`; no hit remains. The `message_ids` identifiers in `src/broker/messaging.rs` (test `message_ids_from_interleaved_inserts_increase_in_commit_order`) and the local variable in `src/runtime/recovery.rs` are unrelated and stay <!-- completed: 2026-11-19T11:20 -->
 - [ ] Reinstall the CLI through the task registry (`mise tasks --all`) only after the executing fleet ends, preserving its installed runtime/assets meanwhile <!-- completed: -->

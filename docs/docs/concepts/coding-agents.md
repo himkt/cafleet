@@ -19,7 +19,7 @@ Run the root Director on a backend whose Director verdict is `yes` and members o
 
 ## Director requirements
 
-A Director backend needs two capabilities, checked independently: goal lifecycle controls, from the backend itself or a CAFleet extension supporting the full goal lifecycle across compaction and restarts, and reception of notices naming its pending messages. Reception preferably pushes each pending notice into the session, natively or through a CAFleet plugin, starting a turn when idle; a model reading the listener's output ranks far below both ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and their probes). Each bundled backend supplies them as follows, and [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records which requirements its evidence establishes:
+A Director backend needs two capabilities, checked independently: goal lifecycle controls, from the backend itself or a CAFleet extension supporting the full goal lifecycle across compaction and restarts, and reception of notices announcing its pending messages. Reception preferably pushes each pending notice into the session, natively or through a CAFleet plugin, starting a turn when idle; a model reading the listener's output ranks far below both ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and their probes). Each bundled backend supplies them as follows, and [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records which requirements its evidence establishes:
 
 | Backend | Director launch | Reception | Goal |
 |---|---|---|---|
@@ -79,7 +79,7 @@ Evidence of insufficient capability can trigger a replacement with a strictly st
 
 The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. herdr labels every member pane with its member ID and name and tmux titles it, though an agent may retitle a tmux pane; `cafleet member list` shows each member's `window` and `pane_id`.
 
-A backend whose measured plain-input limit is below the longest preview receives long previews by bracketed paste or a short pointer to the full message; the [bundled profile contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the measured values.
+A backend whose measured plain-input limit is below the longest preview receives long previews by bracketed paste or a short pointer to the poll that reads the full message; the [bundled profile contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the measured values.
 
 A Hermes member's session can keep accepted work and background processes running after its pane's client exits. `cafleet member delete` stops that session's work and registered background processes, keeping the member when it cannot verify the stop; CAFleet never touches your Hermes gateway or sessions it does not own.
 

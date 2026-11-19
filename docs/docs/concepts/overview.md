@@ -13,8 +13,8 @@ CAFleet coordinates independent coding-agent sessions in tmux or herdr through d
 | window | A tmux window or herdr tab holding fleet panes, named at creation `cafleet-<fleet_id>-<ordinal>` with ordinal `0` for the Director | [Pane layout](members.md#pane-layout) |
 | broker | The CLI's synchronous SQLite data-access layer | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
-| inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
-| listener | The Director's persistent read-only `message listen` process that notifies unpolled message IDs as JSONL; the `message poll` each notice prompts consumes them | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
+| inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a poll pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
+| listener | The Director's persistent read-only `message listen` process that notifies pending messages as JSONL wake notices that name the consuming poll; the `message poll` each notice prompts consumes them | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
 | runner | The owned PTY observer and input arbiter for a member run | [Member permission events](members.md#member-permission-events) |
 | runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
@@ -31,7 +31,7 @@ Fleet creation atomically registers the calling Director and its current pane, a
 |---|---|
 | Host | Continue its task and own native shell/background results |
 | Director | Assign work, receive replies, inspect evidence, resolve blockers and close the team |
-| CLI | Register sessions, persist messages, notify pending message IDs, preview ordinary-member messages and submit authorized pane input |
+| CLI | Register sessions, persist messages, notify pending messages, preview ordinary-member messages and submit authorized pane input |
 | Multiplexer | Create, read, type into and close panes and overflow windows while preserving layout ownership |
 | Member | Perform its assignment, report through the broker and route required unavailable commands |
 

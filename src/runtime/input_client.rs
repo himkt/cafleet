@@ -3087,6 +3087,7 @@ mod tests {
         let foreign = Fixture::new();
         let foreign_settings = Settings {
             database_url: format!("sqlite:///{}", foreign.conn.path().unwrap()),
+            database_url_explicit: true,
         };
         assert!(
             reconcile_with(
@@ -3721,6 +3722,7 @@ mod tests {
             let foreign = Fixture::new();
             let foreign_settings = Settings {
                 database_url: format!("sqlite:///{}", foreign.conn.path().unwrap()),
+                database_url_explicit: true,
             };
             assert!(
                 submit_wrapped_input_under_pane_lock_with_host(

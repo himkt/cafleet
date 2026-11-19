@@ -23,7 +23,7 @@ Exact command facts for running CAFleet and interpreting its results.
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request or question | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
-| `message listen` | Notify pending message IDs through stdout | `MEMBER_ID` | JSONL only |
+| `message listen` | Notify pending messages through stdout | `MEMBER_ID` | JSONL only |
 | `message show` | Read one message | `MESSAGE_ID` | yes |
 
 `cafleet --version` prints `cafleet <version>` and exits 0.
@@ -157,25 +157,25 @@ Each attempted message left in the composer or held by its own in-progress, unce
 
 ### `message poll`
 
-`cafleet message poll MEMBER_ID [--json]` returns every incoming `input_required` record descending by status timestamp/message ID and consumes exactly those records in one transaction: each returned record shows `status_state` `completed`, and no later poll or listener notice lists it. Two concurrent polls never return the same message. An empty inbox prints `[]` (text: `No messages found.`) and exits 0. Unknown/inactive member: `Member ID not found`, exit 1, consuming nothing. A failure before commit consumes nothing; output lost after commit leaves the messages consumed, and `message show MESSAGE_ID --json` reads each one again.
+`cafleet message poll MEMBER_ID [--json]` returns every incoming `input_required` record descending by status timestamp/message ID and consumes exactly those records in one transaction: each returned record shows `status_state` `completed`, no later poll returns it and no later listener notice announces it. Two concurrent polls never return the same message. An empty inbox prints `[]` (text: `No messages found.`) and exits 0. Unknown/inactive member: `Member ID not found`, exit 1, consuming nothing. A failure before commit consumes nothing; output lost after commit leaves the messages consumed, and `message show MESSAGE_ID --json` reads each one again.
 
 ### `message listen`
 
 `cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
 
-Notifies an active member's pending message IDs, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer `1..=1800` lease is monotonic from startup; absence runs until closure/cancellation/failure.
+Notifies an active member's pending messages, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer `1..=1800` lease is monotonic from startup; absence runs until closure/cancellation/failure.
 
-Flush UTF-8 JSONL records: `ready` with `member_id,fleet_id` before replay; `pending` with `member_id,message_ids`; `closed` with `member_id,reason`. There is no text mode or `--json`. Closure reasons are `timeout`, `member_inactive`, `fleet_deleted`, and `session_exited` in forwarding mode only; deletion wins simultaneous lifecycle closure. Normal closure exits 0, operational/output failures exit 1, usage errors exit 2; cancellation may omit `closed`.
+Flush UTF-8 JSONL records: `ready` with `member_id,fleet_id` before replay; `pending` with `next`; `closed` with `member_id,reason`. There is no text mode or `--json`. Closure reasons are `timeout`, `member_inactive`, `fleet_deleted`, and `session_exited` in forwarding mode only; deletion wins simultaneous lifecycle closure. Normal closure exits 0, operational/output failures exit 1, usage errors exit 2; cancellation may omit `closed`.
 
 ```json
-{"event":"pending","member_id":1,"message_ids":[51,52,53]}
+{"event":"pending","next":"cafleet message poll 1 --json"}
 ```
 
-A `pending` notice is a wake signal, never a payload: `message_ids` is the member's full unpolled set at that moment, ordered by creation/message ID, and is never empty. `cafleet message poll <member-id> --json` returns and consumes the bodies.
+A `pending` notice is a wake signal, never a payload: `next` is the exact consuming command, `cafleet message poll <member-id> --json`, plus `--database-url <url>` when the listener was started with one (single-quoted when the URL needs it). Run it once per notice; it returns and consumes every pending body, and `[]` means an earlier poll already consumed what the notice announced.
 
-**Hold.** After a notice is delivered, the listener holds later notices while any ID it named stays unpolled. Any poll consumes the whole pending set and so releases the hold; the next snapshot with pending messages emits one notice naming only messages committed after that poll. A hold lasting 300 s with IDs the notice did not name re-sends one bulk notice naming every unpolled ID, held and fresh, and restarts the 300 s; held IDs alone never trigger a re-notice.
+**Hold.** After a notice is delivered, the listener holds later notices while any message pending at that notice stays unpolled. Any poll consumes the whole pending set and so releases the hold; the next snapshot with pending messages emits one notice announcing only messages committed after that poll. A hold lasting 300 s with messages committed after the held notice re-sends one bulk notice covering every unpolled message, held and fresh, and restarts the 300 s; held messages alone never trigger a re-notice.
 
-**Notice bound.** A listener emits at most 1 notice, plus one per poll that consumed held IDs, plus one per 300 s ceiling firing, so a burst of any size adds no notice beyond the outstanding one. Within one listener, an ID appears in two notices only through a ceiling re-notice. A turn with k mid-turn polls can queue at most k + 1 notices behind it; each names only IDs those polls already consumed. Message IDs follow commit order, so a notice whose every ID is at or below the highest ID your polls returned needs no command. A restarted listener emits one notice naming every unpolled ID right after `ready`. IDs you poll before any notice names them are never notified.
+**Notice bound.** A listener emits at most 1 notice, plus one per poll that consumed held messages, plus one per 300 s ceiling firing, so a burst of any size adds no notice beyond the outstanding one. Within one listener, two notices announce the same message only through a ceiling re-notice. A turn with k mid-turn polls can queue at most k + 1 notices behind it; each announces only messages those polls already consumed, so its poll returns `[]` unless messages arrived since. A restarted listener emits one notice covering every unpolled message right after `ready`. Messages you poll before any notice announces them are never notified.
 
 Listening changes no consumption/notification state and retries no pane delivery; concurrent listeners are independent. Preserve incomplete JSONL across native reads.
 
@@ -183,7 +183,7 @@ Listening changes no consumption/notification state and retries no pane delivery
 
 - Stdout carries only `ready` and the final `closed` record, written right before exit with every reason, `session_exited` included.
 - Each `pending` notice, and each `closed` record with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, one at a time with a 10 s deadline each. `ready` and `closed` `session_exited` are never forwarded.
-- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal. A refused `pending` notice is rebuilt from a fresh snapshot after 1 s while the pinned session lives, and dropped when a poll consumed its IDs meanwhile or its re-notice no longer has fresh IDs. A refused `closed` record is retried every 1 s with no time limit and, once accepted, still written to stdout. The pinned session's exit during either wait ends the listener with `session_exited`.
+- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal. A refused `pending` notice is rebuilt from a fresh snapshot after 1 s while the pinned session lives, and dropped when a poll consumed its messages meanwhile or its re-notice no longer has fresh messages. A refused `closed` record is retried every 1 s with no time limit and, once accepted, still written to stdout. The pinned session's exit during either wait ends the listener with `session_exited`.
 - At startup the listener pins its nearest ancestor whose argv[0] basename is exactly `codex`. When that process exits (a reused pid counts as exited), stdout gets `closed` `session_exited` and the listener exits 0.
 
 | Condition | Result |
@@ -209,7 +209,7 @@ For sandbox startup failures, confirm exit and follow the [Codex native receptio
 
 Ordinary concrete panes receive previews; Directors and self-sends use broker reception. Profile previews are `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.` Delivery fallback leads with Escape and appends ` [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.`
 
-Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.` independently of the 200-codepoint text-output limit. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
+Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.` independently of the 200-codepoint text-output limit. `RECIPIENT_ID` is the recipient; the pointer never carries `--database-url`. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
 
 ### Wrapped delivery methods
 
@@ -221,7 +221,7 @@ A measured plan with an unverified/nonempty composer queues under `composer_busy
 
 Absent plan/profile/version probe uses fallback `submission_plan_unavailable`: Escape, settle, literal (`! ` prefix for exec), settle, Enter. Recheck interactions before each stage; permission answers require their tested plan.
 
-Long input uses a plan's declared bracketed-paste framing when the child has enabled it; otherwise a preview over its measured plain limit uses the short `message show` pointer. Oversized prompt/exec input without safe framing is refused before typing; a queued refusal settles `not_submitted/plain_limit_exceeded`. On verified-composer runs, `submitted` requires confirmation by a verified empty composer or a newly opened interaction; an ineffective submit key produces `left_in_composer/submit_unconfirmed`. Insufficient immediate budget returns zero-byte `queued` with `delivery_budget_exhausted`.
+Long input uses a plan's declared bracketed-paste framing when the child has enabled it; otherwise a preview over its measured plain limit uses the short `poll` pointer. Oversized prompt/exec input without safe framing is refused before typing; a queued refusal settles `not_submitted/plain_limit_exceeded`. On verified-composer runs, `submitted` requires confirmation by a verified empty composer or a newly opened interaction; an ineffective submit key produces `left_in_composer/submit_unconfirmed`. Insufficient immediate budget returns zero-byte `queued` with `delivery_budget_exhausted`.
 
 ### Runner queue
 

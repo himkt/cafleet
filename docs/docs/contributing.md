@@ -87,20 +87,20 @@ Every claimed detector/composer/answer capability requires CAFleet-owned positiv
 
 ### Run a CAFleet subscribe probe
 
-The subscribe probe establishes a tier-1 (native) or tier-2 (extension) subscribe listen as SPEC Role requirements defines it. The candidate Director starts its receiver through the mechanism under test, such as a native tool or a CAFleet plugin tool, and a probe member sends the messages. A probe message ID is *observed in a notice* when a `pending` record the receiver delivers names it.
+The subscribe probe establishes a tier-1 (native) or tier-2 (extension) subscribe listen as SPEC Role requirements defines it. The candidate Director starts its receiver through the mechanism under test, such as a native tool or a CAFleet plugin tool, and a probe member sends the messages. A probe message ID is *observed through a notice* when the one `poll` that a `pending` record the receiver delivers prompts returns it.
 
 1. Prepare the isolated database, Director session and probe member as in steps 1–3 of the stream probe below, and start the receiver after the Director consumes the ready. Then give the Director the instruction below the steps.
-2. **Idle.** With the Director idle, send one message. A notice naming it must start a turn without user input, and the poll it prompts must return it.
+2. **Idle.** With the Director idle, send one message. A notice must start a turn without user input, and the poll it prompts must return the message.
 3. **Busy.** Ask the Director to run a foreground command of at least 60 s, such as `sleep 90`, and send two messages while it runs. The command must not be interrupted; a notice must arrive no later than the end of that turn, and the poll it prompts must return both IDs.
-4. **Burst.** Ask the Director to run a foreground command of at least 60 s and under 300 s, and send 150 messages back to back while it runs. At most two notice turns may arrive for the burst, every ID must be consumed through a notice-prompted poll, and no ID may appear in two notices. On Codex the forwarder must stay alive with no `codex queue` refusal.
-5. **Consumed notice.** Direct one turn: a 30 s foreground command while m1 is sent, one poll, a second 30 s foreground command while m2 is sent, one poll, then end the turn. Every notice turn delivered after that turn must name only consumed IDs and run no command, and no ID may appear in two notices.
-6. **Hold ceiling.** Say `hold`, then send `hold-probe 1` to the idle Director and record t1, the time its notice turn starts; the Director ends that turn without polling. After that turn ends and 60 s have passed since t1, send `hold-probe 2`. No notice may arrive before t1 + 285 s, and one notice naming both IDs must arrive between t1 + 285 s and t1 + 315 s; its IDs are above the watermark, so the Director polls once and the poll must return both.
+4. **Burst.** Ask the Director to run a foreground command of at least 60 s and under 300 s, and send 150 messages back to back while it runs. At most two notice turns may arrive for the burst, and every ID must be returned by a notice-prompted poll. On Codex the forwarder must stay alive with no `codex queue` refusal.
+5. **Consumed notice.** Direct one turn: a 30 s foreground command while m1 is sent, one poll, a second 30 s foreground command while m2 is sent, one poll, then end the turn. Every notice turn delivered after the directed turn must run one poll, which returns `[]`.
+6. **Hold ceiling.** Say `hold`, then send `hold-probe 1` to the idle Director and record t1, the time its notice turn starts; the Director ends that turn without polling. After that turn ends and 60 s have passed since t1, send `hold-probe 2`. No notice may arrive before t1 + 285 s; one notice must arrive between t1 + 285 s and t1 + 315 s, and the poll it prompts must return both IDs.
 7. **Owner exit.** End the Director session the receiver belongs to, and confirm with `ps` that no `cafleet message listen` survives it.
-8. Record the backend, native version, mechanism, message IDs, send timestamps, each notice's delivery turn, timestamp and named IDs, poll timestamps and the receiver's exit in the design doc's evidence record.
+8. Record the backend, native version, mechanism, message IDs, send timestamps, each notice's delivery turn and timestamp, each poll's timestamp and returned IDs and the receiver's exit in the design doc's evidence record.
 
 The Director instruction for step 1:
 
-> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, end the turn with no commands when every named ID is at or below your consumed watermark; otherwise run `cafleet message poll <director-id> --json` once and raise the watermark. Run no other `poll` or `show` unless a step below directs it. When I say `hold`, end only the next notice turn without polling, then apply the rule above to every later notice turn, including the ceiling re-notice.
+> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, run the command in the record's `next` field once. Run no other `poll` or `show` unless a step below directs it. When I say `hold`, end only the next notice turn without running its command, then apply the rule above to every later notice turn, including the ceiling re-notice.
 
 A `poll` or `show` that first reveals a probe ID without a preceding notice turn invalidates the run; the poll a notice prompts is part of consumption. The ±15 s hold-ceiling tolerance covers the receiver latency between the listener's delivery and t1 and the listener's one-second check interval. Probe each mechanism separately; the backend's Director reception recipe owns the concrete tool calls.
 
@@ -114,18 +114,18 @@ The stream probe establishes a tier-3 built-in compromise listen as SPEC Role re
 4. After the Director consumes the ready, have it start `cafleet message listen <director-id> --timeout 300` through the mechanism under test, then send the task prompt below the steps.
 5. From a separate shell, send three probe messages at 20 s, 60 s and 120 s after the task prompt: `cafleet message send --from-member-id <probe-id> --to-member-id <director-id> "stream-probe 1"`, then `2` and `3`. Record each printed message ID and timestamp.
 6. Classify the run by the run classification below the steps. Capture the Director pane and retain the session records that show each probe ID's first observation.
-7. Record the backend, native version, mechanism (tool call and flags), message IDs, send timestamps, each probe ID's first observation (the tool result or injected event carrying the `pending` line that names it, and its timestamp), poll timestamps, the listener's exit timestamp, the task-turn end timestamp and the classification in the design doc's evidence record.
+7. Record the backend, native version, mechanism (tool call and flags), message IDs, send timestamps, each probe ID's first observation (the notice-prompted poll that first returned it, the tool result or injected event carrying the `pending` line that prompted that poll, and their timestamps), poll timestamps, the listener's exit timestamp, the task-turn end timestamp and the classification in the design doc's evidence record.
 
 The task prompt for step 4 sets `<mechanism instruction>` to "between steps, read your background listener with `<tool call>`" for a pull mechanism and "consume each record your background listener delivers" for a push mechanism:
 
-> Summarize the files `<file 1>`, `<file 2>`, … one at a time. `<mechanism instruction>`. Learn about broker messages only from that listener's output; run no other `poll` or `show`. When a `pending` record appears there, run `cafleet message poll <director-id> --json` once and continue. Keep working until a poll has returned `stream-probe 3` or 240 seconds have passed since this prompt, then end your turn.
+> Summarize the files `<file 1>`, `<file 2>`, … one at a time. `<mechanism instruction>`. Learn about broker messages only from that listener's output; run no other `poll` or `show`. When a `pending` record appears there, run the command in its `next` field once and continue. Keep working until a poll has returned `stream-probe 3` or 240 seconds have passed since this prompt, then end your turn.
 
 Classify each run as follows; the 240-second turn bound leaves 60 seconds of the 300-second lease for turn-boundary delivery.
 
 | Classification | Condition |
 |---|---|
-| Invalid | The task turn ended before 240 s without a poll having returned `stream-probe 3`; the task turn was still running when the listener exited; a probe ID was first observed outside a `pending` record, or the Director ran any other `poll` or `show`; every probe ID was first observed in a notice while the listener ran but the poll consuming one ran at or after the listener exited; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
-| Pass | A valid run in which every probe ID was first observed in a `pending` record delivered through the mechanism under test and consumed by a notice-prompted poll before the listener exited. |
-| Fail | A valid run in which any probe ID was first observed only after the listener exited, or was never observed in a `pending` record. |
+| Invalid | The task turn ended before 240 s without a poll having returned `stream-probe 3`; the task turn was still running when the listener exited; a probe ID was first revealed outside a notice-prompted poll, or the Director ran any other `poll` or `show`; every `pending` record reached the session while the listener ran but a poll one of them prompted ran at or after the listener exited; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
+| Pass | A valid run in which every probe ID was first returned, before the listener exited, by a poll that a `pending` record delivered through the mechanism under test prompted. |
+| Fail | A valid run in which any probe ID was first returned only after the listener exited, or was never returned by a notice-prompted poll. |
 
 A mechanism with three invalid runs is recorded as "not established" with the invalidating cause.

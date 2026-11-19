@@ -1,4 +1,5 @@
 pub(crate) use crate::cli::member::MemberCapture;
+pub(crate) use crate::cli::message::poll_command;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::format_json;
