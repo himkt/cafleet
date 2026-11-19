@@ -38,6 +38,7 @@ const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
 const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
+const ATTEMPT_FAILURE_LIMIT: usize = 256;
 const POST_SUBMIT_VERIFICATION: Duration = Duration::from_secs(2);
 const PASTE_CLOSE_RESERVE: Duration = Duration::from_millis(250);
 const PASTE_OPEN: &[u8] = b"\x1b[200~";
@@ -102,6 +103,8 @@ pub(crate) struct InputCoordinator {
     held_composer: Option<(i64, u64)>,
     output_seq: u64,
     bracketed_paste: bool,
+    last_drain_blocker: Option<String>,
+    head_attempt_failure: Option<(i64, String)>,
 }
 
 /// An accepted deferred preview whose notification stamp and settlement storage prevented; like
@@ -125,6 +128,16 @@ fn storage_failure(cause: &CafleetError) -> bool {
         cause,
         CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded
     )
+}
+
+fn message_consumed(conn: &Connection, message_id: Option<i64>) -> Result<bool> {
+    Ok(match message_id {
+        Some(message_id) => {
+            crate::broker::get_message(conn, message_id)?.status
+                != crate::broker::MessageStatus::InputRequired
+        }
+        None => false,
+    })
 }
 
 /// Runner-owned ordinary input accepted with a durable ready receipt; its literal stays in
@@ -1901,6 +1914,7 @@ impl InputCoordinator {
                 if let Some(retained) = self.operations.get_mut(id) {
                     retained.operation = settled;
                 }
+                self.queue.retain(|queued| queued.input_id != *id);
                 check_deadline(Instant::now(), deadline)?;
                 Ok(InputControlReply::Receipt(ReceiptReply::Settled {
                     input_id: *id,
@@ -2422,6 +2436,27 @@ impl InputCoordinator {
         self.deferred_failed
     }
 
+    /// Records the queue turn's input-drain result: a pending drain keeps its blocker.
+    pub(super) fn record_queue_drain(&mut self, drain: InputDrain) {
+        self.last_drain_blocker = match drain {
+            InputDrain::Pending => self.observation_blocker.clone(),
+            InputDrain::Quiescent => None,
+        };
+    }
+
+    /// Records a non-fatal queue-turn attempt error against the current head.
+    pub(super) fn record_attempt_failure(&mut self, failure: &CafleetError) {
+        let Some(head) = self.queue.front() else {
+            return;
+        };
+        let message = failure.message();
+        let mut end = message.len().min(ATTEMPT_FAILURE_LIMIT);
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.head_attempt_failure = Some((head.input_id, message[..end].to_owned()));
+    }
+
     /// The runner already owns a preview's delivery: one waits in the FIFO or is being drained
     /// from it, or a preview's terminal transaction is pending storage.
     pub(super) fn owns_preview_delivery(&self) -> bool {
@@ -2538,6 +2573,106 @@ impl InputCoordinator {
         Ok(None)
     }
 
+    /// The settlement reason of a queued head about to start: a consumed preview message, or its
+    /// target classification from `deferred_target`.
+    fn head_settlement(
+        &self,
+        conn: &Connection,
+        message_id: Option<i64>,
+    ) -> Result<Option<&'static str>> {
+        if message_consumed(conn, message_id)? {
+            return Ok(Some("message_consumed"));
+        }
+        self.deferred_target(conn)
+    }
+
+    /// Cancels every queued preview whose message was consumed and a head whose target was
+    /// removed, from one read transaction and independently of every queue-turn gate.
+    pub(crate) fn queue_housekeeping(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) -> Result<()> {
+        if self.input_fenced || self.queue.is_empty() {
+            return Ok(());
+        }
+        if let Some(pending) = self.finalization.take() {
+            self.cancel_deferred(
+                conn,
+                observation,
+                pending.input_id,
+                pending.expected,
+                pending.reason,
+            )?;
+            if self.finalization.is_some() {
+                return Ok(());
+            }
+        }
+        let entries: Vec<(i64, Option<i64>)> = self
+            .queue
+            .iter()
+            .map(|queued| (queued.input_id, queued.request.message_id))
+            .collect();
+        let read = with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+            let mut sweep = Vec::with_capacity(entries.len());
+            for (input_id, message_id) in &entries {
+                let state = storage::get_input(&tx, *input_id)?.state;
+                sweep.push((*input_id, state, message_consumed(&tx, *message_id)?));
+            }
+            let target = self.deferred_target(&tx)?;
+            tx.commit()?;
+            Ok((sweep, target))
+        });
+        let (sweep, target) = match read {
+            Ok(read) => read,
+            Err(cause) if storage_failure(&cause) => {
+                self.note_head_obstacle("storage_unavailable");
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        };
+        if let Some((input_id, state, _)) = sweep
+            .iter()
+            .find(|(_, state, _)| *state != storage::InputState::Ready)
+        {
+            self.input_fenced = true;
+            self.deferred_failed = true;
+            return Err(error(format!(
+                "queued input {input_id} changed to {} outside the runner queue",
+                state.as_str()
+            )));
+        }
+        for (input_id, _, consumed) in sweep {
+            if !consumed {
+                continue;
+            }
+            self.queue.retain(|queued| queued.input_id != input_id);
+            self.cancel_deferred(
+                conn,
+                observation,
+                input_id,
+                storage::InputState::Ready,
+                "message_consumed",
+            )?;
+            if self.finalization.is_some() {
+                return Ok(());
+            }
+        }
+        if let Some(reason) = target
+            && let Some(head) = self.queue.pop_front()
+        {
+            self.cancel_deferred(
+                conn,
+                observation,
+                head.input_id,
+                storage::InputState::Ready,
+                reason,
+            )?;
+        }
+        Ok(())
+    }
+
     fn hold_possible_ordinary_input(&mut self, input_id: i64) {
         let retained = self
             .operations
@@ -2622,13 +2757,7 @@ impl InputCoordinator {
             (head.input_id, head.request.message_id, head.operation);
         let now = Instant::now();
         let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-            if let Some(message_id) = message_id
-                && crate::broker::get_message(conn, message_id)?.status
-                    != crate::broker::MessageStatus::InputRequired
-            {
-                return Ok(Some("message_consumed"));
-            }
-            self.deferred_target(conn)
+            self.head_settlement(conn, message_id)
         });
         match target {
             Ok(Some(reason)) => {
@@ -2798,13 +2927,7 @@ impl InputCoordinator {
             );
         }
         let target = match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-            if let Some(message_id) = message_id {
-                let message = crate::broker::get_message(conn, message_id)?;
-                if message.status != crate::broker::MessageStatus::InputRequired {
-                    return Ok(Some("message_consumed"));
-                }
-            }
-            self.deferred_target(conn)
+            self.head_settlement(conn, message_id)
         }) {
             Ok(target) => target,
             Err(cause) if storage_failure(&cause) => {
@@ -3469,13 +3592,7 @@ impl InputCoordinator {
                 let (input_id, message_id) = (head.input_id, head.request.message_id);
                 let reason =
                     with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
-                        if let Some(message_id) = message_id
-                            && crate::broker::get_message(conn, message_id)?.status
-                                != crate::broker::MessageStatus::InputRequired
-                        {
-                            return Ok(Some("message_consumed"));
-                        }
-                        self.deferred_target(conn)
+                        self.head_settlement(conn, message_id)
                     });
                 match reason {
                     Ok(Some(reason)) => {
@@ -3575,7 +3692,8 @@ impl InputCoordinator {
             let source = if terminal_bookkeeping {
                 source
             } else {
-                self.retain_permission_failure(conn, deadline, source)
+                let source = self.retain_permission_failure(conn, deadline, source);
+                self.record_immediate_write_failure(conn, observation, deadline, source)
             };
             if self.pending.is_some() {
                 self.failure(source)
@@ -4740,6 +4858,84 @@ impl InputCoordinator {
         }
     }
 
+    /// Records the in-flight immediate attempt whose completion failed before the runner replies,
+    /// as `uncertain/write_failed` once it has written a byte, and returns the client failure.
+    pub(crate) fn pending_attempt_failed(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        failure: InputFailure,
+    ) -> InputFailure {
+        let InputFailure { source, context } = failure;
+        let source = self.record_immediate_write_failure(conn, observation, Instant::now(), source);
+        InputFailure { source, context }
+    }
+
+    fn record_immediate_write_failure(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        deadline: Instant,
+        source: CafleetError,
+    ) -> CafleetError {
+        let Some(pending) = self.pending.as_mut() else {
+            return source;
+        };
+        let Some(composer) = pending.composer() else {
+            return source;
+        };
+        if composer.deferred.is_some() {
+            return source;
+        }
+        let written_stages = composer.written_stages;
+        let Some(id) = pending.installed_input_id() else {
+            return source;
+        };
+        let retained = self
+            .operations
+            .get(&id)
+            .expect("pending composer receipt retained");
+        let written = retained.stage != SubmissionStage::ZeroBytes
+            || retained.written_bytes > 0
+            || written_stages > 0;
+        if !written || retained.operation.state != storage::InputState::InProgress {
+            return source;
+        }
+        pending.phase = InputPhase::Blocked;
+        let stage = retained.stage;
+        let bookkeeping = match self.effective_deadline(conn, deadline) {
+            Ok(effective) if effective > Instant::now() => effective,
+            _ => Instant::now() + DEFERRED_FINALIZATION,
+        };
+        let persisted = with_database_deadline(conn, bookkeeping, |conn| {
+            self.validate_live_run(conn)?;
+            storage::record_input_uncertain(
+                conn,
+                &self.run.owner(),
+                id,
+                storage::StopCause::WriteFailed,
+            )
+        });
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("pending composer receipt retained");
+        retained.attempt_available = false;
+        match persisted {
+            Ok(operation) => {
+                retained.operation = operation;
+                Self::publish_result(
+                    observation,
+                    id,
+                    stage,
+                    Some(storage::StopCause::WriteFailed),
+                );
+                source
+            }
+            Err(bookkeeping) => source.with_diagnostic(bookkeeping.message()),
+        }
+    }
+
     /// Retires the pending immediate attempt; a started deferred attempt stays for `fence`,
     /// which settles it by its written bytes.
     pub(super) fn finish_pending_attempt(&mut self) {
@@ -4834,6 +5030,8 @@ impl InputCoordinator {
             held_composer: None,
             output_seq: 0,
             bracketed_paste: false,
+            last_drain_blocker: None,
+            head_attempt_failure: None,
         })
     }
 
@@ -7019,6 +7217,43 @@ mod tests {
             }
 
             fn held_blocker_for_stalled_heads(host: &mut Host, immediate: bool) -> i64 {
+                let id = hold_failed_blocker(host, immediate);
+                let blocker = row(host, id);
+                assert_eq!(blocker.state, storage::InputState::Uncertain);
+                assert_eq!(blocker.stop_cause, Some(storage::StopCause::WriteFailed));
+                id
+            }
+
+            /// An immediate blocker whose `uncertain/write_failed` bookkeeping write fails, so it
+            /// stays `in_progress` while it holds the composer.
+            fn held_in_progress_blocker_after_a_failed_uncertain_write(host: &mut Host) -> i64 {
+                host.fixture
+                    .conn
+                    .execute_batch(
+                        "CREATE TRIGGER owned_uncertain_bookkeeping_failure BEFORE UPDATE OF state ON member_input_operations
+                         WHEN OLD.operation_key='prompt:reconciled-stalled-blocker' AND NEW.state='uncertain'
+                         BEGIN SELECT RAISE(FAIL,'owned uncertain bookkeeping failure'); END",
+                    )
+                    .unwrap();
+                let held = catch_unwind(AssertUnwindSafe(|| hold_failed_blocker(host, true)));
+                let removed = host
+                    .fixture
+                    .conn
+                    .execute_batch("DROP TRIGGER owned_uncertain_bookkeeping_failure");
+                let id = match held {
+                    Ok(id) => {
+                        removed.unwrap();
+                        id
+                    }
+                    Err(primary) => resume_unwind(primary),
+                };
+                let blocker = row(host, id);
+                assert_eq!(blocker.state, storage::InputState::InProgress);
+                assert_eq!(blocker.stop_cause, None);
+                id
+            }
+
+            fn hold_failed_blocker(host: &mut Host, immediate: bool) -> i64 {
                 host.coordinator.services.hooks = Arc::new(FailLaterBeforeWrite {
                     inner: host.hooks.clone(),
                     armed: std::sync::atomic::AtomicBool::new(true),
@@ -7045,20 +7280,17 @@ mod tests {
                     .input_id()
                     .unwrap();
                 let failure = later_checkpoint_failure(host);
+                let primary = match &failure.source {
+                    CafleetError::WithDiagnostics { cause, .. } => cause.as_ref(),
+                    source => source,
+                };
                 assert!(
-                    matches!(failure.source, CafleetError::DeadlineExceeded),
+                    matches!(primary, CafleetError::DeadlineExceeded),
                     "{failure:?}"
                 );
                 assert_eq!(failure.context.input_id, Some(id));
                 if immediate {
                     host.coordinator.finish_pending_attempt();
-                    assert_eq!(row(host, id).state, storage::InputState::InProgress);
-                } else {
-                    assert_eq!(row(host, id).state, storage::InputState::Uncertain);
-                    assert_eq!(
-                        row(host, id).stop_cause,
-                        Some(storage::StopCause::WriteFailed)
-                    );
                 }
                 assert!(host.coordinator.pending.is_none());
                 assert_eq!(host.pty.offers, [LITERAL.as_bytes().to_vec()]);
@@ -7275,7 +7507,7 @@ mod tests {
                     permission_configured("plain", Value::Null),
                     encoded(),
                     |host| {
-                        let blocker = held_blocker_for_stalled_heads(host, true);
+                        let blocker = held_in_progress_blocker_after_a_failed_uncertain_write(host);
                         let head = queued(
                             host,
                             request(host, "prompt:behind-consumed-in-progress", LITERAL),
@@ -7329,7 +7561,7 @@ mod tests {
                     permission_configured("plain", Value::Null),
                     encoded(),
                     |host| {
-                        let blocker = held_blocker_for_stalled_heads(host, true);
+                        let blocker = held_in_progress_blocker_after_a_failed_uncertain_write(host);
                         let owner = host.fixture.run.owner();
                         let unrelated = storage::test_support::reserve_input(
                             &mut host.fixture.conn,
@@ -7529,12 +7761,9 @@ mod tests {
                 assert_eq!(failure.context.input_id, Some(id));
                 assert_eq!(failure.context.run_id, Some(host.fixture.run.run_id));
                 let failed = row(host, id);
-                if deferred {
-                    assert_eq!(failed.state, storage::InputState::Uncertain);
-                    assert_eq!(failed.stop_cause, Some(storage::StopCause::WriteFailed));
-                } else {
-                    assert_eq!(failed.state, storage::InputState::InProgress);
-                    assert_eq!(failed.stop_cause, None);
+                assert_eq!(failed.state, storage::InputState::Uncertain);
+                assert_eq!(failed.stop_cause, Some(storage::StopCause::WriteFailed));
+                if !deferred {
                     host.coordinator
                         .set_queued_composer_busy_since(next, &old_wait());
                     let since = host.coordinator.queue.front().unwrap().composer_busy_since;
@@ -7663,7 +7892,7 @@ mod tests {
                                 reconcile.operation =
                                     InputControlOperation::Receipt(ReceiptAction::Reconcile {
                                         input_id: first,
-                                        expected: storage::InputState::InProgress,
+                                        expected: storage::InputState::Uncertain,
                                         disposition: storage::InputDisposition::AbandonedUncertain,
                                         evidence_ref:
                                             "synthetic:positive-literal-later-before-write-failure"
@@ -9192,6 +9421,137 @@ mod tests {
                         "the consumed preview is never typed"
                     );
                     assert_eq!(result_events(host, head), 0);
+                });
+            }
+
+            fn queued_ids(host: &Host) -> Vec<i64> {
+                host.coordinator
+                    .queue
+                    .iter()
+                    .map(|queued| queued.input_id)
+                    .collect()
+            }
+
+            fn exec_request(host: &Host, key: &str) -> InputControlRequest {
+                let mut request = host.request(key);
+                request.operation = InputControlOperation::SubmitExec(SubmitInput {
+                    operation_key: key.into(),
+                    input_kind: storage::InputKind::Exec,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                request
+            }
+
+            fn cancel_queued(host: &mut Host, input_id: i64) {
+                let reply = host
+                    .receipt(crate::runtime::ReceiptAction::Reconcile {
+                        input_id,
+                        expected: storage::InputState::Ready,
+                        disposition: storage::InputDisposition::NotSubmitted,
+                        evidence_ref: "audit:cancelled-before-resend".into(),
+                    })
+                    .unwrap();
+                assert!(
+                    matches!(
+                        reply,
+                        InputControlReply::Receipt(crate::runtime::ReceiptReply::Settled {
+                            input_id: settled
+                        }) if settled == input_id
+                    ),
+                    "the coordinator cancels the queued receipt"
+                );
+            }
+
+            fn assert_cancelled_zero_byte(host: &Host, input_id: i64) {
+                let input = row(host, input_id);
+                assert_eq!(input.state, storage::InputState::Settled, "{input:?}");
+                assert_eq!(
+                    input.disposition,
+                    Some(storage::InputDisposition::NotSubmitted)
+                );
+                assert_eq!(input.delivery_method, None);
+                assert_eq!(result_events(host, input_id), 0);
+            }
+
+            #[test]
+            fn reconcile_cancels_a_queued_ready_prompt_and_pops_it_from_the_fifo_in_place() {
+                with_permission_host(Duration::from_secs(20), |host| {
+                    form(host);
+                    let first = queued(host, host.request("prompt:first"), "interaction_open");
+                    let cancelled =
+                        queued(host, host.request("prompt:cancelled"), "interaction_open");
+                    let last = queued(host, host.request("prompt:last"), "interaction_open");
+                    cancel_queued(host, cancelled);
+                    assert_cancelled_zero_byte(host, cancelled);
+                    assert_eq!(
+                        queued_ids(host),
+                        vec![first, last],
+                        "the settled entry leaves the FIFO in the same call"
+                    );
+                    close(host);
+                    turns_until(host, |host| settled(host, first) && settled(host, last));
+                    assert_eq!(
+                        host.pty.program,
+                        vec![encoded(), encoded()],
+                        "only the two remaining prompts are typed"
+                    );
+                    assert!(!host.coordinator.input_fenced);
+                    assert_cancelled_zero_byte(host, cancelled);
+                });
+            }
+
+            #[test]
+            fn reconcile_cancels_a_queued_ready_exec_and_pops_it_from_the_fifo() {
+                with_permission_host(Duration::from_secs(20), |host| {
+                    form(host);
+                    let exec = queued(
+                        host,
+                        exec_request(host, "exec:cancelled"),
+                        "interaction_open",
+                    );
+                    let after = queued(host, host.request("prompt:after-exec"), "interaction_open");
+                    cancel_queued(host, exec);
+                    assert_cancelled_zero_byte(host, exec);
+                    assert_eq!(queued_ids(host), vec![after]);
+                    close(host);
+                    turns_until(host, |host| settled(host, after));
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                    assert!(!host.coordinator.input_fenced);
+                });
+            }
+
+            #[test]
+            fn housekeeping_fails_loudly_and_fences_input_when_a_queued_receipt_changed_outside_the_runner_queue()
+             {
+                with_permission_host(Duration::from_secs(20), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:changed"), "interaction_open");
+                    let owner = host.fixture.run.owner();
+                    storage::settle_zero_byte_deferred(
+                        &mut host.fixture.conn,
+                        &owner,
+                        id,
+                        storage::InputState::Ready,
+                        "target_inactive",
+                    )
+                    .unwrap();
+                    let failure = host
+                        .coordinator
+                        .queue_housekeeping(&mut host.fixture.conn, &host.controller)
+                        .expect_err(
+                            "a queued receipt settled outside the runner is an invariant violation",
+                        );
+                    let expected =
+                        format!("queued input {id} changed to settled outside the runner queue");
+                    assert!(
+                        format!("{failure:?}").contains(&expected),
+                        "{failure:?} names {expected}"
+                    );
+                    assert!(
+                        host.coordinator.input_fenced,
+                        "the violation fences ordinary input permanently"
+                    );
                 });
             }
 

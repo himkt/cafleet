@@ -1,7 +1,7 @@
 # Held runner queue drain and Director forced flush
 
 **Status**: Approved
-**Progress**: 7/43 tasks complete
+**Progress**: 15/43 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -83,7 +83,7 @@ The fix in § Runner queue housekeeping takes the consumption check, the stall w
 - **Rule:** every path that ends an immediate ordinary (`preview`, `prompt`, `exec`) attempt after its first child byte records the receipt `uncertain` with `stop_cause=write_failed` before the runner replies to the client. `write_failed` already covers "PTY/checkpoint error, unrecorded possible I/O". A zero-byte attempt returns to `ready` exactly as today.
 - **`advance`:** its error mapping gains an ordinary-attempt branch beside `retain_permission_failure`. When the pending composer attempt is immediate and has written bytes, the branch records `record_input_uncertain(…, StopCause::WriteFailed)`.
 - **Expired deadline:** when the caller's deadline has passed, the bookkeeping transaction uses `Instant::now() + DEFERRED_FINALIZATION` as its storage deadline, matching `stop_composer_stages`.
-- **`complete_pending_input`:** a `quiesce` failure goes through the same coordinator bookkeeping before `finish_pending_attempt`.
+- **`complete_pending_input`:** a `quiesce` failure goes through the same coordinator bookkeeping, `InputCoordinator::pending_attempt_failed(&mut self, conn: &mut Connection, observation: &ObservationController, failure: InputFailure) -> InputFailure`, before `finish_pending_attempt`; it records a written immediate attempt `uncertain/write_failed` and returns the client failure.
 - **Held composer:** set exactly as today. The receipt now carries `uncertain/write_failed`, which satisfies `has_stalled_blocker_provenance`.
 
 ### Runner: interrupted drain feed (gate (b) repair)
@@ -117,7 +117,7 @@ Each sweep:
 3. Applies the head's target result as today (`target_inactive`, `target_changed` → pop and settle).
 4. Runs the stall watchdog (§ Stall watchdog).
 
-A transient storage failure (`DatabaseBusy`, `DeadlineExceeded`) on the read leaves every entry unchanged and records the head obstacle `storage_unavailable`.
+A transient storage failure (`DatabaseBusy`, `DeadlineExceeded`) on the read leaves every entry unchanged and records the head obstacle `storage_unavailable`. A sweep first retries a pending `finalization`; a cancellation that storage prevents becomes that `finalization`, and the sweep settles nothing further until it commits.
 
 Related changes:
 
@@ -195,6 +195,11 @@ The `review_stalled_queue` INSTRUCTION is exactly: `Capture the member's pane, i
   - The cursor must sit immediately after the prompt marker. This is a new `CursorRule::AfterPrompt`, evaluated at the end of the rule's prompt matcher.
 - Step 6 researches which backends render inline suggestions on their supported native versions. Claude Code renders them even though members launch with `--prompt-suggestions false`, as the issue observed. Each backend that renders them gains a fixture-backed rule; one that never does is recorded as such in `SPEC.md` §6.7.
 - The Claude Code 2.1.322 / Herdr 0.9.5 suggestion rendering is captured as a native fixture in `assets/profiles/native/claude.json` and registered in `assets/profiles/bundled.json`.
+- **Fixture cell styles:** a native screen object gains optional `cell_styles` beside `cell_backgrounds`, so fixtures reproduce the styles a `suggestion` rule reads.
+  - Each run is `{"row":N,"start_col":C,"end_col":E,"faint":BOOL,"foreground":COLOUR_OR_NULL}`, one per maximal run of cells in an unmasked row sharing one non-default (`faint`, `foreground`) pair, with `end_col` exclusive. `COLOUR` uses the `cell_backgrounds` colour form.
+  - An absent key means every cell has default style, so existing fixtures and their digests are unchanged.
+  - The capture-to-fixture conversion derives the runs from the capture grid's per-cell faint and foreground attributes. Fixture replay applies each run's style before writing its row text.
+  - The build guard requires each run inside the geometry and outside masked rows, `start_col` below `end_col`, no overlap with another run, and at least one non-default attribute with a valid colour.
 
 ### Profiles: composer draft and mode-switch prefixes
 
@@ -513,7 +518,7 @@ Every test is an in-file `#[cfg(test)] mod tests` unit in the file owning the as
 
 | Behavior | Owning file |
 |---|---|
-| Run 34 reproduction: deadline-expired immediate write, queued head, reconciled blocker, consumed message, the head held on the Step 1 gate → head cancelled `message_consumed` | `src/runtime/service.rs` |
+| Run 34 reproduction: deadline-expired immediate write, queued head, reconciled blocker, consumed message, the head held on the Step 1 gate → head cancelled `message_consumed`, driven on an in-process `Host` through the production entry points in `tick_running` order | `src/runtime/input.rs` |
 | Written immediate attempt failing in `advance` or in `complete_pending_input`'s drain records `uncertain/write_failed` | `src/runtime/input.rs` |
 | A deadline or observer error mid-feed retains the unfed remainder, the next drain or tick feeds it, `observation_complete` is restored and no byte is dropped; a parser failure keeps the fence | `src/runtime/transport.rs` |
 | Housekeeping cancels a consumed head and a consumed non-head entry while (a) an immediate attempt is in flight, (b) the drain stays `Pending`, (c) a `finalization` retry is outstanding | `src/runtime/service.rs` |
@@ -522,7 +527,7 @@ Every test is an in-file `#[cfg(test)] mod tests` unit in the file owning the as
 | Watchdog: one event per head for every cause row, interaction reset, live versus recorded derivation, `queue_turn_not_reached`, action shapes | `src/runtime/input.rs` |
 | `stalled_delivery` validation per `cause.kind`; outbox carries `cause` | `src/broker/runtime/events.rs` |
 | Suggestion-only composer empty; typed draft non-empty | `src/coding_agent/detector.rs` |
-| `composer_draft` validation, single-row and framed extraction, mode-switched marker unreadable, prefix match | `src/coding_agent/catalog.rs` |
+| `composer_draft` validation, single-row and framed extraction, mode-switched marker unreadable, prefix match; `cell_styles` build-guard validation and replay | `src/coding_agent/catalog.rs` |
 | `send_text` argv and acknowledgment mapping | `src/multiplexer/tmux.rs`, `src/multiplexer/herdr.rs` |
 | `Flush::Reserve` refusals in order, selection in in-memory FIFO order including a head requeued by `push_front` with a higher receipt ID, plain-limit fallbacks and `FLUSH_LITERAL_LIMIT`, `Settle` per outcome with events, expiry → uncertain, late or mismatched `Settle` → `NotOutstanding` with no write, `Reconcile` refused while a slot is outstanding, `fence()` cascade | `src/runtime/input.rs` |
 | `Flush` served while the queue turn is held, one case per § Gate tolerance row, asserting proceed or the row's refusal cause | `src/runtime/service.rs` |
@@ -543,7 +548,7 @@ Every test is an in-file `#[cfg(test)] mod tests` unit in the file owning the as
 This step commits no code. A scratch test may be used locally and discarded; the committed reproduction comes in Step 3.
 
 - [x] Model the run 34 sequence against the pre-change runner, and determine which D4 gate holds the head. Confirm or rule out the drain-`Pending` hypothesis, including the CPU observation <!-- completed: 2026-11-19T13:41 -->
-- [ ] If the modeled sequence does not hold the head, inspect run 34 read-only (`cafleet input show`, `cafleet member show 41 --json`, `cafleet member capture 41`) and model the drain blocker or storage retry its evidence implies, until a sequence holds the head <!-- completed: -->
+- [x] If the modeled sequence does not hold the head, inspect run 34 read-only (`cafleet input show`, `cafleet member show 41 --json`, `cafleet member capture 41`) and model the drain blocker or storage retry its evidence implies, until a sequence holds the head; not needed: the modeled sequence held the head <!-- completed: 2026-11-19T13:42 -->
 - [x] Record the gate in Background § Root cause with a Changelog row, and adjust § Specification wherever the finding changes it <!-- completed: 2026-11-19T13:41 -->
 
 ### Step 2: Documentation
@@ -554,28 +559,20 @@ This step commits no code. A scratch test may be used locally and discarded; the
 - [x] Update `assets/skills/cafleet/roles/member.md` with the marker rule <!-- completed: 2026-11-19T13:41 -->
 - [x] Update `assets/skills/cafleet/roles/director.md` with the `review_stalled_queue` procedure and the forced-flush preconditions <!-- completed: 2026-11-19T13:41 -->
 
-COMMENT(programmer): [Fixture style gap] The suggestion rule matches on cell style (`faint` or an indexed foreground), but the native fixture screen schema (SPEC §6.9 Bundled profiles and native screen fixtures) records only `cell_backgrounds`. Step 6 fixtures cannot reproduce a suggestion-only composer until the screen object gains an optional per-cell style field (for example `cell_styles` runs `{"row","start_col","end_col","faint","fg"}` beside `cell_backgrounds`). Please decide whether to add that field to § Profiles: suggestion-only composer; SPEC.md is not yet updated for it.
-
-COMMENT(programmer): [Parser failure scope] § Runner: interrupted drain feed applies remainder retention to deadline and observer interruptions only, per the decision. I specified that a terminal parser failure keeps today's lifetime fence, because a parser error leaves no resumable boundary. Please confirm or overrule.
-
-COMMENT(programmer): [Step 1 task 2] Step 1's conditional task (inspect run 34 when the model does not hold the head) is unchecked because the modeled sequence held the head. Please decide whether to check it as satisfied or reword it, so Progress can reach 43/43.
-
-COMMENT(programmer): [Implementation notes, no decision needed] (1) SPEC §3 lists concerns, not source paths, so `src/runtime/flush.rs` is reflected as a Pane input responsibility instead of a path. (2) SPEC §6.9 Input control frames now fixes the wire names `flush` / `reserve` (`director_member_id,reservation_expires_at_mono_ns`) / `settle` (`flush_input_id,outcome` ∈ `acknowledged,not_started,uncertain`) and reply statuses `reserved,empty,refused,settled,not_outstanding`; Step 8 implements these. (3) The per-backend suggestion and mode-prefix research results are left for Step 6 to record in SPEC §6.7 § Composer drafts and native suggestions. (4) `mise //docs:build` cannot install `node_modules` on the full `/development-pvc` (pnpm store also lives there), so I ran the same `pnpm build` in a `/tmp/cafleet-programmer-docs` copy with `--store-dir /tmp/cafleet-programmer-pnpm-store`; it passed. (5) `herdr pane send-text <PANE_ID> <TEXT>` is verified against Herdr 0.9.5 help and recorded in SPEC §6.5. (6) The ask-gate entry was also added to `docs/docs/quickstart.md` and `docs/docs/concepts/coding-agents.md`.
-
 ### Step 3: Reproduction and failure bookkeeping
 
-- [ ] Commit the run 34 reproduction test in `src/runtime/service.rs` on the Step 1 gate, asserting the post-fix outcome; confirm it fails on the pre-change code <!-- completed: -->
-- [ ] Add the ordinary-attempt `uncertain/write_failed` branch to `InputCoordinator::advance`'s error mapping, with the fallback bookkeeping deadline <!-- completed: -->
-- [ ] Route `complete_pending_input` `quiesce` failures through the coordinator bookkeeping <!-- completed: -->
+- [ ] Commit the run 34 reproduction test in `src/runtime/input.rs` (in-process `Host`, production entry points in `tick_running` order) on the Step 1 gate, asserting the post-fix outcome; confirm it fails on the pre-change code <!-- completed: -->
+- [x] Add the ordinary-attempt `uncertain/write_failed` branch to `InputCoordinator::advance`'s error mapping, with the fallback bookkeeping deadline <!-- completed: 2026-11-19T13:55 -->
+- [x] Route `complete_pending_input` `quiesce` failures through the coordinator bookkeeping <!-- completed: 2026-11-19T13:55 -->
 - [ ] Add the D1/D2 unit tests in `src/runtime/input.rs` <!-- completed: -->
 
 ### Step 4: Queue housekeeping
 
-- [ ] Extract the shared consumption check used by housekeeping, `start_deferred`, `attempt_deferred` and `advance` <!-- completed: -->
-- [ ] Add `queue_housekeeping` (one read transaction per sweep, 1 s cadence) and call it from `tick_running` before the pending-client branch <!-- completed: -->
-- [ ] Record `attempt_failed` and `last_drain_blocker` in `retry_deferred` <!-- completed: -->
-- [ ] Make the receipt `Reconcile` action pop settled queued entries and accept `ready` prompt/exec cancellation <!-- completed: -->
-- [ ] Repair the `observation incomplete` latch per § Runner: interrupted drain feed so a healthy queue turn resumes on it <!-- completed: -->
+- [x] Extract the shared consumption check used by housekeeping, `start_deferred`, `attempt_deferred` and `advance` <!-- completed: 2026-11-19T14:04 -->
+- [x] Add `queue_housekeeping` (one read transaction per sweep, 1 s cadence) and call it from `tick_running` before the pending-client branch <!-- completed: 2026-11-19T14:04 -->
+- [x] Record `attempt_failed` and `last_drain_blocker` in `retry_deferred` <!-- completed: 2026-11-19T14:04 -->
+- [x] Make the receipt `Reconcile` action pop settled queued entries and accept `ready` prompt/exec cancellation <!-- completed: 2026-11-19T14:04 -->
+- [x] Repair the `observation incomplete` latch per § Runner: interrupted drain feed so a healthy queue turn resumes on it <!-- completed: 2026-11-19T13:55 -->
 - [ ] Add the housekeeping and reconcile tests; confirm the reproduction test passes <!-- completed: -->
 
 ### Step 5: Stall watchdog
@@ -589,7 +586,7 @@ COMMENT(programmer): [Implementation notes, no decision needed] (1) SPEC §3 lis
 ### Step 6: Profiles
 
 - [ ] Research inline-suggestion rendering on each backend's supported native version, and record the result in `SPEC.md` §6.7 <!-- completed: -->
-- [ ] Add `CursorRule::AfterPrompt` and the `suggestion` style field to `composer_empty` rules in the catalog and detector <!-- completed: -->
+- [ ] Add `CursorRule::AfterPrompt` and the `suggestion` style field to `composer_empty` rules in the catalog and detector, and the optional fixture `cell_styles` runs to capture conversion, replay and the build guard <!-- completed: -->
 - [ ] Verify each candidate mode-switch prefix and each mode's marker behavior against each backend's native CLI <!-- completed: -->
 - [ ] Capture the suggestion, draft and mode-switched fixtures for every backend, including Claude Code 2.1.322 / Herdr 0.9.5; register them in `assets/profiles/bundled.json` and add `composer_draft` to every profile <!-- completed: -->
 - [ ] Add catalog validation and detector/extraction tests <!-- completed: -->
@@ -628,3 +625,4 @@ COMMENT(programmer): [Implementation notes, no decision needed] (1) SPEC §3 lis
 | 2026-11-19 | Review round 1: flush reservation and settlement moved to runner control actions served outside the queue path; FIFO order by `input_id`; one-read housekeeping at 1 s; live cause derivation and event validation; region-based `composer_draft`; settle interval, plain framing and absolute literal bound; Step 1 reframed as investigation |
 | 2026-11-19 | Review round 2: flush order defined as the runner's in-memory FIFO order (replacing `input_id` ascending); explicit `draft_rows`; § Gate tolerance per D4 gate and drain blocker; `settle_ms` fixed at `STAGE_SETTLE`; late `Settle` handling |
 | 2026-11-19 | Step 1 finding: gate (b) `observation incomplete` latch in `Transport::observe_drain_child` recorded in § Root cause; user decisions: § Runner: interrupted drain feed retains and later feeds the unfed remainder, and the § Gate tolerance `observation incomplete` row proceeds as a user-accepted last-resort override |
+| 2026-11-19 | Director decisions: optional fixture `cell_styles` runs so suggestion fixtures reproduce cell style; a terminal parser failure keeps the lifetime observation fence |

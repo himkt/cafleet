@@ -87,7 +87,8 @@ pub(crate) struct Transport {
     input_instance: Arc<()>,
     input_drain: Option<DrainedInput>,
     drain_blocker: Option<String>,
-    observation_complete: bool,
+    observation_fenced: bool,
+    observation_remainder: Option<Vec<u8>>,
     #[cfg(test)]
     observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
     #[cfg(test)]
@@ -176,7 +177,8 @@ impl Transport {
             input_instance: Arc::new(()),
             input_drain: None,
             drain_blocker: None,
-            observation_complete: true,
+            observation_fenced: false,
+            observation_remainder: None,
             #[cfg(test)]
             observation_hooks: None,
             #[cfg(test)]
@@ -199,36 +201,74 @@ impl Transport {
         };
         progress.forwarded_bytes =
             write_pending(&mut self.input, usize::MAX, |bytes| pty.try_write(bytes))?;
+        if let Some(remainder) = self.observation_remainder.take() {
+            self.observe_tick_child(&remainder, observer)?;
+        }
         if let Some(bytes) = self.read_child(pty)? {
             self.child_eof = bytes.is_empty();
             self.display.extend(bytes.iter().copied());
-            let observation_complete_before = self.observation_complete;
-            if !bytes.is_empty() {
-                self.observation_complete = false;
-            }
             #[cfg(test)]
             if !bytes.is_empty()
                 && let Some(hooks) = &self.observation_hooks
                 && let Err(cause) =
                     hooks.before(self.observation_phase, ObservationOperation::Parser)
             {
+                self.observation_fenced = true;
                 observer.parser_failure()?;
                 return Err(cause);
             }
-            match self.terminal.feed_observed_classified(&bytes, observer) {
-                Ok(()) => {}
-                Err(TerminalObservationError::Parser(cause)) => {
-                    observer.parser_failure()?;
-                    return Err(cause);
-                }
-                Err(TerminalObservationError::Observer(cause)) => return Err(cause),
+            if !bytes.is_empty() {
+                self.observe_tick_child(&bytes, observer)?;
             }
-            self.observation_complete = observation_complete_before;
         }
         self.flush_display(display)?;
         progress.outer_eof = self.outer_eof;
         progress.child_eof = self.child_eof;
         Ok(progress)
+    }
+    fn observe_tick_child(
+        &mut self,
+        bytes: &[u8],
+        observer: &mut impl ScreenObserver,
+    ) -> Result<()> {
+        match self.observe_child_bytes(bytes, observer) {
+            Ok(()) => Ok(()),
+            Err(TerminalObservationError::Parser(cause)) => {
+                observer.parser_failure()?;
+                Err(cause)
+            }
+            Err(TerminalObservationError::Observer { cause, .. }) => Err(cause),
+        }
+    }
+    /// An observer failure leaves the unconsumed suffix of `bytes` as the observation
+    /// remainder, which the next tick or drain feeds before any new child read; a parser
+    /// failure has no resumable boundary and fences observation for the transport lifetime.
+    fn observe_child_bytes(
+        &mut self,
+        bytes: &[u8],
+        observer: &mut impl ScreenObserver,
+    ) -> std::result::Result<(), TerminalObservationError> {
+        let observed = self.terminal.feed_observed_classified(bytes, observer);
+        match &observed {
+            Ok(()) => {}
+            Err(TerminalObservationError::Observer { consumed, .. }) => {
+                self.retain_observation_remainder(&bytes[*consumed..]);
+            }
+            Err(TerminalObservationError::Parser(_)) => self.observation_fenced = true,
+        }
+        observed
+    }
+    fn retain_observation_remainder(&mut self, unobserved: &[u8]) {
+        assert!(
+            self.observation_remainder.is_none(),
+            "an observation remainder is fed before new child output"
+        );
+        if !unobserved.is_empty() {
+            self.observation_remainder = Some(unobserved.to_vec());
+        }
+    }
+    fn observation_complete(&self) -> bool {
+        !self.observation_fenced && self.observation_remainder.is_none()
     }
     /// One outer-terminal read returns at most the line discipline's buffer, so
     /// a longer terminal reply must reach the child within the same tick: a
@@ -393,7 +433,7 @@ impl Transport {
             "input drain binding changed",
         )?;
         ensure(
-            self.observation_complete
+            self.observation_complete()
                 && !self.replies.pending()
                 && !self.outer_eof
                 && !self.child_eof
@@ -488,7 +528,7 @@ impl Transport {
         self.invalidate_input_drain();
         #[cfg(test)]
         if let Some(bytes) = self.deferred_child_bytes.take() {
-            self.observation_complete = false;
+            self.observation_fenced = true;
             self.display.extend(bytes);
         }
         let count = self.display.len();
@@ -593,6 +633,13 @@ impl Transport {
                 remaining.manual -= written;
                 check_deadline(Instant::now(), deadline)?;
             }
+            if let Some(remainder) = self.observation_remainder.take() {
+                remaining.child = remaining
+                    .child
+                    .checked_sub(remainder.len())
+                    .expect("an observation remainder fits a fresh drain's child quota");
+                self.observe_drain_child(&remainder, observer, deadline)?;
+            }
             let child_read = self.read_drain_child(
                 pty,
                 remaining
@@ -640,7 +687,7 @@ impl Transport {
                 if self.replies.pending() {
                     return Ok(self.pending("terminal reply pending".into()));
                 }
-                if !self.observation_complete {
+                if !self.observation_complete() {
                     return Ok(self.pending("observation incomplete".into()));
                 }
                 let health = observer.input_health();
@@ -691,24 +738,28 @@ impl Transport {
         observer: &mut impl ScreenObserver,
         deadline: Instant,
     ) -> Result<()> {
-        let observation_complete_before = self.observation_complete;
-        self.observation_complete = false;
-        check_deadline(Instant::now(), deadline)?;
+        if let Err(cause) = check_deadline(Instant::now(), deadline) {
+            self.retain_observation_remainder(bytes);
+            return Err(cause);
+        }
         #[cfg(test)]
         if let Some(hooks) = &self.observation_hooks {
-            hooks.before(self.observation_phase, ObservationOperation::Parser)?;
-            check_deadline(Instant::now(), deadline)?;
+            if let Err(cause) = hooks.before(self.observation_phase, ObservationOperation::Parser) {
+                self.observation_fenced = true;
+                return Err(cause);
+            }
+            if let Err(cause) = check_deadline(Instant::now(), deadline) {
+                self.retain_observation_remainder(bytes);
+                return Err(cause);
+            }
         }
         let mut bounded = DeadlineObserver {
             inner: observer,
             deadline,
         };
-        match self.terminal.feed_observed_classified(bytes, &mut bounded) {
-            Ok(()) => {
-                self.observation_complete = observation_complete_before;
-                check_deadline(Instant::now(), deadline)
-            }
-            Err(TerminalObservationError::Observer(cause)) => Err(cause),
+        match self.observe_child_bytes(bytes, &mut bounded) {
+            Ok(()) => check_deadline(Instant::now(), deadline),
+            Err(TerminalObservationError::Observer { cause, .. }) => Err(cause),
             Err(TerminalObservationError::Parser(cause)) => match bounded.parser_failure() {
                 Ok(()) => Err(cause),
                 Err(notification) => Err(CafleetError::WithDiagnostics {
@@ -1045,7 +1096,10 @@ pub(crate) struct TerminalState {
 }
 pub(crate) enum TerminalObservationError {
     Parser(CafleetError),
-    Observer(CafleetError),
+    Observer {
+        cause: CafleetError,
+        consumed: usize,
+    },
 }
 
 impl TerminalState {
@@ -1083,7 +1137,7 @@ impl TerminalState {
         self.feed_observed_classified(bytes, observer)
             .map_err(|failure| match failure {
                 TerminalObservationError::Parser(cause)
-                | TerminalObservationError::Observer(cause) => cause,
+                | TerminalObservationError::Observer { cause, .. } => cause,
             })
     }
     pub(crate) fn feed_observed_classified(
@@ -1095,26 +1149,30 @@ impl TerminalState {
         for (index, byte) in bytes.iter().enumerate() {
             if byte.is_ascii_control() {
                 if index > start {
-                    self.step(&bytes[start..index], observer)?;
+                    self.step(bytes, start..index, observer)?;
                 }
-                self.step(&[*byte], observer)?;
+                self.step(bytes, index..index + 1, observer)?;
                 start = index + 1;
             }
         }
         if start < bytes.len() {
-            self.step(&bytes[start..], observer)?;
+            self.step(bytes, start..bytes.len(), observer)?;
         }
         Ok(())
     }
+    /// An observer failure reports the step's end as consumed: its bytes reached the parser.
     fn step(
         &mut self,
         bytes: &[u8],
+        range: std::ops::Range<usize>,
         observer: &mut impl ScreenObserver,
     ) -> std::result::Result<(), TerminalObservationError> {
-        self.feed(bytes).map_err(TerminalObservationError::Parser)?;
+        let consumed = range.end;
+        self.feed(&bytes[range])
+            .map_err(TerminalObservationError::Parser)?;
         observer
             .observe(&self.snapshot())
-            .map_err(TerminalObservationError::Observer)
+            .map_err(|cause| TerminalObservationError::Observer { cause, consumed })
     }
     pub(crate) fn resize(&mut self, size: TerminalSize) -> Result<()> {
         size.validate()?;
@@ -2514,8 +2572,88 @@ mod tests {
         );
     }
 
+    const RESUMED_CHILD: &[u8] = b"live\r\n";
+
+    fn reference_screen(bytes: &[u8]) -> ScreenSnapshot {
+        let mut reference = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        reference.feed(bytes).unwrap();
+        reference.snapshot()
+    }
+
+    fn observes_before_first_child_read(trace: &[Site]) -> usize {
+        trace
+            .iter()
+            .take_while(|site| **site != Site::Child)
+            .filter(|site| **site == Site::Observe)
+            .count()
+    }
+
+    /// The next drain feeds the retained remainder of the interrupted chunk before any newly
+    /// read child output, so the screen holds every byte and the drain seals again.
+    fn assert_retained_remainder_is_observed_and_seals(
+        h: &mut Harness,
+        drain_transport: &mut Transport,
+        endpoints: (&mut Reader, &mut DrainPty, &mut DrainOutput),
+        child_bytes: &[u8],
+        remainder_screens: &[u64],
+    ) {
+        let (human, pty, output) = endpoints;
+        let generation = drain_transport.human_generation();
+        let callbacks = h.observations.screens.borrow().len();
+        let traced = h.trace.borrow().len();
+        assert_healthy(h);
+        pty.reader
+            .steps
+            .push_back(Read::Data(RESUMED_CHILD.to_vec()));
+        let resumed = h.drain(drain_transport, human, pty, output, h.until);
+        assert_eq!(resumed.unwrap(), InputDrain::Quiescent);
+        let mut all = child_bytes.to_vec();
+        all.extend_from_slice(RESUMED_CHILD);
+        let full = all.len() as u64;
+        assert_eq!(drain_transport.drained(), Some((generation, full)));
+        assert!(drain_transport.take_input_drain().is_some());
+        let mut expected = remainder_screens.to_vec();
+        expected.extend([full - 2, full - 1, full]);
+        assert_eq!(h.observations.screens.borrow()[callbacks..], expected[..]);
+        assert_eq!(
+            observes_before_first_child_read(&h.trace.borrow()[traced..]),
+            remainder_screens.len(),
+            "the retained remainder is observed before any newly read child output"
+        );
+        let reference = reference_screen(&all);
+        assert_eq!(drain_transport.snapshot().screen_seq, reference.screen_seq);
+        assert_eq!(
+            drain_transport.snapshot().screen.contents(),
+            reference.screen.contents()
+        );
+        assert_eq!(output.bytes, all);
+        assert_eq!(drain_transport.pending_display_bytes(), 0);
+
+        human.steps.push_back(Read::Data(b"manual\r".to_vec()));
+        pty.reader.steps.push_back(Read::Data(b"more\r\n".to_vec()));
+        drain_transport
+            .tick(
+                human,
+                pty,
+                output,
+                &mut Measured {
+                    inner: h.controller.observer(&h.writer, &h.clock),
+                    trace: h.trace.clone(),
+                    facts: h.observations.clone(),
+                },
+            )
+            .unwrap();
+        assert_eq!(drain_transport.human_generation(), generation + 7);
+        let after_tick = h.drain(drain_transport, human, pty, output, h.until);
+        assert_eq!(after_tick.unwrap(), InputDrain::Quiescent);
+        assert!(
+            drain_transport.take_input_drain().is_some(),
+            "a fed remainder leaves no fence behind"
+        );
+    }
+
     #[test]
-    fn drain_incomplete_delayed_positive_child_read_keeps_display_and_lifetime_fence() {
+    fn drain_incomplete_delayed_positive_child_read_feeds_the_retained_chunk_on_the_next_drain() {
         with_harness(|h| {
             let mut drain_transport = drain_transport(64, 64, 64);
             h.seal(&mut drain_transport);
@@ -2552,12 +2690,12 @@ mod tests {
             assert!(io.output.bytes.is_empty() && io.output.offered.is_empty());
             assert_eq!(io.output.flushes, 0);
             assert_eq!(h.observations.health_reads.get(), 0);
-            assert_incomplete_observation_stays_fenced(
+            assert_retained_remainder_is_observed_and_seals(
                 h,
                 &mut drain_transport,
                 (&mut io.human, &mut io.pty, &mut io.output),
                 child_bytes,
-                0,
+                &[6, 7, 8, 14],
             );
         });
     }
@@ -2713,33 +2851,101 @@ mod tests {
                 assert!(observed[1].returned < until);
             }
             drop(observed);
-            assert_incomplete_observation_stays_fenced(
+            assert_retained_remainder_is_observed_and_seals(
                 h,
                 &mut drain_transport,
                 (&mut human, &mut pty, &mut output),
                 CONTROL_SEPARATED_CHILD,
-                5,
+                &[9, 10, 11, 17],
             );
         });
     }
 
     #[test]
-    fn drain_incomplete_mid_observer_expiry_preserves_prefix_and_lifetime_fence() {
+    fn drain_incomplete_mid_observer_expiry_feeds_the_retained_remainder_on_the_next_drain() {
         incomplete_callback_case(CallbackFault::Expire);
     }
 
     #[test]
-    fn drain_incomplete_mid_observer_error_before_expiry_keeps_primary_and_fence() {
+    fn drain_incomplete_mid_observer_error_before_expiry_keeps_primary_and_feeds_the_remainder() {
         incomplete_callback_case(CallbackFault::Fail);
     }
 
     #[test]
-    fn drain_incomplete_mid_observer_error_after_expiry_keeps_primary_and_fence() {
+    fn drain_incomplete_mid_observer_error_after_expiry_keeps_primary_and_feeds_the_remainder() {
         incomplete_callback_case(CallbackFault::ExpireAndFail);
     }
 
     #[test]
-    fn drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
+    fn drain_incomplete_remainder_feeds_on_the_next_tick_before_new_child_output() {
+        with_harness(|h| {
+            h.control();
+            let mut drain_transport = drain_transport(64, 64, 64);
+            h.seal(&mut drain_transport);
+            h.reset_observations();
+            let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
+            io.pty.reader = Reader::data(
+                Site::Child,
+                &h.trace,
+                CONTROL_SEPARATED_CHILD,
+                CONTROL_SEPARATED_CHILD.len(),
+            );
+            let until = Instant::now() + Duration::from_millis(100);
+            let records = Rc::default();
+            let result = callback_drain(
+                h,
+                &mut drain_transport,
+                (&mut io.human, &mut io.pty, &mut io.output),
+                CallbackFault::Expire,
+                until,
+                &records,
+            );
+            assert_deadline(result, &mut drain_transport);
+            assert_eq!(drain_transport.snapshot().screen_seq, 5);
+            let traced = h.trace.borrow().len();
+            io.pty
+                .reader
+                .steps
+                .push_back(Read::Data(RESUMED_CHILD.to_vec()));
+            drain_transport
+                .tick(
+                    &mut io.human,
+                    &mut io.pty,
+                    &mut io.output,
+                    &mut Measured {
+                        inner: h.controller.observer(&h.writer, &h.clock),
+                        trace: h.trace.clone(),
+                        facts: h.observations.clone(),
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                *h.observations.screens.borrow(),
+                vec![4, 5, 9, 10, 11, 17, 21, 22, 23]
+            );
+            assert_eq!(
+                observes_before_first_child_read(&h.trace.borrow()[traced..]),
+                4,
+                "the tick feeds the retained remainder before its own child read"
+            );
+            let mut all = CONTROL_SEPARATED_CHILD.to_vec();
+            all.extend_from_slice(RESUMED_CHILD);
+            let reference = reference_screen(&all);
+            assert_eq!(drain_transport.snapshot().screen_seq, reference.screen_seq);
+            assert_eq!(
+                drain_transport.snapshot().screen.contents(),
+                reference.screen.contents()
+            );
+            assert_eq!(io.output.bytes, all);
+            let result = h.drain_with(&mut drain_transport, &mut io);
+            assert_eq!(result.unwrap(), InputDrain::Quiescent);
+            assert_eq!(drain_transport.drained(), Some((0, all.len() as u64)));
+            assert!(drain_transport.take_input_drain().is_some());
+        });
+    }
+
+    #[test]
+    fn drain_incomplete_fatal_observer_error_feeds_the_retained_remainder_on_the_next_drain() {
         with_harness(|h| {
             h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
@@ -2786,14 +2992,13 @@ mod tests {
                 17,
                 "a completed child read remains queued after a failed observation"
             );
-            let prefix = 5;
-            assert_eq!(drain_transport.snapshot().screen_seq, prefix);
-            assert_incomplete_observation_stays_fenced(
+            assert_eq!(drain_transport.snapshot().screen_seq, 5);
+            assert_retained_remainder_is_observed_and_seals(
                 h,
                 &mut drain_transport,
                 (&mut human, &mut pty, &mut output),
                 CONTROL_SEPARATED_CHILD,
-                prefix,
+                &[9, 10, 11, 17],
             );
         });
     }

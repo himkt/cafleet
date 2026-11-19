@@ -759,6 +759,7 @@ pub(crate) fn run_service(
             PreviewSweep::disabled()
         },
         deferred_retry: DeferredRetry::default(),
+        queue_housekeeping_at: None,
         shutdown_client: None,
         native_exit: None,
     };
@@ -919,6 +920,7 @@ struct RunnerLoop<'a> {
     pending_sweep: Option<PendingSweep>,
     preview_sweep: PreviewSweep,
     deferred_retry: DeferredRetry,
+    queue_housekeeping_at: Option<Instant>,
     shutdown_client: Option<u64>,
     native_exit: Option<ChildExit>,
 }
@@ -1268,6 +1270,7 @@ impl RunnerLoop<'_> {
         if let Some(clock) = self.observe_exit()? {
             return Ok(ControlFlow::Break(clock));
         }
+        self.housekeep_queue()?;
         if self.pending_input_client.is_some() || self.pending_sweep.is_some() {
             if let Some(clock) = self.complete_pending_input()? {
                 return Ok(ControlFlow::Break(clock));
@@ -1311,7 +1314,11 @@ impl RunnerLoop<'_> {
         };
         let coordinator = started(&mut self.coordinator);
         let result = match self.native.quiesce(coordinator, deadline) {
-            Err(failure) => Err(CafleetError::from(failure)),
+            Err(failure) => Err(CafleetError::from(coordinator.pending_attempt_failed(
+                self.conn,
+                self.native.controller,
+                failure,
+            ))),
             Ok(InputDrain::Pending) => Ok(None),
             Ok(InputDrain::Quiescent) => {
                 if self.terminate.load(Ordering::Acquire) {
@@ -1367,15 +1374,37 @@ impl RunnerLoop<'_> {
             return Ok(());
         }
         let deadline = Instant::now() + Duration::from_secs(5);
-        if let Ok(InputDrain::Quiescent) = self.native.quiesce(coordinator, deadline)
+        let drained = self.native.quiesce(coordinator, deadline);
+        if let Ok(drain) = &drained {
+            coordinator.record_queue_drain(*drain);
+        }
+        if let Ok(InputDrain::Quiescent) = drained
             && !self.terminate.load(Ordering::Acquire)
             && !self.resize.load(Ordering::Acquire)
             && let Err(failure) = self.advance(deadline)
         {
-            if started(&mut self.coordinator).deferred_failed() {
+            let coordinator = started(&mut self.coordinator);
+            if coordinator.deferred_failed() {
                 return Err(failure);
             }
+            coordinator.record_attempt_failure(&failure);
             eprintln!("member runtime: deferred input: {}", failure.message());
+        }
+        Ok(())
+    }
+
+    fn housekeep_queue(&mut self) -> Result<()> {
+        let now = Instant::now();
+        if self.queue_housekeeping_at.is_some_and(|at| now < at) {
+            return Ok(());
+        }
+        self.queue_housekeeping_at = Some(now + QUEUE_HOUSEKEEPING_INTERVAL);
+        let coordinator = started(&mut self.coordinator);
+        if let Err(failure) = coordinator.queue_housekeeping(self.conn, self.native.controller) {
+            if coordinator.deferred_failed() {
+                return Err(failure);
+            }
+            eprintln!("member runtime: queue housekeeping: {}", failure.message());
         }
         Ok(())
     }
@@ -1603,6 +1632,7 @@ fn publish_stopped_results(
 const IDLE_TICK_SLEEP: Duration = Duration::from_millis(2);
 const DEFERRED_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 pub(crate) const PREVIEW_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
+const QUEUE_HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(1);
 const SWEEP_BACKOFF_FLOOR: Duration = Duration::from_secs(1);
 const SWEEP_BACKOFF_CAP: Duration = Duration::from_secs(30);
 
@@ -4018,7 +4048,8 @@ mod tests {
                         .expect("independent durable reservation after the actual write");
                 assert_eq!(original.run_id, fixture.fixture.run.run_id);
                 assert_eq!(original.operation_key, key);
-                assert_eq!(original.state, InputState::InProgress);
+                assert_eq!(original.state, InputState::Uncertain);
+                assert_eq!(original.stop_cause, Some(StopCause::WriteFailed));
                 wait_input_service_record(fixture, literal, until);
                 let history = exchange(fixture, &value, until);
                 assert!(history.get("error").is_none(), "{history}");
@@ -4633,6 +4664,213 @@ mod tests {
                 assert_runner_settled_submitted(fixture, &head);
                 assert_eq!(previews(fixture, head.message_id).len(), 1);
             });
+        }
+
+        mod queue_housekeeping {
+            use crate::runtime::service::tests::preview_sweep::*;
+
+            fn queue_preview(
+                fixture: &ServiceFixture,
+                message: &MessageRecord,
+                until: Instant,
+            ) -> i64 {
+                let key = storage::preview_operation_key(
+                    fixture.fixture.run.run_id,
+                    message.message_id,
+                    1,
+                )
+                .unwrap();
+                let value = request(
+                    fixture,
+                    &key,
+                    &line(message),
+                    InputKind::Preview,
+                    Some(message.message_id),
+                    until,
+                );
+                let reply = exchange(fixture, &value, until);
+                assert!(reply.get("error").is_none(), "{reply}");
+                let queued: SubmissionResult =
+                    serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
+                assert_eq!(queued.status, SubmissionStatus::Queued, "{reply}");
+                queued.input_id.expect("queued work has a durable input ID")
+            }
+
+            /// Queues three previews in FIFO order: a head and a later entry whose messages the
+            /// test consumes, around a kept entry that stays `input_required`.
+            fn queue_three(
+                fixture: &mut ServiceFixture,
+                until: Instant,
+            ) -> [(MessageRecord, i64); 3] {
+                ["consumed head", "kept entry", "consumed later entry"].map(|body| {
+                    let message = send(fixture, body);
+                    let input_id = queue_preview(fixture, &message, until);
+                    (message, input_id)
+                })
+            }
+
+            fn consume(fixture: &mut ServiceFixture, messages: [&MessageRecord; 2]) {
+                for message in messages {
+                    fixture
+                        .fixture
+                        .conn
+                        .execute(
+                            "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                            [message.message_id],
+                        )
+                        .unwrap();
+                }
+            }
+
+            fn input(fixture: &ServiceFixture, input_id: i64) -> InputOperation {
+                storage::get_input(&fixture.fixture.conn, input_id).unwrap()
+            }
+
+            /// Waits two housekeeping intervals plus slack for every listed entry to leave
+            /// `ready`, running `during` on each wait.
+            fn await_housekeeping(
+                fixture: &mut ServiceFixture,
+                input_ids: [i64; 2],
+                mut during: impl FnMut(&mut ServiceFixture),
+            ) {
+                let bound = Instant::now() + Duration::from_millis(2500);
+                while input_ids
+                    .iter()
+                    .any(|id| input(fixture, *id).state == InputState::Ready)
+                {
+                    assert!(
+                        Instant::now() < bound,
+                        "housekeeping cancels each consumed queued entry within its interval: {:?}",
+                        input_ids.map(|id| input(fixture, id))
+                    );
+                    during(fixture);
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+
+            fn assert_cancelled_consumed(fixture: &ServiceFixture, input_id: i64) {
+                let settled = input(fixture, input_id);
+                assert_eq!(settled.state, InputState::Settled, "{settled:?}");
+                assert_eq!(settled.disposition, Some(InputDisposition::NotSubmitted));
+                assert_eq!(settled.delivery_reason.as_deref(), Some("message_consumed"));
+                assert_eq!(
+                    result_events(fixture, input_id),
+                    0,
+                    "a preview consumed by poll publishes no delivery result"
+                );
+            }
+
+            fn assert_housekept(
+                fixture: &ServiceFixture,
+                [(_, head), (_, kept), (_, later)]: &[(MessageRecord, i64); 3],
+            ) {
+                assert_cancelled_consumed(fixture, *head);
+                assert_cancelled_consumed(fixture, *later);
+                assert_eq!(
+                    input(fixture, *kept).state,
+                    InputState::Ready,
+                    "an entry whose message is still input_required stays queued"
+                );
+            }
+
+            fn open_form(fixture: &mut ServiceFixture, until: Instant) {
+                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
+                loop {
+                    assert!(Instant::now() < until, "the detected interaction opens");
+                    let health = fixture.health();
+                    let observation = health.observation.as_ref().unwrap();
+                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
+                        && observation.pending_count == 0
+                        && !observation.pending_evidence
+                    {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
+
+            #[test]
+            fn housekeeping_cancels_consumed_queued_previews_while_an_immediate_attempt_is_in_flight()
+             {
+                with_input_service(|fixture, until| {
+                    let stopped = StoppedNative::stop(fixture);
+                    let key = "prompt:in-flight-while-stopped";
+                    let value = request(
+                        fixture,
+                        key,
+                        "in flight while the native is stopped",
+                        InputKind::Prompt,
+                        None,
+                        until.min(Instant::now() + Duration::from_secs(8)),
+                    );
+                    let mut client = Peer::connect(fixture);
+                    client.send(&encode_control_frame(&value).unwrap(), until);
+                    let in_flight = || {
+                        fixture
+                            .fixture
+                            .conn
+                            .query_row(
+                                "SELECT input_id FROM member_input_operations WHERE operation_key=?1 AND state='in_progress'",
+                                [key],
+                                |row| row.get::<_, i64>(0),
+                            )
+                            .ok()
+                    };
+                    wait_for(until, "the immediate attempt starts writing", || {
+                        in_flight().is_some()
+                    });
+                    let attempt = in_flight().unwrap();
+                    let queue = queue_three(fixture, until);
+                    consume(fixture, [&queue[0].0, &queue[2].0]);
+                    await_housekeeping(fixture, [queue[0].1, queue[2].1], |_| {});
+                    assert_eq!(
+                        input(fixture, attempt).state,
+                        InputState::InProgress,
+                        "housekeeping ran while the immediate attempt was still in flight"
+                    );
+                    assert_housekept(fixture, &queue);
+                    drop(stopped);
+                    drop(client);
+                });
+            }
+
+            #[test]
+            fn housekeeping_cancels_consumed_queued_previews_while_the_drain_stays_pending() {
+                with_detecting_input_service(|fixture, until| {
+                    open_form(fixture, until);
+                    let queue = queue_three(fixture, until);
+                    let hold_reply_prefix =
+                        |fixture: &mut ServiceFixture| manual(fixture, b"\x1b", until);
+                    let warm = Instant::now() + Duration::from_millis(200);
+                    while Instant::now() < warm {
+                        hold_reply_prefix(fixture);
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    consume(fixture, [&queue[0].0, &queue[2].0]);
+                    await_housekeeping(fixture, [queue[0].1, queue[2].1], hold_reply_prefix);
+                    assert_housekept(fixture, &queue);
+                    manual(fixture, b"\r", until);
+                });
+            }
+
+            #[test]
+            fn housekeeping_cancels_consumed_queued_previews_after_a_storage_outage_leaves_a_finalization_retry()
+             {
+                with_detecting_input_service(|fixture, until| {
+                    open_form(fixture, until);
+                    let queue = queue_three(fixture, until);
+                    consume(fixture, [&queue[0].0, &queue[2].0]);
+                    let outage = fixture
+                        .fixture
+                        .conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .unwrap();
+                    std::thread::sleep(Duration::from_millis(1500));
+                    drop(outage);
+                    await_housekeeping(fixture, [queue[0].1, queue[2].1], |_| {});
+                    assert_housekept(fixture, &queue);
+                });
+            }
         }
     }
 
