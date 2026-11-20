@@ -2442,7 +2442,7 @@ pub(crate) mod test_support {
         value
     }
 
-    fn bundled_file(id: &str) -> (String, Value) {
+    pub(crate) fn bundled_file(id: &str) -> (String, Value) {
         let definitions = bundled_definitions();
         let entry = definitions["fixtures"]
             .as_array()
@@ -8314,42 +8314,57 @@ mod tests {
             state.snapshot()
         }
 
-        fn bundled_draft(composer: &str, cursor_col: u16, footer: &str) -> ComposerDraft {
+        /// The oldest bundled OpenCode profile and the strict-idle profile of the installed version.
+        const DRAFT_VERSIONS: [&str; 2] = [OPENCODE_VERSION, "2.2.7"];
+
+        fn bundled_draft(
+            version: &str,
+            composer: &str,
+            cursor_col: u16,
+            footer: &str,
+        ) -> ComposerDraft {
             ProfileCatalog::bundled().composer_draft(
                 CodingAgent::Opencode,
-                OPENCODE_VERSION,
+                version,
                 &composer_screen(composer, cursor_col, footer),
             )
         }
 
         #[test]
         fn a_normal_mode_composer_draft_is_readable_up_to_the_footer() {
-            for agent in ["cafleet", "cafleet-ask"] {
-                let footer = format!("{agent} · Big Pickle · OpenCode · ctrl+p menu");
-                assert!(
-                    matches!(bundled_draft("┃", 2, &footer), ComposerDraft::Readable(draft) if draft.is_empty()),
-                    "{agent} empty composer"
-                );
-                assert!(
-                    matches!(
-                        bundled_draft("┃ fix the failing build", 23, &footer),
-                        ComposerDraft::Readable(draft) if draft == "fix the failing build"
-                    ),
-                    "{agent} typed draft"
-                );
+            for version in DRAFT_VERSIONS {
+                for agent in ["cafleet", "cafleet-ask"] {
+                    let footer = format!("{agent} · Big Pickle · OpenCode · ctrl+p menu");
+                    assert!(
+                        matches!(
+                            bundled_draft(version, "┃", 2, &footer),
+                            ComposerDraft::Readable(draft) if draft.is_empty()
+                        ),
+                        "{version} {agent} empty composer"
+                    );
+                    assert!(
+                        matches!(
+                            bundled_draft(version, "┃ fix the failing build", 23, &footer),
+                            ComposerDraft::Readable(draft) if draft == "fix the failing build"
+                        ),
+                        "{version} {agent} typed draft"
+                    );
+                }
             }
         }
 
         #[test]
         fn a_shell_mode_composer_with_the_normal_glyph_is_an_unreadable_draft() {
-            for (composer, cursor_col) in [("┃", 2), ("┃  touch fx-mark", 16)] {
-                assert!(
-                    matches!(
-                        bundled_draft(composer, cursor_col, "Shell · esc normal"),
-                        ComposerDraft::Unreadable
-                    ),
-                    "{composer}"
-                );
+            for version in DRAFT_VERSIONS {
+                for (composer, cursor_col) in [("┃", 2), ("┃  touch fx-mark", 16)] {
+                    assert!(
+                        matches!(
+                            bundled_draft(version, composer, cursor_col, "Shell · esc normal"),
+                            ComposerDraft::Unreadable
+                        ),
+                        "{version} {composer}"
+                    );
+                }
             }
         }
     }

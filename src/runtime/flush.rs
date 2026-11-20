@@ -600,6 +600,27 @@ mod tests {
             member: crate::broker::MemberRecord,
             case: Case,
         ) -> Result<FlushOutcome, CafleetError> {
+            let channel = Channel {
+                log: self.log.clone(),
+                run_id: self.fixture.run.run_id,
+                replies: RefCell::new(case.replies.into()),
+                on_reserve: case.on_reserve,
+            };
+            let writes = Case {
+                replies: Vec::new(),
+                on_reserve: Box::new(|| {}),
+                ..case
+            };
+            self.flush_through(member, writes, &channel)
+        }
+
+        /// Flushes through the scripted multiplexer and `channel`; the case's replies are unused.
+        fn flush_through(
+            &mut self,
+            member: crate::broker::MemberRecord,
+            case: Case,
+            channel: &impl FlushChannel,
+        ) -> Result<FlushOutcome, CafleetError> {
             let mux = Rc::new(Mux {
                 log: self.log.clone(),
                 database_url: self.settings.database_url.clone(),
@@ -609,12 +630,6 @@ mod tests {
                 keys: case.keys,
             });
             let mux = crate::multiplexer::multiplexer_for_server("tmux", SERVER, mux).unwrap();
-            let channel = Channel {
-                log: self.log.clone(),
-                run_id: self.fixture.run.run_id,
-                replies: RefCell::new(case.replies.into()),
-                on_reserve: case.on_reserve,
-            };
             let log = self.log.clone();
             let sleep = move |interval: Duration| {
                 log.borrow_mut()
@@ -626,7 +641,7 @@ mod tests {
                 member,
                 Deadline::until(Instant::now() + case.deadline),
                 &*mux,
-                &channel,
+                channel,
                 &sleep,
             )
         }
@@ -966,5 +981,59 @@ mod tests {
             assert_eq!(cause.message(), message, "{expected}");
             assert!(h.lock_released());
         }
+    }
+
+    fn flush_by_id(h: &mut Harness, member_id: i64) -> Result<FlushOutcome, CafleetError> {
+        flush_member(
+            &mut h.fixture.conn,
+            &h.settings,
+            member_id,
+            Deadline::until(Instant::now() + Duration::from_secs(10)),
+        )
+    }
+
+    #[test]
+    fn flush_member_reports_an_unknown_member_as_not_found() {
+        let mut h = harness();
+        let cause = failure(flush_by_id(&mut h, 999_999));
+        assert_eq!(cause.exit_code(), 1);
+        assert_eq!(cause.message(), "Member 999999 not found");
+    }
+
+    #[test]
+    fn flush_member_refuses_an_inactive_member() {
+        let mut h = harness();
+        let member_id = h.member_id();
+        h.fixture
+            .conn
+            .execute(
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                [member_id],
+            )
+            .unwrap();
+        let cause = failure(flush_by_id(&mut h, member_id));
+        assert_eq!(cause.exit_code(), 1);
+        assert_eq!(
+            cause.message(),
+            not_flushed(member_id, &format!("member {member_id} is not active"))
+        );
+    }
+
+    #[test]
+    fn an_unreachable_runner_control_socket_refuses_the_flush_without_writing() {
+        let mut h = harness();
+        let member_id = h.member_id();
+        let member = h.member();
+        let cause =
+            failure(h.flush_through(member, Case::replying(Vec::new()), &ControlFlushChannel));
+        assert_eq!(cause.exit_code(), 1);
+        let prefix = not_flushed(member_id, "the member's runner is unreachable: ");
+        let message = cause.message();
+        assert!(
+            message.starts_with(&prefix) && message.len() > prefix.len(),
+            "{message}"
+        );
+        assert_eq!(h.log(), ["target"]);
+        assert!(h.lock_released());
     }
 }

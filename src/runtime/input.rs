@@ -6705,21 +6705,49 @@ mod tests {
                 let backend: CodingAgent =
                     serde_json::from_value(fixture["backend"].clone()).unwrap();
                 let native_version = fixture["native_version"].as_str().unwrap();
-                let idle = fixtures
+                let (_, file) =
+                    crate::coding_agent::catalog::test_support::bundled_file(fixture_id);
+                let reads_empty = |candidate: &Value| {
+                    let screen = &file["screens"][candidate["id"].as_str().unwrap()];
+                    crate::coding_agent::detector::test_support::observe_bundled(
+                        backend,
+                        native_version,
+                        &crate::coding_agent::detector::test_support::replay_native_fixture(
+                            &crate::digest::canonical_json(screen),
+                            |_| {},
+                            screen["alternate_screen"].as_bool().unwrap(),
+                            None,
+                        ),
+                    )
+                    .kind
+                        == crate::coding_agent::detector::ObservationKind::ComposerEmpty
+                };
+                let same_geometry: Vec<&Value> = fixtures
                     .iter()
-                    .find(|candidate| {
-                        candidate["backend"] == fixture["backend"]
+                    .filter(|candidate| {
+                        candidate["source_ref"] == fixture["source_ref"]
+                            && candidate["backend"] == fixture["backend"]
                             && candidate["native_version"] == fixture["native_version"]
                             && candidate["rows"] == fixture["rows"]
                             && candidate["cols"] == fixture["cols"]
-                            && candidate["id"]
-                                .as_str()
-                                .unwrap()
-                                .contains("-composer-prompt-idle-mode-2004-")
                     })
-                    .expect(
-                        "each measured backend/geometry has its captured initial empty composer",
-                    );
+                    .collect();
+                let idle = same_geometry
+                    .iter()
+                    .copied()
+                    .filter(|candidate| {
+                        candidate["id"]
+                            .as_str()
+                            .unwrap()
+                            .contains("-composer-prompt-idle-mode-2004-")
+                    })
+                    .chain(same_geometry.iter().copied())
+                    .find(|candidate| reads_empty(candidate))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{fixture_id}: its backend/geometry has a captured screen its profile reads as an empty composer"
+                        )
+                    });
                 let operation = if fixture_id.contains("-composer-exec-") {
                     ComposerOperation::Exec
                 } else {
@@ -6802,8 +6830,8 @@ mod tests {
                     "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
                     "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
                     "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
-                    "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
                     "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
+                    "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-99",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-100",
                     "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-herdr-119-49",
@@ -6816,14 +6844,11 @@ mod tests {
                     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
                     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
                     "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-tmux-120-37",
-                    "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-herdr-119-37",
                     "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-tmux-120-37",
-                    "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-herdr-119-37",
                     "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
                     "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43",
                     "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-tmux-120-94",
                     "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93",
-                    "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
                     "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
                     "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
                 ] {

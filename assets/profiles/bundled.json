@@ -769,7 +769,10 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "c48a4a45d85f7eff591d494588753bc57609c6a46f9734f243308775961abc88"
+      "sha256": "c48a4a45d85f7eff591d494588753bc57609c6a46f9734f243308775961abc88",
+      "composer_draft": {
+        "text": ""
+      }
     },
     {
       "id": "claude-2.1.308-prompt-empty-composer-1",
@@ -789,7 +792,10 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "409494565f1eade8f6f83346f686973c4f50ec6734ae302477f476ed58eeacf6"
+      "sha256": "409494565f1eade8f6f83346f686973c4f50ec6734ae302477f476ed58eeacf6",
+      "composer_draft": {
+        "text": "What is 41 plus 1? Reply with only the number."
+      }
     },
     {
       "id": "claude-2.1.308-prompt-post-submit-1",
@@ -819,7 +825,8 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "a2de8c903cd78a78d7802e131187bfdcf5cada9f1b0dc0a8e1b13f1be455907b"
+      "sha256": "a2de8c903cd78a78d7802e131187bfdcf5cada9f1b0dc0a8e1b13f1be455907b",
+      "composer_draft": "unreadable"
     },
     {
       "id": "claude-2.1.308-exec-post-submit-1",
@@ -939,7 +946,8 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "3202e1b8610b65bbc2308faf29df70d8f3d7a6e804d58617b2950c228e6c3a50"
+      "sha256": "3202e1b8610b65bbc2308faf29df70d8f3d7a6e804d58617b2950c228e6c3a50",
+      "composer_draft": "unreadable"
     },
     {
       "id": "opencode-2.1.4-exec-post-submit-1",
@@ -6141,7 +6149,10 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ]
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
@@ -6243,7 +6254,10 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ]
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
     },
     {
       "id": "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
@@ -6612,6 +6626,1525 @@
       "composer_draft": {
         "text": "!ls"
       }
+    },
+    {
+      "id": "claude-2.1.322-wrapped-preview-herdr-094-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 38,
+      "cols": 94,
+      "source_ref": "native/claude.json",
+      "sha256": "2ef389b1ca29f5b83ec1b580622e3bc78469eaa6c4b8e14d83914ce449875b34",
+      "composer_draft": {
+        "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery\n  state, report the stalled queue head with its named cause, and confirm with member show\n  that no interaction is open before the Director forces a flush of the remaining previews"
+      }
+    },
+    {
+      "id": "claude-2.1.322-ctrl-u-one-row-herdr-094-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 38,
+      "cols": 94,
+      "source_ref": "native/claude.json",
+      "sha256": "78049988daaebe36a306eda24eb46dcf9a2321d9b0b28409f6e0eceafc924155",
+      "composer_draft": {
+        "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery"
+      }
+    },
+    {
+      "id": "codex-0.167.0-wrapped-preview-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "32e4bee7b622ead686c537d7827d6c46ef31374e57ecaa16853192e5a94bd7b3",
+      "composer_draft": {
+        "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery state, report the stalled queue\n  head with its named cause, and confirm with member show that no interaction is open before the Director forces a\n  flush"
+      }
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-1-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "ccd344f33c23ba147b9a3b34fdad5d910911262bc2f09e083bc8cc118394e75f"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-2-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "c5b89d4d2cf51ccba64ff38b38cc5fca64160a81028e62b8e438028546ebd169"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-3-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "bd8544afc675bb8872d54eb2d68a19132883b420ab732c1ffde0c4ef92562c42"
+    },
+    {
+      "id": "opencode-2.2.7-deny-post-idle-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "12f27c4e490631fc18f3c454754e51d698f7e9ceb242f2af02c214eb98a1cf13"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-1-tmux-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "97d9e70a52fed2249a7ba2080597f18754ff1b8fd076a98e4fc03236d95bd3f2"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-2-tmux-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "75a643cf35a1b5cd4695fdef2cec6991075b06cee4448ed1f648b86483e6eb27"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-3-tmux-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "b6e30abb516edb9dccaf85c97b310bbe6cb3fed965c06280ebb1ed595bd12b96"
+    },
+    {
+      "id": "opencode-2.2.7-deny-post-idle-tmux-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "13e8a6950187a044e9877d8bf6fb3be7fd040444d6b7ec3829ee23d8b1d31b6f"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode.json",
+      "sha256": "78f0db23c30a3566793787baa7c62dd0e4db3882c7a54b89d879fc9d01aa17bd"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-2-tmux-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode.json",
+      "sha256": "924decd56d487fc31470dfa56f41a6dae8aa1a2f72ef28e31f4fb133ef7f8ce6"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-3-tmux-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode.json",
+      "sha256": "5baba04b5cbe2d84da413e8ca8d3887ce1414308a8b8a6425d5366ea167dbc68"
+    },
+    {
+      "id": "opencode-2.2.7-deny-post-idle-tmux-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode.json",
+      "sha256": "54315c64726e7f7bc9e2231d931a1cf5f65fad01f2768bb9745aad1e4a381a1f"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-1-tmux-036-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode.json",
+      "sha256": "75e7bcd41ff292455ffecdbbb7d5764652f38ffbd72b1e2a01ccd51a95af028b"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-2-tmux-036-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode.json",
+      "sha256": "503d7105c6444bd8c3238ce633486bb79ec86c8601eece9ea502e87f06cb1c06"
+    },
+    {
+      "id": "opencode-2.2.7-deny-pre-stage-3-tmux-036-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode.json",
+      "sha256": "8697845c5ca64f6684130bad2d14e59b21ae2803aa407a57ae46bf2b0b31a02d"
+    },
+    {
+      "id": "opencode-2.2.7-deny-post-idle-tmux-036-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode.json",
+      "sha256": "8f5f51134f4716ccd6bb3878fe6c88d001f1b459091db78763492ae65020d10c"
+    },
+    {
+      "id": "opencode-2.2.7-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "1cc5a17b84857408997b9ec2be6482346baa0a2b305aa2874fecfb5bdd4f879f"
+    },
+    {
+      "id": "opencode-2.2.7-allow-post-idle-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "e46bb00005f7327a91b36feab26be087bc8cec6e1f7374655c54c853bbae7ec0"
+    },
+    {
+      "id": "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "9c27ffea246ff248e5f4cc3c21610636d68858749f5f00319ccfa317fb7862cc",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
+    },
+    {
+      "id": "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "f8d785e76014ea2a4718b1d451f67420c33be76d24cbb043f2490753b5f80f1d",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "e93c77740b4c19e48bc52d2d32d96adce53a1cb3ca1417364023661621889bc3",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "opencode-2.2.7-composer-exec-plain-41-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "8709b15126871704e73d9d6095c66e3a720f32f2e78f14fb471eb9700f544b94",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ]
+    },
+    {
+      "id": "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "c25a16d17d08567c4076e9da16b29e9091dac5985d06ded8f5de3a4c26cb5104",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "dba06ecc26a139293b5b91e7a7d7c105f785a0d9cefca3d6f7c699a9470110ff",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 91,
+      "source_ref": "native/opencode.json",
+      "sha256": "b92074ff62ec56cedbf1c6b210944fb7e03cf61fbdb9b191e205ba0fe651b53a",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
+    },
+    {
+      "id": "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 91,
+      "source_ref": "native/opencode.json",
+      "sha256": "76721d12493f9ea72f1020f93f30fcdac214adca32420f1679a8c2f255a5bde7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 91,
+      "source_ref": "native/opencode.json",
+      "sha256": "caf96bc3d391f5b2d77a4c0b4339c0fab11e842eb3ee6bb63e496a7afec67c1b",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 91,
+      "source_ref": "native/opencode.json",
+      "sha256": "5a6943963c4c8e7e5c2cae8b0222f3c7ed5a10ee995beae8c22e2ae73b23b4fc",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ]
+    },
+    {
+      "id": "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 91,
+      "source_ref": "native/opencode.json",
+      "sha256": "6fa2b599908e768e27740c152c9b224d0b5f8cfa2344443d56782fcff022ded4",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.2.7",
+      "rows": 36,
+      "cols": 91,
+      "source_ref": "native/opencode.json",
+      "sha256": "94e76d1fab89cf0b224f2f358c6c80d71b573aaaa13325e0cc4bb2b21fd559fb",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-bash-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a7e2cbd6ab4543d4105b4ea4731a13e8862e7298aabef1a9714c1e7490870fdc"
+    },
+    {
+      "id": "claude-2.1.322-bash-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4f1907cb3f7d752461234170cac42f7797c32dec2377ec9a75b848838e0d0b8e"
+    },
+    {
+      "id": "claude-2.1.322-bash-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ac8e80a90d386dd831bcee66854dcb8d5c3e6554772756bf80e72a760d6856ca"
+    },
+    {
+      "id": "claude-2.1.322-bash-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c5e3c7dd158f1d0e475be1fe967f29ceaa001989258b366214309a51f24ce77e"
+    },
+    {
+      "id": "claude-2.1.322-no-tip-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "3684172802199b6762ed94fe1a97991e2531748fac49cedb0701f34d28c6ef1d"
+    },
+    {
+      "id": "claude-2.1.322-no-tip-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "9d9bb451b54bc52cc5c1aedb61e4d0dc3205faa76ed3af65249a0314d9ae641f"
+    },
+    {
+      "id": "claude-2.1.322-no-tip-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "dbb4a8268c4a50e2fbfe6faadc59af79ab64361ba0ba5ad94d8a0e0b62471db5"
+    },
+    {
+      "id": "claude-2.1.322-no-tip-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4c29bf3947d3158406f94e7d7abe8d27dec16ef2aa6e5875389e057835f444c9"
+    },
+    {
+      "id": "claude-2.1.322-tip-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "b5f762b73809765590767000243731b9d75c91a3e7d707a314b89d471c7c82fa"
+    },
+    {
+      "id": "claude-2.1.322-tip-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "91eb2a038350d6f1f1290d7092a9757129c93819369fce19c871e4aa0190e503"
+    },
+    {
+      "id": "claude-2.1.322-tip-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "2bde5c8598146e81db29373af7f62541e9fa181cdb73e23b51b2b135ae2052f0"
+    },
+    {
+      "id": "claude-2.1.322-tip-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "3514dda9afff574719e36b1f01d57523ab99fe59eb6fdc6721316ee48599b18f"
+    },
+    {
+      "id": "claude-2.1.322-ask-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "5a5756a9c14c1e08250da606d533d2dec5eda1d9262f092896da8aed76e78f6c"
+    },
+    {
+      "id": "claude-2.1.322-ask-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "82602febf038bae18b768cdeeb884fe18cfd3c55980fb7113c453a5b8d2b0409"
+    },
+    {
+      "id": "claude-2.1.322-ask-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "27660a6c7c33cd3e52347fd950426306c780714ac2c7da9900a217c637d38fa1"
+    },
+    {
+      "id": "claude-2.1.322-ask-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "bac1fdafcd210db204ab3cdda304d117f9db79f84b5a334a6d1a2036d90fbb10"
+    },
+    {
+      "id": "claude-2.1.322-read-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "cf43f3bc4b9aadabe3072eee1e45a6a2b22e3c4cb42f8b6d6aae4a2879bbe6f1"
+    },
+    {
+      "id": "claude-2.1.322-read-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "e0ab21f6f8f7602f31045c2a26539ac8a40d5de267b016fae76a52e6c71c074c"
+    },
+    {
+      "id": "claude-2.1.322-read-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "eed8031d522605bebcef41bdb3e4661294adf66fd1d6d9cefcc84d5284e4754d"
+    },
+    {
+      "id": "claude-2.1.322-read-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "460af25916ab1b146b6f70bc99d0251b6a60291a5216e12c79495f53e1b94239"
+    },
+    {
+      "id": "claude-2.1.322-readout-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "42219858b38a9e4423cae915d2cb3b2da0c06bea0bc5a2a3ae8a5a726a75ed5f"
+    },
+    {
+      "id": "claude-2.1.322-readout-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c92906a1ed614b50493ba8791194b1f1b7faf9bdf8e96fc37fe0b7e6e8b632d9"
+    },
+    {
+      "id": "claude-2.1.322-readout-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "dd080eac31907fd876efb9e5aa5eb883457fa6b2649f561f1cb00e38204e3577"
+    },
+    {
+      "id": "claude-2.1.322-readout-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "cdf8ef794aa1363e05aaeed1cb46320c25d89d04faff4d6f33ed38ab8f3b7772"
+    },
+    {
+      "id": "claude-2.1.322-edit-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "7b66d166e41f5586b1c2f31cc4b65d0b9829054de63c1b8bbf35eafbf73b0cc4"
+    },
+    {
+      "id": "claude-2.1.322-edit-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "281fef965d705fcdf2482edd50b055dfbb730a759ae4161a5fad8b345566e7a5"
+    },
+    {
+      "id": "claude-2.1.322-edit-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ed7b87998b7a4674b9533f53483851e648e0d612467920caf8b23a446d948bcd"
+    },
+    {
+      "id": "claude-2.1.322-edit-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "aca45287f5f4933648dd80be8c529c5c4c3fdcc891b763f1231271d101be5210"
+    },
+    {
+      "id": "claude-2.1.322-create-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "3bfd63e000c9e62f8d098d0b44785ea852c34cba959abf1cefab215241712f1c"
+    },
+    {
+      "id": "claude-2.1.322-create-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "959fccf1107b7a1212f9e362d54b3c9d6989c141baf9ed14ca040cfce614b7f1"
+    },
+    {
+      "id": "claude-2.1.322-create-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "0d32264dbd49a6a2e69d55a26c0d29cbafd313aafb8bd992565629c83b85e214"
+    },
+    {
+      "id": "claude-2.1.322-create-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "504b22e640ef2508baf458c873ed73617392ec6edf7502c857e40edb13a7d614"
+    },
+    {
+      "id": "claude-2.1.322-nudge-decline-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ba87878bb64b91a305712394c1aa39559d2e1c2d74b7fb28abe5f36e2fd10ba6"
+    },
+    {
+      "id": "claude-2.1.322-nudge-decline-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8c7808880cd7aba03a6548c0b8b77cf020c663c3cc6d1699f26d0d4b364edde5"
+    },
+    {
+      "id": "claude-2.1.322-env-not-now-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "134a250b3f3ae9cb3eb066cda184fcfdfe9156b5b22b673745d330e097b06c62"
+    },
+    {
+      "id": "claude-2.1.322-env-not-now-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "977fa4cb210e72d84a35a800980b483a3d24b796e2ddff861e7770087ead6c6e"
+    },
+    {
+      "id": "claude-2.1.322-env-dont-show-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "0efbaad1886d498be85563d1de0121ad882cbb982eb5a58ed3d6ad2a0d652704"
+    },
+    {
+      "id": "claude-2.1.322-env-dont-show-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c510f001281c98bfc9f9ea4ca8e516fc32e109a9fb156c5091105c27bcaeb299"
+    },
+    {
+      "id": "claude-2.1.322-queued-hint-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "04a316669137c94bf0ed9a0f96d0645f9068dbc5b2206b8ee7bf53e4c23e4612"
+    },
+    {
+      "id": "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "30cd1a39b64217c14e8203767e964c1978f9042a636fd381d6c004634dabb2dd",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "claude-2.1.322-composer-prompt-plain-41-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "d395bf2b5cf3427aafc63699b1ac900d2ba279373c10e6b9605e1337f5f30814",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-composer-prompt-plain-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c9b60d21f707e2ef34389b743923882e3ac6784a4791f5b3d6402983e1c3cb99",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "e376f41bd1798961b2ba76742503ea815844e8dde3a002c97425ef008bdc538c",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "claude-2.1.322-composer-exec-plain-41-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "0e3b54e62a0d4acd077187d7c2cc41aff64740bf4dcfb44513f7fefc2ccc370d",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-composer-exec-plain-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "db5abb78008ca057e9aadefc80fea54501c8e3347b2d9939e8e445b05a1b9287",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/claude.json",
+      "sha256": "0dad59be5d85332770bd673a9215d9c20824f2f99de4c05eca78d320431c5007",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/claude.json",
+      "sha256": "b35dda011e767adbc5555ec86af0cafa21ae8fb1aba22634bf3ec970eae5a3d7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-composer-prompt-plain-4000-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/claude.json",
+      "sha256": "f8f8c438c4ab42a15921a800dd029a1a6e3272f34213cb63753ff39e2d1e0734",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/claude.json",
+      "sha256": "8abb794a32c5d702294f2b201cf997cbb5375e45735e0ce89b8b2c17f7b522a0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/claude.json",
+      "sha256": "6fb95367ae607ca11f236dee7165fa00471523587c1d5052952d93789daafe39",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "claude-2.1.322-composer-exec-plain-4000-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.322",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/claude.json",
+      "sha256": "d9c036f99627475bed8417b7c3b5a205018dd21baeaf988e89d8d2d5247e6293",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "9bd3b3f43aba12d8cf981637d32fb7fb2ebdd042fbb8852ff44e85e861083956"
+    },
+    {
+      "id": "codex-0.166.0-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "6fffb40a1d164957ef6260dccbc12699c7cb2e5d0a9814bc28b536f005803ea4"
+    },
+    {
+      "id": "codex-0.166.0-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "0643d8cbe9e727b2389048efa5ef17a39ea968cce9e18d6c80c0d0271548aa2e"
+    },
+    {
+      "id": "codex-0.166.0-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d5b7ea04f2c5fa636314e8eebed8abd1f3ea66ed69b06f6a9cf183afb1d56eaf"
+    },
+    {
+      "id": "codex-0.166.0-auto-status-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "e5f3ff94d8198dfaf8908d62dfd7574390ae971ef857b6ca3876f8deee393e4a"
+    },
+    {
+      "id": "codex-0.167.0-deny-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "03d257ab0f3f074beea9dc87dd1cdbc46ee1a202b2c561e60a06a01b19ee4808"
+    },
+    {
+      "id": "codex-0.167.0-deny-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "ff8d803db51aa2a8640def71098ffbe51eded7b4a85917ca523411fc64d51490"
+    },
+    {
+      "id": "codex-0.167.0-allow-pre-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "9b037a1feec3345237ceb244eec5ff62f5f06c063a1b7a6adf4eb522ce0f8a45"
+    },
+    {
+      "id": "codex-0.167.0-allow-post-stage-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "311aef01d1725b223c358b7c68fb159ec5ebe8d65ede445cccab73290e22b6cf"
+    },
+    {
+      "id": "codex-0.167.0-auto-status-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "289f5958e523d77d6ccea4da31095ae1285bf0df9617fcf858108c98fb46fcfc"
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-plain-41-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "c0c41b95f9bbaafc40c5e478751c211ed97f8d17c209a8e2d10bbeeba00ca7cd",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-plain-41-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "b33241f56fa7b27bcedcc4c425e4b4acb80a2f5de7aea0f6f003036135d3fcb1",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-plain-1024-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "c328e597fbd12f53bc33ef5c2d2ca74191eda4a93ffe445d033d385e2f873594",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-paste-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "08a28d3e7bfd12f06a32e2908c0b8e0f0119dcdaacc03ac212b8fd6c82c155b8",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-exec-plain-42-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "4c36b8096762fda6296e5fb6f3733c1495ede29ba512cbafe3b2fadb375e4c90",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "codex-0.166.0-composer-exec-plain-998-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "1f3a5530df922bc62e883d6d731d3e5bff67ff2e1b1b9ab6970bbe20a3870cd1",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-exec-paste-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "2fed3650c83de4d33919605616314441d005fa84608d1bd38f70a10c6b1c8458",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-plain-41-literal-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "4dd968392ff3f1ee3e52c1bc7d3daf7c7ee513ab43a776e95ea2bcf614ecc02c",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-plain-41-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "e35c9c63157d20d15ea3956cdbaaff6f12db7650ca98e4398c9206ad299de37e",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-plain-1024-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "614be22f4e809682465ce69eb8750c62e00f3f92b8cb8f0910426c48bb5d28bc",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-prompt-paste-4000-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "e2c5d10ce7e30249e7cfa158489bff7573cb69ecc1e5c05e4aab40a6d7c524fa",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "f7eb6dbe2383ad4040e300af470be18d9cebea5d57025f4179b9ce47e817a76d",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "codex-0.166.0-composer-exec-plain-998-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "68414b53be77f5ba10639a7ecc973b16e341a9e967484d7493bcd325bf3874e9",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-exec-paste-4000-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "2c50405a075370070c98ce8a53116cb9c1b30fe98fd8f243820681804e6a2904",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
     }
   ],
   "profiles": [
@@ -6718,35 +8251,6 @@
             "choices": []
           },
           "verified_noninteraction": true
-        },
-        {
-          "id": "claude-suggestion-composer",
-          "priority": 50,
-          "observation": "composer_empty",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^❯\\u{a0}",
-            "end_pattern": "^❯\\u{a0}",
-            "max_rows": 1,
-            "cursor": "after_prompt"
-          },
-          "matchers": [
-            {
-              "id": "prompt",
-              "scope": "line",
-              "pattern": "^❯\\u{a0}"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "verified_noninteraction": true,
-          "suggestion": {
-            "style": {
-              "faint": true
-            }
-          }
         },
         {
           "id": "claude-auto-ask-permission",
@@ -7706,8 +9210,7 @@
         },
         "composer": {
           "rule_ids": [
-            "claude-idle-composer",
-            "claude-suggestion-composer"
+            "claude-idle-composer"
           ],
           "fixture_ids": [
             "claude-2.1.302-idle-composer-1",
@@ -7747,8 +9250,7 @@
             "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
             "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
             "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
-            "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
-            "claude-2.1.322-suggestion-herdr-094-1"
+            "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
           ],
           "submission": {
             "prompt": {
@@ -8171,13 +9673,1503 @@
         "region": {
           "screen": "either",
           "start_pattern": "^❯\\u{a0}",
-          "end_pattern": "^❯\\u{a0}",
-          "max_rows": 1,
+          "end_pattern": "^─+ *$",
+          "max_rows": 48,
           "cursor": "inside"
         },
         "draft_rows": {
           "first": "start",
-          "last": "end"
+          "last": "before_end"
+        },
+        "prompt_pattern": "^❯\\u{a0}",
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
+          "claude-2.1.308-prompt-typed-literal-1",
+          "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+          "claude-2.1.308-exec-typed-literal-1"
+        ]
+      }
+    },
+    {
+      "backend": "claude",
+      "min_version": "2.1.322",
+      "rules": [
+        {
+          "id": "claude-bash-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "approval",
+              "scope": "line",
+              "pattern": "^ This command requires approval\\s*$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^❯\\u{a0}",
+            "end_pattern": "^❯\\u{a0}",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^❯\\u{a0} *$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true
+        },
+        {
+          "id": "claude-suggestion-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^❯\\u{a0}",
+            "end_pattern": "^❯\\u{a0}",
+            "max_rows": 1,
+            "cursor": "after_prompt"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^❯\\u{a0}"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true,
+          "suggestion": {
+            "style": {
+              "faint": true
+            }
+          }
+        },
+        {
+          "id": "claude-auto-ask-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "ask_rule",
+              "scope": "line",
+              "pattern": "^ │ Ask rule \\S"
+            },
+            {
+              "id": "auto_hint",
+              "scope": "line",
+              "pattern": "^ /permissions to let auto mode decide\\s*$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-bash-permission-auto-tip",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "access",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project\\s*$"
+            },
+            {
+              "id": "switch",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-read-outside-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Read outside the working directories\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Read outside the working directories\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Allow this read outside the working directories\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "keep_allowing",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories\\s*$"
+            },
+            {
+              "id": "block_from_now",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)\\s*$"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-bash-permission-no-tip",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and (?:always allow access to \\S.* from this project|don’t ask again for: \\S.*)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-read-file-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, allow reading from \\S"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-edit-file-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^ Edit file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to make this edit to \\S.*\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-create-file-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^ Create file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to create \\S.*\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-auto-startup",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^  Teach auto mode about your environment\\?\\s*$",
+            "end_pattern": "^  Enter to confirm · Esc to cancel\\s*$",
+            "max_rows": 14,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  Teach auto mode about your environment\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^  ❯ [1-9]\\. "
+            },
+            {
+              "id": "yes",
+              "scope": "line",
+              "pattern": "^  [❯ ] 1\\. Yes\\s*$"
+            },
+            {
+              "id": "not_now",
+              "scope": "line",
+              "pattern": "^  [❯ ] 2\\. (?P<label>Not now)\\s*$"
+            },
+            {
+              "id": "dont_show",
+              "scope": "line",
+              "pattern": "^  [❯ ] 3\\. (?P<label>Don't show again)\\s*$"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^  Enter to confirm · Esc to cancel\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [
+              {
+                "id": "not-now",
+                "label": {
+                  "matcher_id": "not_now",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              },
+              {
+                "id": "dont-show-again",
+                "label": {
+                  "matcher_id": "dont_show",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-auto-env-setup-wizard",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^   Teach auto mode about your environment\\?\\s*$",
+            "end_pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$",
+            "max_rows": 14,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^   Teach auto mode about your environment\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^   ❯ \\S"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-auto-default-nudge",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Make auto mode your default permission mode\\?\\s*$",
+            "end_pattern": "^   (?:❯ |  )No, keep \\S.*$",
+            "max_rows": 10,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Make auto mode your default permission mode\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^   ❯ \\S",
+              "focus_style": "marker"
+            },
+            {
+              "id": "accept",
+              "scope": "line",
+              "pattern": "^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)\\s*$"
+            },
+            {
+              "id": "decline",
+              "scope": "line",
+              "pattern": "^   (?:❯ |  )(?P<label>No, keep \\S.*?)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [
+              {
+                "id": "accept",
+                "label": {
+                  "matcher_id": "accept",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              },
+              {
+                "id": "decline",
+                "label": {
+                  "matcher_id": "decline",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              }
+            ]
+          },
+          "verified_noninteraction": false,
+          "frame": {
+            "require_patterns": [],
+            "reject_patterns": [
+              "^❯\\u{a0}"
+            ]
+          }
+        },
+        {
+          "id": "claude-question-pending-notice",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
+            "end_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
+            "max_rows": 1,
+            "cursor": "any",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "notice",
+              "scope": "line",
+              "pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": false,
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          }
+        },
+        {
+          "id": "claude-auto-refusal",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^● [A-Z][A-Za-z]*\\(",
+            "end_pattern": "^  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[",
+            "max_rows": 8,
+            "cursor": "any",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)\\s*\\n  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?\\s*\\z"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": []
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-auto-refusal-notice",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
+            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
+            "max_rows": 2,
+            "cursor": "any",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "operation",
+              "scope": "line",
+              "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": []
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-auto-unavailable",
+          "priority": 40,
+          "observation": "automatic_review_unavailable",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ +auto mode disabled by settings\\b",
+            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
+            "max_rows": 2,
+            "cursor": "any",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "notice",
+              "scope": "line",
+              "pattern": "^ +(?P<notice>auto mode disabled by settings)"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "claude-auto-mode-indicator",
+          "priority": 40,
+          "observation": "automatic_review_available",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
+            "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
+            "max_rows": 1,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "mode",
+              "scope": "line",
+              "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false
+        }
+      ],
+      "capabilities": {
+        "annotations": {
+          "rule_ids": [
+            "claude-auto-refusal",
+            "claude-auto-refusal-notice",
+            "claude-auto-unavailable",
+            "claude-auto-mode-indicator"
+          ],
+          "fixture_ids": [
+            "claude-2.1.322-ask-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-ask-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-readout-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-readout-deny-post-stage-tmux-120-1"
+          ]
+        },
+        "detection": {
+          "rule_ids": [
+            "claude-bash-permission",
+            "claude-auto-ask-permission",
+            "claude-bash-permission-auto-tip",
+            "claude-read-outside-permission",
+            "claude-auto-startup",
+            "claude-bash-permission-no-tip",
+            "claude-read-file-permission",
+            "claude-edit-file-permission",
+            "claude-create-file-permission",
+            "claude-auto-env-setup-wizard",
+            "claude-auto-default-nudge",
+            "claude-question-pending-notice"
+          ],
+          "fixture_ids": [
+            "claude-2.1.322-bash-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-bash-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-no-tip-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-no-tip-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-tip-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-tip-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-ask-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-ask-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-read-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-read-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-readout-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-readout-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-edit-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-edit-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-create-deny-pre-stage-tmux-120-1",
+            "claude-2.1.322-create-allow-pre-stage-tmux-120-1",
+            "claude-2.1.322-nudge-decline-pre-stage-tmux-120-1",
+            "claude-2.1.322-env-not-now-pre-stage-tmux-120-1",
+            "claude-2.1.322-env-dont-show-pre-stage-tmux-120-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "claude-idle-composer",
+            "claude-suggestion-composer"
+          ],
+          "fixture_ids": [
+            "claude-2.1.322-suggestion-herdr-094-1",
+            "claude-2.1.322-bash-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-bash-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-no-tip-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-no-tip-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-tip-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-tip-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-ask-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-ask-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-read-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-read-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-readout-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-readout-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-edit-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-edit-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-create-deny-post-stage-tmux-120-1",
+            "claude-2.1.322-create-allow-post-stage-tmux-120-1",
+            "claude-2.1.322-queued-hint-tmux-120-1",
+            "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1",
+            "claude-2.1.322-composer-prompt-plain-41-post-submit-tmux-120-1",
+            "claude-2.1.322-composer-prompt-plain-4000-post-submit-tmux-120-1",
+            "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1",
+            "claude-2.1.322-composer-exec-plain-41-post-submit-tmux-120-1",
+            "claude-2.1.322-composer-exec-plain-4000-post-submit-tmux-120-1",
+            "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1",
+            "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1",
+            "claude-2.1.322-composer-prompt-plain-4000-post-submit-herdr-092-1",
+            "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1",
+            "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1",
+            "claude-2.1.322-composer-exec-plain-4000-post-submit-herdr-092-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1",
+                "claude-2.1.322-composer-prompt-plain-41-post-submit-tmux-120-1",
+                "claude-2.1.322-composer-prompt-plain-4000-post-submit-tmux-120-1",
+                "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1",
+                "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1",
+                "claude-2.1.322-composer-prompt-plain-4000-post-submit-herdr-092-1"
+              ],
+              "literal_framing": "plain",
+              "plain_literal_limit": null
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1",
+                "claude-2.1.322-composer-exec-plain-41-post-submit-tmux-120-1",
+                "claude-2.1.322-composer-exec-plain-4000-post-submit-tmux-120-1",
+                "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1",
+                "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1",
+                "claude-2.1.322-composer-exec-plain-4000-post-submit-herdr-092-1"
+              ],
+              "literal_framing": "plain",
+              "plain_literal_limit": null
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-bash-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-bash-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-bash-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-auto-ask-permission",
+            "answer_rule_id": "claude-auto-ask-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-auto-ask-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-ask-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-auto-ask-permission",
+            "answer_rule_id": "claude-auto-ask-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "32",
+                "required_rule_id": "claude-auto-ask-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-ask-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission-auto-tip",
+            "answer_rule_id": "claude-bash-auto-tip-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission-auto-tip",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-tip-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission-auto-tip",
+            "answer_rule_id": "claude-bash-auto-tip-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-bash-permission-auto-tip",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-tip-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-read-outside-permission",
+            "answer_rule_id": "claude-read-outside-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-read-outside-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-readout-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-read-outside-permission",
+            "answer_rule_id": "claude-read-outside-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-read-outside-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-readout-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-read-file-permission",
+            "answer_rule_id": "claude-read-file-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-read-file-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-read-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-read-file-permission",
+            "answer_rule_id": "claude-read-file-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-read-file-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-read-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-edit-file-permission",
+            "answer_rule_id": "claude-edit-file-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-edit-file-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-edit-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-edit-file-permission",
+            "answer_rule_id": "claude-edit-file-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-edit-file-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-edit-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-create-file-permission",
+            "answer_rule_id": "claude-create-file-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-create-file-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-create-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-create-file-permission",
+            "answer_rule_id": "claude-create-file-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-create-file-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-create-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission-no-tip",
+            "answer_rule_id": "claude-bash-no-tip-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission-no-tip",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-no-tip-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission-no-tip",
+            "answer_rule_id": "claude-bash-no-tip-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-bash-permission-no-tip",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-no-tip-deny-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "request_rule_id": "claude-auto-default-nudge",
+            "answer_rule_id": "claude-auto-default-decline",
+            "choice_id": "decline",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "0e",
+                "required_rule_id": "claude-auto-default-nudge",
+                "required_choice_id": "decline",
+                "required_focus_choice_id": "accept"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "claude-auto-default-nudge",
+                "required_choice_id": "decline",
+                "required_focus_choice_id": "decline"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-nudge-decline-pre-stage-tmux-120-1",
+              "claude-2.1.322-nudge-decline-post-stage-tmux-120-1"
+            ]
+          },
+          {
+            "request_rule_id": "claude-auto-startup",
+            "answer_rule_id": "claude-auto-env-setup-not-now-digit",
+            "choice_id": "not-now",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "32",
+                "required_rule_id": "claude-auto-startup",
+                "required_choice_id": "not-now"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-env-not-now-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "request_rule_id": "claude-auto-startup",
+            "answer_rule_id": "claude-auto-env-setup-dont-show-again-digit",
+            "choice_id": "dont-show-again",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-auto-startup",
+                "required_choice_id": "dont-show-again"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.322-env-dont-show-pre-stage-tmux-120-1"
+            ]
+          }
+        ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "either",
+          "start_pattern": "^❯\\u{a0}",
+          "end_pattern": "^─+ *$",
+          "max_rows": 48,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "start",
+          "last": "before_end"
         },
         "prompt_pattern": "^❯\\u{a0}",
         "mode_switch_prefixes": [
@@ -8187,7 +11179,13 @@
         "fixture_ids": [
           "claude-2.1.322-suggestion-herdr-094-1",
           "claude-2.1.322-draft-herdr-094-1",
-          "claude-2.1.322-shell-mode-herdr-094-1"
+          "claude-2.1.322-shell-mode-herdr-094-1",
+          "claude-2.1.322-wrapped-preview-herdr-094-1",
+          "claude-2.1.322-ctrl-u-one-row-herdr-094-1",
+          "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1",
+          "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1",
+          "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1",
+          "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1"
         ]
       }
     },
@@ -8285,6 +11283,343 @@
               "id": "prompt",
               "scope": "line",
               "pattern": "^› "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true
+        },
+        {
+          "id": "codex-auto-review-refusal",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^✗ Request denied for codex to run \\S",
+            "end_pattern": "^\\s*$",
+            "max_rows": 6,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*\\S(?:\\n  [^\\n]*\\S)*)\\s*\\n\\s*\\z"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "  "
+            },
+            "choices": []
+          },
+          "frame": {
+            "require_patterns": [
+              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
+            ],
+            "reject_patterns": [
+              "^  k keep & next · esc dismiss & close"
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "codex-auto-review-indicator",
+          "priority": 40,
+          "observation": "automatic_review_available",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
+            "end_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
+            "max_rows": 1,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "mode",
+              "scope": "line",
+              "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "frame": {
+            "require_patterns": [
+              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
+            ],
+            "reject_patterns": [
+              "^  k keep & next · esc dismiss & close"
+            ]
+          },
+          "verified_noninteraction": false
+        }
+      ],
+      "capabilities": {
+        "annotations": {
+          "rule_ids": [
+            "codex-auto-review-refusal",
+            "codex-auto-review-indicator"
+          ],
+          "fixture_ids": [
+            "codex-0.163.0-auto-refusal-working-1",
+            "codex-0.163.0-auto-refusal-idle-1",
+            "codex-0.163.0-auto-refusal-after-overlay-1",
+            "codex-0.163.0-auto-two-refusals-1",
+            "codex-0.163.0-auto-two-refusals-resized-1",
+            "codex-0.163.0-auto-two-refusals-restored-1",
+            "codex-0.163.0-auto-denial-limit-interrupted-1",
+            "codex-0.163.0-auto-status-indicator-1",
+            "codex-0.163.0-auto-quote-false-positive-1",
+            "codex-0.163.0-auto-refusal-warning-overlay-1",
+            "codex-0.163.0-auto-warning-overlay-1",
+            "codex-0.163.0-auto-expanded-detail-1",
+            "codex-0.166.0-auto-status-tmux-120-1"
+          ]
+        },
+        "detection": {
+          "rule_ids": [
+            "codex-exec-approval"
+          ],
+          "fixture_ids": [
+            "codex-0.163.0-on-request-permission-1",
+            "codex-0.166.0-deny-pre-stage-tmux-120-1",
+            "codex-0.166.0-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "codex-idle-composer"
+          ],
+          "fixture_ids": [
+            "codex-0.163.0-idle-composer-1",
+            "codex-0.163.0-auto-idle-composer-1",
+            "codex-0.163.0-auto-fresh-idle-1",
+            "codex-0.166.0-deny-post-stage-tmux-120-1",
+            "codex-0.166.0-allow-post-stage-tmux-120-1",
+            "codex-0.166.0-composer-prompt-plain-41-literal-tmux-120-1",
+            "codex-0.166.0-composer-prompt-plain-41-post-submit-tmux-120-1",
+            "codex-0.166.0-composer-prompt-plain-1024-post-submit-tmux-120-1",
+            "codex-0.166.0-composer-prompt-paste-4000-post-submit-tmux-120-1",
+            "codex-0.166.0-composer-exec-plain-42-literal-tmux-120-1",
+            "codex-0.166.0-composer-exec-plain-998-post-submit-tmux-120-1",
+            "codex-0.166.0-composer-exec-paste-4000-post-submit-tmux-120-1",
+            "codex-0.166.0-composer-prompt-plain-41-literal-herdr-092-1",
+            "codex-0.166.0-composer-prompt-plain-41-post-submit-herdr-092-1",
+            "codex-0.166.0-composer-prompt-plain-1024-post-submit-herdr-092-1",
+            "codex-0.166.0-composer-prompt-paste-4000-post-submit-herdr-092-1",
+            "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1",
+            "codex-0.166.0-composer-exec-plain-998-post-submit-herdr-092-1",
+            "codex-0.166.0-composer-exec-paste-4000-post-submit-herdr-092-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "codex-0.163.0-prompt-empty-composer-1",
+                "codex-0.163.0-prompt-typed-literal-1",
+                "codex-0.163.0-prompt-post-submit-1",
+                "codex-0.166.0-composer-prompt-plain-41-literal-tmux-120-1",
+                "codex-0.166.0-composer-prompt-plain-41-post-submit-tmux-120-1",
+                "codex-0.166.0-composer-prompt-plain-1024-post-submit-tmux-120-1",
+                "codex-0.166.0-composer-prompt-paste-4000-post-submit-tmux-120-1",
+                "codex-0.166.0-composer-prompt-plain-41-literal-herdr-092-1",
+                "codex-0.166.0-composer-prompt-plain-41-post-submit-herdr-092-1",
+                "codex-0.166.0-composer-prompt-plain-1024-post-submit-herdr-092-1",
+                "codex-0.166.0-composer-prompt-paste-4000-post-submit-herdr-092-1"
+              ],
+              "literal_framing": "bracketed_paste",
+              "plain_literal_limit": {
+                "unit": "bytes",
+                "max": 1024
+              }
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "codex-0.163.0-exec-empty-composer-1",
+                "codex-0.163.0-exec-typed-literal-1",
+                "codex-0.163.0-exec-post-submit-1",
+                "codex-0.166.0-composer-exec-plain-42-literal-tmux-120-1",
+                "codex-0.166.0-composer-exec-plain-998-post-submit-tmux-120-1",
+                "codex-0.166.0-composer-exec-paste-4000-post-submit-tmux-120-1",
+                "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1",
+                "codex-0.166.0-composer-exec-plain-998-post-submit-herdr-092-1",
+                "codex-0.166.0-composer-exec-paste-4000-post-submit-herdr-092-1"
+              ],
+              "literal_framing": "bracketed_paste",
+              "plain_literal_limit": {
+                "unit": "bytes",
+                "max": 1000
+              }
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-allow-y",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "79",
+                "required_rule_id": "codex-exec-approval",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "codex-0.163.0-allow-pre-stage-1",
+              "codex-0.166.0-allow-pre-stage-tmux-120-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "codex-exec-approval",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "codex-0.163.0-deny-pre-stage-1",
+              "codex-0.166.0-deny-pre-stage-tmux-120-1"
+            ]
+          }
+        ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^› ",
+          "end_pattern": "^  \\S.* · Context \\d+% (?:used|left)",
+          "max_rows": 48,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "start",
+          "last": "before_end"
+        },
+        "prompt_pattern": "^› ",
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
+          "codex-0.166.0-composer-prompt-plain-41-literal-tmux-120-1",
+          "codex-0.166.0-composer-exec-plain-42-literal-tmux-120-1",
+          "codex-0.166.0-composer-prompt-plain-41-literal-herdr-092-1",
+          "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1"
+        ]
+      }
+    },
+    {
+      "backend": "codex",
+      "min_version": "0.167.0",
+      "rules": [
+        {
+          "id": "codex-exec-approval",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  Would you like to run the following command\\?\\s*$",
+            "end_pattern": "^  Press enter to confirm or esc to cancel\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  Would you like to run the following command\\?\\s*$"
+            },
+            {
+              "id": "environment",
+              "scope": "line",
+              "pattern": "^  Environment: \\S+\\s*$"
+            },
+            {
+              "id": "reason",
+              "scope": "line",
+              "pattern": "^  Reason: \\S"
+            },
+            {
+              "id": "operation",
+              "scope": "line",
+              "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^› [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "codex-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^› ",
+            "end_pattern": "^› ",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^›  *$"
             }
           ],
           "extract": {
@@ -8398,18 +11733,7 @@
             "codex-auto-review-indicator"
           ],
           "fixture_ids": [
-            "codex-0.163.0-auto-refusal-working-1",
-            "codex-0.163.0-auto-refusal-idle-1",
-            "codex-0.163.0-auto-refusal-after-overlay-1",
-            "codex-0.163.0-auto-two-refusals-1",
-            "codex-0.163.0-auto-two-refusals-resized-1",
-            "codex-0.163.0-auto-two-refusals-restored-1",
-            "codex-0.163.0-auto-denial-limit-interrupted-1",
-            "codex-0.163.0-auto-status-indicator-1",
-            "codex-0.163.0-auto-quote-false-positive-1",
-            "codex-0.163.0-auto-refusal-warning-overlay-1",
-            "codex-0.163.0-auto-warning-overlay-1",
-            "codex-0.163.0-auto-expanded-detail-1"
+            "codex-0.167.0-auto-status-tmux-120-1"
           ]
         },
         "detection": {
@@ -8417,7 +11741,8 @@
             "codex-exec-approval"
           ],
           "fixture_ids": [
-            "codex-0.163.0-on-request-permission-1"
+            "codex-0.167.0-deny-pre-stage-tmux-120-1",
+            "codex-0.167.0-allow-pre-stage-tmux-120-1"
           ]
         },
         "composer": {
@@ -8426,9 +11751,6 @@
             "codex-suggestion-composer"
           ],
           "fixture_ids": [
-            "codex-0.163.0-idle-composer-1",
-            "codex-0.163.0-auto-idle-composer-1",
-            "codex-0.163.0-auto-fresh-idle-1",
             "codex-0.167.0-composer-exec-paste-1037-args-post-1900ms-tapped-v2-herdr-119-19",
             "codex-0.167.0-composer-exec-paste-1037-args-post-1900ms-tapped-v2-tmux-120-19",
             "codex-0.167.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-herdr-119-13",
@@ -8469,16 +11791,15 @@
             "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
             "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
             "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
-            "codex-0.167.0-suggestion-tmux-120-1"
+            "codex-0.167.0-suggestion-tmux-120-1",
+            "codex-0.167.0-deny-post-stage-tmux-120-1",
+            "codex-0.167.0-allow-post-stage-tmux-120-1"
           ],
           "submission": {
             "prompt": {
               "prefix_hex": "",
               "submit_hex": "0d",
               "fixture_ids": [
-                "codex-0.163.0-prompt-empty-composer-1",
-                "codex-0.163.0-prompt-typed-literal-1",
-                "codex-0.163.0-prompt-post-submit-1",
                 "codex-0.167.0-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1",
                 "codex-0.167.0-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1",
                 "codex-0.167.0-composer-prompt-paste-1037-literal-tapped-v2-herdr-119-15",
@@ -8522,9 +11843,6 @@
               "prefix_hex": "2120",
               "submit_hex": "0d",
               "fixture_ids": [
-                "codex-0.163.0-exec-empty-composer-1",
-                "codex-0.163.0-exec-typed-literal-1",
-                "codex-0.163.0-exec-post-submit-1",
                 "codex-0.167.0-composer-exec-final-mode-2004-tapped-v2-herdr-119-41",
                 "codex-0.167.0-composer-exec-final-mode-2004-tapped-v2-tmux-120-41",
                 "codex-0.167.0-composer-exec-paste-1037-args-literal-tapped-v2-herdr-119-15",
@@ -8587,7 +11905,7 @@
               }
             ],
             "fixture_ids": [
-              "codex-0.163.0-allow-pre-stage-1"
+              "codex-0.167.0-allow-pre-stage-tmux-120-1"
             ]
           },
           {
@@ -8604,7 +11922,7 @@
               }
             ],
             "fixture_ids": [
-              "codex-0.163.0-deny-pre-stage-1"
+              "codex-0.167.0-deny-pre-stage-tmux-120-1"
             ]
           }
         ]
@@ -8613,13 +11931,13 @@
         "region": {
           "screen": "alternate",
           "start_pattern": "^› ",
-          "end_pattern": "^› ",
-          "max_rows": 1,
+          "end_pattern": "^  \\S.* · Context \\d+% (?:used|left)",
+          "max_rows": 48,
           "cursor": "inside"
         },
         "draft_rows": {
           "first": "start",
-          "last": "end"
+          "last": "before_end"
         },
         "prompt_pattern": "^› ",
         "mode_switch_prefixes": [
@@ -8629,7 +11947,8 @@
         "fixture_ids": [
           "codex-0.167.0-suggestion-tmux-120-1",
           "codex-0.167.0-draft-tmux-120-1",
-          "codex-0.167.0-shell-mode-tmux-120-1"
+          "codex-0.167.0-shell-mode-tmux-120-1",
+          "codex-0.167.0-wrapped-preview-tmux-120-1"
         ]
       }
     },
@@ -8894,40 +12213,6 @@
             "choices": []
           },
           "verified_noninteraction": true
-        },
-        {
-          "id": "opencode-suggestion-composer",
-          "priority": 50,
-          "observation": "composer_empty",
-          "region": {
-            "screen": "primary",
-            "start_pattern": "^┃ ",
-            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
-            "max_rows": 3,
-            "cursor": "after_prompt"
-          },
-          "matchers": [
-            {
-              "id": "prompt",
-              "scope": "line",
-              "pattern": "^┃ "
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "verified_noninteraction": true,
-          "suggestion": {
-            "style": {
-              "foreground": {
-                "kind": "rgb",
-                "r": 128,
-                "g": 128,
-                "b": 128
-              }
-            }
-          }
         }
       ],
       "capabilities": {
@@ -8946,8 +12231,7 @@
         },
         "composer": {
           "rule_ids": [
-            "opencode-idle-composer",
-            "opencode-suggestion-composer"
+            "opencode-idle-composer"
           ],
           "fixture_ids": [
             "opencode-2.1.4-idle-composer-1",
@@ -8983,9 +12267,7 @@
             "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
             "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
             "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
-            "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
-            "opencode-2.2.7-suggestion-tmux-120-1",
-            "opencode-2.2.7-shell-mode-tmux-120-1"
+            "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
           ],
           "submission": {
             "prompt": {
@@ -9205,10 +12487,517 @@
           "/"
         ],
         "fixture_ids": [
+          "opencode-2.1.4-idle-composer-1",
+          "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+          "opencode-2.1.4-exec-typed-literal-1"
+        ]
+      }
+    },
+    {
+      "backend": "opencode",
+      "min_version": "2.2.7",
+      "rules": [
+        {
+          "id": "opencode-shell-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^  △ Permission required\\s*$",
+            "end_pattern": "  ⇆ select  enter confirm  esc reject\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  △ Permission required\\s*$"
+            },
+            {
+              "id": "shell",
+              "scope": "line",
+              "pattern": "^   # Shell command(?:\\s|$)"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^  \\$ (?P<operation>\\S[^\\n]*(?:\\n  \\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
+            },
+            {
+              "id": "unclipped",
+              "scope": "region",
+              "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  \\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
+            },
+            {
+              "id": "controls",
+              "scope": "region",
+              "pattern": "(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *| *(?:\\n *)*\\n  ⇆ select  enter confirm  esc reject *)\\z"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$",
+              "focus_style": "background"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^   (?P<label>Allow once)   "
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "  ",
+              "margin_rows": "continuation",
+              "row_trailer": "█"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "opencode-reject-reason",
+          "priority": 100,
+          "observation": "permission_continuation",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^  △ Reject permission\\s*$",
+            "end_pattern": "  enter confirm  esc cancel\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  △ Reject permission\\s*$"
+            },
+            {
+              "id": "empty_reason",
+              "scope": "region",
+              "pattern": "(?m)^  △ Reject permission *(?:\\n *)*\\n  Tell OpenCode what to do differently *(?:\\n *)*\\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *| *(?:\\n *)*\\n  enter confirm  esc cancel *)\\z"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission",
+          "continues_choice_id": "deny-once",
+          "fixture_ids": [
+            "opencode-2.2.7-deny-pre-stage-3-tmux-120-1",
+            "opencode-2.2.7-deny-pre-stage-3-tmux-057-1"
+          ]
+        },
+        {
+          "id": "opencode-shell-permission-compact",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^△ Permission required\\s*$",
+            "end_pattern": "pgup/pgdn scroll\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^△ Permission required\\s*$"
+            },
+            {
+              "id": "shell",
+              "scope": "line",
+              "pattern": "^# Shell command(?:\\s|$)"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^\\$ (?P<operation>\\S[^\\n]*(?:\\n\\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
+            },
+            {
+              "id": "unclipped",
+              "scope": "region",
+              "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n\\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
+            },
+            {
+              "id": "controls",
+              "scope": "region",
+              "pattern": "(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *| *(?:\\n *)*\\npgup/pgdn scroll *)\\z"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\\s*$",
+              "focus_style": "background"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ (?P<label>Allow once)   "
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_trailer": "█"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ]
+          },
+          "verified_noninteraction": false
+        },
+        {
+          "id": "opencode-reject-reason-compact",
+          "priority": 100,
+          "observation": "permission_continuation",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^△ Reject permission\\s*$",
+            "end_pattern": "^enter reject esc back\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^△ Reject permission\\s*$"
+            },
+            {
+              "id": "empty_reason",
+              "scope": "region",
+              "pattern": "(?m)^△ Reject permission *(?:\\n *)*\\nTell OpenCode what to do differently *(?:\\n *)*\\nenter reject esc back *\\z"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact",
+          "continues_choice_id": "deny-once",
+          "fixture_ids": [
+            "opencode-2.2.7-deny-pre-stage-3-tmux-055-1",
+            "opencode-2.2.7-deny-pre-stage-3-tmux-036-1"
+          ]
+        },
+        {
+          "id": "opencode-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^┃ ",
+            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+            "max_rows": 3,
+            "cursor": "after_prompt"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^┃  *$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true
+        },
+        {
+          "id": "opencode-suggestion-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^┃ ",
+            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+            "max_rows": 3,
+            "cursor": "after_prompt"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^┃ "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": []
+          },
+          "verified_noninteraction": true,
+          "suggestion": {
+            "style": {
+              "foreground": {
+                "kind": "rgb",
+                "r": 128,
+                "g": 128,
+                "b": 128
+              }
+            }
+          }
+        }
+      ],
+      "capabilities": {
+        "annotations": null,
+        "detection": {
+          "rule_ids": [
+            "opencode-shell-permission",
+            "opencode-shell-permission-compact"
+          ],
+          "fixture_ids": [
+            "opencode-2.2.7-deny-pre-stage-1-tmux-120-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-057-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-036-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "opencode-idle-composer",
+            "opencode-suggestion-composer"
+          ],
+          "fixture_ids": [
+            "opencode-2.2.7-suggestion-tmux-120-1",
+            "opencode-2.2.7-shell-mode-tmux-120-1",
+            "opencode-2.2.7-deny-post-idle-tmux-120-1",
+            "opencode-2.2.7-deny-post-idle-tmux-057-1",
+            "opencode-2.2.7-deny-post-idle-tmux-055-1",
+            "opencode-2.2.7-deny-post-idle-tmux-036-1",
+            "opencode-2.2.7-allow-post-idle-tmux-120-1",
+            "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1",
+            "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1",
+            "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1",
+            "opencode-2.2.7-composer-exec-plain-41-literal-tmux-120-1",
+            "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1",
+            "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1",
+            "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1",
+            "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
+            "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1",
+            "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1",
+            "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1",
+            "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1",
+                "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1",
+                "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1",
+                "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1",
+                "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
+                "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1"
+              ],
+              "literal_framing": "plain",
+              "plain_literal_limit": null
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "opencode-2.2.7-composer-exec-plain-41-literal-tmux-120-1",
+                "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1",
+                "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1",
+                "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1",
+                "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1",
+                "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1"
+              ],
+              "literal_framing": "plain",
+              "plain_literal_limit": null
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "opencode-shell-permission",
+            "answer_rule_id": "opencode-shell-allow-once",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "allow-once",
+                "required_focus_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.2.7-allow-pre-stage-tmux-120-1",
+              "opencode-2.2.7-deny-pre-stage-1-tmux-057-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "opencode-shell-permission",
+            "answer_rule_id": "opencode-shell-deny-once",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "68",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "allow-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "deny-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_screen_rule_id": "opencode-reject-reason"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.2.7-deny-pre-stage-1-tmux-120-1",
+              "opencode-2.2.7-deny-pre-stage-2-tmux-120-1",
+              "opencode-2.2.7-deny-pre-stage-3-tmux-120-1",
+              "opencode-2.2.7-deny-pre-stage-1-tmux-057-1",
+              "opencode-2.2.7-deny-pre-stage-2-tmux-057-1",
+              "opencode-2.2.7-deny-pre-stage-3-tmux-057-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "opencode-shell-permission-compact",
+            "answer_rule_id": "opencode-shell-compact-allow-once",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "allow-once",
+                "required_focus_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
+              "opencode-2.2.7-deny-pre-stage-1-tmux-036-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "opencode-shell-permission-compact",
+            "answer_rule_id": "opencode-shell-compact-deny-once",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "68",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "allow-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "deny-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_screen_rule_id": "opencode-reject-reason-compact"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
+              "opencode-2.2.7-deny-pre-stage-2-tmux-055-1",
+              "opencode-2.2.7-deny-pre-stage-3-tmux-055-1",
+              "opencode-2.2.7-deny-pre-stage-1-tmux-036-1",
+              "opencode-2.2.7-deny-pre-stage-2-tmux-036-1",
+              "opencode-2.2.7-deny-pre-stage-3-tmux-036-1"
+            ]
+          }
+        ]
+      },
+      "composer_draft": {
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^┃ ",
+          "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+          "max_rows": 8,
+          "cursor": "inside"
+        },
+        "draft_rows": {
+          "first": "start",
+          "last": "before_end"
+        },
+        "prompt_pattern": "^┃ ",
+        "mode_switch_prefixes": [
+          "!",
+          "/"
+        ],
+        "fixture_ids": [
           "opencode-2.2.7-suggestion-tmux-120-1",
           "opencode-2.2.7-draft-tmux-120-1",
           "opencode-2.2.7-wrapped-draft-tmux-120-1",
-          "opencode-2.2.7-shell-mode-tmux-120-1"
+          "opencode-2.2.7-shell-mode-tmux-120-1",
+          "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1",
+          "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1",
+          "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
+          "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1"
         ]
       }
     },

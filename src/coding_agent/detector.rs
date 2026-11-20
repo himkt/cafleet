@@ -437,15 +437,26 @@ fn region_candidates(
     }
     regions
 }
-/// Reads the draft from the single matching composer region: the selected rows without the
-/// prompt marker or suggestion-styled cells, trailing blanks trimmed and blank edge rows dropped.
+/// Reads the draft from the live composer region: the single matching region with no other
+/// start-pattern row inside it, unless the row above it also matches the start pattern, which
+/// makes it a continuation of a composer whose every row repeats the marker. The draft is its
+/// selected rows without the prompt marker or suggestion-styled cells, trailing blanks trimmed
+/// and blank edge rows dropped.
 pub(super) fn composer_draft(spec: &ComposerDraftSpec, screen: &ScreenSnapshot) -> ComposerDraft {
     let Ok(lines) = clipped_logical_lines(screen, &BTreeMap::new()) else {
         return ComposerDraft::Unreadable;
     };
-    let [(_, _, region)] = region_candidates(&spec.region, None, screen, &lines)[..] else {
+    let opens = |index: usize| spec.region.start.is_match(&lines[index].text);
+    let live: Vec<_> = region_candidates(&spec.region, None, screen, &lines)
+        .into_iter()
+        .filter(|&(start, end, _)| !(start + 1..end).any(opens))
+        .collect();
+    let [(start, _, region)] = live[..] else {
         return ComposerDraft::Unreadable;
     };
+    if start > 0 && opens(start - 1) {
+        return ComposerDraft::Unreadable;
+    }
     let first = match spec.rows.first {
         DraftFirst::Start => region.top,
         DraftFirst::AfterStart => region.top + 1,
@@ -2744,7 +2755,8 @@ mod tests {
     mod opencode_shell_mode {
         use crate::coding_agent::detector::tests::*;
 
-        const VERSION: &str = "2.1.4";
+        /// The oldest bundled OpenCode profile and the strict-idle profile of the installed version.
+        const VERSIONS: [&str; 2] = ["2.1.4", "2.2.7"];
         const SHELL_FOOTER: &str = "Shell · esc normal";
         const PADDING: &str = "    ";
 
@@ -2762,27 +2774,256 @@ mod tests {
             state.snapshot()
         }
 
-        fn observed(footer: &str) -> ScreenObservation {
-            bundled_detector(CodingAgent::Opencode, VERSION)
+        fn observed(version: &str, footer: &str) -> ScreenObservation {
+            bundled_detector(CodingAgent::Opencode, version)
                 .observe(&composer(footer))
                 .unwrap()
         }
 
         #[test]
         fn a_composer_above_the_normal_mode_footer_is_an_empty_composer() {
-            for agent in ["cafleet", "cafleet-ask"] {
-                let observation =
-                    observed(&format!("{agent} · Big Pickle · OpenCode · ctrl+p menu"));
-                assert_eq!(observation.kind, ObservationKind::ComposerEmpty, "{agent}");
-                assert!(observation.verified_noninteraction, "{agent}");
+            for version in VERSIONS {
+                for agent in ["cafleet", "cafleet-ask"] {
+                    let observation = observed(
+                        version,
+                        &format!("{agent} · Big Pickle · OpenCode · ctrl+p menu"),
+                    );
+                    assert_eq!(
+                        observation.kind,
+                        ObservationKind::ComposerEmpty,
+                        "{version} {agent}"
+                    );
+                    assert!(observation.verified_noninteraction, "{version} {agent}");
+                }
             }
         }
 
         #[test]
         fn a_shell_mode_composer_with_the_normal_glyph_is_not_an_empty_composer() {
-            let observation = observed(SHELL_FOOTER);
-            assert_ne!(observation.kind, ObservationKind::ComposerEmpty);
-            assert!(!observation.verified_noninteraction);
+            for version in VERSIONS {
+                let observation = observed(version, SHELL_FOOTER);
+                assert_ne!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{version}"
+                );
+                assert!(!observation.verified_noninteraction, "{version}");
+            }
+        }
+    }
+
+    mod bundled_suggestions {
+        use crate::coding_agent::detector::tests::*;
+
+        struct SuggestionFixture {
+            id: String,
+            backend: CodingAgent,
+            version: String,
+            suggestion_rules: Vec<String>,
+            strict_idle: bool,
+        }
+
+        /// The profile that serves `version`: the backend's profile with the highest
+        /// `min_version` at or below it.
+        fn applicable_profile<'a>(
+            definitions: &'a Value,
+            backend: &str,
+            version: &str,
+        ) -> &'a Value {
+            let version = crate::coding_agent::NativeVersion::parse(version).unwrap();
+            let minimum = |profile: &Value| {
+                crate::coding_agent::NativeVersion::parse(profile["min_version"].as_str().unwrap())
+                    .unwrap()
+            };
+            definitions["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|profile| profile["backend"] == backend)
+                .filter(|profile| minimum(profile).precedence(&version).is_le())
+                .max_by(|left, right| minimum(left).precedence(&minimum(right)))
+                .expect("a bundled fixture is served by a profile of its backend")
+        }
+
+        fn line_patterns(rule: &Value) -> impl Iterator<Item = &str> {
+            rule["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|matcher| matcher["scope"] == "line")
+                .map(|matcher| matcher["pattern"].as_str().unwrap())
+        }
+
+        /// A strict idle rule is an empty-composer rule without a suggestion style whose line
+        /// matcher is a suggestion rule's prompt marker followed by only blanks.
+        fn has_strict_idle_rule(profile: &Value) -> bool {
+            let rules = profile["rules"].as_array().unwrap();
+            let markers: Vec<&str> = rules
+                .iter()
+                .filter(|rule| rule.get("suggestion").is_some())
+                .flat_map(line_patterns)
+                .collect();
+            rules.iter().any(|rule| {
+                rule["observation"] == "composer_empty"
+                    && rule.get("suggestion").is_none()
+                    && line_patterns(rule).any(|pattern| {
+                        markers
+                            .iter()
+                            .any(|marker| pattern == format!("{marker} *$"))
+                    })
+            })
+        }
+
+        /// Every bundled `-suggestion-` fixture with its serving profile's suggestion rule ids
+        /// and whether that profile's idle rule is strict.
+        fn suggestion_fixtures() -> Vec<SuggestionFixture> {
+            let definitions = bundled_definitions();
+            let fixtures: Vec<SuggestionFixture> = definitions["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|fixture| fixture["id"].as_str().unwrap().contains("-suggestion-"))
+                .map(|fixture| {
+                    let backend = fixture["backend"].as_str().unwrap();
+                    let version = fixture["native_version"].as_str().unwrap();
+                    let profile = applicable_profile(&definitions, backend, version);
+                    SuggestionFixture {
+                        id: fixture["id"].as_str().unwrap().to_owned(),
+                        backend: *CodingAgent::all()
+                            .iter()
+                            .find(|agent| agent.name() == backend)
+                            .expect("a bundled fixture names a supported backend"),
+                        version: version.to_owned(),
+                        suggestion_rules: profile["rules"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter(|rule| rule.get("suggestion").is_some())
+                            .map(|rule| rule["id"].as_str().unwrap().to_owned())
+                            .collect(),
+                        strict_idle: has_strict_idle_rule(profile),
+                    }
+                })
+                .collect();
+            assert!(
+                !fixtures.is_empty(),
+                "the bundled catalog carries suggestion fixtures"
+            );
+            fixtures
+        }
+
+        fn strict_suggestion_fixtures() -> Vec<SuggestionFixture> {
+            let strict: Vec<SuggestionFixture> = suggestion_fixtures()
+                .into_iter()
+                .filter(|fixture| fixture.strict_idle)
+                .collect();
+            assert!(
+                !strict.is_empty(),
+                "some suggestion fixture is served by a profile with a strict idle rule"
+            );
+            strict
+        }
+
+        #[test]
+        fn a_strict_idle_rule_is_the_suggestion_marker_followed_by_only_blanks() {
+            let profile = |idle: &str| {
+                json!({"rules":[
+                    {"id":"idle","observation":"composer_empty","matchers":[{"id":"prompt","scope":"line","pattern":idle}]},
+                    {"id":"working","observation":"composer_empty","matchers":[{"id":"prompt","scope":"line","pattern":"^> working *$"}]},
+                    {"id":"suggestion","observation":"composer_empty","suggestion":{"style":{"faint":true}},
+                        "matchers":[{"id":"prompt","scope":"line","pattern":"^> "}]}
+                ]})
+            };
+            assert!(has_strict_idle_rule(&profile("^>  *$")));
+            assert!(!has_strict_idle_rule(&profile("^> ")));
+        }
+
+        #[test]
+        fn every_bundled_suggestion_fixture_is_an_empty_composer() {
+            for fixture in suggestion_fixtures() {
+                let observation = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &replay_as_captured(&fixture.id, |_| {}, None),
+                );
+                assert_eq!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{}",
+                    fixture.id
+                );
+                assert!(observation.verified_noninteraction, "{}", fixture.id);
+            }
+        }
+
+        #[test]
+        fn under_a_strict_idle_rule_a_suggestion_rule_decides_each_suggestion_fixture() {
+            for fixture in strict_suggestion_fixtures() {
+                let observation = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &replay_as_captured(&fixture.id, |_| {}, None),
+                );
+                assert!(
+                    fixture.suggestion_rules.contains(&observation.rule_id),
+                    "{} is decided by {}, not a suggestion rule",
+                    fixture.id,
+                    observation.rule_id
+                );
+            }
+        }
+
+        /// The fixture's screen with plain `typed` text after the prompt marker, the cursor
+        /// left on the marker's end as after Home.
+        fn typed_after_the_marker(id: &str, typed: &str) -> ScreenSnapshot {
+            let mut screen: Value = serde_json::from_str(&bundled_screen(id)).unwrap();
+            screen.as_object_mut().unwrap().remove("cell_styles");
+            let row = usize::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap();
+            let col = usize::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap();
+            let marker: String = screen["lines"][row]
+                .as_str()
+                .unwrap()
+                .chars()
+                .take(col)
+                .collect();
+            screen["lines"][row] = json!(format!("{marker}{typed}"));
+            let alternate = screen["alternate_screen"].as_bool().unwrap();
+            replay_native_fixture(
+                &crate::digest::canonical_json(&screen),
+                |_| {},
+                alternate,
+                None,
+            )
+        }
+
+        #[test]
+        fn under_a_strict_idle_rule_a_typed_draft_with_the_cursor_at_the_marker_is_not_empty() {
+            for fixture in strict_suggestion_fixtures() {
+                let bare = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &typed_after_the_marker(&fixture.id, ""),
+                );
+                assert_eq!(
+                    bare.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{}: the bare marker is an empty composer",
+                    fixture.id
+                );
+                let observation = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &typed_after_the_marker(&fixture.id, "fix the failing build"),
+                );
+                assert_ne!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{} is decided by {}",
+                    fixture.id,
+                    observation.rule_id
+                );
+                assert!(!observation.verified_noninteraction, "{}", fixture.id);
+            }
         }
     }
 

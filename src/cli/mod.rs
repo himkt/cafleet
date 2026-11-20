@@ -1145,6 +1145,10 @@ mod tests {
                     ]),
                 ),
                 (
+                    "member flush",
+                    owned(&["member", "flush", subject, "--from-member-id", caller]),
+                ),
+                (
                     "member recover",
                     owned(&["member", "recover", subject, "--from-member-id", caller]),
                 ),
@@ -1248,7 +1252,7 @@ mod tests {
         }
 
         #[test]
-        fn director_only_names_exactly_the_six_guarded_commands() {
+        fn director_only_names_exactly_the_seven_guarded_commands() {
             for (name, args) in director_only_commands("7", "1") {
                 assert_eq!(
                     director_only(&parse(&args)).map(|guarded| guarded.name),

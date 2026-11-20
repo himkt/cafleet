@@ -4739,7 +4739,8 @@ mod tests {
                 })
             }
 
-            fn consume(fixture: &mut ServiceFixture, messages: [&MessageRecord; 2]) {
+            /// Marks both messages consumed and returns when the last consumption committed.
+            fn consume(fixture: &mut ServiceFixture, messages: [&MessageRecord; 2]) -> Instant {
                 for message in messages {
                     fixture
                         .fixture
@@ -4750,20 +4751,28 @@ mod tests {
                         )
                         .unwrap();
                 }
+                Instant::now()
             }
 
             pub(super) fn input(fixture: &ServiceFixture, input_id: i64) -> InputOperation {
                 storage::get_input(&fixture.fixture.conn, input_id).unwrap()
             }
 
-            /// Waits two housekeeping intervals plus slack for every listed entry to leave
-            /// `ready`, running `during` on each wait.
+            /// The runner loop's slack beyond one housekeeping interval: a tick in progress when
+            /// the interval elapses plus the cancelling transaction.
+            const HOUSEKEEPING_SLACK: Duration = Duration::from_millis(300);
+
+            /// Waits one housekeeping interval plus tick slack, measured from `since`, for every
+            /// listed entry to leave `ready`, running `during` on each wait.
             fn await_housekeeping(
                 fixture: &mut ServiceFixture,
+                since: Instant,
                 input_ids: [i64; 2],
                 mut during: impl FnMut(&mut ServiceFixture),
             ) {
-                let bound = Instant::now() + Duration::from_millis(2500);
+                let bound = since
+                    + crate::runtime::service::QUEUE_HOUSEKEEPING_INTERVAL
+                    + HOUSEKEEPING_SLACK;
                 while input_ids
                     .iter()
                     .any(|id| input(fixture, *id).state == InputState::Ready)
@@ -4851,8 +4860,8 @@ mod tests {
                     });
                     let attempt = in_flight().unwrap();
                     let queue = queue_three(fixture, until);
-                    consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, [queue[0].1, queue[2].1], |_| {});
+                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
+                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
                     assert_eq!(
                         input(fixture, attempt).state,
                         InputState::InProgress,
@@ -4876,8 +4885,13 @@ mod tests {
                         hold_reply_prefix(fixture);
                         std::thread::sleep(Duration::from_millis(20));
                     }
-                    consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, [queue[0].1, queue[2].1], hold_reply_prefix);
+                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
+                    await_housekeeping(
+                        fixture,
+                        consumed,
+                        [queue[0].1, queue[2].1],
+                        hold_reply_prefix,
+                    );
                     assert_housekept(fixture, &queue);
                     manual(fixture, b"\r", until);
                 });
@@ -4897,8 +4911,77 @@ mod tests {
                         .unwrap();
                     std::thread::sleep(Duration::from_millis(1500));
                     drop(outage);
-                    await_housekeeping(fixture, [queue[0].1, queue[2].1], |_| {});
+                    let released = Instant::now();
+                    await_housekeeping(fixture, released, [queue[0].1, queue[2].1], |_| {});
                     assert_housekept(fixture, &queue);
+                });
+            }
+
+            #[test]
+            fn housekeeping_cancels_consumed_queued_previews_while_a_sweep_attempt_is_in_flight() {
+                with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
+                    let stopped = StoppedNative::stop(fixture);
+                    let swept = send(fixture, "swept while the native is stopped");
+                    wait_for(until, "the sweep starts its immediate attempt", || {
+                        previews(fixture, swept.message_id)
+                            .first()
+                            .is_some_and(|attempt| attempt.state == InputState::InProgress)
+                    });
+                    let queue = queue_three(fixture, until);
+                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
+                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
+                    assert_eq!(
+                        previews(fixture, swept.message_id)[0].state,
+                        InputState::InProgress,
+                        "housekeeping ran while the sweep attempt was still in flight"
+                    );
+                    assert_housekept(fixture, &queue);
+                    drop(stopped);
+                });
+            }
+
+            #[test]
+            fn housekeeping_cancels_consumed_queued_previews_while_each_queue_turn_fails() {
+                with_detecting_input_service(|fixture, until| {
+                    open_form(fixture, until);
+                    let queue = queue_three(fixture, until);
+                    fixture
+                        .fixture
+                        .conn
+                        .execute_batch(
+                            "CREATE TRIGGER owned_deferred_attempt_failure BEFORE UPDATE OF state ON member_input_operations
+                             WHEN OLD.kind='preview' AND NEW.state='in_progress'
+                             BEGIN SELECT RAISE(FAIL,'owned deferred attempt failure'); END",
+                        )
+                        .unwrap();
+                    manual(fixture, b"\r", until);
+                    wait_for(until, "the answered form closes", || {
+                        fixture.health().observation.as_ref().unwrap().eligibility
+                            != InputEligibility::Hold(GateReason::Interaction)
+                    });
+                    std::thread::sleep(Duration::from_millis(300));
+                    assert_eq!(
+                        input(fixture, queue[0].1).state,
+                        InputState::Ready,
+                        "the queue head's attempts fail without starting it"
+                    );
+                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
+                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
+                    assert_housekept(fixture, &queue);
+                    fixture
+                        .fixture
+                        .conn
+                        .execute_batch("DROP TRIGGER owned_deferred_attempt_failure")
+                        .unwrap();
+                    wait_for(until, "the runner survives the swallowed errors", || {
+                        input(fixture, queue[1].1).state == InputState::Settled
+                    });
+                    let kept = input(fixture, queue[1].1);
+                    assert_eq!(
+                        kept.disposition,
+                        Some(InputDisposition::Submitted),
+                        "{kept:?}"
+                    );
                 });
             }
         }
