@@ -309,9 +309,20 @@ pub(crate) fn flush_member_with(
             state,
             disposition,
         )),
-        (Err(cause), _) if outcome == FlushWriteOutcome::NotStarted => {
+        (Err(cause), Ok(FlushReply::Settled { .. }))
+            if outcome == FlushWriteOutcome::NotStarted =>
+        {
             Err(refused(member_id, cause.message()))
         }
+        (Err(cause), Err(settle)) if outcome == FlushWriteOutcome::NotStarted => Err(uncertain(
+            member_id,
+            format!(
+                "{}; the runner did not confirm that the flush wrote nothing: {}",
+                cause.message(),
+                settle.message()
+            ),
+            flush_input_id,
+        )),
         (Err(cause), _) => Err(uncertain(member_id, cause.message(), flush_input_id)),
         (Ok(()), Ok(FlushReply::Settled { .. })) => Ok(FlushOutcome {
             member_id,
@@ -485,6 +496,7 @@ mod tests {
         run_id: i64,
         replies: RefCell<VecDeque<FlushReply>>,
         on_reserve: Box<dyn Fn()>,
+        settle_error: Option<&'static str>,
     }
 
     impl FlushChannel for Channel {
@@ -513,6 +525,9 @@ mod tests {
                     self.log
                         .borrow_mut()
                         .push(format!("settle:{flush_input_id}:{outcome}"));
+                    if let Some(cause) = self.settle_error {
+                        return Err(CafleetError::App(cause.into()));
+                    }
                 }
             }
             Ok(self
@@ -570,6 +585,7 @@ mod tests {
         keys: Write,
         replies: Vec<FlushReply>,
         on_reserve: Box<dyn Fn()>,
+        settle_error: Option<&'static str>,
         deadline: Duration,
     }
 
@@ -581,6 +597,7 @@ mod tests {
                 keys: Write::Acknowledged,
                 replies,
                 on_reserve: Box::new(|| {}),
+                settle_error: None,
                 deadline: Duration::from_secs(10),
             }
         }
@@ -605,6 +622,7 @@ mod tests {
                 run_id: self.fixture.run.run_id,
                 replies: RefCell::new(case.replies.into()),
                 on_reserve: case.on_reserve,
+                settle_error: case.settle_error,
             };
             let writes = Case {
                 replies: Vec::new(),
@@ -895,6 +913,31 @@ mod tests {
         assert!(
             cause.message().starts_with(&not_flushed(member_id, "")),
             "{cause}"
+        );
+        assert_eq!(
+            h.log(),
+            ["target", "reserve", "text", "settle:9:not_started"]
+        );
+        assert!(h.lock_released());
+    }
+
+    #[test]
+    fn a_write_that_never_started_with_an_unconfirmed_settlement_is_uncertain_not_refused() {
+        let mut h = harness();
+        let member_id = h.member_id();
+        let mut case = Case::replying(vec![reservation(&[4], &[7], &[])]);
+        case.text = Write::NotStarted;
+        case.settle_error = Some("runner control: owned settle exchange failure");
+        let cause = failure(h.flush(case));
+        let message = cause.message();
+        assert_eq!(cause.exit_code(), 1);
+        assert!(
+            message.starts_with(&format!(
+                "queued input flush to member {member_id} is uncertain: "
+            )) && message.ends_with(&format!(
+                " (input_id={FLUSH}). Inspect the pane, then reconcile input {FLUSH}."
+            )),
+            "the reservation may still be outstanding, so the flush is not reported as not flushed: {message}"
         );
         assert_eq!(
             h.log(),

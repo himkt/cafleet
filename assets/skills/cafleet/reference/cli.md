@@ -419,7 +419,8 @@ An unknown member keeps its not-found error. Receipt refusals list every matchin
 
 | Write outcome | Error (exit 1) |
 |---|---|
-| Failure before any writing process started | `Error: queued input was not flushed to member ID: CAUSE` |
+| Failure before any writing process started, and the runner confirmed the settlement | `Error: queued input was not flushed to member ID: CAUSE` |
+| Failure before any writing process started, and the runner did not confirm the settlement | `Error: queued input flush to member ID is uncertain: CAUSE; the runner did not confirm that the flush wrote nothing: SETTLE_CAUSE (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
 | A writing process started and failed, or an unreadable acknowledgment | `Error: queued input flush to member ID is uncertain: CAUSE (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
 | The reservation expired before settlement | `Error: queued input flush to member ID is uncertain: the flush reservation expired before settlement (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
 | A reconciliation settled the flush first | `Error: queued input flush to member ID was already settled DISPOSITION before the flush reported its write outcome (input_id=FLUSH_INPUT_ID).` |

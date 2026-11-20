@@ -208,12 +208,12 @@ Each backend profile gains a `composer_draft` section. Only the runner's forced-
 
 ```json
 "composer_draft": {
-  "region": {"screen": "either", "start_pattern": "^❯\\u{a0}", "end_pattern": "^❯\\u{a0}",
-             "max_rows": 1, "cursor": "any"},
-  "draft_rows": {"first": "start", "last": "end"},
+  "region": {"screen": "either", "start_pattern": "^❯\\u{a0}", "end_pattern": "^─+ *$",
+             "max_rows": 48, "cursor": "inside"},
+  "draft_rows": {"first": "start", "last": "before_end"},
   "prompt_pattern": "^❯\\u{a0}",
   "mode_switch_prefixes": ["!", "/"],
-  "fixture_ids": ["claude-2.1.322-draft-1", "claude-2.1.322-suggestion-1"]
+  "fixture_ids": ["claude-2.1.322-draft-herdr-094-1", "claude-2.1.322-suggestion-herdr-094-1"]
 }
 ```
 
@@ -225,17 +225,18 @@ Each backend profile gains a `composer_draft` section. Only the runner's forced-
 | `mode_switch_prefixes` | Nonempty array of 1–4-scalar strings | Draft prefixes that switch the native input mode, each verified against the native CLI |
 | `fixture_ids` | Nonempty array | Native fixtures proving extraction, including a suggestion-only fixture where the backend renders suggestions and a mode-switched fixture where the mode changes the marker |
 
-- **Region rows:** the region matcher yields the inclusive row span `[S, E]` from the start row `S` to the end row `E`, exactly as `composer_empty` evaluation computes it today. When the start and end patterns are the same, as for claude and hermes, that span can still cover several rows up to `max_rows`.
+- **Region rows:** the region matcher yields the inclusive row span `[S, E]` from the start row `S` to the end row `E`. Each start row's region ends at the first end-pattern row that leaves the draft rows inside it, and the live region is the single one that satisfies the cursor rule and holds no other start-pattern row (Step 6 § Composer-draft regions).
 - **Draft rows:** `draft_rows` selects `[S, E]` for `start`/`end`, `[S+1, E]` for `after_start`, and `[S, E-1]` for `before_end`; the two are combined, so pi's framed composer uses `after_start`/`before_end` = `[S+1, E-1]`.
 
   | Backend | Region | `draft_rows` |
   |---|---|---|
-  | claude, codex | One prompt row | `start` / `end` |
-  | opencode | Prompt rows through the normal-mode footer row | `start` / `before_end` |
-  | hermes | Prompt row plus up to two continuation rows (`max_rows: 3`) | `start` / `end` |
+  | claude | Prompt row and continuation rows through the `─` rule below the composer (`max_rows: 48`) | `start` / `before_end` |
+  | codex | Prompt row and continuation rows through the first blank row below them (`max_rows: 48`) | `start` / `before_end` |
+  | opencode | Prompt rows through the normal-mode footer row; a wrapped draft is unreadable | `start` / `before_end` |
+  | hermes | Prompt row through the `─` rule below it (`max_rows: 4`) | `start` / `before_end` |
   | pi | `─` rule, editor rows, `─` rule | `after_start` / `before_end` |
 
-  Step 6 confirms each assignment against that backend's fixtures. An empty selected span is an empty draft, not an unreadable one.
+  Every region uses `cursor: inside`. An empty selected span is an empty draft, not an unreadable one.
 - **Extraction:** the `prompt_pattern` match is removed from the first draft row. From every row, cells in the profile's suggestion style are removed and trailing blanks trimmed. The rows are joined with `\n`, and leading and trailing blank rows are dropped.
 - **Multi-row fixtures:** every backend whose region can span several rows gets a multi-row draft fixture, including a hermes draft that wraps onto a continuation row.
 - **Unreadable:** no matching region means the draft is unreadable. That includes a composer whose mode changed the prompt marker, such as a bash-mode marker; such a composer is refused.

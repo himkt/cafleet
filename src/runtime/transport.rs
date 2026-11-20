@@ -241,14 +241,22 @@ impl Transport {
         }
     }
     /// An observer failure leaves the unconsumed suffix of `bytes` as the observation
-    /// remainder, which the next tick or drain feeds before any new child read; a parser
-    /// failure has no resumable boundary and fences observation for the transport lifetime.
+    /// remainder, which the next tick or drain feeds before any new child read; an empty
+    /// remainder re-observes the current screen, so observation completes only after a
+    /// successful observer callback. A parser failure has no resumable boundary and fences
+    /// observation for the transport lifetime.
     fn observe_child_bytes(
         &mut self,
         bytes: &[u8],
         observer: &mut impl ScreenObserver,
     ) -> std::result::Result<(), TerminalObservationError> {
-        let observed = self.terminal.feed_observed_classified(bytes, observer);
+        let observed = if bytes.is_empty() {
+            observer
+                .observe(&self.terminal.snapshot())
+                .map_err(|cause| TerminalObservationError::Observer { cause, consumed: 0 })
+        } else {
+            self.terminal.feed_observed_classified(bytes, observer)
+        };
         match &observed {
             Ok(()) => {}
             Err(TerminalObservationError::Observer { consumed, .. }) => {
@@ -263,9 +271,7 @@ impl Transport {
             self.observation_remainder.is_none(),
             "an observation remainder is fed before new child output"
         );
-        if !unobserved.is_empty() {
-            self.observation_remainder = Some(unobserved.to_vec());
-        }
+        self.observation_remainder = Some(unobserved.to_vec());
     }
     fn observation_complete(&self) -> bool {
         !self.observation_fenced && self.observation_remainder.is_none()
@@ -3007,6 +3013,152 @@ mod tests {
                 &[9, 10, 11, 17],
             );
         });
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Refusal {
+        /// What the deadline guard returns when the deadline passed before the callback: the
+        /// inner observer never sees the screen.
+        Expire,
+        Fail,
+    }
+
+    /// Refuses the `refuse_at`-th observer callback without passing its screen on, then
+    /// forwards every later callback.
+    struct RefusingObservation<O> {
+        inner: O,
+        calls: usize,
+        refuse_at: Option<usize>,
+        refusal: Refusal,
+        deadline: Instant,
+    }
+
+    impl<O: ScreenObserver> ScreenObserver for RefusingObservation<O> {
+        fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
+            let call = self.calls;
+            self.calls += 1;
+            if self.refuse_at == Some(call) {
+                return match self.refusal {
+                    Refusal::Expire => {
+                        std::thread::sleep(
+                            self.deadline.saturating_duration_since(Instant::now())
+                                + Duration::from_millis(1),
+                        );
+                        Err(CafleetError::DeadlineExceeded)
+                    }
+                    Refusal::Fail => Err(CafleetError::App("fixture observation refused".into())),
+                };
+            }
+            self.inner.observe(screen)
+        }
+
+        fn parser_failure(&mut self) -> Result<()> {
+            self.inner.parser_failure()
+        }
+
+        fn input_health(&self) -> ObservationHealth {
+            self.inner.input_health()
+        }
+    }
+
+    /// Two observed steps, `head` then the carriage return, so the second callback is the
+    /// chunk's final step.
+    const TWO_STEP_CHILD: &[u8] = b"head\r";
+
+    fn refused_drain(
+        h: &mut Harness,
+        drain_transport: &mut Transport,
+        io: &mut Endpoints,
+        refuse_at: Option<usize>,
+        refusal: Refusal,
+        until: Instant,
+    ) -> Result<InputDrain> {
+        drain_transport.quiesce_for_input(
+            &mut io.human,
+            &mut io.pty,
+            &mut io.output,
+            &mut RefusingObservation {
+                inner: Measured {
+                    inner: h.controller.observer(&h.writer, &h.clock),
+                    trace: h.trace.clone(),
+                    facts: h.observations.clone(),
+                },
+                calls: 0,
+                refuse_at,
+                refusal,
+                deadline: until,
+            },
+            until,
+        )
+    }
+
+    fn final_step_fault_case(refusal: Refusal) {
+        with_harness(|h| {
+            h.control();
+            let mut drain_transport = drain_transport(64, 64, 64);
+            h.seal(&mut drain_transport);
+            h.reset_observations();
+            let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
+            io.pty.reader =
+                Reader::data(Site::Child, &h.trace, TWO_STEP_CHILD, TWO_STEP_CHILD.len());
+            let until = Instant::now() + Duration::from_millis(100);
+            let result = refused_drain(h, &mut drain_transport, &mut io, Some(1), refusal, until);
+            match refusal {
+                Refusal::Expire => assert_deadline(result, &mut drain_transport),
+                Refusal::Fail => {
+                    assert_eq!(
+                        format!("{:?}", result.unwrap_err()),
+                        "App(\"fixture observation refused\")"
+                    );
+                    assert!(drain_transport.take_input_drain().is_none());
+                }
+            }
+            assert_eq!(
+                drain_transport.snapshot().screen_seq,
+                5,
+                "the final step reached the screen"
+            );
+            assert_eq!(
+                *h.observations.screens.borrow(),
+                vec![4],
+                "no observer callback succeeded for the final snapshot"
+            );
+
+            let refused_again = refused_drain(
+                h,
+                &mut drain_transport,
+                &mut io,
+                Some(0),
+                Refusal::Fail,
+                h.until,
+            );
+            assert!(
+                !matches!(refused_again, Ok(InputDrain::Quiescent)),
+                "{refusal:?}: observation stays incomplete while the final snapshot is unobserved: {refused_again:?}"
+            );
+            assert!(drain_transport.take_input_drain().is_none());
+            assert_eq!(*h.observations.screens.borrow(), vec![4]);
+
+            assert_healthy(h);
+            let resumed = refused_drain(h, &mut drain_transport, &mut io, None, refusal, h.until);
+            assert_eq!(resumed.unwrap(), InputDrain::Quiescent, "{refusal:?}");
+            assert_eq!(
+                *h.observations.screens.borrow(),
+                vec![4, 5],
+                "{refusal:?}: the drain observes the final snapshot before it seals"
+            );
+            assert!(drain_transport.take_input_drain().is_some());
+        });
+    }
+
+    #[test]
+    fn drain_incomplete_final_step_deadline_guard_expiry_reobserves_the_snapshot_before_sealing() {
+        final_step_fault_case(Refusal::Expire);
+    }
+
+    #[test]
+    fn drain_incomplete_final_step_observer_error_reobserves_the_snapshot_before_sealing() {
+        final_step_fault_case(Refusal::Fail);
     }
 
     #[test]

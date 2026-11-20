@@ -1171,7 +1171,8 @@ Write failures are reported after `settle`:
 
 | Boundary | Error (exit 1) |
 |---|---|
-| Before any writing process started | `Error: queued input was not flushed to member ID: CAUSE` |
+| Before any writing process started, with the runner's `settled` reply | `Error: queued input was not flushed to member ID: CAUSE` |
+| Before any writing process started, when the `settle` exchange fails | `Error: queued input flush to member ID is uncertain: CAUSE; the runner did not confirm that the flush wrote nothing: SETTLE_CAUSE (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
 | After a writing process started, or an unreadable acknowledgment | `Error: queued input flush to member ID is uncertain: CAUSE (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
 
 A `settle` that finds the reservation no longer outstanding writes nothing, and the command exits 1 according to the flush receipt's durable state:
@@ -2404,7 +2405,7 @@ Every backend profile declares a `composer_draft` section, which only the runner
   "draft_rows": {"first": "start", "last": "before_end"},
   "prompt_pattern": "^❯\\u{a0}",
   "mode_switch_prefixes": ["!", "/"],
-  "fixture_ids": ["claude-2.1.322-draft-1", "claude-2.1.322-suggestion-1"]
+  "fixture_ids": ["claude-2.1.322-draft-herdr-094-1", "claude-2.1.322-suggestion-herdr-094-1"]
 }
 ```
 

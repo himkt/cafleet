@@ -5136,11 +5136,14 @@ impl InputCoordinator {
         let expires_at =
             InputExpiration(expires_at_mono_ns).instant(&mut RealInputDeadlineClock)?;
         let stamped = self.pending_stamp.as_ref().map(|stamp| stamp.input_id);
+        let finalizing = self.finalization.as_ref().map(|pending| pending.input_id);
         let unresolved = with_database_deadline(conn, deadline, |conn| {
             conn.prepare(
-                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state IN ('in_progress','accepted','uncertain') AND input_id IS NOT ?2 ORDER BY input_id",
+                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state IN ('in_progress','accepted','uncertain') AND input_id IS NOT ?2 AND input_id IS NOT ?3 ORDER BY input_id",
             )?
-            .query_map(rusqlite::params![self.run.run_id, stamped], |row| row.get(0))?
+            .query_map(rusqlite::params![self.run.run_id, stamped, finalizing], |row| {
+                row.get(0)
+            })?
             .collect::<rusqlite::Result<Vec<i64>>>()
             .map_err(CafleetError::from)
         })?;
@@ -11293,6 +11296,24 @@ mod tests {
                                 });
                             let reservation = reserved(reserve(host));
                             assert_eq!(reservation.flushed_input_ids, vec![preview]);
+                        });
+                        with_flush_host(Value::Null, |host| {
+                            let previews =
+                                queued_previews(host, &["behind an attempt finalization"]);
+                            let attempted = reserve_unrelated(host, "prompt:finalizing-attempt");
+                            assert_eq!(row(host, attempted).state, storage::InputState::InProgress);
+                            host.coordinator.finalization =
+                                Some(crate::runtime::input::PendingFinalization {
+                                    input_id: attempted,
+                                    expected: storage::InputState::InProgress,
+                                    reason: "pane_input_busy",
+                                });
+                            let reservation = reserved(reserve(host));
+                            assert_eq!(
+                                reservation.flushed_input_ids,
+                                vec![previews[0].1],
+                                "the in-progress receipt awaiting finalization is no unresolved receipt"
+                            );
                         });
                     }
 
