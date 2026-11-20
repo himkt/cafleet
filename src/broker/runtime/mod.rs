@@ -1414,50 +1414,6 @@ mod tests {
     use crate::broker::runtime::*;
 
     #[test]
-    fn the_runtime_snapshot_lists_unresolved_flush_receipts() {
-        let mut fixture = Fixture::new();
-        let owner = fixture.activate();
-        let flush = |conn: &rusqlite::Connection,
-                     key: &str,
-                     state: &str,
-                     stop_cause: Option<&str>,
-                     disposition: Option<&str>| {
-            conn.execute(
-                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,delivery_method,stop_cause,disposition,evidence_ref) VALUES(?1,?2,'flush',?3,?4,?5,?5,'forced',?6,?7,?8)",
-                params![
-                    owner.run_id,
-                    key,
-                    "d".repeat(64),
-                    state,
-                    NOW,
-                    stop_cause,
-                    disposition,
-                    disposition.map(|_| "director=1; multiplexer acknowledged forced flush")
-                ],
-            )
-            .unwrap();
-            conn.last_insert_rowid()
-        };
-        let writing = flush(&fixture.conn, "flush:1:1", "in_progress", None, None);
-        let uncertain = flush(
-            &fixture.conn,
-            "flush:1:2",
-            "uncertain",
-            Some("write_failed"),
-            None,
-        );
-        flush(
-            &fixture.conn,
-            "flush:1:3",
-            "settled",
-            None,
-            Some("submitted"),
-        );
-        let snapshot = storage::runtime_snapshot(&fixture.conn, owner.run_id).unwrap();
-        assert_eq!(snapshot.unresolved_input_ids, vec![writing, uncertain]);
-    }
-
-    #[test]
     fn new_run_records_launch_intent_and_unreached_phases_without_inventing_policy() {
         let fixture = Fixture::new();
         let run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();

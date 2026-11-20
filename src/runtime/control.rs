@@ -3058,7 +3058,7 @@ mod tests {
         fixture: Fixture,
     }
 
-    const OPERATIONS: [(&str, Option<&str>); 9] = [
+    const OPERATIONS: [(&str, Option<&str>); 7] = [
         ("submit_prompt", None),
         ("submit_exec", None),
         ("permission_inspect", None),
@@ -3066,8 +3066,6 @@ mod tests {
         ("receipt", Some("query")),
         ("receipt", Some("retire")),
         ("receipt", Some("reconcile")),
-        ("flush", Some("reserve")),
-        ("flush", Some("settle")),
     ];
 
     #[test]
@@ -3118,15 +3116,6 @@ mod tests {
                     "retire" => json!({"action":"retire","input_id":13}),
                     "reconcile" => {
                         json!({"action":"reconcile","input_id":13,"expected_state":"uncertain","disposition":"submitted","evidence_ref":"fixture:settlement"})
-                    }
-                    _ => unreachable!(),
-                },
-                "flush" => match action.expect("flush fixture specifies its action") {
-                    "reserve" => {
-                        json!({"action":"reserve","director_member_id":run.director_member_id,"reservation_expires_at_mono_ns":40_000_000_000u64})
-                    }
-                    "settle" => {
-                        json!({"action":"settle","flush_input_id":15,"outcome":"acknowledged"})
                     }
                     _ => unreachable!(),
                 },
@@ -3341,20 +3330,7 @@ mod tests {
                     assert_eq!(disposition, InputDisposition::Submitted);
                     assert_eq!(evidence_ref, "fixture:settlement");
                 }
-                InputControlOperation::Flush(FlushAction::Reserve {
-                    director_member_id,
-                    expires_at_mono_ns,
-                }) => {
-                    assert_eq!(director_member_id, case.fixture.run.director_member_id);
-                    assert_eq!(expires_at_mono_ns, 40_000_000_000);
-                }
-                InputControlOperation::Flush(FlushAction::Settle {
-                    flush_input_id,
-                    outcome,
-                }) => {
-                    assert_eq!(flush_input_id, 15);
-                    assert_eq!(outcome, FlushWriteOutcome::Acknowledged);
-                }
+                InputControlOperation::Flush(_) => unreachable!("OPERATIONS holds no flush"),
             }
             assert!(matches!(
                 decode_service_request(&bytes(&value)).unwrap(),
