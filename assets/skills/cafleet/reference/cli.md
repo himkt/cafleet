@@ -164,7 +164,7 @@ Each attempted message left in the composer or held by its own in-progress, unce
 
 `cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
 
-Notifies an active member's pending messages, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer `1..=1800` lease is monotonic from startup; absence runs until closure/cancellation/failure.
+Notifies an active member's pending messages, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer lease from 1 through 1800 inclusive is monotonic from startup; absence runs until closure/cancellation/failure.
 
 Flush UTF-8 JSONL records: `ready` with `member_id,fleet_id` before replay; `pending` with `next`; `closed` with `member_id,reason`. There is no text mode or `--json`. Closure reasons are `timeout`, `member_inactive`, `fleet_deleted`, and `session_exited` in forwarding mode only; deletion wins simultaneous lifecycle closure. Normal closure exits 0, operational/output failures exit 1, usage errors exit 2; cancellation may omit `closed`.
 

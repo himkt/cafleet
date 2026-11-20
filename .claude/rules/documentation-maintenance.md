@@ -12,6 +12,8 @@ numbering/format rules live in the shared [design-document guidelines](../../ass
 | Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs, stated as user-visible behavior and the decisions a user makes; numbered Director procedures live in the skills, and mechanism and exact contract detail is a link to `SPEC.md`. `docs/docs/concepts/coding-agents.md` explains backend differences, selection and configuration. |
 | Agents | `assets/skills/` | Necessary-and-sufficient instructions to drive cafleet: `assets/skills/cafleet/reference/cli.md` carries the command facts an agent acts on (invocations, flags, outputs it reads, errors it must recognize, next commands), role files carry procedure and link `cli.md` for command behavior, and implementation timing, concurrency and internal mechanics stay in `SPEC.md`. `assets/skills/cafleet/reference/coding-agents.md` owns the runtime overlay. |
 
+`SPEC.md` specifies the `cafleet` binary's observable behavior in implementation-neutral terms, so any implementation can be built and conformance-tested from it alone. It names the contract's external parts — the SQLite storage format and its table names, the embedded `assets/` paths, external programs (tmux, herdr, each backend's executable) and the host APIs the bundled extensions use — and does not name the binary's implementation language, libraries, internal identifiers, build tools or test suite. Implementation, build, test and release facts live in `docs/docs/contributing.md`. A contract that a library defines incidentally is restated as the behavior itself.
+
 Skills never link `docs/` or `SPEC.md`; they carry the facts they need. `SPEC.md` never links `docs/`.
 
 ## Implementation Order
