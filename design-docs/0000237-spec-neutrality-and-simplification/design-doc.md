@@ -1,7 +1,7 @@
 # SPEC Neutrality, Test Simplification and Feature Reduction
 
 **Status**: Approved
-**Progress**: 0/83 tasks complete
+**Progress**: 4/83 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -537,10 +537,10 @@ Per TD-1 (a), `CLAUDE.md` § Tests is unchanged.
 
 ### Step A1: Owning definitions in SPEC.md
 
-- [ ] Rewrite the preamble per § Preamble <!-- completed: -->
-- [ ] Add § Pattern syntax (with the catalog invariant), § JSON encoding, § Quoted text, § Parse errors and help and § Screen model facts at their owning sections <!-- completed: -->
-- [ ] Run § Verification check 3, extend § Source-only constants with any further internal constant, then apply every row of that table <!-- completed: -->
-- [ ] Confirm the ledger DDL against a freshly initialized file's `sqlite_master` and add it to §8 <!-- completed: -->
+- [x] Rewrite the preamble per § Preamble <!-- completed: 2026-11-21T08:29 -->
+- [x] Add § Pattern syntax (with the catalog invariant), § JSON encoding, § Quoted text, § Parse errors and help and § Screen model facts at their owning sections <!-- completed: 2026-11-21T08:29 -->
+- [x] Run § Verification check 3, extend § Source-only constants with any further internal constant, then apply every row of that table <!-- completed: 2026-11-21T08:29 -->
+- [x] Confirm the ledger DDL against a freshly initialized file's `sqlite_master` and add it to §8 (evidence: refinery-core 0.10.1 `src/traits/mod.rs:108-122` creates `CREATE TABLE IF NOT EXISTS refinery_schema_history(version int4 PRIMARY KEY, name VARCHAR(255), applied_on VARCHAR(255), checksum VARCHAR(255))` with `%VERSION_TYPE%` = `int4` for SQLite; the ledger shape check in `src/db.rs` is the runtime confirmation) <!-- completed: 2026-11-21T08:31 -->
 
 ### Step A2: Findings sweep
 

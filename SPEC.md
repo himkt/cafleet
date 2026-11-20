@@ -1,6 +1,6 @@
 # CAFleet — Reimplementation Specification
 
-This is the self-contained interface and observable-behavior specification for the `cafleet` CLI, broker, independent coding-agent sessions and embedded assets. Exact authored errors, JSON fields/order and command layouts govern; incidental host-language quoting and operating-system error suffixes preserve intent. Complete module contracts appear in §6 Module specifications.
+This is the self-contained interface and observable-behavior specification for the `cafleet` CLI, broker, independent coding-agent sessions and embedded assets. Exact authored errors, JSON fields/order and command layouts govern. Text that an operating-system or library error contributes after an authored prefix (written `<io error>`, `<error>` or `<cause>`) is non-normative: an implementation preserves the error's meaning, not its wording, quoting or numeric suffix. An errno name shown in a diagnostic (such as `ECONNREFUSED`) is normative; the description after it is not. Complete module contracts appear in §6 Module specifications.
 
 ## 1. Overview & goals
 
@@ -151,7 +151,7 @@ CAFleet reads no `CAFLEET_*` environment variable. Member creation renders the s
 
 #### Help text
 
-`--help` describes every visible command, subcommand and option with a one-line description. Command group descriptions state the purpose given in the subcommand summary. Help derives choice lists from the same registries that validate the values:
+`--help` on any command prints its usage line, its subcommands and its options, each with a one-line description, to stdout and exits 0 without opening the database. Its layout is non-normative except for the strings this specification quotes, such as the `--permission-mode` description. Command group descriptions state the purpose given in the subcommand summary. Help derives choice lists from the same registries that validate the values:
 
 | Option | Help shows | Source |
 |---|---|---|
@@ -305,7 +305,7 @@ Existing targets are deleted before their replacements are written; a symlink ta
 
 `<preset base>` is the opencode preset base (`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`). `<hermes home>` is the parent directory of the `<config path>` that `hermes config path` prints (§ Hermes plugin enablement step 1); Hermes discovers user plugins under its home, and a sticky `<base>/active_profile` re-homes both that directory and `hermes config path` to the profile directory. Setup for `hermes` runs `hermes config path` once, in the read batch before the extension install, so installing the Hermes extension requires `hermes` on `PATH`. `<pi base>` is the pi base (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`); setup for `pi` runs no `pi` command, so it needs no `pi` on `PATH`. Extension files are embedded verbatim, so the embedded bytes equal the installed bytes.
 
-The *executable record* is a one-line file holding the absolute, canonicalized path of the running `cafleet` executable (`std::env::current_exe()`), written after the extension files. It is neither an embedded asset nor byte-compared; OpenCode plugin discovery loads only `.ts`/`.js` files and directories, and pi extension discovery loads only `*.ts`, `*.js`, `*/index.ts` and `*/package.json` entries, so both ignore the record. The plugins and extensions execute only the recorded path.
+The *executable record* is a one-line file holding the absolute path of the running `cafleet` executable as the OS reports it (Linux: the target of `/proc/self/exe`; macOS: the kernel-reported image path), with every symbolic link resolved, written after the extension files. It is neither an embedded asset nor byte-compared; OpenCode plugin discovery loads only `.ts`/`.js` files and directories, and pi extension discovery loads only `*.ts`, `*.js`, `*/index.ts` and `*/package.json` entries, so both ignore the record. The plugins and extensions execute only the recorded path.
 
 Skills-operation errors retain `failed to install skills into <skills_dir>: <error>`, preset-operation errors `failed to install preset into <target>: <error>`, and extension-operation errors, including the executable record, `failed to install extension into <target>: <error>`. A successful install records one `asset_installs` row for the agent, covering its skills, presets and extensions; a failure on any preset, extension or plugin enablement step fails setup and records no installation.
 
@@ -534,7 +534,7 @@ List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain t
 
 `cafleet fleet delete FLEET_ID [--json]` ends every active ordinary member that owns a concrete pane, then deregisters the fleet. It retains messages and is idempotent; an unknown ID fails with `fleet 'X' not found.`, exit 1. One operation-wide five-second deadline bounds the whole command, extended by the time each Hermes work settlement takes (§6.3 `member delete`).
 
-1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds; a set change releases every acquired guard and restarts within the same deadline. Contention until the deadline releases every acquired guard, leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.` After all pane locks, acquire the fleet layout lock once within `LAYOUT_LOCK_WAIT` (§6.5 Fleet window layout), moving the deadline later by the wait's duration; expiry exits 1 with the fleet delete busy error (§6.3 Error Messages) and leaves every member unchanged.
+1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds; a set change releases every acquired guard and restarts within the same deadline. Contention until the deadline releases every acquired guard, leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.` After all pane locks, acquire the fleet layout lock once within the layout lock wait (60 s) (§6.5 Fleet window layout), moving the deadline later by the wait's duration; expiry exits 1 with the fleet delete busy error (§6.3 Error Messages) and leaves every member unchanged.
 2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure with the held layout lock: runner shutdown and recovery for a wrapped member, pane close in the placement's recorded window, that member's deregistration, then optional layout restoration of that window. The root Director's pane stays open.
 3. **Deregister the fleet.** One transaction revalidates the placement set, stamps deletion, deregisters the remaining active members (the root Director and members with a pending placement) and removes their placements.
 
@@ -872,7 +872,7 @@ Key order is `event`, `next`. A `pending` record is never emitted for an empty p
 
 Each short read transaction validates identity and selects every `input_required` record for the pinned subject ordered by `(created_at ASC, message_id ASC)`, committing before output or sleep; a later commit with an earlier timestamp joins the pending set when first observed.
 
-**Notice hold.** The listener's only emission state is the *hold*. A hold exists exactly while some ID in the last delivered notice's pending set is still pending; it carries the *held set* `H` (those IDs, never empty) and `held_at`, the monotonic instant that notice was delivered. The listener starts with no hold. `HOLD_CEILING` is 300 s. On every successful snapshot with ordered pending set `P`, in order:
+**Notice hold.** The listener's only emission state is the *hold*. A hold exists exactly while some ID in the last delivered notice's pending set is still pending; it carries the *held set* `H` (those IDs, never empty) and `held_at`, the monotonic instant that notice was delivered. The listener starts with no hold. The hold ceiling is 300 s. On every successful snapshot with ordered pending set `P`, in order:
 
 1. **Reconcile:** `H ← H ∩ P`. Consumed IDs leave the hold; when `H` becomes empty, the hold and its `held_at` end.
 2. **Fresh IDs:** `F ← P \ H`.
@@ -883,18 +883,18 @@ Each short read transaction validates identity and selects every `input_required
 |---|---|
 | `P` empty | Emit nothing |
 | No hold and `P` non-empty (hold released) | Emit `pending(P)` |
-| A hold, `F` non-empty and at least `HOLD_CEILING` since `held_at` | Emit `pending(P)`, the ceiling re-notice: one bulk notice whose pending set is every unpolled ID |
+| A hold, `F` non-empty and at least the hold ceiling since `held_at` | Emit `pending(P)`, the ceiling re-notice: one bulk notice whose pending set is every unpolled ID |
 | Otherwise (a hold with `F` empty, or the ceiling not reached) | Emit nothing |
 
 Every notice's pending set is the full pending set, so every pending ID in an earlier notice's pending set is in `H`; that one set separates notified from fresh IDs, and the listener keeps no per-ID history. A failed snapshot leaves the hold unchanged. A snapshot that emits nothing, or whose notice is refused, waits one second (shortened by the lease) before the next snapshot; one whose notice is delivered rechecks immediately.
 
-**Re-listing.** An ID leaves `P` only through a consuming `message poll`, which consumes the subject's whole pending set atomically, so a snapshot sees either all held IDs pending or none of them, and any poll by the receiver releases the hold. The next ordinary notice's pending set holds only IDs committed after that poll. Within one listener process an ID is in two notices' pending sets only through a ceiling re-notice, which fires only when no poll has run for `HOLD_CEILING` since the held notice was delivered, so every ID in its pending set, held or fresh, is unpolled. The only other re-listing is a new listener's startup replay of still-unpolled IDs. The ceiling is the liveness backstop for a delivered notice that no receiver turn acted on; without it, every later message would stay held.
+**Re-listing.** An ID leaves `P` only through a consuming `message poll`, which consumes the subject's whole pending set atomically, so a snapshot sees either all held IDs pending or none of them, and any poll by the receiver releases the hold. The next ordinary notice's pending set holds only IDs committed after that poll. Within one listener process an ID is in two notices' pending sets only through a ceiling re-notice, which fires only when no poll has run for the hold ceiling since the held notice was delivered, so every ID in its pending set, held or fresh, is unpolled. The only other re-listing is a new listener's startup replay of still-unpolled IDs. The ceiling is the liveness backstop for a delivered notice that no receiver turn acted on; without it, every later message would stay held.
 
-**Notice bound.** Each ordinary notice after the first requires a hold release, and each release requires a poll that consumed held IDs. Each ceiling firing emits at most one notice and restarts the ceiling. A listener therefore emits at most 1 notice, plus one per poll that consumed held IDs, plus one per ceiling firing (at most one per `HOLD_CEILING`, and only while held IDs stay unpolled with fresh IDs present). A receiver turn with k mid-turn polls can queue at most k + 1 notices behind it, each whose pending set holds only IDs that turn already consumed, so the poll it prompts returns `[]` unless messages arrived since. A burst of any size adds no notice beyond the one outstanding.
+**Notice bound.** Each ordinary notice after the first requires a hold release, and each release requires a poll that consumed held IDs. Each ceiling firing emits at most one notice and restarts the ceiling. A listener therefore emits at most 1 notice, plus one per poll that consumed held IDs, plus one per ceiling firing (at most one per hold ceiling period, and only while held IDs stay unpolled with fresh IDs present). A receiver turn with k mid-turn polls can queue at most k + 1 notices behind it, each whose pending set holds only IDs that turn already consumed, so the poll it prompts returns `[]` unless messages arrived since. A burst of any size adds no notice beyond the one outstanding.
 
 | Situation | Behavior |
 |---|---|
-| A delivered notice whose pending set is never polled, and a new message arrives | One ceiling re-notice whose pending set holds the held and fresh IDs, at least `HOLD_CEILING` after `held_at` |
+| A delivered notice whose pending set is never polled, and a new message arrives | One ceiling re-notice whose pending set holds the held and fresh IDs, at least the hold ceiling after `held_at` |
 | A delivered notice whose pending set is never polled, and nothing new arrives | No re-notice; the ceiling fires only when fresh IDs exist |
 | The receiver polls before any notice's pending set includes an ID | That ID is never notified |
 | A message, including a runtime event such as `interaction_opened`, arrives while a notice is held | No notice until the receiver polls or the ceiling re-notice fires; any `poll` returns the ID immediately |
@@ -970,7 +970,7 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 
 A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight). The pi backend also requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a missing or unreadable extension exits 1 (§6.7 Contract error strings), and a pi prompt beginning with `@` exits 2 before registration (§6.7 Per-backend `build_spawn_argv`).
 
-After prompt validation, `member create` acquires the fleet layout lock within `LAYOUT_LOCK_WAIT` (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
+After prompt validation, `member create` acquires the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
 
 The pane target — a column of an existing window or a new overflow window in the Director's session — and the multiplexer server come from the registry and the fleet Director's recorded placement (§6.5 Multiplexer context); each new member placement copies the Director's `mux_server`. Publication patches the pane ID, window ID and window name together (§6.9 Runner boundary and creation transaction).
 
@@ -1028,7 +1028,7 @@ Once the runner reports `started` under the matching identity, creation removes 
 
 Request owned runner shutdown under the member's recorded run identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock a concrete placement before kill/deregistration (a member without a concrete pane needs no lock), retrying contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
-After the pane lock and before any cleanup step (Hermes settlement, runner shutdown, pane close), acquire the fleet layout lock within `LAYOUT_LOCK_WAIT` (§6.5 Fleet window layout) and hold it through deregistration and layout restoration. The deletion deadline moves later by the wait's duration, as it does for Hermes settlement. Expiry exits 1 with the delete busy error (§6.3 Error Messages) and leaves the run, pane and row unchanged.
+After the pane lock and before any cleanup step (Hermes settlement, runner shutdown, pane close), acquire the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and hold it through deregistration and layout restoration. The deletion deadline moves later by the wait's duration, as it does for Hermes settlement. Expiry exits 1 with the delete busy error (§6.3 Error Messages) and leaves the run, pane and row unchanged.
 
 For a `hermes` run, after the pane lock is held and before runner shutdown, run the Hermes work settlement (§6.7 Hermes work settlement) under its own 20-second budget; the deletion deadline moves later by the settlement's duration, so lock acquisition stays bounded by the original five seconds and the remaining steps keep the time they had when settlement began. An unverified stop exits 1 (§6.3 Error Messages) and retains the runner's cleanup records and the member row; a retry re-runs the settlement.
 
@@ -1354,9 +1354,9 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member delete` | A `hermes` run whose work settlement cannot be verified; the member row and runner cleanup records are kept | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 |
 | `fleet create` | Director window naming, exact name read-back or pane-context verification fails; active uncommitted registration rolls back (§6.5 Backend operations) | The cause and attempted target diagnostics of § `fleet create` | 1 |
 | `fleet create` | Registration or commit fails after naming is attempted | The registration cause, attempted target diagnostics and transaction-resolution outcome of § `fleet create`; rollback failures accompany the original error | 1 |
-| `member create` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; nothing is registered (§6.5 Fleet window layout) | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` | 1 |
-| `member delete` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; the run, pane and row are unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` | 1 |
-| `fleet delete` | The fleet layout lock stays busy for `LAYOUT_LOCK_WAIT`; every member is unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.` | 1 |
+| `member create` | The fleet layout lock stays busy for the layout lock wait (60 s); nothing is registered (§6.5 Fleet window layout) | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` | 1 |
+| `member delete` | The fleet layout lock stays busy for the layout lock wait (60 s); the run, pane and row are unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` | 1 |
+| `fleet delete` | The fleet layout lock stays busy for the layout lock wait (60 s); every member is unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.` | 1 |
 | `member create` | An overflow window's height read fails or is unparsable; nothing is registered (§6.5 Fleet window layout) | `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.` | 1 |
 | `member create` | The conditional `last_window_ordinal` update changes a row count other than 1; the registration transaction rolls back (§6.2 Members) | `Error: fleet <fleet-id> window ordinal changed under the layout lock` | 1 |
 | `member create` | The tmux `new-window` reply is malformed; the cleanup diagnostic follows (§6.5 Member pane creation) | `Error: unexpected tmux new-window output: <quoted>` | 1 |
@@ -1366,7 +1366,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `setup` | The Hermes plugin enablement fails; no `asset_installs` row for `hermes` (§6.3 Hermes plugin enablement) | `failed to enable hermes plugin cafleet in <config path>: <cause>` | 1 |
 | `message listen --codex-thread` | `codex` is not on `PATH`, or no Codex ancestor process exists; before `ready` | §6.3 Codex forwarding | 1 |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path, before registration or multiplexer effects. `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
-| (any parser-validated input) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | The parser's native error of that kind | 2 |
+| (any parser-validated input) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is non-normative. | 2 |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID; for `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The live-fleet guard: the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
@@ -1449,6 +1449,16 @@ The CSI regex is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC, `[`, any run of paramet
 
 Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eight characters after `T`; absent/non-string/no-T values render `-`. Idle renders null as `-`, seconds below 60, floor minutes below 3600 and floor hours afterward. Required fields fail if absent; nullable activity and pending placement are documented valid cases.
 
+`TEXT_REPR` and `<quoted>` denote the value wrapped in `"` with these escapes: `"` → `\"`, `\` → `\\`, U+0009 → `\t`, U+000A → `\n`, U+000D → `\r`, U+0000 → `\0`; any other scalar whose general category is Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs (except U+0020), or which has the Grapheme_Extend property, → `\u{H}` with lowercase hex and no leading zeros. Every other scalar, including `'`, is written as itself. Categories and properties follow the Unicode version the implementation ships; the rendering of a scalar whose classification differs between Unicode versions is non-normative.
+
+#### JSON encoding
+
+Every JSON document the `cafleet` binary writes — `--json` output, JSONL listener records, stored JSON columns and inbox payloads — is compact: no whitespace between tokens, object members in the order this specification lists, arrays in order. Strings escape `"` as `\"`, `\` as `\\`, U+0008 as `\b`, U+000C as `\f`, U+000A as `\n`, U+000D as `\r`, U+0009 as `\t`, and every other code point below U+0020 as `\u00` followed by two lowercase hex digits; every other scalar, including `/`, U+007F, non-ASCII text, U+2028 and U+2029, is written raw as UTF-8. Numbers in these documents are integers, written in decimal with a leading `-` when negative.
+
+Canonical JSON is this encoding with every object's members sorted by the UTF-8 bytes of their keys, recursively. A digest named "SHA-256 of the canonical JSON of X" is the lowercase hex SHA-256 of those bytes.
+
+JSON that a bundled extension emits on its host's behalf is any valid JSON; the binary parses it by value, independent of whitespace, escaping and member order.
+
 ### 6.5 Multiplexer (tmux + herdr)
 
 CAFleet hosts coding-agent sessions in tmux or herdr panes. Both backends are driven as CLI subprocesses, and wrapped input on both goes through the pinned PTY runner control socket. The adapters preserve pane ownership, layout, literal input and bounded subprocess behavior.
@@ -1468,14 +1478,14 @@ CAFleet hosts coding-agent sessions in tmux or herdr panes. Both backends are dr
 
 #### Backend selection
 
-`fleet create` and the `cafleet doctor` `multiplexer` and `multiplexer.caller_pane` rows are the only readers of the caller's multiplexer environment. Both run the shared-server check before reading it and verify the env pane afterwards (§6.3 Caller pane verification). Both use one resolver, where truthy `HERDR_ENV` signals herdr and a set `TMUX` signals tmux:
+`fleet create` and the `cafleet doctor` `multiplexer` and `multiplexer.caller_pane` rows are the only readers of the caller's multiplexer environment. Both run the shared-server check before reading it and verify the env pane afterwards (§6.3 Caller pane verification). Both use one resolver, where a non-empty `HERDR_ENV` signals herdr and a non-empty `TMUX` signals tmux; an empty value counts as unset:
 
 | `HERDR_ENV` | `TMUX` | Result |
 |---|---|---|
-| truthy | set | Error `ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; unset the one that does not belong to this session` |
-| truthy | unset | herdr |
-| not truthy | set | tmux |
-| not truthy | unset | Error `no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; run cafleet inside a tmux or herdr session` |
+| non-empty | non-empty | Error `ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; unset the one that does not belong to this session` |
+| non-empty | unset or empty | herdr |
+| unset or empty | non-empty | tmux |
+| unset or empty | unset or empty | Error `no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; run cafleet inside a tmux or herdr session` |
 
 An explicit `fleet create --pane` selects the backend by its ID form instead of this resolver (§6.3 Caller pane verification). `fleet create` records the backend, its server and the Director's pane context (§6.3 `fleet create`); `cafleet doctor` reports the detected backend, its server and the caller pane verification (§6.3 `cafleet doctor` — Environment Diagnosis). Every other multiplexer-driving command — `member create`, `member delete`, `fleet delete`, `member prompt`, `member exec`, `member press`, `member capture`, runner recovery and Hermes work settlement — builds it from the fleet Director's placement row (backend, `mux_server`, session, window, pane) and targets the recorded server explicitly (§ Multiplexer context).
 
@@ -1497,7 +1507,7 @@ On success, the spawn returns the pane ID and its window ID, and ownership trans
 
 #### Subprocess output and deadlines
 
-The shared subprocess runner captures stdout and stderr without truncation. With a timeout, it drains both pipes concurrently from spawn using nonblocking I/O: each loop checks the monotonic deadline and the direct child's exit status, then reads at most 64 KiB per stream, polling at most 20 ms or the remaining deadline, whichever is shorter. Interrupted operations retry against the same deadline. Completion requires the child's exit and EOF on both streams. Success returns stdout, and a nonzero exit reports stderr, as lossy UTF-8. Calls without a timeout retain the unbounded output-collection path.
+The shared subprocess runner captures stdout and stderr without truncation. With a timeout, it drains both pipes concurrently from spawn using nonblocking I/O: each loop checks the monotonic deadline and the direct child's exit status, then reads at most 64 KiB per stream, polling at most 20 ms or the remaining deadline, whichever is shorter. Interrupted operations retry against the same deadline. Completion requires the child's exit and EOF on both streams. Success returns stdout, and a nonzero exit reports stderr, decoded as UTF-8 with each maximal ill-formed subsequence replaced by one U+FFFD. Calls without a timeout retain the unbounded output-collection path.
 
 At the deadline, including when the direct child has exited but a descendant still holds a pipe open, the runner kills and reaps the direct child, closes both read pipes and reports a timeout; descendant termination is outside this contract. FD setup, read, poll and child-status failures also release the pipes and kill/reap the child; cleanup failures accompany the primary error instead of replacing it. The deadline bounds observation and the start of cleanup; an unresponsive operating system can delay cleanup itself.
 
@@ -1702,11 +1712,11 @@ A fleet spreads its member panes across several windows. Every `member create` t
 
 | Constant | Value |
 |---|---|
-| `MIN_PANE_HEIGHT` | 15 rows |
-| `MAX_PANES_PER_COLUMN` | 8 |
-| `LAYOUT_LOCK_WAIT` | 60 seconds |
+| Minimum pane height | 15 rows |
+| Maximum panes per column | 8 |
+| Layout lock wait | 60 seconds |
 
-The constants are fixed; no flag or configuration changes them. A column in a window whose live height is `H` rows has capacity `capacity(H) = min(MAX_PANES_PER_COLUMN, floor(H / MIN_PANE_HEIGHT))`. `H` is the tmux `#{window_height}`, which excludes the status line, or the herdr `layout.area.height`; the 15-row minimum is a per-slot budget that includes the tmux pane separator. The Director window's right column holds `capacity(H)` members and is skipped when that is 0. An overflow column holds `max(1, capacity(H))` members, so a new overflow window always makes progress.
+The constants are fixed; no flag or configuration changes them. A column in a window whose live height is `H` rows has capacity `capacity(H) = min(8, floor(H / 15))`. `H` is the tmux `#{window_height}`, which excludes the status line, or the herdr `layout.area.height`; the 15-row minimum is a per-slot budget that includes the tmux pane separator. The Director window's right column holds `capacity(H)` members and is skipped when that is 0. An overflow column holds `max(1, capacity(H))` members, so a new overflow window always makes progress.
 
 | Window height `H` | Capacity per column | Director window members | Overflow window members |
 |---|---|---|---|
@@ -1753,7 +1763,7 @@ A fleet-scoped OS file lock serializes every operation that creates or closes a 
 | Directory | `<canonical-database-file>.layout-locks/` adjacent to the database, created on demand |
 | Key | SHA-256 hex of the fleet ID's UTF-8 decimal text |
 | File | `<key>.lock`, created `0600` |
-| Acquisition | Exclusive OS file lock retried every 50 milliseconds within `LAYOUT_LOCK_WAIT`, a budget separate from each command's operation deadline; the OS releases it when its holder exits, including after `SIGKILL` |
+| Acquisition | Exclusive OS file lock retried every 50 milliseconds within the layout lock wait (60 s), a budget separate from each command's operation deadline; the OS releases it when its holder exits, including after `SIGKILL` |
 
 | Holder | Acquired | Held through |
 |---|---|---|
@@ -1859,7 +1869,7 @@ herdr has no single reflow command, so it rebalances every column of a tab arith
 Equal heights ⇔ split *k* has ratio `1/(N-k)` (top → `1/N`, …, bottom pair →
 `1/2`). `herdr pane resize --amount` is a signed delta on a split's ratio, so
 each split is driven to target by one resize: `delta = 1/(N-k) - ratio`
-(rounded to 4 decimal places; skipped if `|delta| < 1e-3`); `delta > 0` →
+(rounded to 4 decimal places half away from zero, written as the shortest decimal that round-trips, without exponent or trailing zeros, such as `0.1667` or `0.5`; skipped if `|delta| < 1e-3`); `delta > 0` →
 `herdr pane resize --pane <pane k> --direction down --amount <delta>`, else
 `--pane <pane k+1> --direction up --amount <|delta|>`. A column whose matching
 `down` split count is not `N - 1` is left untouched.
@@ -1869,7 +1879,7 @@ Delete-time restoration anchors at the first surviving pane in `herdr pane list`
 | Tab state after close | Action |
 |---|---|
 | No surviving pane | Nothing to do: herdr closed the tab with its last pane |
-| One pane with exactly one residual `right` split | `herdr pane resize --pane <that pane> --direction right --amount <1 - ratio, rounded to 4 places>` unless the delta is below `1e-3` |
+| One pane with exactly one residual `right` split | `herdr pane resize --pane <that pane> --direction right --amount <1 - ratio>`, rounded and written as for column equalization, unless the delta is below `1e-3` |
 | Otherwise | Equalize every column |
 
 A close error that the teardown does not tolerate propagates unchanged and no
@@ -2257,7 +2267,7 @@ To enter each command, settlement clears the composer by the bounded loop below,
 Each check reads one SGR-preserving capture and indexes its rows identically to the ANSI-stripped view. The bottom border is the last stripped row consisting only of `─` across the pane width. The top border is the nearest preceding full-width border beginning and ending with `─`, with an embedded title allowed; the composer region is strictly between them. Empty means exactly one region row whose stripped text starts `❯ ` and whose remaining cells in that same SGR row are blank or italic placeholder text. Multiple region rows, including blank ones, mean nonempty. Progress compares stripped region text, retaining SGR only for the placeholder decision.
 
 1. Capture and inspect the region; an empty composer completes clearing.
-2. Send exactly 16 batches back to back: `Escape` plus 63 `Backspace` keys, then 15 batches of 64 `Backspace` keys. Pause once for `POLL_INTERVAL` (200 ms), then capture again.
+2. Send exactly 16 batches back to back: `Escape` plus 63 `Backspace` keys, then 15 batches of 64 `Backspace` keys. Pause once for the settlement poll interval (200 ms), then capture again.
 3. Fail with `the Hermes composer still holds text after clearing` if stripped region text is unchanged; otherwise repeat until empty or the settlement budget expires.
 
 Each round sends 1023 Backspace keys. A draft of 8192 scalars clears within 9 rounds (144 batches) and 10 seconds on tmux and herdr, leaving at least 10 seconds of the 20-second settlement budget for `/stop` and `/exit`; their clear steps complete after one empty capture. Complete nine-round native measurements took 2.676 seconds on tmux and 2.782 seconds on herdr, with the composer first observed empty after round 3; the loop stops after its first verified empty capture. Excess Backspace on an empty composer had no effect. `Ctrl+U` and `Ctrl+A` followed by `Ctrl+K` cleared a visually wrapped single logical line, but the latter retained a multi-line draft after an ineffective submit, so the fixed clear rounds cover both layouts. The total measured clear time satisfies the bound independently of any individual batch duration.
@@ -3158,9 +3168,15 @@ These checks are the bundled catalog's build guard: a CAFleet build whose bundle
 
 Each file and screen parses with exactly its fields above. Every row declared in `masked_rows` is in range and empty. Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour. Every `cell_styles` run satisfies the same placement rules against the other `cell_styles` runs and carries at least one non-default attribute with a valid colour. JSON formatting leaves the canonical screen digest unchanged.
 
+Every bundled catalog pattern spells its classes explicitly: it contains no Perl class or boundary (`\s \S \d \D \w \W \b \B`) and no escape outside the syntax (§ Pattern syntax).
+
 Synthetic fixtures, which the build guard rejects for the bundled catalog, remain available to explicitly selected test catalogs, which pass the same provenance rules.
 
 A rule's cursor condition treats a pending-wrap cursor as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
+
+###### Pattern syntax
+
+Profile patterns, frame guards and region matchers of the bundled catalog, operator redaction patterns, and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; flags `i m s U` in `(?flags)` and `(?flags:…)`; and the Perl classes `\s \S \d \D \w \W` and boundaries `\b \B`. Perl classes have Unicode meaning: `\s` is White_Space (U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000), `\d` is general category Nd, `\w` is Alphabetic, M, Nd, Pc and Join_Control, `\b` is a boundary between `\w` and non-`\w`, and the capitals negate. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
 
 ##### Operation extraction
 
@@ -3270,6 +3286,7 @@ The runner uses these monotonic bounds within the original attempt deadline:
 | Settle after a completed literal, and after fallback Escape | 500 ms |
 | Post-submit verification on a verified-composer run | 2 s |
 | Paste close reserve | 250 ms |
+| Stage write margin | 250 ms |
 
 Before the first byte and on each zero-byte reselection, render the selected delivery method and apply the first matching row:
 
@@ -3283,12 +3300,12 @@ Before the first byte and on each zero-byte reselection, render the selected del
 
 Fallback applies the same selection to its literal stage. A run without a selected profile writes plainly with no limit. The 4000-scalar inline limit remains unchanged; framing and inline/pointer rendering are outside the digest preimage and become pinned at the first byte.
 
-A verified-composer run is one whose recorded backend and native version select empty-composer observation and an executable plan for the operation: `prompt` for previews/prompts, `exec` for native commands. The runner and every client derive this predicate from the same recorded identity. Such an attempt begins only when its remaining budget covers `stage_settle() * settles + 2 s + STAGE_WRITE_MARGIN`: one settle for profile delivery, two for fallback. An immediate attempt below that bound queues with zero bytes and `defer_reason=delivery_budget_exhausted`; a deferred head waits with zero bytes under the same obstacle and retries with its own five-second attempt budget.
+A verified-composer run is one whose recorded backend and native version select empty-composer observation and an executable plan for the operation: `prompt` for previews/prompts, `exec` for native commands. The runner and every client derive this predicate from the same recorded identity. Such an attempt begins only when its remaining budget covers `500 ms × settles + 2 s + 250 ms`: one settle for profile delivery, two for fallback. An immediate attempt below that bound queues with zero bytes and `defer_reason=delivery_budget_exhausted`; a deferred head waits with zero bytes under the same obstacle and retries with its own five-second attempt budget.
 
 1. Revalidate run, placement, observer and interaction state, then durably reserve the input before any child byte.
 2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to `AwaitBeforeWrite` without settling; each chunk consumes a new guard after fresh ordinary draining and keyboard/pointer/interaction/observer/accounting checks.
 3. Start the 500 ms settle only after the last literal chunk, including any closing paste marker. Service child output, outer input and control traffic throughout it.
-4. Revalidate identity, interaction state and keyboard generation; pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus `STAGE_WRITE_MARGIN` before writing the submit key; insufficient budget stops as `left_in_composer/deadline_expired`, stage `literal_complete`.
+4. Revalidate identity, interaction state and keyboard generation; pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget stops as `left_in_composer/deadline_expired`, stage `literal_complete`.
 5. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
 6. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `left_in_composer/submit_unconfirmed`, stage `submitted`.
 
@@ -3313,7 +3330,7 @@ tmux/herdr pane <--> CAFleet runner <--> child PTY <--> native agent CLI
 
 The runner owns the child PTY and reconstructs terminal state independently of the multiplexer.
 
-Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` beside the canonical selected database. The database identity is the canonical path, filesystem device/inode and the stored `runtime_database_identity` instance ID (§8); `database_namespace` is the first 26 base32 characters of its SHA-256 digest. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts.
+Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` beside the canonical selected database. The database identity is the canonical path, filesystem device/inode and the stored `runtime_database_identity` instance ID (§8); `database_namespace` is the first 26 characters of the unpadded RFC 4648 base32 encoding (alphabet `a`–`z`, `2`–`7`, most-significant bit first) of the SHA-256 digest of the canonical JSON (§6.4 JSON encoding) of the database identity object. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts.
 
 Directories use `0700`, descriptor/spool files `0600`, and a control socket is accessible only to its owner. Create each run directory exclusively and reconcile an existing directory before reuse. Reject symlinks, ownership mismatches, malformed descriptors and socket paths exceeding the platform limit against the complete resulting path before pane creation. The descriptor contains complete database identity, fleet/member/Director/run identities, ownership epoch, a random launch nonce, literal child argv, absolute cwd, required environment overrides, evidence policy and initial terminal dimensions. The child inherits the native configuration; CAFleet neither copies the entire environment nor creates per-member native profiles.
 
@@ -3384,6 +3401,10 @@ The creator precreates `owner.lock`, records its device/inode and runtime-direct
 Normal recovery acquires the identity-matching lock before a CAS epoch takeover. Every event mutation validates complete database identity, owner kind and epoch; input additionally validates its ownership/lock identities immediately before child writes. A delayed live runner retaining the original lock prevents normal takeover. The missing-path branch also requires verified original-owner termination before fencing; missing files alone establish no exclusive ownership or safe input. Every takeover records the recovering process identity and advances the epoch, rejecting stale writes/input.
 
 Only the current lock/epoch owner allocates event sequences. Confirmed loss and its events are produced by the explicit recovery procedure below after exclusive takeover, ordered after complete outbox replay. Concurrent reconcilers contend for the same lock and CAS rather than allocating competing loss events. PID/start identity assists child reconciliation; it never substitutes for ownership.
+
+##### Screen model facts
+
+The runner reconstructs the child's screen as a grid of rows × columns of cells and offers detection a snapshot of it after each step. A cell holds one base scalar plus any following zero-width scalars. A wide scalar (width 2; East Asian Ambiguous scalars are width 1) occupies a leading cell and a continuation cell, and writing it resets the continuation cell to the default background and style. Each row records whether its text continued onto the next row by automatic wrap. After a write into the last column the cursor reports column `cols` (pending wrap). A cell's colours are default, one of 256 indexed colours (SGR 30–37/40–47 and 90–97/100–107 denote indexed colours 0–15, equal to their `38;5;n`/`48;5;n` forms) or RGB, and its style includes faint. The model tracks the primary and alternate screens, the OSC window title and the bracketed-paste mode (DEC private mode 2004), resizes with the PTY, and never answers a terminal query itself.
 
 ##### Terminal reply classification
 
@@ -3704,7 +3725,7 @@ Build argv from validated stored identities and append `--database-url URL` for 
 
 ##### Input delivery stalled event
 
-Queue housekeeping (§ Queue housekeeping) publishes one `input_delivery_stalled` event per run/head input when the head has been the head for `COMPOSER_BUSY_BOUND` (3 minutes) and no attempt has started for it. Each queued entry records `head_since` when it becomes the head. An interaction that blocks the head clears `head_since` and the head's stalled flag, and its closure restarts `head_since`, so time an open interaction blocks the head never counts: the `interaction_opened` event already notifies the Director with its own action. The event creates no interaction and stores no literal:
+Queue housekeeping (§ Queue housekeeping) publishes one `input_delivery_stalled` event per run/head input when the head has been the head for the stall bound (3 minutes) and no attempt has started for it. Each queued entry records `head_since` when it becomes the head. An interaction that blocks the head clears `head_since` and the head's stalled flag, and its closure restarts `head_since`, so time an open interaction blocks the head never counts: the `interaction_opened` event already notifies the Director with its own action. The event creates no interaction and stores no literal:
 
 | Field | Value |
 |---|---|
@@ -3885,7 +3906,7 @@ The service also caps new-operation admission at five seconds from the first obs
 
 Before a programmatic input attempt, drain actual human and child input through the runner's manual queue, terminal parser, ordered observer and outer display. A drain returns `Pending` or `Quiescent` with cumulative `human_generation`, `pointer_generation` (§ Terminal reply classification) and terminal `output_seq`. `DrainedInput` and its opaque proof retain both counters: `validate_ordinary` compares keyboard generation, and `validate_permission` compares both. Quiescence describes transport and observation health; the input coordinator separately validates composer/request eligibility, ownership, reservation and the original deadline before a write.
 
-Each call executes at most eight rounds under the original deadline. A round attempts at most one human read, one manual-queue PTY write, one child read, one display-queue write and one display flush, in that order. Skip an operation only for unavailable capacity or remaining quota, an empty queue or previously observed stream `EOF`. Let B be the positive configured `bytes_per_tick`; each actual read buffer is bounded by the minimum of 16384 bytes, the remaining stream quota and available queue capacity.
+Each call executes at most eight rounds under the original deadline. A round attempts at most one human read, one manual-queue PTY write, one child read, one display-queue write and one display flush, in that order. Skip an operation only for unavailable capacity or remaining quota, an empty queue or previously observed stream `EOF`. Let B be 16384 bytes, the per-drain transfer quota; each actual read buffer is bounded by the minimum of B, the remaining stream quota and available queue capacity.
 
 | Work per drain call | Inclusive bound |
 |---|---|
@@ -4015,11 +4036,11 @@ Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` wi
 
 ##### Immediate attempt failure bookkeeping
 
-Every path that ends an immediate ordinary (`preview`, `prompt` or `exec`) attempt after its first child byte records the receipt `uncertain` with `stop_cause=write_failed` before the runner replies to the client. This covers an error while advancing the attempt's stages, including an expired deadline, and an input-drain failure while the runner completes the in-flight attempt. When the caller's deadline has passed, the bookkeeping transaction uses `DEFERRED_FINALIZATION` (1 s) from now as its storage deadline. A zero-byte attempt returns to `ready`. The held composer is set as for any uncertain write, and the receipt's `uncertain/write_failed` state is the blocker provenance a held-composer stall event requires.
+Every path that ends an immediate ordinary (`preview`, `prompt` or `exec`) attempt after its first child byte records the receipt `uncertain` with `stop_cause=write_failed` before the runner replies to the client. This covers an error while advancing the attempt's stages, including an expired deadline, and an input-drain failure while the runner completes the in-flight attempt. When the caller's deadline has passed, the bookkeeping transaction uses the deferred finalization interval (1 s) from now as its storage deadline. A zero-byte attempt returns to `ready`. The held composer is set as for any uncertain write, and the receipt's `uncertain/write_failed` state is the blocker provenance a held-composer stall event requires.
 
 ##### Queue housekeeping
 
-Queue housekeeping runs from the runner event loop every `QUEUE_HOUSEKEEPING_INTERVAL` (1 s) while the FIFO is non-empty or a forced flush reservation is outstanding, and ordinary input is not fenced, so a reservation's expiry applies even after the flush emptied the FIFO. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization and stamp retries, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds consumption-detection latency to about one second, at one read transaction per second per queued member.
+Queue housekeeping runs from the runner event loop every housekeeping interval (1 s) while the FIFO is non-empty or a forced flush reservation is outstanding, and ordinary input is not fenced, so a reservation's expiry applies even after the flush emptied the FIFO. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization and stamp retries, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds consumption-detection latency to about one second, at one read transaction per second per queued member.
 
 Each sweep:
 
@@ -4045,7 +4066,7 @@ Each ordinary member's runner retries that member's own unnotified pending previ
 
 | Property | Contract |
 |---|---|
-| Cadence | From the runner event loop, at most once per `PREVIEW_SWEEP_INTERVAL` (1 s), and not before the run-wide backoff expires |
+| Cadence | From the runner event loop, at most once per preview sweep interval (1 s), and not before the run-wide backoff expires |
 | Preconditions | The run is live and its native child is running; `pending_input_client` and `pending_sweep` are both empty; the runner FIFO holds no preview request and no forced flush reservation is outstanding |
 | Selection | One short read snapshot confirms that the run's member is an active ordinary member whose recorded run is this run with a concrete placement, then takes the oldest `to_member_id=<member> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
 | Attempt decision | The latest-attempt table of § Durable input receipts and settlement for `preview:<run_id>:<message_id>:<attempt>`: no receipt starts attempt 1, a not-submitted settlement starts N+1, and accepted or submitted history settles and stamps without typing |
@@ -4100,7 +4121,7 @@ The flush is meant for a queue turn held by a gate that does not make a forced w
 | An unresolved `in_progress` blocker | Refuses: `input INPUT_IDS is unresolved; …` | The blocker may still be writing; the Director reconciles it first |
 | Held composer | Proceeds | The flush appends after whatever the composer holds |
 
-The literal is ` [cafleet: ignore any text before this marker, if present] ` followed by the selected preview lines joined by one space, in the runner's in-memory FIFO order. Each line is the canonical profile-method preview line the runner types (§6.5 Push notifications), including its 4000-scalar inline bound and long-body pointer. The flush always types plainly, because its bytes pass through the human-input path. Its effective bound is the lower of the plan's plain literal limit in its own unit, when non-null, and `FLUSH_LITERAL_LIMIT`, 65,536 bytes of UTF-8, which keeps the single argv element below Linux `MAX_ARG_STRLEN`:
+The literal is ` [cafleet: ignore any text before this marker, if present] ` followed by the selected preview lines joined by one space, in the runner's in-memory FIFO order. Each line is the canonical profile-method preview line the runner types (§6.5 Push notifications), including its 4000-scalar inline bound and long-body pointer. The flush always types plainly, because its bytes pass through the human-input path. Its effective bound is the lower of the plan's plain literal limit in its own unit, when non-null, and the flush literal limit (65,536 bytes of UTF-8), which keeps the single argv element below Linux `MAX_ARG_STRLEN`:
 
 1. Build the literal from canonical lines; use it when it fits.
 2. Otherwise rebuild every line in its pointer form; use it when it fits.
@@ -4198,7 +4219,7 @@ Every transition from `in_progress` to `uncertain`, or to `settled/left_in_compo
 | `interaction_candidate` | A staged stage stops on a blocking interaction whose eligibility is held as a candidate |
 | `interaction_open` | A staged stage stops on any other blocking interaction: a visible or obscured interaction, an interaction hold or a retained transition |
 | `observer_unavailable` | A staged stage stops because the observer is unavailable, has a gap or reported an observation diagnostic |
-| `deadline_expired` | Chunk bound reached at a complete prefix, or insufficient budget remains for the full verification window plus `STAGE_WRITE_MARGIN` before submit |
+| `deadline_expired` | Chunk bound reached at a complete prefix, or insufficient budget remains for the full verification window plus the stage write margin (250 ms) before submit |
 | `submit_unconfirmed` | The 2 s verification window ends without confirmation; only `left_in_composer`, stage `submitted` |
 | `short_write` | A stop leaves a prefix inside a UTF-8 scalar or paste marker; a positive short permission stage retains its uncertain behavior |
 | `write_failed` | PTY error, unrecorded possible I/O, failed checkpoint, failed/short close, positive short submit key, failed deferred or written immediate attempt (§ Immediate attempt failure bookkeeping), failed permission response, or a forced flush whose write failed or whose reservation expired |
@@ -4375,7 +4396,7 @@ Use UTC for durable timestamps, monotonic clocks for budgets and deadlines. Cap 
 
 ### 7.6 Packaging & distribution
 
-Ship one `cafleet` binary per release target. Archives are `cafleet-v<version>-<target>.tar.gz` containing the binary; the release tag is the bare package version. The compile-time version owns `--version`, asset stamps and doctor's installation checks. Embed the `assets/` tree (§6.3 Asset installation) offline. Rust builds/release packaging require no frontend output. The documentation site retains its independent Node/pnpm tooling.
+Ship one `cafleet` binary per release target. The release version, printed by `cafleet --version` and used bare as the release tag, names the default database file and asset stamps. Archives are `cafleet-v<version>-<target>.tar.gz` containing the binary, where `<target>` is the platform name in target-triple form, for example `x86_64-unknown-linux-musl`. The release version (above) owns `--version`, asset stamps and doctor's installation checks. Embed the `assets/` tree (§6.3 Asset installation) offline. Rust builds/release packaging require no frontend output. The documentation site retains its independent Node/pnpm tooling.
 
 ### 7.7 Agent-operation contract — one-shot command isolation
 
@@ -4402,7 +4423,7 @@ The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.
 | `asset_installs` | Asset installation timestamps by backend and config path |
 | `refinery_schema_history` | Baseline ledger |
 
-Exact baseline DDL:
+Exact baseline DDL, ending with the ledger table that initialization creates beside it:
 
 ```sql
 PRAGMA application_id = 1128351289;
@@ -4619,7 +4640,11 @@ CREATE TABLE member_permission_response_claims (
     FOREIGN KEY(interaction_id, input_id)
         REFERENCES member_permission_responses(interaction_id, input_id) ON DELETE RESTRICT
 );
+
+CREATE TABLE refinery_schema_history (version INT4 PRIMARY KEY, name VARCHAR(255), applied_on VARCHAR(255), checksum VARCHAR(255));
 ```
+
+Initialization inserts the ledger row with `version` 1 and `name` `'baseline'`; `applied_on` and `checksum` are non-normative, and diagnosis compares `version`, `name` and the column shape.
 
 Baseline column semantics:
 
