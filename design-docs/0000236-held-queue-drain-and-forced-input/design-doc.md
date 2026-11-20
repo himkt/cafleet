@@ -1,8 +1,8 @@
 # Held runner queue drain and Director forced flush
 
-**Status**: Approved
-**Progress**: 42/43 tasks complete
-**Last Updated**: 2026-11-19
+**Status**: Complete
+**Progress**: 43/43 tasks complete
+**Last Updated**: 2026-11-20
 
 ## Overview
 
@@ -663,7 +663,7 @@ This step commits no code. A scratch test may be used locally and discarded; the
 - [x] Run `mise //:test` and `mise //:lint`. Environment limitation: under host load (load average 184 on 64 cores during Steps 3–4) the default 32 test threads time out in unrelated timing-bound tests, so run with `RUST_TEST_THREADS=8` and record the thread count used <!-- completed: 2026-11-20T01:56 -->
 - [x] Run `mise //docs:build` <!-- completed: 2026-11-20T01:56 -->
 - [x] Re-run the issue #623 reproduction live with the branch binary on a dedicated database (no reinstall; the active fleet keeps the installed 0.35.4 runtime) <!-- completed: 2026-11-20T01:56 -->
-- [ ] Mark the design doc complete <!-- completed: -->
+- [x] Mark the design doc complete <!-- completed: 2026-11-20T02:20 -->
 
 **Step 9 results:** `mise //:test` with `RUST_TEST_THREADS=8` passed 2066 tests with 0 failures and 11 ignored; `mise //:lint` passed; `mise //docs:build` built 8 pages with no dead links, run in a `/tmp` copy of the documentation package with a `/tmp` pnpm store. The live re-run used the branch binary on `/tmp/cafleet-live/live.db` with Claude Code 2.1.322 on Herdr 0.9.5 (Verifier record `.verifier/live-sc11.md`): queued previews drained, `input_delivery_stalled` published once with cause `held_composer`, and `member flush` delivered the queued previews, including after a draft wrapped over 6 rows and a one-row leftover preview line.
 
