@@ -6409,7 +6409,7 @@
       "rows": 38,
       "cols": 94,
       "source_ref": "native/claude.json",
-      "sha256": "1c2b8e72ba7c5adb2b76dd1af50e36c8c2766d3a2301b36fb933033350acc500",
+      "sha256": "3eba8be1f03d51559e8f2b72c83dc9b927dd5a4b02968dbb99fa29b95bd0d5a5",
       "composer_draft": {
         "text": ""
       }
@@ -6422,7 +6422,7 @@
       "rows": 38,
       "cols": 94,
       "source_ref": "native/claude.json",
-      "sha256": "d5c72b675c77ea3ce289ea494d63b55e7d5ffc44b27c9e1a6b3311ccbaa959b9",
+      "sha256": "e7afd151b783b4e0b4dc421da671a0413a750bc207d70c8d22566b2afd11a8d0",
       "composer_draft": {
         "text": "draft text"
       }
@@ -6446,7 +6446,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "6e4a47c3a8477a3cf33b516dd021640ee6cfefb298b67a4ce31d5d0bef725cbc",
+      "sha256": "16b61e5577822e609ddb4d08cd03025425ddde4b22c2e56003e2d27538a49364",
       "composer_draft": {
         "text": ""
       }
@@ -6459,7 +6459,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "110d136803b16de1e3a8b11f94ba2cad6a0704ca6b0a7bc5b1e7a25d0025074f",
+      "sha256": "06d235b8e2e261efc401239b7761bdca170b33cc4d49e74fbffd90dab14a73d6",
       "composer_draft": {
         "text": "draft text"
       }
@@ -6472,7 +6472,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "c26198f0d96518c93e0475932061e9e919068962fe3e572309e73c7050382c35",
+      "sha256": "2db21e318c4a43ee997a1d1dedab4d741ae70e108231cd32a482382151d6005a",
       "composer_draft": "unreadable"
     },
     {
@@ -6483,7 +6483,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "c9a9caa99a161f129edbe7a6340c4f735df3a7a384d1313c1cab7b554dcd1945",
+      "sha256": "17c32a95d3ee8b2defa8c0633507ee940ed73b2889f90d76dee7308a8e688cbe",
       "composer_draft": {
         "text": ""
       }
@@ -6496,7 +6496,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "e405f8cc73c91d8913f29059333b1814871a590e78d8f10bfe1958d1e3736fe0",
+      "sha256": "82a333a245dfc54ace30a97eebef525cb0e04e93b27fd03991aa9c70cf16e4ae",
       "composer_draft": {
         "text": "draft text"
       }
@@ -6509,7 +6509,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "9f0f51e6d1ce3ce4330905e1211ca131dd2dd09f1193969297054a9fa57b0293",
+      "sha256": "017f8d666843a5502d4fcd67fe9c18ba8a5fa0bdbb75e6f4548a5af36116ec64",
       "composer_draft": "unreadable"
     },
     {
@@ -6520,7 +6520,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "c08493f3cdc3768d948bcd702bb4a3ddf6429fcadd286dc0c086914a5255730e",
+      "sha256": "637d5a7d745c2fbbf7f0d0c254252a9fb15430919339985bff606cfca7ad971e",
       "composer_draft": "unreadable"
     },
     {
@@ -6635,7 +6635,7 @@
       "rows": 38,
       "cols": 94,
       "source_ref": "native/claude.json",
-      "sha256": "2ef389b1ca29f5b83ec1b580622e3bc78469eaa6c4b8e14d83914ce449875b34",
+      "sha256": "814ca6d9301bbdbe09584227874a2c7431b309e853ba2fae8101224dc669d6e7",
       "composer_draft": {
         "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery\n  state, report the stalled queue head with its named cause, and confirm with member show\n  that no interaction is open before the Director forces a flush of the remaining previews"
       }
@@ -6648,7 +6648,7 @@
       "rows": 38,
       "cols": 94,
       "source_ref": "native/claude.json",
-      "sha256": "78049988daaebe36a306eda24eb46dcf9a2321d9b0b28409f6e0eceafc924155",
+      "sha256": "dd4ca35fbe18acbee8464c3a63039c6ce8d8b313012bef4a4ec84b16ca8e0314",
       "composer_draft": {
         "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery"
       }
@@ -6661,7 +6661,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "32e4bee7b622ead686c537d7827d6c46ef31374e57ecaa16853192e5a94bd7b3",
+      "sha256": "7911e5d9289ca5844ab90afc8da6b135376e5770a982acf6b2599157e074405d",
       "composer_draft": {
         "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery state, report the stalled queue\n  head with its named cause, and confirm with member show that no interaction is open before the Director forces a\n  flush"
       }
@@ -6674,7 +6674,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "ccd344f33c23ba147b9a3b34fdad5d910911262bc2f09e083bc8cc118394e75f"
+      "sha256": "78abb364eb257cb1d4802a14d3ed8030dd55aac89cb048931fec372ced45279a"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-2-tmux-120-1",
@@ -6684,7 +6684,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "c5b89d4d2cf51ccba64ff38b38cc5fca64160a81028e62b8e438028546ebd169"
+      "sha256": "d9e1a9a7628d2a29dca54dfc534ca799f394d5eca6e938074ed9eb535eac8430"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-3-tmux-120-1",
@@ -6694,7 +6694,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "bd8544afc675bb8872d54eb2d68a19132883b420ab732c1ffde0c4ef92562c42"
+      "sha256": "636e47192c421f3c04de7f86b40199cc63fedba789630a0c0c1563a211f0d8a3"
     },
     {
       "id": "opencode-2.2.7-deny-post-idle-tmux-120-1",
@@ -6704,7 +6704,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "12f27c4e490631fc18f3c454754e51d698f7e9ceb242f2af02c214eb98a1cf13"
+      "sha256": "97308be9f7c444ad78ed4669fa5785832a4eaf916ed5666a9236ef386137cb78"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-1-tmux-057-1",
@@ -6714,7 +6714,7 @@
       "rows": 36,
       "cols": 57,
       "source_ref": "native/opencode.json",
-      "sha256": "97d9e70a52fed2249a7ba2080597f18754ff1b8fd076a98e4fc03236d95bd3f2"
+      "sha256": "067b04176243ccffe384c7e521ade40a480180288550a70e8c663fba9697a799"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-2-tmux-057-1",
@@ -6724,7 +6724,7 @@
       "rows": 36,
       "cols": 57,
       "source_ref": "native/opencode.json",
-      "sha256": "75a643cf35a1b5cd4695fdef2cec6991075b06cee4448ed1f648b86483e6eb27"
+      "sha256": "2543503d2ef062014c5db2c5b834a036ea7125ea94b5af000c0f7f0636f23037"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-3-tmux-057-1",
@@ -6734,7 +6734,7 @@
       "rows": 36,
       "cols": 57,
       "source_ref": "native/opencode.json",
-      "sha256": "b6e30abb516edb9dccaf85c97b310bbe6cb3fed965c06280ebb1ed595bd12b96"
+      "sha256": "450a5e61407d129a353ad358568e65aedba03d98406529bd241ad6c8897e155a"
     },
     {
       "id": "opencode-2.2.7-deny-post-idle-tmux-057-1",
@@ -6744,7 +6744,7 @@
       "rows": 36,
       "cols": 57,
       "source_ref": "native/opencode.json",
-      "sha256": "13e8a6950187a044e9877d8bf6fb3be7fd040444d6b7ec3829ee23d8b1d31b6f"
+      "sha256": "deea3efd3a35434d71b8acd7fd7b3783836d27ecaac3057f41ce033e86b8442e"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
@@ -6754,7 +6754,7 @@
       "rows": 36,
       "cols": 55,
       "source_ref": "native/opencode.json",
-      "sha256": "78f0db23c30a3566793787baa7c62dd0e4db3882c7a54b89d879fc9d01aa17bd"
+      "sha256": "0a0c6978eb5c7c317ca1eb088a6d18851ec226431c2642232dc1a9da0d88c7f5"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-2-tmux-055-1",
@@ -6764,7 +6764,7 @@
       "rows": 36,
       "cols": 55,
       "source_ref": "native/opencode.json",
-      "sha256": "924decd56d487fc31470dfa56f41a6dae8aa1a2f72ef28e31f4fb133ef7f8ce6"
+      "sha256": "fe9d26c294447392e9b0e104a14f10e14a8bd1ad0b95b03c1eb4cc2f685a2920"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-3-tmux-055-1",
@@ -6774,7 +6774,7 @@
       "rows": 36,
       "cols": 55,
       "source_ref": "native/opencode.json",
-      "sha256": "5baba04b5cbe2d84da413e8ca8d3887ce1414308a8b8a6425d5366ea167dbc68"
+      "sha256": "d488558da56a37697c946f65e63a6d6fbaa7a5bba9ada874d4775bd8459cbb8f"
     },
     {
       "id": "opencode-2.2.7-deny-post-idle-tmux-055-1",
@@ -6784,7 +6784,7 @@
       "rows": 36,
       "cols": 55,
       "source_ref": "native/opencode.json",
-      "sha256": "54315c64726e7f7bc9e2231d931a1cf5f65fad01f2768bb9745aad1e4a381a1f"
+      "sha256": "c007826a1abf1e8686a55cdbe01baec6b202482bc95767624b0922a95910d904"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-1-tmux-036-1",
@@ -6794,7 +6794,7 @@
       "rows": 36,
       "cols": 36,
       "source_ref": "native/opencode.json",
-      "sha256": "75e7bcd41ff292455ffecdbbb7d5764652f38ffbd72b1e2a01ccd51a95af028b"
+      "sha256": "75ba8b48d181963b33b2a18631f05566d84cf52ba3d5993aefe1e7bd0e1f10c9"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-2-tmux-036-1",
@@ -6804,7 +6804,7 @@
       "rows": 36,
       "cols": 36,
       "source_ref": "native/opencode.json",
-      "sha256": "503d7105c6444bd8c3238ce633486bb79ec86c8601eece9ea502e87f06cb1c06"
+      "sha256": "30c8e94336157b36f9d3b408e4fcc4c1e789d3eb8460b2bcc5af138798220e89"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-3-tmux-036-1",
@@ -6814,7 +6814,7 @@
       "rows": 36,
       "cols": 36,
       "source_ref": "native/opencode.json",
-      "sha256": "8697845c5ca64f6684130bad2d14e59b21ae2803aa407a57ae46bf2b0b31a02d"
+      "sha256": "e74c98c1a5d93deae4db26c2facd0604f60dedd76b5111e2cfdf871b1f4c961a"
     },
     {
       "id": "opencode-2.2.7-deny-post-idle-tmux-036-1",
@@ -6824,7 +6824,7 @@
       "rows": 36,
       "cols": 36,
       "source_ref": "native/opencode.json",
-      "sha256": "8f5f51134f4716ccd6bb3878fe6c88d001f1b459091db78763492ae65020d10c"
+      "sha256": "47a393995b0613a057f5d7062ade262aa4321021fd221050a3b2ed0edffea7d2"
     },
     {
       "id": "opencode-2.2.7-allow-pre-stage-tmux-120-1",
@@ -6834,7 +6834,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "1cc5a17b84857408997b9ec2be6482346baa0a2b305aa2874fecfb5bdd4f879f"
+      "sha256": "24f54e57ecff6dffc345c0ce1a5a44137d4f4dd039ea8e0d27b4ae0bdcf3bd6b"
     },
     {
       "id": "opencode-2.2.7-allow-post-idle-tmux-120-1",
@@ -6844,7 +6844,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "e46bb00005f7327a91b36feab26be087bc8cec6e1f7374655c54c853bbae7ec0"
+      "sha256": "db5b1d0517974c46a48833ef91e494a9693a3fc1a8784760b5e5e086618f72d8"
     },
     {
       "id": "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1",
@@ -6854,7 +6854,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "9c27ffea246ff248e5f4cc3c21610636d68858749f5f00319ccfa317fb7862cc",
+      "sha256": "86671648c9114a79920e97bf186a6311286dd9ac06f6fa51edfd78df99477e30",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -6871,7 +6871,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "f8d785e76014ea2a4718b1d451f67420c33be76d24cbb043f2490753b5f80f1d",
+      "sha256": "0629b126509e787501c83608a375978e073e6de4ad39b8d0518a8e2142b6df66",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -6891,7 +6891,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "e93c77740b4c19e48bc52d2d32d96adce53a1cb3ca1417364023661621889bc3",
+      "sha256": "34c7dbbdfb79f441875fbb1528a5c419b253b08a415667eb68fea07df2fb8036",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -6920,7 +6920,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "8709b15126871704e73d9d6095c66e3a720f32f2e78f14fb471eb9700f544b94",
+      "sha256": "d4201f3f66e2f29a58edf3d428b8a18c507c9f89dab70d9d8c86a3e725975978",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -6937,7 +6937,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "c25a16d17d08567c4076e9da16b29e9091dac5985d06ded8f5de3a4c26cb5104",
+      "sha256": "67810d29d15854ede793286d119e9d45f28d94a1f8e5dcea84acd7ca07406a1e",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -6957,7 +6957,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "dba06ecc26a139293b5b91e7a7d7c105f785a0d9cefca3d6f7c699a9470110ff",
+      "sha256": "7b1ab51ba7e6fa16d64694ea8ae3ec693acd373cd47cbdc00614e570c3bb6787",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -6986,7 +6986,7 @@
       "rows": 36,
       "cols": 91,
       "source_ref": "native/opencode.json",
-      "sha256": "b92074ff62ec56cedbf1c6b210944fb7e03cf61fbdb9b191e205ba0fe651b53a",
+      "sha256": "08bc36468b62be6b211c7a10b7e366a02f31fe133d0f63d55658c61f893901db",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7003,7 +7003,7 @@
       "rows": 36,
       "cols": 91,
       "source_ref": "native/opencode.json",
-      "sha256": "76721d12493f9ea72f1020f93f30fcdac214adca32420f1679a8c2f255a5bde7",
+      "sha256": "fc2f12664a658f9df73a21a7417054acc12be1c5a253f3bba97dbcfcfd05b31a",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7023,7 +7023,7 @@
       "rows": 36,
       "cols": 91,
       "source_ref": "native/opencode.json",
-      "sha256": "caf96bc3d391f5b2d77a4c0b4339c0fab11e842eb3ee6bb63e496a7afec67c1b",
+      "sha256": "dd75f2eb628f6cfb6935010c901e4d95de4d1e332fb36aecb05fd920bb6d25c1",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7052,7 +7052,7 @@
       "rows": 36,
       "cols": 91,
       "source_ref": "native/opencode.json",
-      "sha256": "5a6943963c4c8e7e5c2cae8b0222f3c7ed5a10ee995beae8c22e2ae73b23b4fc",
+      "sha256": "a1d6c44c69b2bfd17054410f5b89fec324b29634c476f0a8e8a455835ce7d0ce",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7069,7 +7069,7 @@
       "rows": 36,
       "cols": 91,
       "source_ref": "native/opencode.json",
-      "sha256": "6fa2b599908e768e27740c152c9b224d0b5f8cfa2344443d56782fcff022ded4",
+      "sha256": "e22994e06e865ff93c35ee0bcf8bd11a74c1f4a8ce4babf0a1f41f80754e910e",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7089,7 +7089,7 @@
       "rows": 36,
       "cols": 91,
       "source_ref": "native/opencode.json",
-      "sha256": "94e76d1fab89cf0b224f2f358c6c80d71b573aaaa13325e0cc4bb2b21fd559fb",
+      "sha256": "61c99c359a559be3a499b0761bda8beea8c7f41b1c9596d37b36960fa3ca1264",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7461,16 +7461,6 @@
       "sha256": "134a250b3f3ae9cb3eb066cda184fcfdfe9156b5b22b673745d330e097b06c62"
     },
     {
-      "id": "claude-2.1.322-env-not-now-post-stage-tmux-120-1",
-      "kind": "native",
-      "backend": "claude",
-      "native_version": "2.1.322",
-      "rows": 36,
-      "cols": 120,
-      "source_ref": "native/claude.json",
-      "sha256": "977fa4cb210e72d84a35a800980b483a3d24b796e2ddff861e7770087ead6c6e"
-    },
-    {
       "id": "claude-2.1.322-env-dont-show-pre-stage-tmux-120-1",
       "kind": "native",
       "backend": "claude",
@@ -7479,16 +7469,6 @@
       "cols": 120,
       "source_ref": "native/claude.json",
       "sha256": "0efbaad1886d498be85563d1de0121ad882cbb982eb5a58ed3d6ad2a0d652704"
-    },
-    {
-      "id": "claude-2.1.322-env-dont-show-post-stage-tmux-120-1",
-      "kind": "native",
-      "backend": "claude",
-      "native_version": "2.1.322",
-      "rows": 36,
-      "cols": 120,
-      "source_ref": "native/claude.json",
-      "sha256": "c510f001281c98bfc9f9ea4ca8e516fc32e109a9fb156c5091105c27bcaeb299"
     },
     {
       "id": "claude-2.1.322-queued-hint-tmux-120-1",
@@ -7545,7 +7525,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "c9b60d21f707e2ef34389b743923882e3ac6784a4791f5b3d6402983e1c3cb99",
+      "sha256": "749a52dddf312ebb0bceaa315ad6a14afd4b67d4edd1cda6f58dd8b449fbf049",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7574,7 +7554,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "e376f41bd1798961b2ba76742503ea815844e8dde3a002c97425ef008bdc538c",
+      "sha256": "67b25c4eec82495a0ab23bf4ce2fb6e205a6f62dfe0a2a33ae8936fb0333c7cc",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7592,7 +7572,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "0e3b54e62a0d4acd077187d7c2cc41aff64740bf4dcfb44513f7fefc2ccc370d",
+      "sha256": "fb704f89488e970db46dd32538c6231ec5794fc25d35d0cd97e4213d062a8208",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7609,7 +7589,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "db5abb78008ca057e9aadefc80fea54501c8e3347b2d9939e8e445b05a1b9287",
+      "sha256": "1c1d6f79fbf3b46e9765b3d7ce83d0662472464facc349df41ba0fc3f4144dc0",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7675,7 +7655,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/claude.json",
-      "sha256": "f8f8c438c4ab42a15921a800dd029a1a6e3272f34213cb63753ff39e2d1e0734",
+      "sha256": "261804fc78ada52af2e6c1ac0e96d7b875b302bc37774519da225b292219a79f",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7704,7 +7684,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/claude.json",
-      "sha256": "8abb794a32c5d702294f2b201cf997cbb5375e45735e0ce89b8b2c17f7b522a0",
+      "sha256": "31069109556e7917baca95dd8e76e369421392d732875dc3365ac0ec0b7c8dcd",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7722,7 +7702,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/claude.json",
-      "sha256": "6fb95367ae607ca11f236dee7165fa00471523587c1d5052952d93789daafe39",
+      "sha256": "093b0d61b16f5b78dca19b5c726325a7ef954bb7930dd51faa57bec2df80c4eb",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7739,7 +7719,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/claude.json",
-      "sha256": "d9c036f99627475bed8417b7c3b5a205018dd21baeaf988e89d8d2d5247e6293",
+      "sha256": "1763fcc0e2b798d67625f4c5430134de5adc9d898c67ae427ef17127b9d026d8",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7868,7 +7848,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "c0c41b95f9bbaafc40c5e478751c211ed97f8d17c209a8e2d10bbeeba00ca7cd",
+      "sha256": "85ff4e27093c0edfe9c120d52680dc9283feac1c4d025700d1fa2fcbc150e7d0",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7888,7 +7868,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "b33241f56fa7b27bcedcc4c425e4b4acb80a2f5de7aea0f6f003036135d3fcb1",
+      "sha256": "881b81706a258bcbd2faf23059c984c3a66233473f13229a8048e0f450003077",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7926,7 +7906,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "08a28d3e7bfd12f06a32e2908c0b8e0f0119dcdaacc03ac212b8fd6c82c155b8",
+      "sha256": "4b55f02c7006e4bad10f6e838d1b0f67647bed118be7d0c5e58495056341181d",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7949,7 +7929,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "4c36b8096762fda6296e5fb6f3733c1495ede29ba512cbafe3b2fadb375e4c90",
+      "sha256": "c23b34d90f60c2f8ec7713d56c271eb61cd9cd18043402decc7710bb869e7c2d",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7967,7 +7947,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "1f3a5530df922bc62e883d6d731d3e5bff67ff2e1b1b9ab6970bbe20a3870cd1",
+      "sha256": "8c06e1166176c0b6cd3619384d557226459184547d09922e21650163bebfe40a",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -7988,7 +7968,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "2fed3650c83de4d33919605616314441d005fa84608d1bd38f70a10c6b1c8458",
+      "sha256": "6e637bb87396d1fa44d0921b6225d904ad40ebc3a1536e8779aef7de4287039e",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -8011,7 +7991,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/codex.json",
-      "sha256": "4dd968392ff3f1ee3e52c1bc7d3daf7c7ee513ab43a776e95ea2bcf614ecc02c",
+      "sha256": "35551c1fd95d81ae9674e19c8b93dfcc60c5fd149e59f51c61c72fcb77806161",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -8069,7 +8049,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/codex.json",
-      "sha256": "e2c5d10ce7e30249e7cfa158489bff7573cb69ecc1e5c05e4aab40a6d7c524fa",
+      "sha256": "365ed7136317cbd98052f0a2b83bbb9fb3e7474fedc184b332d7c08befcec70f",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -8092,7 +8072,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/codex.json",
-      "sha256": "f7eb6dbe2383ad4040e300af470be18d9cebea5d57025f4179b9ce47e817a76d",
+      "sha256": "9600ce2b952528a25ea4394affa3d1a41879c2347f7281d33d8a20b83144b661",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -8110,7 +8090,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/codex.json",
-      "sha256": "68414b53be77f5ba10639a7ecc973b16e341a9e967484d7493bcd325bf3874e9",
+      "sha256": "9aeb7c58d93b436eebc9f35bb776b5907d6ace310adf3b88c0e8e0d729986bc6",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -8131,7 +8111,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/codex.json",
-      "sha256": "2c50405a075370070c98ce8a53116cb9c1b30fe98fd8f243820681804e6a2904",
+      "sha256": "bcdd60b4e1667550af1beaeef679bdea061d49a250bfb9dccb3a8bea8aa8dfed",
       "composer_evidence": [
         {
           "operation": "exec",
