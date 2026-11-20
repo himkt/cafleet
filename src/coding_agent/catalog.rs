@@ -1618,6 +1618,102 @@ pub(crate) mod test_support {
         Ok(())
     }
 
+    const SYNTAX_LETTER_ESCAPES: &[char] = &['t', 'n', 'r', 'f', 'v', 'x', 'p', 'A', 'z'];
+
+    /// Each escape of `pattern` outside the pattern syntax, spelled as written.
+    fn escapes_outside_syntax(pattern: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut rest = pattern;
+        while let Some(at) = rest.find('\\') {
+            let Some(letter) = rest[at + 1..].chars().next() else {
+                found.push("\\".to_owned());
+                break;
+            };
+            let after = &rest[at + 1 + letter.len_utf8()..];
+            if !(letter.is_ascii_punctuation() || SYNTAX_LETTER_ESCAPES.contains(&letter)) {
+                let braced = after
+                    .starts_with('{')
+                    .then(|| after.find('}'))
+                    .flatten()
+                    .map_or(0, |close| close + 1);
+                found.push(format!("\\{letter}{}", &after[..braced]));
+            }
+            rest = after;
+        }
+        found
+    }
+
+    fn profile_strings<'a>(value: &'a Value, pointer: String, found: &mut Vec<(String, &'a str)>) {
+        match value {
+            Value::String(text) => found.push((pointer, text)),
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    profile_strings(item, format!("{pointer}/{index}"), found);
+                }
+            }
+            Value::Object(map) => {
+                for (key, item) in map {
+                    let key = key.replace('~', "~0").replace('/', "~1");
+                    profile_strings(item, format!("{pointer}/{key}"), found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether the catalog decoder compiles the profile string at `pointer` as a pattern.
+    fn decodes_as_pattern(profile: &Value, pointer: &str) -> bool {
+        let mut probe = profile.clone();
+        *probe
+            .pointer_mut(pointer)
+            .expect("the pointer names a profile string") = json!("(");
+        RawProfile::deserialize(&probe).is_err_and(|cause| cause.to_string().contains("regex: "))
+    }
+
+    fn pattern_location(profile: &Value, pointer: &str) -> String {
+        let mut segments = pointer.trim_start_matches('/').split('/');
+        match (segments.next(), segments.next()) {
+            (Some("rules"), Some(index)) => {
+                let index = index.parse::<usize>().expect("a rule index");
+                format!(
+                    "rule {}",
+                    profile["rules"][index]["id"].as_str().expect("a rule id")
+                )
+            }
+            (Some(field), _) => field.to_owned(),
+            (None, _) => unreachable!("split yields at least one segment"),
+        }
+    }
+
+    /// One ``<backend> <min_version> <location>: `<construct>` `` line per Perl class, boundary
+    /// or other escape outside the pattern syntax in a profile string the decoder compiles.
+    pub(crate) fn implicit_pattern_classes(definitions: &Value) -> Vec<String> {
+        let mut found = Vec::new();
+        for profile in array(&definitions["profiles"]).expect("catalog profiles") {
+            RawProfile::deserialize(profile).expect("the profile decodes before probing");
+            let name = format!(
+                "{} {}",
+                text(&profile["backend"]).expect("profile backend"),
+                text(&profile["min_version"]).expect("profile min_version")
+            );
+            let mut strings = Vec::new();
+            profile_strings(profile, String::new(), &mut strings);
+            for (pointer, pattern) in strings {
+                let constructs = escapes_outside_syntax(pattern);
+                if constructs.is_empty() || !decodes_as_pattern(profile, &pointer) {
+                    continue;
+                }
+                let location = pattern_location(profile, &pointer);
+                found.extend(
+                    constructs
+                        .into_iter()
+                        .map(|construct| format!("{name} {location}: `{construct}`")),
+                );
+            }
+        }
+        found
+    }
+
     /// Replays every native fixture a profile's `composer_draft` cites and requires the
     /// profile's extraction to reproduce the fixture's recorded draft.
     fn verify_bundled_drafts(
@@ -4303,6 +4399,7 @@ mod tests {
         use crate::coding_agent::catalog::ProfileCatalog;
         use crate::coding_agent::catalog::test_support::BUNDLED_FIXTURES;
         use crate::coding_agent::catalog::test_support::bundled_definitions;
+        use crate::coding_agent::catalog::test_support::implicit_pattern_classes;
         use crate::coding_agent::catalog::tests::definitions;
         use crate::error::CafleetError;
         use serde_json::Value;
@@ -4875,6 +4972,119 @@ mod tests {
                 )),
                 None
             );
+        }
+
+        #[test]
+        fn the_bundled_catalog_spells_every_pattern_class_explicitly() {
+            assert_eq!(
+                implicit_pattern_classes(&bundled_definitions()),
+                Vec::<String>::new()
+            );
+        }
+
+        /// The first bundled rule whose `suffix` holds a pattern string, as
+        /// `(profile index, rule index)`.
+        fn rule_with(definitions: &Value, suffix: &str) -> (usize, usize) {
+            definitions["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .find_map(|(profile, value)| {
+                    value["rules"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .position(|rule| rule.pointer(suffix).is_some_and(Value::is_string))
+                        .map(|rule| (profile, rule))
+                })
+                .unwrap_or_else(|| panic!("a bundled rule carries {suffix}"))
+        }
+
+        fn with_pattern(suffix: &str, pattern: &str) -> (Value, String) {
+            let mut definitions = bundled_definitions();
+            let (profile, rule) = rule_with(&definitions, suffix);
+            let value = &mut definitions["profiles"][profile];
+            *value["rules"][rule].pointer_mut(suffix).unwrap() = json!(pattern);
+            let location = format!(
+                "{} {} rule {}",
+                value["backend"].as_str().unwrap(),
+                value["min_version"].as_str().unwrap(),
+                value["rules"][rule]["id"].as_str().unwrap()
+            );
+            (definitions, location)
+        }
+
+        const PATTERN_FIELDS: &[&str] = &[
+            "/matchers/0/pattern",
+            "/region/start_pattern",
+            "/region/end_pattern",
+            "/frame/require_patterns/0",
+            "/frame/reject_patterns/0",
+        ];
+
+        #[test]
+        fn the_explicit_class_guard_names_the_profile_rule_and_construct_in_every_pattern_field() {
+            const CONSTRUCTS: &[&str] = &[
+                r"\s", r"\S", r"\d", r"\D", r"\w", r"\W", r"\b", r"\B", r"\u{a0}",
+            ];
+            for field in PATTERN_FIELDS {
+                for construct in CONSTRUCTS {
+                    let (definitions, location) = with_pattern(field, &format!("x{construct}y"));
+                    assert_eq!(
+                        implicit_pattern_classes(&definitions),
+                        vec![format!("{location}: `{construct}`")],
+                        "{field} {construct}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn the_explicit_class_guard_reports_every_construct_of_a_pattern_in_order() {
+            let (definitions, location) = with_pattern("/matchers/0/pattern", r"^\s+\d[\w,]$");
+            assert_eq!(
+                implicit_pattern_classes(&definitions),
+                vec![
+                    format!("{location}: `\\s`"),
+                    format!("{location}: `\\d`"),
+                    format!("{location}: `\\w`"),
+                ]
+            );
+        }
+
+        #[test]
+        fn the_explicit_class_guard_admits_every_escape_of_the_pattern_syntax() {
+            const ADMITTED: &[(&str, &str)] = &[
+                ("ascii punctuation", r"\.\?\(\)\[\]\{\}\$\^\*\+\|\\\-\#\&\~"),
+                ("control escapes", r"\t\n\r\f\v"),
+                ("code points", r"\x41\x{a0}\x{3000}"),
+                ("general category", r"\p{L}\p{Nd}"),
+                ("text anchors", r"\Ax\z"),
+                (
+                    "explicit white space class",
+                    r"[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]",
+                ),
+                ("explicit word boundary", r"settings(?:$|[^0-9A-Za-z_])"),
+            ];
+            for field in PATTERN_FIELDS {
+                for (name, pattern) in ADMITTED {
+                    let (definitions, _) = with_pattern(field, pattern);
+                    assert_eq!(
+                        implicit_pattern_classes(&definitions),
+                        Vec::<String>::new(),
+                        "{field} {name}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn the_explicit_class_guard_ignores_strings_the_decoder_does_not_compile_as_patterns() {
+            let (mut definitions, _) = with_pattern("/matchers/0/pattern", "x");
+            let (profile, rule) = rule_with(&definitions, "/matchers/0/pattern");
+            definitions["profiles"][profile]["rules"][rule]["id"] = json!(r"rule-\s-\d");
+            assert_eq!(implicit_pattern_classes(&definitions), Vec::<String>::new());
         }
 
         fn load_with_file(

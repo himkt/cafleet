@@ -495,6 +495,72 @@ mod tests {
         }
     }
 
+    mod quoted_text {
+        use crate::broker::runtime::DeliveryMethod;
+        use crate::broker::runtime::DeliveryProjection;
+        use crate::broker::runtime::DeliveryStatus;
+        use crate::output::text::tests::*;
+
+        const CASES: &[(&str, &str, &str)] = &[
+            ("double quote", "\"", r#""\"""#),
+            ("backslash", "\\", r#""\\""#),
+            ("tab", "\t", r#""\t""#),
+            ("line feed", "\n", r#""\n""#),
+            ("carriage return", "\r", r#""\r""#),
+            ("nul", "\0", r#""\0""#),
+            ("Cc bell", "\u{7}", r#""\u{7}""#),
+            ("Cc escape", "\u{1b}", r#""\u{1b}""#),
+            ("Cc delete", "\u{7f}", r#""\u{7f}""#),
+            ("Cc next line", "\u{85}", r#""\u{85}""#),
+            ("Cf soft hyphen", "\u{ad}", r#""\u{ad}""#),
+            ("Cf zero width space", "\u{200b}", r#""\u{200b}""#),
+            ("Cf byte order mark", "\u{feff}", r#""\u{feff}""#),
+            ("Co private use", "\u{e000}", r#""\u{e000}""#),
+            ("Cn noncharacter", "\u{ffff}", r#""\u{ffff}""#),
+            ("Cn plane 16 noncharacter", "\u{10ffff}", r#""\u{10ffff}""#),
+            ("Zl line separator", "\u{2028}", r#""\u{2028}""#),
+            ("Zp paragraph separator", "\u{2029}", r#""\u{2029}""#),
+            ("Zs no-break space", "\u{a0}", r#""\u{a0}""#),
+            ("Zs ideographic space", "\u{3000}", r#""\u{3000}""#),
+            ("Grapheme_Extend alone", "\u{301}", r#""\u{301}""#),
+            ("Grapheme_Extend after a base", "e\u{301}", r#""e\u{301}""#),
+            (
+                "Grapheme_Extend enclosing mark",
+                "\u{20dd}",
+                r#""\u{20dd}""#,
+            ),
+            (
+                "Grapheme_Extend zero width non-joiner",
+                "\u{200c}",
+                r#""\u{200c}""#,
+            ),
+            ("space", " ", r#"" ""#),
+            ("single quote", "'", r#""'""#),
+            ("solidus", "/", r#""/""#),
+            ("latin small e with acute", "\u{e9}", "\"\u{e9}\""),
+            ("cjk ideographs", "日本", "\"日本\""),
+            ("euro sign", "€", "\"€\""),
+            ("emoji", "\u{1f4a9}", "\"\u{1f4a9}\""),
+        ];
+
+        #[test]
+        fn member_prompt_text_quotes_each_scalar_class_per_the_quoted_text_definition() {
+            let submitted = DeliveryProjection {
+                status: DeliveryStatus::Submitted,
+                method: Some(DeliveryMethod::Profile),
+                reason: None,
+            };
+            for (name, scalar, quoted) in CASES {
+                let text = format_member_prompt(7, scalar, "worker", "%2", None, &submitted);
+                assert_eq!(
+                    text.split_once('\n').map(|(first, _)| first),
+                    Some(format!("Sent prompt {quoted} to member worker (%2).").as_str()),
+                    "{name}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn unicode_truncation_changes_only_human_message_bodies() {
         let mut message = MessageRecord {
