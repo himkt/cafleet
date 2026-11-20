@@ -7848,7 +7848,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "85ff4e27093c0edfe9c120d52680dc9283feac1c4d025700d1fa2fcbc150e7d0",
+      "sha256": "c5c365b23b77c62eadd5b93d8ab7305b246162e4aae2a7a9b6e0c1be5e18964b",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7868,7 +7868,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "881b81706a258bcbd2faf23059c984c3a66233473f13229a8048e0f450003077",
+      "sha256": "f93a38978ba4642838e82b334f029f1268f7f2ed2c191b195783d3371f07977a",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -7929,7 +7929,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "c23b34d90f60c2f8ec7713d56c271eb61cd9cd18043402decc7710bb869e7c2d",
+      "sha256": "4d77f64bc539b2a1c2b171a98bf7447605fb3fc0fc8d33d5ee3d10275b3c771c",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -8112,6 +8112,328 @@
       "cols": 92,
       "source_ref": "native/codex.json",
       "sha256": "bcdd60b4e1667550af1beaeef679bdea061d49a250bfb9dccb3a8bea8aa8dfed",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.166.0-composer-idle-empty-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.166.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d4ed33e36a5d39fbdf477087d6aaf03a5a7b4a10e9bb3b1fc93d81d4135cce7c"
+    },
+    {
+      "id": "codex-0.167.0-composer-idle-empty-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "9ecb3c997b968c2163a0b069a9e1251e25e937c32ae34329d3ab9cdd3c406b53",
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "4ff36b4038b8bc505a7f254c1dce022ca4ea3091f74dca7cf27bd8a72115facd",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-plain-41-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "0a6db4c35dfd2b591ec6119bb54f4851c6d49b6443f9034460eab20b4a9390ce",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-plain-1024-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "916a362e59e7d654425e1a74c95515675c43b9bf167945bc6eac340afa6ff05c",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-paste-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "0b471a00431f0a536d8e5dd20c42e84842c00506d6cd5df62481035bccb9f644",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "a8f25f2d55701ca94980ba92db7567ce287a7448c0b76aed95f584ca867d1af4",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-plain-998-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "5fdfb3bb500df0c55d8a88e1b75b448781d6aba5a730f525f1b26ba046318650",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-paste-4000-post-submit-tmux-120-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 39,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d1b5f881dbfb9a624676ca3ff7e7ea40f54ac8ce11c2ea79e4c04ed2b6106a8c",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-idle-empty-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "7bf2035224e634e9466d02c982bc292ff36f1781a8683fbd981c0c071a2d6d5f",
+      "composer_draft": {
+        "text": ""
+      }
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "577ea56f032a32b003530bd245ade59db62f813decc2b0c7a015efca1831550f",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": {
+        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-plain-41-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "f4c5c33b3b490dd66f4f51a7ec87bc5393b996b233a7cfb7cdc5e45e331e7b2b",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-plain-1024-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "d61889620f1f2ad0e373fb23ad7e91d5bd77ff5994362cfa479286345476b156",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-prompt-paste-4000-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "fc6791cef170035759a73ae5558a81028d8179fb420043319d1be935f43a2ba5",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "bracketed_paste"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "ff61248204246451664b839fb5d69e987b7a28d031948505ed45e61032614e65",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
+      "composer_draft": "unreadable"
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "acd39d806d70a8ca33f6b298c0abc9887d52ec3fe40ba8625856247bcc2193bd",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ]
+    },
+    {
+      "id": "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.167.0",
+      "rows": 36,
+      "cols": 92,
+      "source_ref": "native/codex.json",
+      "sha256": "b413b7a0c7b61716908af8a539d83c349e5411a3a359948f9f011f6219db6ea2",
       "composer_evidence": [
         {
           "operation": "exec",
@@ -11395,7 +11717,8 @@
             "codex-0.166.0-composer-prompt-paste-4000-post-submit-herdr-092-1",
             "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1",
             "codex-0.166.0-composer-exec-plain-998-post-submit-herdr-092-1",
-            "codex-0.166.0-composer-exec-paste-4000-post-submit-herdr-092-1"
+            "codex-0.166.0-composer-exec-paste-4000-post-submit-herdr-092-1",
+            "codex-0.166.0-composer-idle-empty-tmux-120-1"
           ],
           "submission": {
             "prompt": {
@@ -11485,7 +11808,7 @@
         "region": {
           "screen": "alternate",
           "start_pattern": "^› ",
-          "end_pattern": "^  \\S.* · Context \\d+% (?:used|left)",
+          "end_pattern": "^ *$",
           "max_rows": 48,
           "cursor": "inside"
         },
@@ -11773,45 +12096,37 @@
             "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
             "codex-0.167.0-suggestion-tmux-120-1",
             "codex-0.167.0-deny-post-stage-tmux-120-1",
-            "codex-0.167.0-allow-post-stage-tmux-120-1"
+            "codex-0.167.0-allow-post-stage-tmux-120-1",
+            "codex-0.167.0-composer-idle-empty-tmux-120-1",
+            "codex-0.167.0-composer-idle-empty-herdr-092-1",
+            "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
+            "codex-0.167.0-composer-prompt-plain-41-post-submit-tmux-120-1",
+            "codex-0.167.0-composer-prompt-plain-1024-post-submit-tmux-120-1",
+            "codex-0.167.0-composer-prompt-paste-4000-post-submit-tmux-120-1",
+            "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1",
+            "codex-0.167.0-composer-exec-plain-998-post-submit-tmux-120-1",
+            "codex-0.167.0-composer-exec-paste-4000-post-submit-tmux-120-1",
+            "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
+            "codex-0.167.0-composer-prompt-plain-41-post-submit-herdr-092-1",
+            "codex-0.167.0-composer-prompt-plain-1024-post-submit-herdr-092-1",
+            "codex-0.167.0-composer-prompt-paste-4000-post-submit-herdr-092-1",
+            "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1",
+            "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1",
+            "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1"
           ],
           "submission": {
             "prompt": {
               "prefix_hex": "",
               "submit_hex": "0d",
               "fixture_ids": [
-                "codex-0.167.0-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1",
-                "codex-0.167.0-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1",
-                "codex-0.167.0-composer-prompt-paste-1037-literal-tapped-v2-herdr-119-15",
-                "codex-0.167.0-composer-prompt-paste-1037-literal-tapped-v2-tmux-120-15",
-                "codex-0.167.0-composer-prompt-paste-1037-post-1900ms-tapped-v2-herdr-119-19",
-                "codex-0.167.0-composer-prompt-paste-1037-post-1900ms-tapped-v2-tmux-120-19",
-                "codex-0.167.0-composer-prompt-paste-40-literal-tapped-v2-herdr-119-9",
-                "codex-0.167.0-composer-prompt-paste-40-literal-tapped-v2-tmux-120-9",
-                "codex-0.167.0-composer-prompt-paste-40-post-1900ms-tapped-v2-herdr-119-13",
-                "codex-0.167.0-composer-prompt-paste-40-post-1900ms-tapped-v2-tmux-120-13",
-                "codex-0.167.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-herdr-119-21",
-                "codex-0.167.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-tmux-120-21",
-                "codex-0.167.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
-                "codex-0.167.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
-                "codex-0.167.0-composer-prompt-plain-1024-literal-tapped-v2-herdr-119-27",
-                "codex-0.167.0-composer-prompt-plain-1024-literal-tapped-v2-tmux-120-27",
-                "codex-0.167.0-composer-prompt-plain-1024-post-1900ms-tapped-v2-herdr-119-31",
-                "codex-0.167.0-composer-prompt-plain-1024-post-1900ms-tapped-v2-tmux-120-31",
-                "codex-0.167.0-composer-prompt-plain-1025-literal-tapped-v2-herdr-119-33",
-                "codex-0.167.0-composer-prompt-plain-1025-literal-tapped-v2-tmux-120-33",
-                "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-herdr-119-37",
-                "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-tmux-120-37",
-                "codex-0.167.0-composer-prompt-plain-40-literal-tapped-v2-herdr-119-3",
-                "codex-0.167.0-composer-prompt-plain-40-literal-tapped-v2-tmux-120-3",
-                "codex-0.167.0-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7",
-                "codex-0.167.0-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7",
-                "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-herdr-119-1",
-                "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-tmux-120-1",
-                "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-41",
-                "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-41",
-                "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
-                "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
+                "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
+                "codex-0.167.0-composer-prompt-plain-41-post-submit-tmux-120-1",
+                "codex-0.167.0-composer-prompt-plain-1024-post-submit-tmux-120-1",
+                "codex-0.167.0-composer-prompt-paste-4000-post-submit-tmux-120-1",
+                "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
+                "codex-0.167.0-composer-prompt-plain-41-post-submit-herdr-092-1",
+                "codex-0.167.0-composer-prompt-plain-1024-post-submit-herdr-092-1",
+                "codex-0.167.0-composer-prompt-paste-4000-post-submit-herdr-092-1"
               ],
               "literal_framing": "bracketed_paste",
               "plain_literal_limit": {
@@ -11823,44 +12138,12 @@
               "prefix_hex": "2120",
               "submit_hex": "0d",
               "fixture_ids": [
-                "codex-0.167.0-composer-exec-final-mode-2004-tapped-v2-herdr-119-41",
-                "codex-0.167.0-composer-exec-final-mode-2004-tapped-v2-tmux-120-41",
-                "codex-0.167.0-composer-exec-paste-1037-args-literal-tapped-v2-herdr-119-15",
-                "codex-0.167.0-composer-exec-paste-1037-args-literal-tapped-v2-tmux-120-15",
-                "codex-0.167.0-composer-exec-paste-1037-args-post-1900ms-tapped-v2-herdr-119-19",
-                "codex-0.167.0-composer-exec-paste-1037-args-post-1900ms-tapped-v2-tmux-120-19",
-                "codex-0.167.0-composer-exec-paste-40-args-literal-tapped-v2-herdr-119-9",
-                "codex-0.167.0-composer-exec-paste-40-args-literal-tapped-v2-tmux-120-9",
-                "codex-0.167.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-herdr-119-13",
-                "codex-0.167.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-tmux-120-13",
-                "codex-0.167.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-21",
-                "codex-0.167.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-tmux-120-21",
-                "codex-0.167.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
-                "codex-0.167.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
-                "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-literal-tapped-v2-herdr-119-8",
-                "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-literal-tapped-v2-tmux-120-8",
-                "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-post-1900ms-tapped-v2-herdr-119-12",
-                "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-post-1900ms-tapped-v2-tmux-120-12",
-                "codex-0.167.0-composer-exec-plain-1001-args-execution-proof-literal-tapped-v2-herdr-119-14",
-                "codex-0.167.0-composer-exec-plain-1001-args-execution-proof-literal-tapped-v2-tmux-120-14",
-                "codex-0.167.0-composer-exec-plain-1001-args-execution-proof-post-1900ms-tapped-v2-herdr-119-18",
-                "codex-0.167.0-composer-exec-plain-1001-args-execution-proof-post-1900ms-tapped-v2-tmux-120-18",
-                "codex-0.167.0-composer-exec-plain-1024-args-literal-tapped-v2-herdr-119-27",
-                "codex-0.167.0-composer-exec-plain-1024-args-literal-tapped-v2-tmux-120-27",
-                "codex-0.167.0-composer-exec-plain-1024-args-post-1900ms-tapped-v2-herdr-119-31",
-                "codex-0.167.0-composer-exec-plain-1024-args-post-1900ms-tapped-v2-tmux-120-31",
-                "codex-0.167.0-composer-exec-plain-1025-args-literal-tapped-v2-herdr-119-33",
-                "codex-0.167.0-composer-exec-plain-1025-args-literal-tapped-v2-tmux-120-33",
-                "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-herdr-119-37",
-                "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-tmux-120-37",
-                "codex-0.167.0-composer-exec-plain-40-args-literal-tapped-v2-herdr-119-3",
-                "codex-0.167.0-composer-exec-plain-40-args-literal-tapped-v2-tmux-120-3",
-                "codex-0.167.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-herdr-119-7",
-                "codex-0.167.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-7",
-                "codex-0.167.0-composer-exec-unsubmitted-literal-confirmed-tapped-v2-herdr-119-40",
-                "codex-0.167.0-composer-exec-unsubmitted-literal-confirmed-tapped-v2-tmux-120-40",
-                "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
-                "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39"
+                "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1",
+                "codex-0.167.0-composer-exec-plain-998-post-submit-tmux-120-1",
+                "codex-0.167.0-composer-exec-paste-4000-post-submit-tmux-120-1",
+                "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1",
+                "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1",
+                "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1"
               ],
               "literal_framing": "bracketed_paste",
               "plain_literal_limit": {
@@ -11911,7 +12194,7 @@
         "region": {
           "screen": "alternate",
           "start_pattern": "^› ",
-          "end_pattern": "^  \\S.* · Context \\d+% (?:used|left)",
+          "end_pattern": "^ *$",
           "max_rows": 48,
           "cursor": "inside"
         },
@@ -11928,7 +12211,13 @@
           "codex-0.167.0-suggestion-tmux-120-1",
           "codex-0.167.0-draft-tmux-120-1",
           "codex-0.167.0-shell-mode-tmux-120-1",
-          "codex-0.167.0-wrapped-preview-tmux-120-1"
+          "codex-0.167.0-wrapped-preview-tmux-120-1",
+          "codex-0.167.0-composer-idle-empty-tmux-120-1",
+          "codex-0.167.0-composer-idle-empty-herdr-092-1",
+          "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
+          "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1",
+          "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
+          "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1"
         ]
       }
     },

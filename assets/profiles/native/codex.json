@@ -9762,24 +9762,24 @@
         "  /permissions - choose what Codex is allowed to do",
         "  /model - choose what model and reasoning effort to use",
         "  /review - review any changes and find issues",
-        "",
+        " ",
         " ",
         "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
         "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
         " ",
-        "",
+        " ",
         "• OK",
-        "",
-        "  Worked for 2s • 00:58                                                                                                 ",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
+        " ",
+        "  Worked for 2s • 01:40                                                                                                 ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
         "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "",
+        " ",
         "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 2% used · Standard",
         "                                                                                              ⚠ 2 warnings · f2 to view"
       ],
@@ -10021,7 +10021,7 @@
         {
           "row": 27,
           "start_col": 0,
-          "end_col": 120,
+          "end_col": 23,
           "faint": true,
           "foreground": null
         },
@@ -10095,7 +10095,6 @@
       "cursor_row": 35,
       "cursor_col": 2,
       "lines": [
-        "╭───────────────────────────────────────────────────────────────╮",
         "│ ✨ Update available! 0.166.0 -> 0.170.0                       │",
         "│ See https://github.com/openai/codex for installation options. │",
         "│                                                               │",
@@ -10114,29 +10113,39 @@
         "  /permissions - choose what Codex is allowed to do",
         "  /model - choose what model and reasoning effort to use",
         "  /review - review any changes and find issues",
-        "",
+        " ",
         " ",
         "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
         "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
         " ",
-        "",
+        " ",
         "• OK",
-        "",
-        "  Worked for 2s • 00:58                                                                                                 ",
-        "",
+        " ",
+        "  Worked for 2s • 01:40                                                                                                 ",
+        " ",
         " ",
         "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         " ",
-        "",
-        "",
-        "",
+        " ",
+        "• Working (0s • esc to interrupt)",
+        " ",
+        " ",
         "› Ask Codex to do anything",
-        "",
+        " ",
         "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 2% used · Standard",
         "  ? for shortcuts                                                                             ⚠ 2 warnings · f2 to view"
       ],
       "masked_rows": [],
       "cell_backgrounds": [
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
         {
           "row": 20,
           "start_col": 0,
@@ -10165,7 +10174,7 @@
           }
         },
         {
-          "row": 23,
+          "row": 28,
           "start_col": 0,
           "end_col": 120,
           "bg": {
@@ -10190,34 +10199,18 @@
             "kind": "indexed",
             "index": 8
           }
-        },
-        {
-          "row": 31,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
         }
       ],
       "cell_styles": [
         {
           "row": 0,
           "start_col": 0,
-          "end_col": 65,
-          "faint": true,
-          "foreground": null
-        },
-        {
-          "row": 1,
-          "start_col": 0,
           "end_col": 2,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 1,
+          "row": 0,
           "start_col": 2,
           "end_col": 22,
           "faint": false,
@@ -10229,21 +10222,21 @@
           }
         },
         {
-          "row": 1,
+          "row": 0,
           "start_col": 41,
           "end_col": 65,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 2,
+          "row": 1,
           "start_col": 0,
           "end_col": 2,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 2,
+          "row": 1,
           "start_col": 6,
           "end_col": 37,
           "faint": false,
@@ -10255,8 +10248,15 @@
           }
         },
         {
-          "row": 2,
+          "row": 1,
           "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
           "end_col": 65,
           "faint": true,
           "foreground": null
@@ -10264,33 +10264,26 @@
         {
           "row": 3,
           "start_col": 0,
-          "end_col": 65,
-          "faint": true,
-          "foreground": null
-        },
-        {
-          "row": 4,
-          "start_col": 0,
           "end_col": 2,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 4,
+          "row": 3,
           "start_col": 25,
           "end_col": 65,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 5,
+          "row": 4,
           "start_col": 0,
           "end_col": 2,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 5,
+          "row": 4,
           "start_col": 2,
           "end_col": 49,
           "faint": false,
@@ -10302,21 +10295,21 @@
           }
         },
         {
-          "row": 5,
+          "row": 4,
           "start_col": 49,
           "end_col": 65,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 6,
+          "row": 5,
           "start_col": 0,
           "end_col": 65,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 9,
+          "row": 8,
           "start_col": 2,
           "end_col": 5,
           "faint": false,
@@ -10328,86 +10321,119 @@
           }
         },
         {
-          "row": 9,
+          "row": 8,
           "start_col": 17,
           "end_col": 28,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 10,
+          "row": 9,
           "start_col": 5,
           "end_col": 47,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 12,
+          "row": 11,
           "start_col": 0,
           "end_col": 63,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 14,
+          "row": 13,
           "start_col": 7,
           "end_col": 62,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 15,
+          "row": 14,
           "start_col": 9,
           "end_col": 46,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 16,
+          "row": 15,
           "start_col": 14,
           "end_col": 51,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 17,
+          "row": 16,
           "start_col": 8,
           "end_col": 56,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 18,
+          "row": 17,
           "start_col": 9,
           "end_col": 46,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 21,
+          "row": 20,
           "start_col": 0,
           "end_col": 2,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 25,
+          "row": 24,
           "start_col": 0,
           "end_col": 2,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 27,
+          "row": 26,
           "start_col": 0,
-          "end_col": 120,
+          "end_col": 23,
           "faint": true,
           "foreground": null
         },
         {
-          "row": 30,
+          "row": 29,
           "start_col": 0,
           "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 202,
+            "g": 202,
+            "b": 202
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 9,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 10,
+          "end_col": 16,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 19,
+          "end_col": 33,
           "faint": true,
           "foreground": null
         },
@@ -11268,201 +11294,48 @@
       "cursor_row": 35,
       "cursor_col": 45,
       "lines": [
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
-        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.166.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
+        "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
         " ",
         " ",
         "• OK",
         " ",
-        "  Worked for 1s • 01:01                                                                                                 ",
-        "",
-        "",
+        "  Worked for 2s • 01:40                                                                                                 ",
+        " ",
+        " ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 2s • 01:40                                                                                                 ",
+        " ",
+        " ",
         "!  true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "",
-        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 4% used · Standard",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 3% used · Standard",
         "                                                                                Shell mode    ⚠ 2 warnings · f2 to view"
       ],
       "masked_rows": [],
       "cell_backgrounds": [
-        {
-          "row": 0,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 1,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 2,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 3,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 4,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 5,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 6,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 7,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 8,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 9,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 10,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 11,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 12,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 13,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 14,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 15,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 16,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
         {
           "row": 17,
           "start_col": 0,
@@ -11500,51 +11373,6 @@
           }
         },
         {
-          "row": 21,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 22,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 23,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 24,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
-          "row": 25,
-          "start_col": 0,
-          "end_col": 120,
-          "bg": {
-            "kind": "indexed",
-            "index": 8
-          }
-        },
-        {
           "row": 26,
           "start_col": 0,
           "end_col": 120,
@@ -11574,6 +11402,156 @@
       ],
       "cell_styles": [
         {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 13,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
           "row": 30,
           "start_col": 0,
           "end_col": 2,
@@ -11583,7 +11561,7 @@
         {
           "row": 32,
           "start_col": 0,
-          "end_col": 120,
+          "end_col": 23,
           "faint": true,
           "foreground": null
         },
@@ -14924,6 +14902,6360 @@
           "row": 29,
           "start_col": 0,
           "end_col": 92,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.166.0-composer-idle-empty-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.166.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.166.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
+        "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 0% used · Standard",
+        "  ? for shortcuts                                                                              ⚠ 1 warning · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 97,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-idle-empty-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
+        "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 0% used · Standard",
+        "  ← for agents · ? for shortcuts                                                               ⚠ 1 warning · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 97,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 43,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
+        "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 3s • 01:36                                                                                                 ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 3% used · Standard",
+        "                                                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-plain-41-post-submit-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
+        "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 3s • 01:36                                                                                                 ",
+        " ",
+        " ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        " ",
+        "• Working (0s • esc to interrupt)",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 3% used · Standard",
+        "  ← for agents · ? for shortcuts                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 0,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 0,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 13,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 202,
+            "g": 202,
+            "b": 202
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 9,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 10,
+          "end_col": 16,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 19,
+          "end_col": 33,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-plain-1024-post-submit-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database sqlite:////tmp/cafleet-",
+        "  programmer-research/cf/cf.db). Do not run any tools. Reply to each message with the single word OK and then wait.",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 3s • 01:36                                                                                                 ",
+        " ",
+        " ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:36                                                                                                 ",
+        " ",
+        " ",
+        "› Reply OK.",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 3% used · Standard",
+        "  ← for agents · ? for shortcuts                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-paste-4000-post-submit-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 3% used · Standard",
+        "  ← for agents · ? for shortcuts                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 45,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:37                                                                                                 ",
+        " ",
+        " ",
+        "!  true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 4% used · Standard",
+        "                                                                                Shell mode    ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 30,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 80,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-exec-plain-998-post-submit-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:37                                                                                                 ",
+        " ",
+        "• You ran true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  └ (no output)",
+        " ",
+        "  Worked for <1s • 01:37                                                                                                ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 4% used · Standard",
+        "  ← for agents · ? for shortcuts                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 10,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 137,
+            "g": 180,
+            "b": 250
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 14,
+          "end_col": 52,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 24,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-exec-paste-4000-post-submit-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 2,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:37                                                                                                 ",
+        " ",
+        "• You ran true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  └ (no output)",
+        " ",
+        "  Worked for <1s • 01:37                                                                                                ",
+        " ",
+        "• You ran true",
+        "  │ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  │ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  │ … +8 lines",
+        "  └ (no output)",
+        "    + Show details                                                                                                      ",
+        " ",
+        "  Worked for <1s • 01:37                                                                                                ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 4% used · Standard",
+        "  ← for agents · ? for shortcuts                                                              ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 10,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 137,
+            "g": 180,
+            "b": 250
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 14,
+          "end_col": 52,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 24,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 10,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 137,
+            "g": 180,
+            "b": 250
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 4,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 4,
+          "end_col": 108,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 14,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 30,
+          "start_col": 0,
+          "end_col": 18,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 24,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 37,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 96,
+          "end_col": 106,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-idle-empty-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 2,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        "",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database",
+        "  sqlite:////tmp/cafleet-programmer-research/cf/cf.db). Do not run any tools. Reply to each",
+        "  message with the single word OK and then wait.",
+        " ",
+        "",
+        "• OK",
+        "",
+        "  Worked for 2s • 01:38                                                                     ",
+        "",
+        "",
+        "",
+        "› Ask Codex to do anything",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 2% used · Standard",
+        "  ← for agents · ? for shortcuts                                  ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 43,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.167.0 -> 0.170.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        "",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database",
+        "  sqlite:////tmp/cafleet-programmer-research/cf/cf.db). Do not run any tools. Reply to each",
+        "  message with the single word OK and then wait.",
+        " ",
+        "",
+        "• OK",
+        "",
+        "  Worked for 2s • 01:38                                                                     ",
+        "",
+        "",
+        "",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 2% used · Standard",
+        "                                                                  ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-plain-41-post-submit-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 2,
+      "lines": [
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.167.0)",
+        "     /tmp/cafleet-programmer-research/cf/cx-cwd",
+        " ",
+        "  To get started, describe a task or try one of these commands:",
+        " ",
+        "  /init - create an AGENTS.md file with instructions for Codex",
+        "  /status - show current session configuration",
+        "  /permissions - choose what Codex is allowed to do",
+        "  /model - choose what model and reasoning effort to use",
+        "  /review - review any changes and find issues",
+        " ",
+        " ",
+        "› You are a disposable research member for CAFleet composer-evidence captures (database",
+        "  sqlite:////tmp/cafleet-programmer-research/cf/cf.db). Do not run any tools. Reply to each",
+        "  message with the single word OK and then wait.",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 2s • 01:38                                                                     ",
+        " ",
+        " ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        " ",
+        "• Working (0s • esc to interrupt)",
+        "",
+        "",
+        "› Ask Codex to do anything",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 2% used · Standard",
+        "  ← for agents · ? for shortcuts                                  ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 0,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 0,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 5,
+          "end_col": 47,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 63,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 7,
+          "end_col": 62,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 14,
+          "end_col": 51,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 8,
+          "end_col": 56,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 13,
+          "start_col": 9,
+          "end_col": 46,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 2,
+          "end_col": 9,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 10,
+          "end_col": 16,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 19,
+          "end_col": 33,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-plain-1024-post-submit-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 2,
+      "lines": [
+        "  message with the single word OK and then wait.",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 2s • 01:38                                                                     ",
+        " ",
+        " ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:38                                                                     ",
+        " ",
+        " ",
+        "› Reply OK.",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        "",
+        "",
+        "› Ask Codex to do anything",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 3% used · Standard",
+        "  ← for agents · ? for shortcuts                                  ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-prompt-paste-4000-post-submit-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 2,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        "",
+        "",
+        "› Ask Codex to do anything",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 3% used · Standard",
+        "  ← for agents · ? for shortcuts                                  ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 45,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:38                                                                     ",
+        "",
+        "",
+        "!  true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 5% used · Standard",
+        "                                                    Shell mode    ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 52,
+          "end_col": 62,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 2,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:38                                                                     ",
+        " ",
+        "• You ran true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  └ (no output)",
+        " ",
+        "  Worked for <1s • 01:39                                                                    ",
+        "",
+        "",
+        "› Ask Codex to do anything",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 5% used · Standard",
+        "  ← for agents · ? for shortcuts                                  ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 10,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 137,
+            "g": 180,
+            "b": 250
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 14,
+          "end_col": 52,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 24,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 246,
+            "g": 226,
+            "b": 183
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 19,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 171,
+            "g": 223,
+            "b": 167
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 64,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 82,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 200,
+            "g": 169,
+            "b": 238
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 68,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 196,
+            "g": 167,
+            "b": 103
+          }
+        }
+      ]
+    },
+    "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1": {
+      "rows": 36,
+      "cols": 92,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 32,
+      "cursor_col": 2,
+      "lines": [
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああああああ",
+        "  ああああああああああああああああああああああああああああああああああああああああ",
+        " ",
+        " ",
+        "• OK",
+        " ",
+        "  Worked for 1s • 01:38                                                                     ",
+        " ",
+        "• You ran true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  └ (no output)",
+        " ",
+        "  Worked for <1s • 01:39                                                                    ",
+        " ",
+        "• You ran true",
+        "  │ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  │ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  │ … +11 lines",
+        "  └ (no output)",
+        "    + Show details                                                                          ",
+        " ",
+        "  Worked for <1s • 01:39                                                                    ",
+        "",
+        "",
+        "› Ask Codex to do anything",
+        "",
+        "  GPT-6-Luna low · /tmp/cafleet-programmer-research/cf/cx-cwd · Context 5% used · Standard",
+        "  ← for agents · ? for shortcuts                                  ⚠ 2 warnings · f2 to view"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 92,
+          "bg": {
+            "kind": "indexed",
+            "index": 8
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 10,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 137,
+            "g": 180,
+            "b": 250
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 14,
+          "end_col": 52,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 24,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 10,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 137,
+            "g": 180,
+            "b": 250
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 4,
+          "end_col": 92,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 4,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 214,
+            "b": 244
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 27,
+          "start_col": 0,
+          "end_col": 18,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 29,
+          "start_col": 0,
+          "end_col": 24,
           "faint": true,
           "foreground": null
         },

@@ -437,18 +437,33 @@ fn region_candidates(
     }
     regions
 }
-/// Reads the draft from the live composer region: the single matching region with no other
-/// start-pattern row inside it, unless the row above it also matches the start pattern, which
-/// makes it a continuation of a composer whose every row repeats the marker. The draft is its
-/// selected rows without the prompt marker or suggestion-styled cells, trailing blanks trimmed
-/// and blank edge rows dropped.
+/// Reads the draft from the live composer region. Each start row's region ends at the first
+/// end-pattern row that leaves the selected draft rows inside it; the live region is the single such region that satisfies the cursor
+/// rule and holds no other start-pattern row, unless the row above it also matches the start
+/// pattern, which makes it a continuation of a composer whose every row repeats the marker. The
+/// draft is its selected rows without the prompt marker or suggestion-styled cells, trailing
+/// blanks trimmed and blank edge rows dropped.
 pub(super) fn composer_draft(spec: &ComposerDraftSpec, screen: &ScreenSnapshot) -> ComposerDraft {
     let Ok(lines) = clipped_logical_lines(screen, &BTreeMap::new()) else {
         return ComposerDraft::Unreadable;
     };
     let opens = |index: usize| spec.region.start.is_match(&lines[index].text);
+    let any_cursor = Region {
+        cursor: CursorRule::Any,
+        ..spec.region.clone()
+    };
+    let framed = usize::from(
+        spec.rows.first == DraftFirst::AfterStart || spec.rows.last == DraftLast::BeforeEnd,
+    );
+    let mut nearest = BTreeMap::new();
+    for (start, end, _) in region_candidates(&any_cursor, None, screen, &lines) {
+        if end >= start + framed {
+            nearest.entry(start).or_insert(end);
+        }
+    }
     let live: Vec<_> = region_candidates(&spec.region, None, screen, &lines)
         .into_iter()
+        .filter(|&(start, end, _)| nearest.get(&start) == Some(&end))
         .filter(|&(start, end, _)| !(start + 1..end).any(opens))
         .collect();
     let [(start, _, region)] = live[..] else {
