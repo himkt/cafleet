@@ -51,7 +51,8 @@ covers other permission modes.
     "ask": [
       "Bash(cafleet member prompt *)",
       "Bash(cafleet member exec *)",
-      "Bash(cafleet member press *)"
+      "Bash(cafleet member press *)",
+      "Bash(cafleet member flush *)"
     ]
   }
 }

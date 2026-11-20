@@ -8918,6 +8918,874 @@
           "reason": "reviewed_privacy"
         }
       ]
+    },
+    "pi-1.5.2-empty-composer-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                            ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "                                                                                                                        ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "[Skills]                                                                                                                ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                               ",
+        "",
+        "[Extensions]                                                                                                            ",
+        "  cafleet.ts                                                                                                            ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf    ",
+        " and restart tmux.                                                                                                      ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                                                                                                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-programmer-research/pi-work",
+        "0.0%/262k (auto)                                                                           moonshotai/kimi-k2.6 • medium"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 1,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 40,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-draft-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 10,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                            ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "                                                                                                                        ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "[Skills]                                                                                                                ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                               ",
+        "",
+        "[Extensions]                                                                                                            ",
+        "  cafleet.ts                                                                                                            ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf    ",
+        " and restart tmux.                                                                                                      ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "draft text                                                                                                              ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-programmer-research/pi-work",
+        "0.0%/262k (auto)                                                                           moonshotai/kimi-k2.6 • medium"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 1,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 40,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-multi-row-draft-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 26,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                            ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "                                                                                                                        ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "[Skills]                                                                                                                ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                               ",
+        "",
+        "[Extensions]                                                                                                            ",
+        "  cafleet.ts                                                                                                            ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf    ",
+        " and restart tmux.                                                                                                      ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "draft text that wraps onto a second editor row because it is longer than the editor is wide, so the draft spans         ",
+        "several rows of the editor                                                                                              ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-programmer-research/pi-work",
+        "0.0%/262k (auto)                                                                           moonshotai/kimi-k2.6 • medium"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 1,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 40,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-shell-prefix-tmux-120-1": {
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 3,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                            ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "                                                                                                                        ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "[Skills]                                                                                                                ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                               ",
+        "",
+        "[Extensions]                                                                                                            ",
+        "  cafleet.ts                                                                                                            ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf    ",
+        " and restart tmux.                                                                                                      ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "!ls                                                                                                                     ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "/tmp/cafleet-programmer-research/pi-work",
+        "0.0%/262k (auto)                                                                           moonshotai/kimi-k2.6 • medium"
+      ],
+      "masked_rows": [],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 1,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 40,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
     }
   }
 }

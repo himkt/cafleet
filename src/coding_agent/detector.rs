@@ -2,14 +2,20 @@ use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::catalog::Capture;
+use crate::coding_agent::catalog::ComposerDraft;
+use crate::coding_agent::catalog::ComposerDraftSpec;
 use crate::coding_agent::catalog::CursorRule;
+use crate::coding_agent::catalog::DraftFirst;
+use crate::coding_agent::catalog::DraftLast;
 use crate::coding_agent::catalog::FocusStyle;
 use crate::coding_agent::catalog::MarginRows;
 use crate::coding_agent::catalog::MatcherScope;
 use crate::coding_agent::catalog::Profile;
 use crate::coding_agent::catalog::ProfileCatalog;
+use crate::coding_agent::catalog::Region;
 use crate::coding_agent::catalog::Rule;
 use crate::coding_agent::catalog::ScreenSelector;
+use crate::coding_agent::catalog::SuggestionStyle;
 use crate::error::CafleetError;
 use crate::error::Result;
 use crate::runtime::ScreenSnapshot;
@@ -371,21 +377,31 @@ fn qualifying_regions(
     screen: &ScreenSnapshot,
     lines: &[LogicalLine],
 ) -> Vec<Candidate> {
-    if (rule.region.screen == ScreenSelector::Primary && screen.alternate_screen)
-        || (rule.region.screen == ScreenSelector::Alternate && !screen.alternate_screen)
+    region_candidates(&rule.region, rule.suggestion, screen, lines)
+}
+fn region_candidates(
+    region_rule: &Region,
+    suggestion: Option<SuggestionStyle>,
+    screen: &ScreenSnapshot,
+    lines: &[LogicalLine],
+) -> Vec<Candidate> {
+    if (region_rule.screen == ScreenSelector::Primary && screen.alternate_screen)
+        || (region_rule.screen == ScreenSelector::Alternate && !screen.alternate_screen)
     {
         return Vec::new();
     }
     let mut regions = Vec::new();
     for (start, line) in lines.iter().enumerate() {
-        if rule.region.start.find_iter(&line.text).count() != 1 {
+        let mut starts = region_rule.start.find_iter(&line.text);
+        let (Some(prompt), None) = (starts.next(), starts.next()) else {
             continue;
-        }
+        };
+        let after_prompt = line.boundaries.get(prompt.end()).copied();
         for (end, last) in lines.iter().enumerate().skip(start) {
-            if last.end - line.start + 1 > rule.region.max_rows {
+            if last.end - line.start + 1 > region_rule.max_rows {
                 break;
             }
-            let mut matches = rule.region.end.find_iter(&last.text);
+            let mut matches = region_rule.end.find_iter(&last.text);
             let Some(found) = matches.next() else {
                 continue;
             };
@@ -401,20 +417,138 @@ fn qualifying_regions(
             let inside = screen.cursor_row >= region.top
                 && screen.cursor_row < region.bottom
                 && screen.cursor_col <= screen.cols;
-            let qualified = match rule.region.cursor {
+            let qualified = match region_rule.cursor {
                 CursorRule::AtEnd => {
                     last.boundaries.get(found.end())
                         == Some(&(screen.cursor_row, screen.cursor_col))
                 }
+                CursorRule::AfterPrompt => {
+                    after_prompt == Some((screen.cursor_row, screen.cursor_col))
+                }
                 CursorRule::Inside => inside,
                 CursorRule::Any => true,
-            };
+            } && suggestion.is_none_or(|style| {
+                after_prompt.is_some_and(|(row, col)| suggestion_only(screen, row, col, style))
+            });
             if qualified {
                 regions.push((start, end, region));
             }
         }
     }
     regions
+}
+/// Reads the draft from the live composer region. Each start row's region ends at the first
+/// end-pattern row that leaves the selected draft rows inside it; the live region is the single such region that satisfies the cursor
+/// rule and holds no other start-pattern row, unless the row above it also matches the start
+/// pattern, which makes it a continuation of a composer whose every row repeats the marker. The
+/// draft is its selected rows without the prompt marker or suggestion-styled cells, trailing
+/// blanks trimmed and blank edge rows dropped.
+pub(super) fn composer_draft(spec: &ComposerDraftSpec, screen: &ScreenSnapshot) -> ComposerDraft {
+    let Ok(lines) = clipped_logical_lines(screen, &BTreeMap::new()) else {
+        return ComposerDraft::Unreadable;
+    };
+    let opens = |index: usize| spec.region.start.is_match(&lines[index].text);
+    let any_cursor = Region {
+        cursor: CursorRule::Any,
+        ..spec.region.clone()
+    };
+    let framed = usize::from(
+        spec.rows.first == DraftFirst::AfterStart || spec.rows.last == DraftLast::BeforeEnd,
+    );
+    let mut nearest = BTreeMap::new();
+    for (start, end, _) in region_candidates(&any_cursor, None, screen, &lines) {
+        if end >= start + framed {
+            nearest.entry(start).or_insert(end);
+        }
+    }
+    let live: Vec<_> = region_candidates(&spec.region, None, screen, &lines)
+        .into_iter()
+        .filter(|&(start, end, _)| nearest.get(&start) == Some(&end))
+        .filter(|&(start, end, _)| !(start + 1..end).any(opens))
+        .collect();
+    let [(start, _, region)] = live[..] else {
+        return ComposerDraft::Unreadable;
+    };
+    if start > 0 && opens(start - 1) {
+        return ComposerDraft::Unreadable;
+    }
+    let first = match spec.rows.first {
+        DraftFirst::Start => region.top,
+        DraftFirst::AfterStart => region.top + 1,
+    };
+    let last = match spec.rows.last {
+        DraftLast::End => region.bottom,
+        DraftLast::BeforeEnd => region.bottom - 1,
+    };
+    let mut rows = Vec::new();
+    for row in first..last {
+        let cells: Vec<_> = (0..screen.cols)
+            .filter_map(|col| screen.screen.cell(row, col))
+            .filter(|cell| !cell.is_wide_continuation())
+            .map(|cell| {
+                let text = if cell.has_contents() {
+                    cell.contents()
+                } else {
+                    " "
+                };
+                (
+                    text,
+                    spec.suggestion
+                        .is_some_and(|style| suggestion_cell(cell, style)),
+                )
+            })
+            .collect();
+        let mut skip = 0;
+        if row == first
+            && let Some(prompt) = &spec.prompt
+        {
+            let raw: String = cells.iter().map(|(text, _)| *text).collect();
+            let Some(found) = prompt.find(&raw).filter(|found| found.start() == 0) else {
+                return ComposerDraft::Unreadable;
+            };
+            let mut consumed = 0;
+            while consumed < found.end() {
+                consumed += cells[skip].0.len();
+                skip += 1;
+            }
+        }
+        let text: String = cells[skip..]
+            .iter()
+            .filter(|(_, suggested)| !suggested)
+            .map(|(text, _)| *text)
+            .collect();
+        rows.push(text.trim_end().to_owned());
+    }
+    let Some(top) = rows.iter().position(|row| !row.is_empty()) else {
+        return ComposerDraft::Readable(String::new());
+    };
+    let bottom = rows
+        .iter()
+        .rposition(|row| !row.is_empty())
+        .expect("a nonblank row exists");
+    ComposerDraft::Readable(rows[top..=bottom].join("\n"))
+}
+/// Whether every cell from `col` to the row's last non-blank cell carries the suggestion style.
+fn suggestion_only(screen: &ScreenSnapshot, row: u16, col: u16, style: SuggestionStyle) -> bool {
+    let cells: Vec<_> = (col..screen.cols)
+        .filter_map(|column| screen.screen.cell(row, column))
+        .collect();
+    let Some(last) = cells
+        .iter()
+        .rposition(|cell| !cell.contents().trim().is_empty())
+    else {
+        return true;
+    };
+    cells[..=last]
+        .iter()
+        .filter(|cell| !cell.is_wide_continuation())
+        .all(|cell| suggestion_cell(cell, style))
+}
+pub(crate) fn suggestion_cell(cell: &vt100::Cell, style: SuggestionStyle) -> bool {
+    match style {
+        SuggestionStyle::Faint => cell.dim(),
+        SuggestionStyle::Foreground(colour) => cell.fgcolor() == colour,
+    }
 }
 /// Removes the trailer, then the margin from the rows `margin_rows` selects, then trailing
 /// whitespace; trimming last keeps a whitespace-only margined row a match.
@@ -1030,7 +1164,7 @@ pub(crate) mod test_support {
         }
         let mut written = TerminalState::new(size_of(screen)).unwrap();
         written.feed(&bytes).unwrap();
-        bytes.extend(background_rewrite(screen, &written.snapshot()));
+        bytes.extend(attribute_rewrite(screen, &written.snapshot()));
         let (row, col) = cursor.unwrap_or((
             u16::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap(),
             u16::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap(),
@@ -1039,40 +1173,81 @@ pub(crate) mod test_support {
         bytes
     }
 
-    /// Repaints each `cell_backgrounds` run over the already written text, so the replayed
-    /// cells keep their captured contents and gain the captured background.
-    pub(crate) fn background_rewrite(fixture: &Value, text: &ScreenSnapshot) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        let Some(runs) = fixture.get("cell_backgrounds") else {
-            return bytes;
-        };
-        for run in runs.as_array().unwrap() {
-            let row = u16::try_from(run["row"].as_u64().unwrap()).unwrap();
-            let start = u16::try_from(run["start_col"].as_u64().unwrap()).unwrap();
-            let end = u16::try_from(run["end_col"].as_u64().unwrap()).unwrap();
-            let bg = &run["bg"];
-            let sgr = match bg["kind"].as_str().unwrap() {
-                "rgb" => format!(
-                    "\x1b[48;2;{};{};{}m",
-                    bg["r"].as_u64().unwrap(),
-                    bg["g"].as_u64().unwrap(),
-                    bg["b"].as_u64().unwrap()
-                ),
-                "indexed" => format!("\x1b[48;5;{}m", bg["index"].as_u64().unwrap()),
-                other => panic!("unknown fixture colour kind {other}"),
-            };
-            bytes.extend(format!("\x1b[{};{}H{sgr}", row + 1, start + 1).into_bytes());
-            for col in start..end {
-                let cell = text.screen.cell(row, col).expect("run inside geometry");
-                if cell.is_wide_continuation() {
-                    continue;
-                }
-                if cell.has_contents() {
-                    bytes.extend(cell.contents().as_bytes());
-                } else {
-                    bytes.push(b' ');
-                }
+    fn colour_sgr(layer: u8, colour: &Value) -> String {
+        match colour["kind"].as_str().unwrap() {
+            "rgb" => format!(
+                "{layer};2;{};{};{}",
+                colour["r"].as_u64().unwrap(),
+                colour["g"].as_u64().unwrap(),
+                colour["b"].as_u64().unwrap()
+            ),
+            "indexed" => format!("{layer};5;{}", colour["index"].as_u64().unwrap()),
+            other => panic!("unknown fixture colour kind {other}"),
+        }
+    }
+
+    fn run_cells<'a>(
+        fixture: &'a Value,
+        key: &str,
+    ) -> impl Iterator<Item = (u16, u16, &'a Value)> + 'a {
+        fixture
+            .get(key)
+            .map(|runs| runs.as_array().unwrap().as_slice())
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|run| {
+                let row = u16::try_from(run["row"].as_u64().unwrap()).unwrap();
+                let start = u16::try_from(run["start_col"].as_u64().unwrap()).unwrap();
+                let end = u16::try_from(run["end_col"].as_u64().unwrap()).unwrap();
+                (start..end).map(move |col| (row, col, run))
+            })
+    }
+
+    /// Repaints every cell a `cell_backgrounds` or `cell_styles` run covers over the already
+    /// written text, so the replayed cells keep their captured contents and gain the captured
+    /// background, faint and foreground attributes.
+    pub(crate) fn attribute_rewrite(fixture: &Value, text: &ScreenSnapshot) -> Vec<u8> {
+        let mut cells = std::collections::BTreeMap::<(u16, u16), Vec<String>>::new();
+        for (row, col, run) in run_cells(fixture, "cell_backgrounds") {
+            cells
+                .entry((row, col))
+                .or_default()
+                .push(colour_sgr(48, &run["bg"]));
+        }
+        for (row, col, run) in run_cells(fixture, "cell_styles") {
+            let attributes = cells.entry((row, col)).or_default();
+            if run["faint"].as_bool().unwrap() {
+                attributes.push("2".into());
             }
+            if !run["foreground"].is_null() {
+                attributes.push(colour_sgr(38, &run["foreground"]));
+            }
+        }
+        let mut bytes = Vec::new();
+        let mut segment: Option<(u16, u16, String)> = None;
+        for ((row, col), attributes) in cells {
+            let sgr = attributes.join(";");
+            let continues = segment
+                .as_ref()
+                .is_some_and(|(at_row, next, open)| *at_row == row && *next == col && *open == sgr);
+            if !continues {
+                if segment.is_some() {
+                    bytes.extend(b"\x1b[0m");
+                }
+                bytes.extend(format!("\x1b[{};{}H\x1b[{sgr}m", row + 1, col + 1).into_bytes());
+            }
+            segment = Some((row, col + 1, sgr));
+            let cell = text.screen.cell(row, col).expect("run inside geometry");
+            if cell.is_wide_continuation() {
+                continue;
+            }
+            if cell.has_contents() {
+                bytes.extend(cell.contents().as_bytes());
+            } else {
+                bytes.push(b' ');
+            }
+        }
+        if segment.is_some() {
             bytes.extend(b"\x1b[0m");
         }
         bytes
@@ -2490,6 +2665,380 @@ mod tests {
                 "{}",
                 composer.idle
             );
+        }
+    }
+
+    mod suggestion_composer {
+        use crate::coding_agent::detector::tests::*;
+
+        const FAINT: &str = "\x1b[2m";
+        const GREY: &str = "\x1b[38;5;8m";
+        const RESET: &str = "\x1b[0m";
+
+        fn suggestion_definition(style: Value) -> Value {
+            let mut definition = crate::coding_agent::catalog::test_support::simple_definition(
+                "composer_empty",
+                true,
+            );
+            let rule = &mut definition["profiles"][0]["rules"][0];
+            rule["region"] = json!({"screen":"either","start_pattern":"^> ","end_pattern":"^> ","max_rows":1,"cursor":"after_prompt"});
+            rule["matchers"] = json!([{"id":"prompt","scope":"line","pattern":"^> "}]);
+            rule["suggestion"] = json!({"style":style});
+            definition
+        }
+
+        /// The composer row `> ` followed by `painted`, with the cursor at `cursor_col`.
+        fn composer(painted: &str, cursor_col: u16) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            state
+                .feed(
+                    format!(
+                        "\x1b[2J\x1b[24;1H> {painted}{RESET}\x1b[24;{}H",
+                        cursor_col + 1
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            state.snapshot()
+        }
+
+        fn kind(style: Value, screen: &ScreenSnapshot) -> ObservationKind {
+            observation(&suggestion_definition(style), screen).kind
+        }
+
+        fn faint() -> Value {
+            json!({"faint":true})
+        }
+
+        fn grey() -> Value {
+            json!({"foreground":{"kind":"indexed","index":8}})
+        }
+
+        #[test]
+        fn a_faint_suggestion_after_the_prompt_is_an_empty_composer() {
+            let screen = composer(&format!("{FAINT}fix the failing build"), 2);
+            assert_eq!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
+        }
+
+        #[test]
+        fn an_indexed_foreground_suggestion_after_the_prompt_is_an_empty_composer() {
+            let screen = composer(&format!("{GREY}fix the failing build"), 2);
+            assert_eq!(kind(grey(), &screen), ObservationKind::ComposerEmpty);
+        }
+
+        #[test]
+        fn a_bare_prompt_with_the_cursor_after_it_is_an_empty_composer() {
+            assert_eq!(
+                kind(faint(), &composer("", 2)),
+                ObservationKind::ComposerEmpty
+            );
+        }
+
+        #[test]
+        fn a_typed_draft_in_the_default_style_is_not_an_empty_composer() {
+            let screen = composer("fix the failing build", 23);
+            assert_ne!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
+        }
+
+        #[test]
+        fn typed_text_followed_by_a_suggestion_is_not_an_empty_composer() {
+            let screen = composer(&format!("fix{FAINT} the failing build"), 5);
+            assert_ne!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
+        }
+
+        #[test]
+        fn a_suggestion_with_the_cursor_away_from_the_prompt_is_not_an_empty_composer() {
+            for cursor_col in [0, 1, 3, 23] {
+                let screen = composer(&format!("{FAINT}fix the failing build"), cursor_col);
+                assert_ne!(
+                    kind(faint(), &screen),
+                    ObservationKind::ComposerEmpty,
+                    "cursor at column {cursor_col}"
+                );
+            }
+        }
+
+        #[test]
+        fn text_in_another_style_than_the_rule_declares_is_not_an_empty_composer() {
+            let faint_text = composer(&format!("{FAINT}fix the failing build"), 2);
+            assert_ne!(kind(grey(), &faint_text), ObservationKind::ComposerEmpty);
+            let grey_text = composer(&format!("{GREY}fix the failing build"), 2);
+            assert_ne!(kind(faint(), &grey_text), ObservationKind::ComposerEmpty);
+        }
+    }
+
+    mod opencode_shell_mode {
+        use crate::coding_agent::detector::tests::*;
+
+        /// The oldest bundled OpenCode profile and the strict-idle profile of the installed version.
+        const VERSIONS: [&str; 2] = ["2.1.4", "2.2.7"];
+        const SHELL_FOOTER: &str = "Shell · esc normal";
+        const PADDING: &str = "    ";
+
+        /// An OpenCode composer row `┃` painted with trailing blanks and the cursor after the
+        /// marker, then `footer` two rows below.
+        fn composer(footer: &str) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize {
+                rows: 36,
+                cols: 120,
+            })
+            .unwrap();
+            state
+                .feed(format!("\x1b[2J\x1b[32;1H┃{PADDING}\x1b[34;1H{footer}\x1b[32;3H").as_bytes())
+                .unwrap();
+            state.snapshot()
+        }
+
+        fn observed(version: &str, footer: &str) -> ScreenObservation {
+            bundled_detector(CodingAgent::Opencode, version)
+                .observe(&composer(footer))
+                .unwrap()
+        }
+
+        #[test]
+        fn a_composer_above_the_normal_mode_footer_is_an_empty_composer() {
+            for version in VERSIONS {
+                for agent in ["cafleet", "cafleet-ask"] {
+                    let observation = observed(
+                        version,
+                        &format!("{agent} · Big Pickle · OpenCode · ctrl+p menu"),
+                    );
+                    assert_eq!(
+                        observation.kind,
+                        ObservationKind::ComposerEmpty,
+                        "{version} {agent}"
+                    );
+                    assert!(observation.verified_noninteraction, "{version} {agent}");
+                }
+            }
+        }
+
+        #[test]
+        fn a_shell_mode_composer_with_the_normal_glyph_is_not_an_empty_composer() {
+            for version in VERSIONS {
+                let observation = observed(version, SHELL_FOOTER);
+                assert_ne!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{version}"
+                );
+                assert!(!observation.verified_noninteraction, "{version}");
+            }
+        }
+    }
+
+    mod bundled_suggestions {
+        use crate::coding_agent::detector::tests::*;
+
+        struct SuggestionFixture {
+            id: String,
+            backend: CodingAgent,
+            version: String,
+            suggestion_rules: Vec<String>,
+            strict_idle: bool,
+        }
+
+        /// The profile that serves `version`: the backend's profile with the highest
+        /// `min_version` at or below it.
+        fn applicable_profile<'a>(
+            definitions: &'a Value,
+            backend: &str,
+            version: &str,
+        ) -> &'a Value {
+            let version = crate::coding_agent::NativeVersion::parse(version).unwrap();
+            let minimum = |profile: &Value| {
+                crate::coding_agent::NativeVersion::parse(profile["min_version"].as_str().unwrap())
+                    .unwrap()
+            };
+            definitions["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|profile| profile["backend"] == backend)
+                .filter(|profile| minimum(profile).precedence(&version).is_le())
+                .max_by(|left, right| minimum(left).precedence(&minimum(right)))
+                .expect("a bundled fixture is served by a profile of its backend")
+        }
+
+        fn line_patterns(rule: &Value) -> impl Iterator<Item = &str> {
+            rule["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|matcher| matcher["scope"] == "line")
+                .map(|matcher| matcher["pattern"].as_str().unwrap())
+        }
+
+        /// A strict idle rule is an empty-composer rule without a suggestion style whose line
+        /// matcher is a suggestion rule's prompt marker followed by only blanks.
+        fn has_strict_idle_rule(profile: &Value) -> bool {
+            let rules = profile["rules"].as_array().unwrap();
+            let markers: Vec<&str> = rules
+                .iter()
+                .filter(|rule| rule.get("suggestion").is_some())
+                .flat_map(line_patterns)
+                .collect();
+            rules.iter().any(|rule| {
+                rule["observation"] == "composer_empty"
+                    && rule.get("suggestion").is_none()
+                    && line_patterns(rule).any(|pattern| {
+                        markers
+                            .iter()
+                            .any(|marker| pattern == format!("{marker} *$"))
+                    })
+            })
+        }
+
+        /// Every bundled `-suggestion-` fixture with its serving profile's suggestion rule ids
+        /// and whether that profile's idle rule is strict.
+        fn suggestion_fixtures() -> Vec<SuggestionFixture> {
+            let definitions = bundled_definitions();
+            let fixtures: Vec<SuggestionFixture> = definitions["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|fixture| fixture["id"].as_str().unwrap().contains("-suggestion-"))
+                .map(|fixture| {
+                    let backend = fixture["backend"].as_str().unwrap();
+                    let version = fixture["native_version"].as_str().unwrap();
+                    let profile = applicable_profile(&definitions, backend, version);
+                    SuggestionFixture {
+                        id: fixture["id"].as_str().unwrap().to_owned(),
+                        backend: *CodingAgent::all()
+                            .iter()
+                            .find(|agent| agent.name() == backend)
+                            .expect("a bundled fixture names a supported backend"),
+                        version: version.to_owned(),
+                        suggestion_rules: profile["rules"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter(|rule| rule.get("suggestion").is_some())
+                            .map(|rule| rule["id"].as_str().unwrap().to_owned())
+                            .collect(),
+                        strict_idle: has_strict_idle_rule(profile),
+                    }
+                })
+                .collect();
+            assert!(
+                !fixtures.is_empty(),
+                "the bundled catalog carries suggestion fixtures"
+            );
+            fixtures
+        }
+
+        fn strict_suggestion_fixtures() -> Vec<SuggestionFixture> {
+            let strict: Vec<SuggestionFixture> = suggestion_fixtures()
+                .into_iter()
+                .filter(|fixture| fixture.strict_idle)
+                .collect();
+            assert!(
+                !strict.is_empty(),
+                "some suggestion fixture is served by a profile with a strict idle rule"
+            );
+            strict
+        }
+
+        #[test]
+        fn a_strict_idle_rule_is_the_suggestion_marker_followed_by_only_blanks() {
+            let profile = |idle: &str| {
+                json!({"rules":[
+                    {"id":"idle","observation":"composer_empty","matchers":[{"id":"prompt","scope":"line","pattern":idle}]},
+                    {"id":"working","observation":"composer_empty","matchers":[{"id":"prompt","scope":"line","pattern":"^> working *$"}]},
+                    {"id":"suggestion","observation":"composer_empty","suggestion":{"style":{"faint":true}},
+                        "matchers":[{"id":"prompt","scope":"line","pattern":"^> "}]}
+                ]})
+            };
+            assert!(has_strict_idle_rule(&profile("^>  *$")));
+            assert!(!has_strict_idle_rule(&profile("^> ")));
+        }
+
+        #[test]
+        fn every_bundled_suggestion_fixture_is_an_empty_composer() {
+            for fixture in suggestion_fixtures() {
+                let observation = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &replay_as_captured(&fixture.id, |_| {}, None),
+                );
+                assert_eq!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{}",
+                    fixture.id
+                );
+                assert!(observation.verified_noninteraction, "{}", fixture.id);
+            }
+        }
+
+        #[test]
+        fn under_a_strict_idle_rule_a_suggestion_rule_decides_each_suggestion_fixture() {
+            for fixture in strict_suggestion_fixtures() {
+                let observation = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &replay_as_captured(&fixture.id, |_| {}, None),
+                );
+                assert!(
+                    fixture.suggestion_rules.contains(&observation.rule_id),
+                    "{} is decided by {}, not a suggestion rule",
+                    fixture.id,
+                    observation.rule_id
+                );
+            }
+        }
+
+        /// The fixture's screen with plain `typed` text after the prompt marker, the cursor
+        /// left on the marker's end as after Home.
+        fn typed_after_the_marker(id: &str, typed: &str) -> ScreenSnapshot {
+            let mut screen: Value = serde_json::from_str(&bundled_screen(id)).unwrap();
+            screen.as_object_mut().unwrap().remove("cell_styles");
+            let row = usize::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap();
+            let col = usize::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap();
+            let marker: String = screen["lines"][row]
+                .as_str()
+                .unwrap()
+                .chars()
+                .take(col)
+                .collect();
+            screen["lines"][row] = json!(format!("{marker}{typed}"));
+            let alternate = screen["alternate_screen"].as_bool().unwrap();
+            replay_native_fixture(
+                &crate::digest::canonical_json(&screen),
+                |_| {},
+                alternate,
+                None,
+            )
+        }
+
+        #[test]
+        fn under_a_strict_idle_rule_a_typed_draft_with_the_cursor_at_the_marker_is_not_empty() {
+            for fixture in strict_suggestion_fixtures() {
+                let bare = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &typed_after_the_marker(&fixture.id, ""),
+                );
+                assert_eq!(
+                    bare.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{}: the bare marker is an empty composer",
+                    fixture.id
+                );
+                let observation = observe_bundled(
+                    fixture.backend,
+                    &fixture.version,
+                    &typed_after_the_marker(&fixture.id, "fix the failing build"),
+                );
+                assert_ne!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{} is decided by {}",
+                    fixture.id,
+                    observation.rule_id
+                );
+                assert!(!observation.verified_noninteraction, "{}", fixture.id);
+            }
         }
     }
 

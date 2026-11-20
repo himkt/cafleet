@@ -12,6 +12,7 @@ use crate::coding_agent::ComposerOperation;
 use crate::coding_agent::ProfileCatalog;
 use crate::coding_agent::StageGate;
 use crate::coding_agent::catalog::AnswerKey;
+use crate::coding_agent::catalog::ComposerDraft;
 use crate::coding_agent::coding_agent;
 use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
@@ -38,6 +39,7 @@ const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
 const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
+const ATTEMPT_FAILURE_LIMIT: usize = 256;
 const POST_SUBMIT_VERIFICATION: Duration = Duration::from_secs(2);
 const PASTE_CLOSE_RESERVE: Duration = Duration::from_millis(250);
 const PASTE_OPEN: &[u8] = b"\x1b[200~";
@@ -102,18 +104,31 @@ pub(crate) struct InputCoordinator {
     held_composer: Option<(i64, u64)>,
     output_seq: u64,
     bracketed_paste: bool,
+    last_drain_blocker: Option<String>,
+    flush: Option<PendingFlush>,
+}
+
+pub(crate) const FLUSH_LITERAL_LIMIT: usize = 65_536;
+const FLUSH_MARKER: &str = " [cafleet: ignore any text before this marker, if present] ";
+
+/// The previews a forced flush reserved, outside the FIFO until its write outcome settles.
+pub(crate) struct PendingFlush {
+    pub(crate) flush_input_id: i64,
+    pub(crate) entries: Vec<QueuedInput>,
+    pub(crate) expires_at: Instant,
+    director_member_id: i64,
 }
 
 /// An accepted deferred preview whose notification stamp and settlement storage prevented; like
 /// a pending finalization it blocks later ordinary input and retries on the deferred timer.
-struct PendingStamp {
+pub(crate) struct PendingStamp {
     input_id: i64,
     stage: SubmissionStage,
 }
 
 /// A deferred input's terminal zero-byte transaction that storage prevented; it holds only
 /// metadata, blocks every later ordinary input and retries on the deferred timer.
-struct PendingFinalization {
+pub(crate) struct PendingFinalization {
     input_id: i64,
     expected: storage::InputState,
     reason: &'static str,
@@ -127,10 +142,83 @@ fn storage_failure(cause: &CafleetError) -> bool {
     )
 }
 
+fn message_consumed(conn: &Connection, message_id: Option<i64>) -> Result<bool> {
+    Ok(match message_id {
+        Some(message_id) => {
+            crate::broker::get_message(conn, message_id)?.status
+                != crate::broker::MessageStatus::InputRequired
+        }
+        None => false,
+    })
+}
+
+fn joined(ids: &[i64]) -> String {
+    ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+}
+
+fn flush_literal(lines: &[String]) -> String {
+    format!("{FLUSH_MARKER}{}", lines.join(" "))
+}
+
+/// How many preview lines `literal` carries, as built from `canonical` or a `pointer` prefix.
+fn literal_count(literal: &str, canonical: &[String], pointer: &[String]) -> usize {
+    if literal == flush_literal(canonical) {
+        return canonical.len();
+    }
+    (1..=pointer.len())
+        .find(|count| literal == flush_literal(&pointer[..*count]))
+        .expect("a flush literal is built from its preview lines")
+}
+
+/// The `member press` key name for a plan's submit bytes.
+fn submit_key_name(submit: &[u8]) -> Option<&'static str> {
+    match submit {
+        [0x0d] => Some("Enter"),
+        [0x0a] => Some("Ctrl+j"),
+        [0x09] => Some("Tab"),
+        _ => None,
+    }
+}
+
+/// Why the current observation forbids a forced write, if it does.
+fn flush_observation_refusal(
+    observation: &ObservationController,
+    transport: &Transport,
+) -> Option<String> {
+    let status = observation.status();
+    if matches!(
+        status.visibility,
+        Visibility::Visible | Visibility::Obscured
+    ) || matches!(
+        status.eligibility,
+        InputEligibility::Hold(GateReason::Interaction | GateReason::Candidate)
+    ) {
+        let classification = observation
+            .current_classification()
+            .map_or("candidate", |class| class.as_str());
+        return Some(format!("an interaction is open ({classification})"));
+    }
+    let unavailable =
+        |reason: &str| format!("the member's screen observation is unavailable: {reason}");
+    if status.visibility == Visibility::Unknown {
+        return Some(unavailable(status.visibility.as_str()));
+    }
+    if let Some(code) = &status.diagnostic {
+        return Some(unavailable(&format!("observation degraded: {code}")));
+    }
+    if transport.outer_closed() {
+        return Some(unavailable("outer terminal closed"));
+    }
+    if transport.child_closed() {
+        return Some(unavailable("native output closed"));
+    }
+    None
+}
+
 /// Runner-owned ordinary input accepted with a durable ready receipt; its literal stays in
 /// memory only.
 #[derive(Clone)]
-struct QueuedInput {
+pub(crate) struct QueuedInput {
     input_id: i64,
     redelivery: bool,
     stalled: bool,
@@ -142,6 +230,21 @@ struct QueuedInput {
     composer_busy_since: Option<Instant>,
     attempt_deadline: Option<Instant>,
     obstacle: &'static str,
+    /// When this entry last became a head that no interaction blocks; the stall watchdog runs
+    /// from here, and an attempt start or a blocking interaction clears it.
+    head_since: Option<Instant>,
+    recorded: Option<HeadObstacle>,
+}
+
+/// The obstacle the latest queue turn met at the head, which the stall watchdog reports when no
+/// live state explains the stall.
+#[derive(Clone)]
+enum HeadObstacle {
+    PaneInputBusy,
+    DeliveryBudgetExhausted,
+    StorageUnavailable,
+    AttemptFailed(String),
+    ComposerBusy,
 }
 
 type DeliverySelection = (
@@ -1005,6 +1108,19 @@ impl InputCoordinator {
         self.current_request = None;
         self.input_fenced = true;
         let mut settled = Vec::new();
+        if let Some(slot) = self.flush.take() {
+            let mut conn = crate::db::connect(&self.database_url)?;
+            let (flush, previews) = with_database_deadline(&mut conn, deadline, |conn| {
+                storage::settle_flush(
+                    conn,
+                    &self.run.owner(),
+                    slot.flush_input_id,
+                    storage::FlushSettlement::Uncertain(storage::StopCause::RunnerStopped),
+                )
+            })?;
+            settled.push(flush.input_id);
+            settled.extend(previews.iter().map(|preview| preview.input_id));
+        }
         if let Some((id, _, written)) = self.active_deferred() {
             self.pending = None;
             let mut conn = crate::db::connect(&self.database_url)?;
@@ -1839,11 +1955,24 @@ impl InputCoordinator {
                     !evidence_ref.trim().is_empty(),
                     "nonempty reconciliation evidence required",
                 )?;
+                let mut cascaded = Vec::new();
                 let settled = with_database_deadline(conn, deadline, |conn| {
+                    cascaded.clear();
                     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     self.validate_receipt_owner(&tx)?;
                     let input = storage::get_input(&tx, *id)?;
                     operation_key = Some(input.operation_key.clone());
+                    if let Some(flush) = input.flush_input_id {
+                        return Err(error(format!(
+                            "input {id} belongs to forced flush {flush}; reconcile the flush"
+                        )));
+                    }
+                    ensure(
+                        self.flush
+                            .as_ref()
+                            .is_none_or(|slot| slot.flush_input_id != *id),
+                        &format!("flush {id} is still outstanding"),
+                    )?;
                     self.validate_receipt_cache(&input)?;
                     ensure(
                         self.pending.is_none(),
@@ -1884,7 +2013,7 @@ impl InputCoordinator {
                             }
                             _ => None,
                         };
-                        storage::settle_any_input_in_transaction(
+                        let settled = storage::settle_any_input_in_transaction(
                             &tx,
                             &owner,
                             &input,
@@ -1892,7 +2021,26 @@ impl InputCoordinator {
                             evidence_ref,
                             proof.as_ref(),
                             deadline,
-                        )?
+                        )?;
+                        if input.kind == storage::InputKind::Flush {
+                            for preview in storage::flushed_input_ids(&tx, *id)? {
+                                let preview = storage::get_input(&tx, preview)?;
+                                if preview.state == storage::InputState::Settled {
+                                    continue;
+                                }
+                                let preview = storage::settle_any_input_in_transaction(
+                                    &tx,
+                                    &owner,
+                                    &preview,
+                                    *disposition,
+                                    evidence_ref,
+                                    None,
+                                    deadline,
+                                )?;
+                                cascaded.push(preview);
+                            }
+                        }
+                        settled
                     };
                     check_deadline(Instant::now(), deadline)?;
                     tx.commit()?;
@@ -1901,6 +2049,12 @@ impl InputCoordinator {
                 if let Some(retained) = self.operations.get_mut(id) {
                     retained.operation = settled;
                 }
+                for preview in cascaded.drain(..) {
+                    if let Some(retained) = self.operations.get_mut(&preview.input_id) {
+                        retained.operation = preview;
+                    }
+                }
+                self.queue.retain(|queued| queued.input_id != *id);
                 check_deadline(Instant::now(), deadline)?;
                 Ok(InputControlReply::Receipt(ReceiptReply::Settled {
                     input_id: *id,
@@ -2264,6 +2418,8 @@ impl InputCoordinator {
                             composer_busy_since: None,
                             attempt_deadline: None,
                             obstacle: "delivery_budget_exhausted",
+                            head_since: None,
+                            recorded: None,
                         });
                         operation
                     }
@@ -2422,10 +2578,32 @@ impl InputCoordinator {
         self.deferred_failed
     }
 
+    /// Records the queue turn's input-drain result: a pending drain keeps its blocker.
+    pub(super) fn record_queue_drain(&mut self, drain: InputDrain) {
+        self.last_drain_blocker = match drain {
+            InputDrain::Pending => self.observation_blocker.clone(),
+            InputDrain::Quiescent => None,
+        };
+    }
+
+    /// Records a non-fatal queue-turn attempt error against the current head.
+    pub(super) fn record_attempt_failure(&mut self, failure: &CafleetError) {
+        let Some(head) = self.queue.front_mut() else {
+            return;
+        };
+        let message = failure.message();
+        let mut end = message.len().min(ATTEMPT_FAILURE_LIMIT);
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        head.recorded = Some(HeadObstacle::AttemptFailed(message[..end].to_owned()));
+    }
+
     /// The runner already owns a preview's delivery: one waits in the FIFO or is being drained
     /// from it, or a preview's terminal transaction is pending storage.
     pub(super) fn owns_preview_delivery(&self) -> bool {
-        self.finalization.is_some()
+        self.flush.is_some()
+            || self.finalization.is_some()
             || self.pending_stamp.is_some()
             || self
                 .queue
@@ -2538,6 +2716,213 @@ impl InputCoordinator {
         Ok(None)
     }
 
+    /// The settlement reason of a queued head about to start: a consumed preview message, or its
+    /// target classification from `deferred_target`.
+    fn head_settlement(
+        &self,
+        conn: &Connection,
+        message_id: Option<i64>,
+    ) -> Result<Option<&'static str>> {
+        if message_consumed(conn, message_id)? {
+            return Ok(Some("message_consumed"));
+        }
+        self.deferred_target(conn)
+    }
+
+    /// Cancels every queued preview whose message was consumed and a head whose target was
+    /// removed, from one read transaction and independently of every queue-turn gate.
+    pub(crate) fn queue_housekeeping(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) -> Result<()> {
+        if self.input_fenced || (self.queue.is_empty() && self.flush.is_none()) {
+            return Ok(());
+        }
+        if self
+            .flush
+            .as_ref()
+            .is_some_and(|slot| Instant::now() >= slot.expires_at)
+        {
+            match self.apply_flush_settlement(
+                conn,
+                observation,
+                storage::FlushSettlement::Uncertain(storage::StopCause::WriteFailed),
+                Instant::now() + DEFERRED_FINALIZATION,
+            ) {
+                Ok(()) => {}
+                Err(cause) if storage_failure(&cause) => {}
+                Err(cause) => return Err(cause),
+            }
+        }
+        if self.queue.is_empty() {
+            return Ok(());
+        }
+        if let Some(pending) = self.finalization.take() {
+            self.cancel_deferred(
+                conn,
+                observation,
+                pending.input_id,
+                pending.expected,
+                pending.reason,
+            )?;
+            if self.finalization.is_some() {
+                self.watch_head(observation, None);
+                return Ok(());
+            }
+        }
+        let entries: Vec<(i64, Option<i64>)> = self
+            .queue
+            .iter()
+            .map(|queued| (queued.input_id, queued.request.message_id))
+            .collect();
+        let read = with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+            let mut sweep = Vec::with_capacity(entries.len());
+            for (input_id, message_id) in &entries {
+                let state = storage::get_input(&tx, *input_id)?.state;
+                sweep.push((*input_id, state, message_consumed(&tx, *message_id)?));
+            }
+            let target = self.deferred_target(&tx)?;
+            let head = entries.first().map(|(input_id, _)| *input_id);
+            let unresolved: Option<i64> = rusqlite::OptionalExtension::optional(tx.query_row(
+                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND state='in_progress' AND kind IN ('preview','prompt','exec') AND input_id IS NOT ?2 ORDER BY input_id LIMIT 1",
+                rusqlite::params![self.run.run_id, head],
+                |row| row.get(0),
+            ))?;
+            tx.commit()?;
+            Ok((sweep, target, unresolved))
+        });
+        let (sweep, target, unresolved) = match read {
+            Ok(read) => read,
+            Err(cause) if storage_failure(&cause) => {
+                self.note_head_obstacle("storage_unavailable");
+                self.watch_head(observation, None);
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        };
+        if let Some((input_id, state, _)) = sweep
+            .iter()
+            .find(|(_, state, _)| *state != storage::InputState::Ready)
+        {
+            self.input_fenced = true;
+            self.deferred_failed = true;
+            return Err(error(format!(
+                "queued input {input_id} changed to {} outside the runner queue",
+                state.as_str()
+            )));
+        }
+        for (input_id, _, consumed) in sweep {
+            if !consumed {
+                continue;
+            }
+            self.queue.retain(|queued| queued.input_id != input_id);
+            self.cancel_deferred(
+                conn,
+                observation,
+                input_id,
+                storage::InputState::Ready,
+                "message_consumed",
+            )?;
+            if self.finalization.is_some() {
+                self.watch_head(observation, unresolved);
+                return Ok(());
+            }
+        }
+        if let Some(reason) = target
+            && let Some(head) = self.queue.pop_front()
+        {
+            self.cancel_deferred(
+                conn,
+                observation,
+                head.input_id,
+                storage::InputState::Ready,
+                reason,
+            )?;
+            return Ok(());
+        }
+        self.watch_head(observation, unresolved);
+        Ok(())
+    }
+
+    /// Publishes one `input_delivery_stalled` for a head that has started no attempt within
+    /// `COMPOSER_BUSY_BOUND` of becoming the head; time an interaction blocks it does not count.
+    fn watch_head(&mut self, observation: &ObservationController, unresolved: Option<i64>) {
+        let now = Instant::now();
+        let interaction = matches!(
+            ordinary_blocker(&observation.status()),
+            Some(OrdinaryBlocker::Interaction)
+        );
+        let Some(head) = self.queue.front_mut() else {
+            return;
+        };
+        if interaction {
+            head.head_since = None;
+            head.stalled = false;
+            return;
+        }
+        let since = *head.head_since.get_or_insert(now);
+        if head.stalled || now.duration_since(since) < COMPOSER_BUSY_BOUND {
+            return;
+        }
+        head.stalled = true;
+        let input_id = head.input_id;
+        let recorded = head.recorded.clone();
+        let (kind, blocking_input_id, detail) = self.stall_cause(unresolved, recorded);
+        let waiting_since = chrono::Utc::now()
+            - chrono::Duration::from_std(now.duration_since(since)).expect("bounded head wait");
+        observation.publish_delivery_stalled(serde_json::json!({
+            "kind":"input_delivery_stalled", "input_id":input_id,
+            "blocking_input_id":blocking_input_id,
+            "waiting_since":crate::time::format_utc(waiting_since),
+            "cause":{"kind":kind,"detail":detail},
+        }));
+    }
+
+    /// The first stall cause that holds: live runner state, then the head's recorded obstacle.
+    fn stall_cause(
+        &self,
+        unresolved: Option<i64>,
+        recorded: Option<HeadObstacle>,
+    ) -> (&'static str, Option<i64>, Option<String>) {
+        if let Some(slot) = &self.flush {
+            return ("forced_flush", Some(slot.flush_input_id), None);
+        }
+        if let Some(pending) = self
+            .pending
+            .as_ref()
+            .filter(|pending| pending.deferred().is_none())
+        {
+            return ("immediate_attempt", pending.input_id(), None);
+        }
+        if let Some(finalization) = &self.finalization {
+            return ("pending_finalization", Some(finalization.input_id), None);
+        }
+        if let Some(stamp) = &self.pending_stamp {
+            return ("pending_finalization", Some(stamp.input_id), None);
+        }
+        if let Some((blocker, _)) = self.held_composer {
+            return ("held_composer", Some(blocker), None);
+        }
+        if let Some(blocker) = unresolved {
+            return ("unresolved_input", Some(blocker), None);
+        }
+        if let Some(blocker) = &self.last_drain_blocker {
+            return ("drain_pending", None, Some(blocker.clone()));
+        }
+        match recorded {
+            Some(HeadObstacle::PaneInputBusy) => ("pane_input_busy", None, None),
+            Some(HeadObstacle::DeliveryBudgetExhausted) => {
+                ("delivery_budget_exhausted", None, None)
+            }
+            Some(HeadObstacle::StorageUnavailable) => ("storage_unavailable", None, None),
+            Some(HeadObstacle::AttemptFailed(message)) => ("attempt_failed", None, Some(message)),
+            Some(HeadObstacle::ComposerBusy) => ("composer_busy", None, None),
+            None => ("queue_turn_not_reached", None, None),
+        }
+    }
+
     fn hold_possible_ordinary_input(&mut self, input_id: i64) {
         let retained = self
             .operations
@@ -2546,7 +2931,7 @@ impl InputCoordinator {
         let operation = match retained.operation.kind {
             storage::InputKind::Prompt | storage::InputKind::Preview => ComposerOperation::Prompt,
             storage::InputKind::Exec => ComposerOperation::Exec,
-            storage::InputKind::PermissionResponse => return,
+            storage::InputKind::PermissionResponse | storage::InputKind::Flush => return,
         };
         if !self.verified_composer(operation)
             || retained.stage == SubmissionStage::ZeroBytes && retained.written_bytes == 0
@@ -2593,7 +2978,7 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<()> {
-        if self.input_fenced {
+        if self.input_fenced || self.flush.is_some() {
             return Ok(());
         }
         self.clear_verified_hold(observation);
@@ -2622,13 +3007,7 @@ impl InputCoordinator {
             (head.input_id, head.request.message_id, head.operation);
         let now = Instant::now();
         let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-            if let Some(message_id) = message_id
-                && crate::broker::get_message(conn, message_id)?.status
-                    != crate::broker::MessageStatus::InputRequired
-            {
-                return Ok(Some("message_consumed"));
-            }
-            self.deferred_target(conn)
+            self.head_settlement(conn, message_id)
         });
         match target {
             Ok(Some(reason)) => {
@@ -2660,7 +3039,6 @@ impl InputCoordinator {
             Err(cause) => return Err(cause),
         }
         let blocker = ordinary_blocker(&observation.status());
-        let consumed_held_blocker = self.consumed_held_blocker();
         let head = self
             .queue
             .front_mut()
@@ -2671,38 +3049,9 @@ impl InputCoordinator {
             return Ok(());
         }
         if blocker.is_none() {
-            if let Some((blocking_input_id, _)) = self.held_composer {
-                let since = *head.composer_busy_since.get_or_insert(now);
+            if self.held_composer.is_some() {
+                head.composer_busy_since.get_or_insert(now);
                 head.attempt_deadline = None;
-                if now.duration_since(since) >= COMPOSER_BUSY_BOUND && !head.stalled {
-                    let blocking =
-                        match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-                            storage::get_input(conn, blocking_input_id)
-                        }) {
-                            Ok(blocking) => blocking,
-                            Err(cause) if storage_failure(&cause) => {
-                                head.obstacle = "storage_unavailable";
-                                return Ok(());
-                            }
-                            Err(cause) => return Err(cause),
-                        };
-                    ensure(
-                        blocking.run_id == self.run.run_id,
-                        "held composer blocker belongs to its run",
-                    )?;
-                    ensure(
-                        blocking.has_stalled_blocker_provenance()
-                            && (blocking.state != storage::InputState::InProgress
-                                || consumed_held_blocker == Some(blocking_input_id)),
-                        "held composer blocker retains its selected consumed attempt provenance",
-                    )?;
-                    head.stalled = true;
-                    observation.publish_delivery_stalled(serde_json::json!({
-                        "kind":"input_delivery_stalled", "input_id":input_id,
-                        "blocking_input_id":blocking_input_id,
-                        "waiting_since":crate::time::format_utc(chrono::Utc::now() - chrono::Duration::from_std(now.duration_since(since)).expect("bounded composer wait"))
-                    }));
-                }
                 return Ok(());
             }
             let (kind, literal) = (head.request.kind, head.literal.clone());
@@ -2744,6 +3093,7 @@ impl InputCoordinator {
                         .expect("the waiting queue head remains");
                     head.composer_busy_since.get_or_insert(now);
                     head.attempt_deadline = None;
+                    head.recorded = Some(HeadObstacle::ComposerBusy);
                     return Ok(());
                 }
             }
@@ -2798,13 +3148,7 @@ impl InputCoordinator {
             );
         }
         let target = match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-            if let Some(message_id) = message_id {
-                let message = crate::broker::get_message(conn, message_id)?;
-                if message.status != crate::broker::MessageStatus::InputRequired {
-                    return Ok(Some("message_consumed"));
-                }
-            }
-            self.deferred_target(conn)
+            self.head_settlement(conn, message_id)
         }) {
             Ok(target) => target,
             Err(cause) if storage_failure(&cause) => {
@@ -2970,6 +3314,7 @@ impl InputCoordinator {
             self.operations.remove(&id);
             let mut queued = deferred.queued;
             queued.attempt_deadline = None;
+            queued.head_since = None;
             queued.composer_busy_since = if composer_busy {
                 queued.composer_busy_since.or(Some(now))
             } else {
@@ -3068,6 +3413,8 @@ impl InputCoordinator {
             composer_busy_since: None,
             attempt_deadline: None,
             obstacle: "delivery_budget_exhausted",
+            head_since: None,
+            recorded: None,
         });
         Ok(Some(InputControlReply::Submission(self.result(&operation))))
     }
@@ -3204,10 +3551,14 @@ impl InputCoordinator {
     }
 
     fn note_head_obstacle(&mut self, obstacle: &'static str) {
-        self.queue
-            .front_mut()
-            .expect("queued head remains")
-            .obstacle = obstacle;
+        let head = self.queue.front_mut().expect("queued head remains");
+        head.obstacle = obstacle;
+        head.recorded = match obstacle {
+            "pane_input_busy" => Some(HeadObstacle::PaneInputBusy),
+            "delivery_budget_exhausted" => Some(HeadObstacle::DeliveryBudgetExhausted),
+            "storage_unavailable" => Some(HeadObstacle::StorageUnavailable),
+            _ => head.recorded.take(),
+        };
     }
 
     /// Records the zero-byte obstacle a started deferred attempt last met, which its expiry
@@ -3469,13 +3820,7 @@ impl InputCoordinator {
                 let (input_id, message_id) = (head.input_id, head.request.message_id);
                 let reason =
                     with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
-                        if let Some(message_id) = message_id
-                            && crate::broker::get_message(conn, message_id)?.status
-                                != crate::broker::MessageStatus::InputRequired
-                        {
-                            return Ok(Some("message_consumed"));
-                        }
-                        self.deferred_target(conn)
+                        self.head_settlement(conn, message_id)
                     });
                 match reason {
                     Ok(Some(reason)) => {
@@ -3575,7 +3920,8 @@ impl InputCoordinator {
             let source = if terminal_bookkeeping {
                 source
             } else {
-                self.retain_permission_failure(conn, deadline, source)
+                let source = self.retain_permission_failure(conn, deadline, source);
+                self.record_immediate_write_failure(conn, observation, deadline, source)
             };
             if self.pending.is_some() {
                 self.failure(source)
@@ -4509,6 +4855,8 @@ impl InputCoordinator {
                 composer_busy_since: None,
                 attempt_deadline: None,
                 obstacle: "redelivery",
+                head_since: None,
+                recorded: None,
             });
         }
         self.checkpoint(
@@ -4740,6 +5088,397 @@ impl InputCoordinator {
         }
     }
 
+    /// Serves a Director's forced flush outside the queue turn: `Reserve` moves every live queued
+    /// preview into the flush slot, and `Settle` records the CLI's write outcome.
+    pub(crate) fn flush_received(
+        &mut self,
+        conn: &mut Connection,
+        action: FlushAction,
+        observation: &ObservationController,
+        transport: &Transport,
+        deadline: Instant,
+    ) -> std::result::Result<FlushReply, InputFailure> {
+        let context = self.input_context();
+        match action {
+            FlushAction::Reserve {
+                director_member_id,
+                expires_at_mono_ns,
+            } => self.reserve_flush(
+                conn,
+                director_member_id,
+                expires_at_mono_ns,
+                (observation, transport),
+                deadline,
+            ),
+            FlushAction::Settle {
+                flush_input_id,
+                outcome,
+            } => self.settle_flush(conn, flush_input_id, outcome, observation, deadline),
+        }
+        .map_err(|source| context.failure(source))
+    }
+
+    fn reserve_flush(
+        &mut self,
+        conn: &mut Connection,
+        director_member_id: i64,
+        expires_at_mono_ns: u64,
+        (observation, transport): (&ObservationController, &Transport),
+        deadline: Instant,
+    ) -> Result<FlushReply> {
+        let refused = |cause: String| Ok(FlushReply::Refused { cause });
+        if self.input_fenced || self.manual_accounting_failed {
+            return refused("the member's input is fenced".into());
+        }
+        if self.flush.is_some() || self.pending.is_some() {
+            return refused("a runner input attempt is in flight; retry".into());
+        }
+        let expires_at =
+            InputExpiration(expires_at_mono_ns).instant(&mut RealInputDeadlineClock)?;
+        let stamped = self.pending_stamp.as_ref().map(|stamp| stamp.input_id);
+        let finalizing = self.finalization.as_ref().map(|pending| pending.input_id);
+        let unresolved = with_database_deadline(conn, deadline, |conn| {
+            conn.prepare(
+                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state IN ('in_progress','accepted','uncertain') AND input_id IS NOT ?2 AND input_id IS NOT ?3 ORDER BY input_id",
+            )?
+            .query_map(rusqlite::params![self.run.run_id, stamped, finalizing], |row| {
+                row.get(0)
+            })?
+            .collect::<rusqlite::Result<Vec<i64>>>()
+            .map_err(CafleetError::from)
+        })?;
+        if !unresolved.is_empty() {
+            return refused(format!(
+                "input {} is unresolved; reconcile it with cafleet input reconcile before flushing",
+                joined(&unresolved)
+            ));
+        }
+        let mut explicit: Vec<(i64, storage::InputKind)> = self
+            .queue
+            .iter()
+            .filter(|queued| queued.request.kind != storage::InputKind::Preview)
+            .map(|queued| (queued.input_id, queued.request.kind))
+            .collect();
+        explicit.sort_unstable_by_key(|(input_id, _)| *input_id);
+        if let Some(((first, kind), rest)) = explicit.split_first() {
+            let mut cause = format!(
+                "queued {} input {first} cannot be rebuilt from its receipt; settle it with 'cafleet input reconcile {first} --from-member-id {director_member_id} --disposition not-submitted --evidence-ref REFERENCE', then resend it",
+                kind.as_str()
+            );
+            if !rest.is_empty() {
+                let rest: Vec<i64> = rest.iter().map(|(input_id, _)| *input_id).collect();
+                cause.push_str(&format!("; also queued: {}", joined(&rest)));
+            }
+            return refused(cause);
+        }
+        if let Some(cause) = flush_observation_refusal(observation, transport) {
+            return refused(cause);
+        }
+        let version = self.run.native_version.clone();
+        let catalog = &self.services.catalog;
+        let draft = version
+            .as_deref()
+            .map_or(ComposerDraft::Unreadable, |native| {
+                catalog.composer_draft(self.backend, native, &transport.snapshot())
+            });
+        let ComposerDraft::Readable(draft) = draft else {
+            return refused("the composer draft cannot be read from the screen".into());
+        };
+        if let Some(prefix) = version
+            .as_deref()
+            .and_then(|native| catalog.mode_switch_prefix(self.backend, native, &draft))
+        {
+            return refused(format!(
+                "the composer draft starts with mode prefix '{prefix}'"
+            ));
+        }
+        let plan = version.as_deref().and_then(|native| {
+            catalog.composer_plan(self.backend, native, ComposerOperation::Prompt)
+        });
+        let Some((plan, submit_key)) =
+            plan.and_then(|plan| submit_key_name(plan.submit_bytes()).map(|key| (plan, key)))
+        else {
+            return refused(format!(
+                "the {} profile has no submission plan for native version {}",
+                self.backend.name(),
+                version.as_deref().unwrap_or("-")
+            ));
+        };
+        let entries: Vec<(i64, Option<i64>)> = self
+            .queue
+            .iter()
+            .map(|queued| (queued.input_id, queued.request.message_id))
+            .collect();
+        let live = with_database_deadline(conn, deadline, |conn| {
+            let mut live = Vec::new();
+            for (input_id, message_id) in &entries {
+                let message = crate::broker::get_message(
+                    conn,
+                    message_id.expect("a queued preview has its message"),
+                )?;
+                if message.status == crate::broker::MessageStatus::InputRequired {
+                    live.push((*input_id, message));
+                }
+            }
+            Ok(live)
+        })?;
+        if live.is_empty() {
+            return Ok(FlushReply::Empty);
+        }
+        let fits = |literal: &str| {
+            literal.len() <= FLUSH_LITERAL_LIMIT && plan.plain_literal_allowed(literal)
+        };
+        let canonical: Vec<String> = live
+            .iter()
+            .map(|(_, message)| crate::delivery::canonical_preview_line(message))
+            .collect();
+        let pointer: Vec<String> = live
+            .iter()
+            .map(|(_, message)| crate::delivery::pointer_preview_line(message))
+            .collect();
+        let literal = if fits(&flush_literal(&canonical)) {
+            flush_literal(&canonical)
+        } else {
+            let count = (1..=pointer.len())
+                .rev()
+                .find(|count| fits(&flush_literal(&pointer[..*count])));
+            let Some(count) = count else {
+                let first = flush_literal(&pointer[..1]);
+                let (size, max, unit) = match plan.plain_bound() {
+                    Some((max, unit)) if !plan.plain_literal_allowed(&first) => {
+                        let size = if unit == "bytes" {
+                            first.len()
+                        } else {
+                            first.chars().count()
+                        };
+                        (size, max, unit)
+                    }
+                    _ => (first.len(), FLUSH_LITERAL_LIMIT as u64, "bytes"),
+                };
+                return refused(format!(
+                    "the first queued preview is {size} {unit} as a pointer line, above the flush limit of {max} {unit}"
+                ));
+            };
+            flush_literal(&pointer[..count])
+        };
+        let selected = literal_count(&literal, &canonical, &pointer);
+        let flushed_input_ids: Vec<i64> = live[..selected].iter().map(|(id, _)| *id).collect();
+        let message_ids: Vec<i64> = live[..selected]
+            .iter()
+            .map(|(_, message)| message.message_id)
+            .collect();
+        let remaining_input_ids: Vec<i64> = live[selected..].iter().map(|(id, _)| *id).collect();
+        let mut digested = literal.as_bytes().to_vec();
+        digested.extend_from_slice(plan.submit_bytes());
+        let digest = crate::digest::sha256_hex(&digested);
+        let reservation = with_database_deadline(conn, deadline, |conn| {
+            storage::reserve_flush(conn, &self.run.owner(), &digest, &flushed_input_ids)
+        })?;
+        let storage::FlushReservation::Reserved(flush_input_id) = reservation else {
+            return refused("queued input changed while the flush was prepared; retry".into());
+        };
+        let mut entries = Vec::with_capacity(flushed_input_ids.len());
+        for input_id in &flushed_input_ids {
+            let position = self
+                .queue
+                .iter()
+                .position(|queued| queued.input_id == *input_id)
+                .expect("a reserved preview is queued");
+            entries.push(self.queue.remove(position).expect("the found entry exists"));
+        }
+        self.flush = Some(PendingFlush {
+            flush_input_id,
+            entries,
+            expires_at,
+            director_member_id,
+        });
+        Ok(FlushReply::Reserved {
+            flush_input_id,
+            literal,
+            submit_key: submit_key.into(),
+            settle_ms: u64::try_from(STAGE_SETTLE.as_millis()).expect("the settle interval fits"),
+            flushed_input_ids,
+            message_ids,
+            remaining_input_ids,
+        })
+    }
+
+    fn settle_flush(
+        &mut self,
+        conn: &mut Connection,
+        flush_input_id: i64,
+        outcome: FlushWriteOutcome,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> Result<FlushReply> {
+        let Some(slot) = self
+            .flush
+            .as_ref()
+            .filter(|slot| slot.flush_input_id == flush_input_id)
+        else {
+            let receipt = with_database_deadline(conn, deadline, |conn| {
+                storage::get_input(conn, flush_input_id)
+            })?;
+            ensure(
+                receipt.run_id == self.run.run_id && receipt.kind == storage::InputKind::Flush,
+                "flush receipt belongs to this run",
+            )?;
+            return Ok(FlushReply::NotOutstanding {
+                flush_input_id,
+                state: receipt.state,
+                disposition: receipt.disposition,
+            });
+        };
+        let director_member_id = slot.director_member_id;
+        let settlement = match outcome {
+            FlushWriteOutcome::Acknowledged => {
+                storage::FlushSettlement::Acknowledged { director_member_id }
+            }
+            FlushWriteOutcome::NotStarted => {
+                storage::FlushSettlement::NotStarted { director_member_id }
+            }
+            FlushWriteOutcome::Uncertain => {
+                storage::FlushSettlement::Uncertain(storage::StopCause::WriteFailed)
+            }
+        };
+        let bookkeeping = if deadline > Instant::now() {
+            deadline
+        } else {
+            Instant::now() + DEFERRED_FINALIZATION
+        };
+        self.apply_flush_settlement(conn, observation, settlement, bookkeeping)?;
+        Ok(FlushReply::Settled { flush_input_id })
+    }
+
+    /// Settles the outstanding flush slot and clears it; a failed transaction keeps the slot.
+    fn apply_flush_settlement(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        settlement: storage::FlushSettlement,
+        deadline: Instant,
+    ) -> Result<()> {
+        let slot = self.flush.take().expect("an outstanding flush slot");
+        let settled = with_database_deadline(conn, deadline, |conn| {
+            storage::settle_flush(conn, &self.run.owner(), slot.flush_input_id, settlement)
+        });
+        let previews = match settled {
+            Ok((_, previews)) => previews,
+            Err(cause) => {
+                self.flush = Some(slot);
+                return Err(cause);
+            }
+        };
+        match settlement {
+            storage::FlushSettlement::NotStarted { .. } => {
+                for mut entry in slot.entries.into_iter().rev() {
+                    entry.head_since = None;
+                    entry.attempt_deadline = None;
+                    self.queue.push_front(entry);
+                }
+            }
+            storage::FlushSettlement::Acknowledged { .. } => {
+                for preview in &previews {
+                    Self::publish_result(
+                        observation,
+                        preview.input_id,
+                        SubmissionStage::Submitted,
+                        None,
+                    );
+                }
+            }
+            storage::FlushSettlement::Uncertain(_) => {
+                for preview in &previews {
+                    Self::publish_result(
+                        observation,
+                        preview.input_id,
+                        SubmissionStage::Unknown,
+                        preview.stop_cause,
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Records the in-flight immediate attempt whose completion failed before the runner replies,
+    /// as `uncertain/write_failed` once it has written a byte, and returns the client failure.
+    pub(crate) fn pending_attempt_failed(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        failure: InputFailure,
+    ) -> InputFailure {
+        let InputFailure { source, context } = failure;
+        let source = self.record_immediate_write_failure(conn, observation, Instant::now(), source);
+        InputFailure { source, context }
+    }
+
+    fn record_immediate_write_failure(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        deadline: Instant,
+        source: CafleetError,
+    ) -> CafleetError {
+        let Some(pending) = self.pending.as_mut() else {
+            return source;
+        };
+        let Some(composer) = pending.composer() else {
+            return source;
+        };
+        if composer.deferred.is_some() {
+            return source;
+        }
+        let written_stages = composer.written_stages;
+        let Some(id) = pending.installed_input_id() else {
+            return source;
+        };
+        let retained = self
+            .operations
+            .get(&id)
+            .expect("pending composer receipt retained");
+        let written = retained.stage != SubmissionStage::ZeroBytes
+            || retained.written_bytes > 0
+            || written_stages > 0;
+        if !written || retained.operation.state != storage::InputState::InProgress {
+            return source;
+        }
+        pending.phase = InputPhase::Blocked;
+        let stage = retained.stage;
+        let bookkeeping = match self.effective_deadline(conn, deadline) {
+            Ok(effective) if effective > Instant::now() => effective,
+            _ => Instant::now() + DEFERRED_FINALIZATION,
+        };
+        let persisted = with_database_deadline(conn, bookkeeping, |conn| {
+            self.validate_live_run(conn)?;
+            storage::record_input_uncertain(
+                conn,
+                &self.run.owner(),
+                id,
+                storage::StopCause::WriteFailed,
+            )
+        });
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("pending composer receipt retained");
+        retained.attempt_available = false;
+        match persisted {
+            Ok(operation) => {
+                retained.operation = operation;
+                Self::publish_result(
+                    observation,
+                    id,
+                    stage,
+                    Some(storage::StopCause::WriteFailed),
+                );
+                source
+            }
+            Err(bookkeeping) => source.with_diagnostic(bookkeeping.message()),
+        }
+    }
+
     /// Retires the pending immediate attempt; a started deferred attempt stays for `fence`,
     /// which settles it by its written bytes.
     pub(super) fn finish_pending_attempt(&mut self) {
@@ -4834,6 +5573,8 @@ impl InputCoordinator {
             held_composer: None,
             output_seq: 0,
             bracketed_paste: false,
+            last_drain_blocker: None,
+            flush: None,
         })
     }
 
@@ -4997,6 +5738,21 @@ impl InputExpiration {
 
     pub(crate) fn monotonic_ns(&self) -> u64 {
         self.0
+    }
+
+    /// The local instant of this expiration, without the five-second admission cap.
+    pub(crate) fn instant(&self, clock: &mut impl InputDeadlineClock) -> Result<Instant> {
+        let sample = clock.sample()?;
+        sample.validate()?;
+        let remaining_ns = self
+            .0
+            .checked_sub(sample.monotonic_ns)
+            .filter(|remaining| *remaining > 0)
+            .ok_or(CafleetError::DeadlineExceeded)?;
+        sample
+            .before
+            .checked_add(Duration::from_nanos(remaining_ns))
+            .ok_or_else(|| error("input expiration exceeds the local clock range"))
     }
 }
 
@@ -5952,21 +6708,49 @@ mod tests {
                 let backend: CodingAgent =
                     serde_json::from_value(fixture["backend"].clone()).unwrap();
                 let native_version = fixture["native_version"].as_str().unwrap();
-                let idle = fixtures
+                let (_, file) =
+                    crate::coding_agent::catalog::test_support::bundled_file(fixture_id);
+                let reads_empty = |candidate: &Value| {
+                    let screen = &file["screens"][candidate["id"].as_str().unwrap()];
+                    crate::coding_agent::detector::test_support::observe_bundled(
+                        backend,
+                        native_version,
+                        &crate::coding_agent::detector::test_support::replay_native_fixture(
+                            &crate::digest::canonical_json(screen),
+                            |_| {},
+                            screen["alternate_screen"].as_bool().unwrap(),
+                            None,
+                        ),
+                    )
+                    .kind
+                        == crate::coding_agent::detector::ObservationKind::ComposerEmpty
+                };
+                let same_geometry: Vec<&Value> = fixtures
                     .iter()
-                    .find(|candidate| {
-                        candidate["backend"] == fixture["backend"]
+                    .filter(|candidate| {
+                        candidate["source_ref"] == fixture["source_ref"]
+                            && candidate["backend"] == fixture["backend"]
                             && candidate["native_version"] == fixture["native_version"]
                             && candidate["rows"] == fixture["rows"]
                             && candidate["cols"] == fixture["cols"]
-                            && candidate["id"]
-                                .as_str()
-                                .unwrap()
-                                .contains("-composer-prompt-idle-mode-2004-")
                     })
-                    .expect(
-                        "each measured backend/geometry has its captured initial empty composer",
-                    );
+                    .collect();
+                let idle = same_geometry
+                    .iter()
+                    .copied()
+                    .filter(|candidate| {
+                        candidate["id"]
+                            .as_str()
+                            .unwrap()
+                            .contains("-composer-prompt-idle-mode-2004-")
+                    })
+                    .chain(same_geometry.iter().copied())
+                    .find(|candidate| reads_empty(candidate))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{fixture_id}: its backend/geometry has a captured screen its profile reads as an empty composer"
+                        )
+                    });
                 let operation = if fixture_id.contains("-composer-exec-") {
                     ComposerOperation::Exec
                 } else {
@@ -6049,8 +6833,13 @@ mod tests {
                     "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
                     "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
                     "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
-                    "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
                     "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39",
+                    "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1",
+                    "codex-0.166.0-composer-exec-plain-42-literal-tmux-120-1",
+                    "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1",
+                    "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1",
+                    "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
+                    "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-99",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-100",
                     "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-herdr-119-49",
@@ -6063,14 +6852,11 @@ mod tests {
                     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
                     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
                     "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-tmux-120-37",
-                    "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-herdr-119-37",
                     "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-tmux-120-37",
-                    "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-herdr-119-37",
                     "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-tmux-120-44",
                     "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43",
                     "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-tmux-120-94",
                     "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93",
-                    "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2",
                     "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
                     "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
                 ] {
@@ -6183,6 +6969,7 @@ mod tests {
                 {
                     composer.settle_until = Some(Instant::now());
                 }
+                crate::runtime::input::tests::ordinary_prompt::deferred_queue::housekeep(host);
                 host.drain();
                 host.advance().map(submitted)
             }
@@ -6938,6 +7725,7 @@ mod tests {
                     );
                     host.coordinator
                         .set_queued_composer_busy_since(waiting.input_id, &old_wait());
+                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, waiting.input_id);
                     drain_stalled_events(host);
                     readable_stalled_head(host, waiting.input_id, stopped);
                     assert_eq!(
@@ -6997,6 +7785,7 @@ mod tests {
                     .unwrap();
                     host.coordinator
                         .set_queued_composer_busy_since(next.input_id, &old_wait());
+                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, next.input_id);
                     for _ in 0..64 {
                         let _ = turn(host);
                     }
@@ -7019,6 +7808,43 @@ mod tests {
             }
 
             fn held_blocker_for_stalled_heads(host: &mut Host, immediate: bool) -> i64 {
+                let id = hold_failed_blocker(host, immediate);
+                let blocker = row(host, id);
+                assert_eq!(blocker.state, storage::InputState::Uncertain);
+                assert_eq!(blocker.stop_cause, Some(storage::StopCause::WriteFailed));
+                id
+            }
+
+            /// An immediate blocker whose `uncertain/write_failed` bookkeeping write fails, so it
+            /// stays `in_progress` while it holds the composer.
+            fn held_in_progress_blocker_after_a_failed_uncertain_write(host: &mut Host) -> i64 {
+                host.fixture
+                    .conn
+                    .execute_batch(
+                        "CREATE TRIGGER owned_uncertain_bookkeeping_failure BEFORE UPDATE OF state ON member_input_operations
+                         WHEN OLD.operation_key='prompt:reconciled-stalled-blocker' AND NEW.state='uncertain'
+                         BEGIN SELECT RAISE(FAIL,'owned uncertain bookkeeping failure'); END",
+                    )
+                    .unwrap();
+                let held = catch_unwind(AssertUnwindSafe(|| hold_failed_blocker(host, true)));
+                let removed = host
+                    .fixture
+                    .conn
+                    .execute_batch("DROP TRIGGER owned_uncertain_bookkeeping_failure");
+                let id = match held {
+                    Ok(id) => {
+                        removed.unwrap();
+                        id
+                    }
+                    Err(primary) => resume_unwind(primary),
+                };
+                let blocker = row(host, id);
+                assert_eq!(blocker.state, storage::InputState::InProgress);
+                assert_eq!(blocker.stop_cause, None);
+                id
+            }
+
+            fn hold_failed_blocker(host: &mut Host, immediate: bool) -> i64 {
                 host.coordinator.services.hooks = Arc::new(FailLaterBeforeWrite {
                     inner: host.hooks.clone(),
                     armed: std::sync::atomic::AtomicBool::new(true),
@@ -7045,20 +7871,17 @@ mod tests {
                     .input_id()
                     .unwrap();
                 let failure = later_checkpoint_failure(host);
+                let primary = match &failure.source {
+                    CafleetError::WithDiagnostics { cause, .. } => cause.as_ref(),
+                    source => source,
+                };
                 assert!(
-                    matches!(failure.source, CafleetError::DeadlineExceeded),
+                    matches!(primary, CafleetError::DeadlineExceeded),
                     "{failure:?}"
                 );
                 assert_eq!(failure.context.input_id, Some(id));
                 if immediate {
                     host.coordinator.finish_pending_attempt();
-                    assert_eq!(row(host, id).state, storage::InputState::InProgress);
-                } else {
-                    assert_eq!(row(host, id).state, storage::InputState::Uncertain);
-                    assert_eq!(
-                        row(host, id).stop_cause,
-                        Some(storage::StopCause::WriteFailed)
-                    );
                 }
                 assert!(host.coordinator.pending.is_none());
                 assert_eq!(host.pty.offers, [LITERAL.as_bytes().to_vec()]);
@@ -7142,6 +7965,10 @@ mod tests {
                 assert_eq!(payload["input_id"], head);
                 assert_eq!(payload["blocking_input_id"], blocker);
                 assert_eq!(payload["message_id"], json!(row(host, head).message_id));
+                assert_eq!(
+                    payload["cause"],
+                    json!({"kind":"held_composer","detail":null})
+                );
                 assert_eq!(payload["director_action"]["kind"], "review_stalled_input");
                 payload
             }
@@ -7159,6 +7986,7 @@ mod tests {
                                 let blocker = held_blocker_for_stalled_heads(host, immediate);
                                 let head = queued(host, request(host, "prompt:stalled-after-reconcile", LITERAL), "earlier_input");
                                 host.coordinator.set_queued_composer_busy_since(head, &old_wait());
+                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
                                 let since = host.coordinator.queue.front().unwrap().composer_busy_since;
                                 let reconciled = reconcile_stalled_blocker(host, blocker, disposition);
                                 assert_eq!(host.coordinator.queue.front().unwrap().composer_busy_since, since);
@@ -7210,6 +8038,7 @@ mod tests {
                             );
                             host.coordinator
                                 .set_queued_composer_busy_since(first, &old_wait());
+                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, first);
                             let offers = host.pty.offers.clone();
                             let written = host.pty.written.clone();
                             drain_stalled_events(host);
@@ -7251,6 +8080,7 @@ mod tests {
                             );
                             host.coordinator
                                 .set_queued_composer_busy_since(later, &old_wait());
+                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, later);
                             drain_stalled_events(host);
                             assert_eq!(host.pty.offers, offers);
                             assert_eq!(host.pty.written, written);
@@ -7275,7 +8105,7 @@ mod tests {
                     permission_configured("plain", Value::Null),
                     encoded(),
                     |host| {
-                        let blocker = held_blocker_for_stalled_heads(host, true);
+                        let blocker = held_in_progress_blocker_after_a_failed_uncertain_write(host);
                         let head = queued(
                             host,
                             request(host, "prompt:behind-consumed-in-progress", LITERAL),
@@ -7283,6 +8113,7 @@ mod tests {
                         );
                         host.coordinator
                             .set_queued_composer_busy_since(head, &old_wait());
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
                         let offers = host.pty.offers.clone();
                         let written = host.pty.written.clone();
                         drain_stalled_events(host);
@@ -7306,6 +8137,30 @@ mod tests {
             }
 
             #[test]
+            fn a_held_composer_lets_the_forced_flush_proceed() {
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::forced_flush;
+                crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
+                    forced_flush::flush_catalog(Value::Null),
+                    encoded(),
+                    |host| {
+                        let blocker = held_blocker_for_stalled_heads(host, true);
+                        let message = host.message("behind a held composer");
+                        let request = preview_request(host, &message, &canonical_preview(&message));
+                        let preview = queued(host, request, "earlier_input");
+                        reconcile_stalled_blocker(
+                            host,
+                            blocker,
+                            storage::InputDisposition::Submitted,
+                        );
+                        host.show(SCREEN.to_vec());
+                        assert!(host.coordinator.held_composer.is_some());
+                        let reservation = forced_flush::reserved(forced_flush::reserve(host));
+                        assert_eq!(reservation.flushed_input_ids, vec![preview]);
+                    },
+                );
+            }
+
+            #[test]
             fn a_newly_opened_interaction_confirms_the_written_submit_key() {
                 with_catalog_host(
                     permission_configured("plain", Value::Null),
@@ -7324,12 +8179,13 @@ mod tests {
             }
 
             #[test]
-            fn consumed_held_blocker_exclusion_preserves_an_unrelated_in_progress_barrier() {
+            fn a_consumed_in_progress_held_blocker_stalls_as_held_composer_while_an_unrelated_barrier_blocks_progress()
+             {
                 crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
                     permission_configured("plain", Value::Null),
                     encoded(),
                     |host| {
-                        let blocker = held_blocker_for_stalled_heads(host, true);
+                        let blocker = held_in_progress_blocker_after_a_failed_uncertain_write(host);
                         let owner = host.fixture.run.owner();
                         let unrelated = storage::test_support::reserve_input(
                             &mut host.fixture.conn,
@@ -7350,30 +8206,25 @@ mod tests {
                         );
                         host.coordinator
                             .set_queued_composer_busy_since(head, &old_wait());
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
                         let offers = host.pty.offers.clone();
                         let written = host.pty.written.clone();
                         drain_stalled_events(host);
-                        let events: i64 = host.fixture.conn.query_row(
-                            "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
-                            rusqlite::params![host.fixture.run.run_id, head], |row| row.get(0),
-                        ).unwrap();
-                        assert_eq!(
-                            events, 0,
-                            "an unrelated active writer still blocks held-only progress"
-                        );
+                        let event = readable_stalled_head(host, head, blocker);
                         assert_eq!(row(host, head).state, storage::InputState::Ready);
                         assert_eq!(row(host, unrelated.input_id), unrelated);
-                        assert_eq!(host.pty.offers, offers);
+                        assert_eq!(
+                            host.pty.offers, offers,
+                            "an unrelated active writer still blocks held-only progress"
+                        );
                         assert_eq!(host.pty.written, written);
                         reconcile_stalled_blocker(
                             host,
                             unrelated.input_id,
                             storage::InputDisposition::NotSubmitted,
                         );
-                        host.coordinator
-                            .set_queued_composer_busy_since(head, &old_wait());
                         drain_stalled_events(host);
-                        let event = readable_stalled_head(host, head, blocker);
+                        assert_eq!(readable_stalled_head(host, head, blocker), event);
                         assert_eq!(host.pty.offers, offers);
                         assert_eq!(host.pty.written, written);
                         let reconciled = reconcile_stalled_blocker(
@@ -7529,12 +8380,9 @@ mod tests {
                 assert_eq!(failure.context.input_id, Some(id));
                 assert_eq!(failure.context.run_id, Some(host.fixture.run.run_id));
                 let failed = row(host, id);
-                if deferred {
-                    assert_eq!(failed.state, storage::InputState::Uncertain);
-                    assert_eq!(failed.stop_cause, Some(storage::StopCause::WriteFailed));
-                } else {
-                    assert_eq!(failed.state, storage::InputState::InProgress);
-                    assert_eq!(failed.stop_cause, None);
+                assert_eq!(failed.state, storage::InputState::Uncertain);
+                assert_eq!(failed.stop_cause, Some(storage::StopCause::WriteFailed));
+                if !deferred {
                     host.coordinator
                         .set_queued_composer_busy_since(next, &old_wait());
                     let since = host.coordinator.queue.front().unwrap().composer_busy_since;
@@ -7615,6 +8463,7 @@ mod tests {
                                 host.show(DRAFT.to_vec());
                                 host.coordinator
                                     .set_queued_composer_busy_since(next, &old_wait());
+                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, next);
                                 let before = host.pty.written.clone();
                                 for _ in 0..64 {
                                     let _ = turn(host);
@@ -7663,7 +8512,7 @@ mod tests {
                                 reconcile.operation =
                                     InputControlOperation::Receipt(ReceiptAction::Reconcile {
                                         input_id: first,
-                                        expected: storage::InputState::InProgress,
+                                        expected: storage::InputState::Uncertain,
                                         disposition: storage::InputDisposition::AbandonedUncertain,
                                         evidence_ref:
                                             "synthetic:positive-literal-later-before-write-failure"
@@ -8033,6 +8882,7 @@ mod tests {
                         .unwrap();
                         host.coordinator
                             .set_queued_composer_busy_since(waiting.input_id, &old_wait());
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, waiting.input_id);
                         form(host);
                         for _ in 0..64 {
                             let _ = turn(host);
@@ -8309,6 +9159,111 @@ mod tests {
                     assert_eq!(reply.status, SubmissionStatus::Accepted);
                     assert_eq!(host.pty.program, vec![encoded()]);
                 });
+            }
+
+            mod immediate_failure_bookkeeping {
+                use crate::runtime::input::tests::ordinary_prompt::staged_delivery::*;
+
+                fn expired() -> Instant {
+                    let deadline = Instant::now();
+                    std::thread::sleep(Duration::from_millis(2));
+                    deadline
+                }
+
+                fn fail_advance_at_an_expired_deadline(host: &mut Host) {
+                    host.drain();
+                    let failed = host.coordinator.advance(
+                        &mut host.fixture.conn,
+                        &mut host.transport,
+                        &mut host.pty,
+                        &host.controller,
+                        expired(),
+                    );
+                    assert!(
+                        failed.is_err(),
+                        "a written attempt fails at its expired deadline"
+                    );
+                }
+
+                fn assert_recorded_uncertain_write_failed(host: &Host, input_id: i64) {
+                    let row = storage::get_input(&host.fixture.conn, input_id).unwrap();
+                    assert_eq!(row.state, storage::InputState::Uncertain, "{row:?}");
+                    assert_eq!(
+                        row.stop_cause,
+                        Some(storage::StopCause::WriteFailed),
+                        "{row:?}"
+                    );
+                    assert!(row.has_stalled_blocker_provenance(), "{row:?}");
+                    assert_eq!(
+                        host.coordinator.held_composer.map(|(blocker, _)| blocker),
+                        Some(input_id),
+                        "the written attempt still holds the composer"
+                    );
+                }
+
+                #[test]
+                fn a_written_immediate_prompt_failing_in_advance_after_its_literal_records_uncertain_write_failed()
+                 {
+                    with_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:d1-literal"));
+                        let id = host.hooks.input_id();
+                        fail_advance_at_an_expired_deadline(host);
+                        assert_recorded_uncertain_write_failed(host, id);
+                    });
+                }
+
+                #[test]
+                fn a_written_immediate_prompt_failing_in_advance_after_its_submit_key_records_uncertain_write_failed()
+                 {
+                    with_host(|host| {
+                        host.confirm_submissions = false;
+                        until_literal_written(host, prompt_request(host, "prompt:d1-submit"));
+                        let id = host.hooks.input_id();
+                        std::thread::sleep(host.stage_settle + Duration::from_millis(50));
+                        while host.pty.stage_bytes().len() < 2 {
+                            assert!(Instant::now() < host.until, "the submit stage is written");
+                            host.drain();
+                            assert!(host.advance().is_none(), "no reply before verification");
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        fail_advance_at_an_expired_deadline(host);
+                        assert_recorded_uncertain_write_failed(host, id);
+                    });
+                }
+
+                #[test]
+                fn a_written_immediate_prompt_failing_in_its_pre_write_drain_records_uncertain_write_failed()
+                 {
+                    with_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:d2-drain"));
+                        let id = host.hooks.input_id();
+                        host.child_output(b"echo");
+                        let drained = host.coordinator.progress_with_manual(
+                            &mut host.transport,
+                            |transport| {
+                                transport.quiesce_for_input(
+                                    &mut host.human,
+                                    &mut host.pty,
+                                    &mut host.output,
+                                    &mut host.controller.observer(
+                                        &host.writer,
+                                        &crate::runtime::RealObservationClock,
+                                    ),
+                                    expired(),
+                                )
+                            },
+                        );
+                        let failure =
+                            drained.expect_err("the pre-write drain fails at its deadline");
+                        let _reply = host.coordinator.pending_attempt_failed(
+                            &mut host.fixture.conn,
+                            &host.controller,
+                            failure,
+                        );
+                        host.coordinator.finish_pending_attempt();
+                        assert_recorded_uncertain_write_failed(host, id);
+                    });
+                }
             }
 
             mod stop_cause {
@@ -8666,10 +9621,12 @@ mod tests {
                 reply.input_id.expect("queued work has a durable input ID")
             }
 
-            /// Drives runner turns with no further request until `done` holds.
+            /// Drives runner turns, each housekeeping the queue first as `tick_running` does, with
+            /// no further request until `done` holds.
             pub(super) fn turns_until(host: &mut Host, mut done: impl FnMut(&Host) -> bool) {
                 while !done(host) {
                     assert!(Instant::now() < host.until, "queued work resolves in time");
+                    housekeep(host);
                     host.drain();
                     host.advance();
                     std::thread::sleep(Duration::from_millis(5));
@@ -8938,6 +9895,1961 @@ mod tests {
                         "a preview consumed by poll publishes no delivery result"
                     );
                 });
+            }
+
+            /// Lets each screen reach the controller, then outlives the drain deadline, as a slow
+            /// observer callback does while injected keystrokes keep the child echoing.
+            pub(in crate::runtime::input) struct ExpiringObserver<O> {
+                pub(in crate::runtime::input) inner: O,
+                pub(in crate::runtime::input) deadline: Instant,
+            }
+            impl<O: crate::runtime::transport::ScreenObserver>
+                crate::runtime::transport::ScreenObserver for ExpiringObserver<O>
+            {
+                fn observe(&mut self, screen: &crate::runtime::ScreenSnapshot) -> Result<()> {
+                    let observed = self.inner.observe(screen);
+                    std::thread::sleep(
+                        self.deadline.saturating_duration_since(Instant::now())
+                            + Duration::from_millis(1),
+                    );
+                    observed
+                }
+                fn input_health(&self) -> crate::runtime::ObservationHealth {
+                    self.inner.input_health()
+                }
+                fn parser_failure(&mut self) -> Result<()> {
+                    self.inner.parser_failure()
+                }
+            }
+
+            /// `complete_pending_input` on a written immediate attempt whose drain deadline expires
+            /// inside the observer callback.
+            fn fail_pending_drain_mid_observation(host: &mut Host) {
+                host.child_output(b"echo of injected keys");
+                let deadline = Instant::now() + Duration::from_millis(30);
+                let drained =
+                    host.coordinator
+                        .progress_with_manual(&mut host.transport, |transport| {
+                            transport.quiesce_for_input(
+                                &mut host.human,
+                                &mut host.pty,
+                                &mut host.output,
+                                &mut ExpiringObserver {
+                                    inner: host.controller.observer(
+                                        &host.writer,
+                                        &crate::runtime::RealObservationClock,
+                                    ),
+                                    deadline,
+                                },
+                                deadline,
+                            )
+                        });
+                let failure = drained.expect_err("the pre-write drain fails at its deadline");
+                let _reply = host.coordinator.pending_attempt_failed(
+                    &mut host.fixture.conn,
+                    &host.controller,
+                    failure,
+                );
+                host.coordinator.finish_pending_attempt();
+            }
+
+            /// One `tick_running` turn with no client attempt in flight: the transport tick, the
+            /// observation poll, then the queue turn, which advances only on a quiescent drain.
+            fn queue_turn(host: &mut Host) {
+                host.coordinator
+                    .progress_with_manual(&mut host.transport, |transport| {
+                        transport.tick(
+                            &mut host.human,
+                            &mut host.pty,
+                            &mut host.output,
+                            &mut host
+                                .controller
+                                .observer(&host.writer, &crate::runtime::RealObservationClock),
+                        )
+                    })
+                    .unwrap();
+                host.controller
+                    .poll(
+                        &host.transport.snapshot(),
+                        &host.writer,
+                        &crate::runtime::RealObservationClock,
+                    )
+                    .unwrap();
+                if matches!(host.quiesce_once(), InputDrain::Quiescent) {
+                    let _ = host.try_advance();
+                }
+            }
+
+            #[test]
+            fn run_34_a_deadline_expired_immediate_write_releases_its_consumed_queued_head() {
+                with_permission_host(Duration::from_secs(30), |host| {
+                    assert!(
+                        host.handle(host.request("prompt:run-34-blocker"))
+                            .unwrap()
+                            .is_none()
+                    );
+                    while host.pty.stages.is_empty() {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the blocker's literal is written"
+                        );
+                        host.drain();
+                        assert!(host.advance().is_none());
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    let blocker = host.hooks.input_id();
+                    fail_pending_drain_mid_observation(host);
+                    let blocking = row(host, blocker);
+                    assert_eq!(blocking.state, storage::InputState::Uncertain);
+                    assert_eq!(blocking.stop_cause, Some(storage::StopCause::WriteFailed));
+
+                    let message = host.message("queued behind the blocker");
+                    let request = preview_request(host, &message, &canonical_preview(&message));
+                    let head = queued(host, request, "earlier_input");
+                    let offers = host.pty.offers.len();
+                    assert!(matches!(
+                        host.receipt(crate::runtime::ReceiptAction::Reconcile {
+                            input_id: blocker,
+                            expected: storage::InputState::Uncertain,
+                            disposition: storage::InputDisposition::Submitted,
+                            evidence_ref: "audit:pane-shows-submitted".into(),
+                        })
+                        .unwrap(),
+                        InputControlReply::Receipt(crate::runtime::ReceiptReply::Settled {
+                            input_id
+                        }) if input_id == blocker
+                    ));
+                    assert!(
+                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
+                            .unwrap()
+                            .iter()
+                            .any(|consumed| consumed.message_id == message.message_id)
+                    );
+
+                    host.child_output(SCREEN);
+                    let bound = Instant::now() + Duration::from_secs(3);
+                    while row(host, head).state == storage::InputState::Ready {
+                        assert!(
+                            Instant::now() < bound,
+                            "the consumed head is released; drain blocker {:?}",
+                            host.transport.drain_blocker()
+                        );
+                        queue_turn(host);
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    assert_not_submitted(host, head, "message_consumed");
+                    assert_eq!(
+                        host.pty.offers.len(),
+                        offers,
+                        "the consumed preview is never typed"
+                    );
+                    assert_eq!(result_events(host, head), 0);
+                });
+            }
+
+            fn queued_ids(host: &Host) -> Vec<i64> {
+                host.coordinator
+                    .queue
+                    .iter()
+                    .map(|queued| queued.input_id)
+                    .collect()
+            }
+
+            fn exec_request(host: &Host, key: &str) -> InputControlRequest {
+                let mut request = host.request(key);
+                request.operation = InputControlOperation::SubmitExec(SubmitInput {
+                    operation_key: key.into(),
+                    input_kind: storage::InputKind::Exec,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                request
+            }
+
+            fn cancel_queued(host: &mut Host, input_id: i64) {
+                let reply = host
+                    .receipt(crate::runtime::ReceiptAction::Reconcile {
+                        input_id,
+                        expected: storage::InputState::Ready,
+                        disposition: storage::InputDisposition::NotSubmitted,
+                        evidence_ref: "audit:cancelled-before-resend".into(),
+                    })
+                    .unwrap();
+                assert!(
+                    matches!(
+                        reply,
+                        InputControlReply::Receipt(crate::runtime::ReceiptReply::Settled {
+                            input_id: settled
+                        }) if settled == input_id
+                    ),
+                    "the coordinator cancels the queued receipt"
+                );
+            }
+
+            fn assert_cancelled_zero_byte(host: &Host, input_id: i64) {
+                let input = row(host, input_id);
+                assert_eq!(input.state, storage::InputState::Settled, "{input:?}");
+                assert_eq!(
+                    input.disposition,
+                    Some(storage::InputDisposition::NotSubmitted)
+                );
+                assert_eq!(input.delivery_method, None);
+                assert_eq!(result_events(host, input_id), 0);
+            }
+
+            #[test]
+            fn reconcile_cancels_a_queued_ready_prompt_and_pops_it_from_the_fifo_in_place() {
+                with_permission_host(Duration::from_secs(20), |host| {
+                    form(host);
+                    let first = queued(host, host.request("prompt:first"), "interaction_open");
+                    let cancelled =
+                        queued(host, host.request("prompt:cancelled"), "interaction_open");
+                    let last = queued(host, host.request("prompt:last"), "interaction_open");
+                    cancel_queued(host, cancelled);
+                    assert_cancelled_zero_byte(host, cancelled);
+                    assert_eq!(
+                        queued_ids(host),
+                        vec![first, last],
+                        "the settled entry leaves the FIFO in the same call"
+                    );
+                    close(host);
+                    turns_until(host, |host| settled(host, first) && settled(host, last));
+                    assert_eq!(
+                        host.pty.program,
+                        vec![encoded(), encoded()],
+                        "only the two remaining prompts are typed"
+                    );
+                    assert!(!host.coordinator.input_fenced);
+                    assert_cancelled_zero_byte(host, cancelled);
+                });
+            }
+
+            #[test]
+            fn reconcile_cancels_a_queued_ready_exec_and_pops_it_from_the_fifo() {
+                with_permission_host(Duration::from_secs(20), |host| {
+                    form(host);
+                    let exec = queued(
+                        host,
+                        exec_request(host, "exec:cancelled"),
+                        "interaction_open",
+                    );
+                    let after = queued(host, host.request("prompt:after-exec"), "interaction_open");
+                    cancel_queued(host, exec);
+                    assert_cancelled_zero_byte(host, exec);
+                    assert_eq!(queued_ids(host), vec![after]);
+                    close(host);
+                    turns_until(host, |host| settled(host, after));
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                    assert!(!host.coordinator.input_fenced);
+                });
+            }
+
+            #[test]
+            fn housekeeping_fails_loudly_and_fences_input_when_a_queued_receipt_changed_outside_the_runner_queue()
+             {
+                with_permission_host(Duration::from_secs(20), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:changed"), "interaction_open");
+                    let owner = host.fixture.run.owner();
+                    storage::settle_zero_byte_deferred(
+                        &mut host.fixture.conn,
+                        &owner,
+                        id,
+                        storage::InputState::Ready,
+                        "target_inactive",
+                    )
+                    .unwrap();
+                    let failure = host
+                        .coordinator
+                        .queue_housekeeping(&mut host.fixture.conn, &host.controller)
+                        .expect_err(
+                            "a queued receipt settled outside the runner is an invariant violation",
+                        );
+                    let expected =
+                        format!("queued input {id} changed to settled outside the runner queue");
+                    assert!(
+                        format!("{failure:?}").contains(&expected),
+                        "{failure:?} names {expected}"
+                    );
+                    assert!(
+                        host.coordinator.input_fenced,
+                        "the violation fences ordinary input permanently"
+                    );
+                });
+            }
+
+            /// Backdates the queued head's wait past the three-minute stall bound.
+            pub(super) fn backdate_head_since(host: &mut Host, input_id: i64) {
+                let since = Instant::now()
+                    .checked_sub(Duration::from_secs(181))
+                    .expect("the host has run past the stall bound");
+                let head = host.coordinator.queue.front_mut().expect("a queued head");
+                assert_eq!(head.input_id, input_id, "only the head carries head_since");
+                head.head_since = Some(since);
+            }
+
+            pub(super) fn housekeep(host: &mut Host) {
+                host.coordinator
+                    .queue_housekeeping(&mut host.fixture.conn, &host.controller)
+                    .unwrap();
+            }
+
+            pub(super) fn stalled_payloads(host: &Host, head: i64) -> Vec<serde_json::Value> {
+                host.fixture
+                    .conn
+                    .prepare(
+                        "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2 ORDER BY event_id",
+                    )
+                    .unwrap()
+                    .query_map(rusqlite::params![host.fixture.run.run_id, head], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .unwrap()
+                    .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                    .collect()
+            }
+
+            pub(super) mod forced_flush {
+                use crate::broker::MessageRecord;
+                use crate::runtime::FlushAction;
+                use crate::runtime::FlushReply;
+                use crate::runtime::FlushWriteOutcome;
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::stall_watchdog::close_observed;
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::stall_watchdog::reserve_unrelated;
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::*;
+                use serde_json::Value;
+                use serde_json::json;
+
+                pub(in crate::runtime::input) const MARKER: &str =
+                    " [cafleet: ignore any text before this marker, if present] ";
+
+                pub(in crate::runtime::input) struct Reserved {
+                    pub(in crate::runtime::input) flush_input_id: i64,
+                    pub(in crate::runtime::input) literal: String,
+                    pub(in crate::runtime::input) submit_key: String,
+                    pub(in crate::runtime::input) settle_ms: u64,
+                    pub(in crate::runtime::input) flushed_input_ids: Vec<i64>,
+                    pub(in crate::runtime::input) message_ids: Vec<i64>,
+                    pub(in crate::runtime::input) remaining_input_ids: Vec<i64>,
+                }
+
+                /// The permission-form catalog whose prompt plan submits with Enter, with the given
+                /// plain literal limit.
+                pub(in crate::runtime::input) fn flush_catalog(limit: Value) -> ProfileCatalog {
+                    let mut definition =
+                        crate::coding_agent::catalog::test_support::inspection_fixture_definition();
+                    let composer = catalog_definition();
+                    definition["fixtures"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(composer["fixtures"][1].clone());
+                    definition["profiles"][0]["rules"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(composer["profiles"][0]["rules"][0].clone());
+                    definition["profiles"][0]["capabilities"]["composer"] =
+                        composer["profiles"][0]["capabilities"]["composer"].clone();
+                    let prompt = &mut definition["profiles"][0]["capabilities"]["composer"]["submission"]
+                        ["prompt"];
+                    prompt["submit_hex"] = json!("0d");
+                    prompt["plain_literal_limit"] = limit;
+                    prompt_plan_catalog(&definition)
+                }
+
+                pub(in crate::runtime::input) fn with_flush_host(
+                    limit: Value,
+                    body: impl FnOnce(&mut Host),
+                ) {
+                    with_profile_host_until(
+                        flush_catalog(limit),
+                        encoded(),
+                        HostProfile::metadata(),
+                        Instant::now() + Duration::from_secs(30),
+                        body,
+                    );
+                }
+
+                fn expires(host: &Host) -> u64 {
+                    crate::runtime::InputExpiration::capture(
+                        host.until,
+                        &mut crate::runtime::RealInputDeadlineClock,
+                    )
+                    .unwrap()
+                    .monotonic_ns()
+                }
+
+                pub(in crate::runtime::input) fn flush(
+                    host: &mut Host,
+                    action: FlushAction,
+                ) -> std::result::Result<FlushReply, InputFailure> {
+                    host.coordinator.flush_received(
+                        &mut host.fixture.conn,
+                        action,
+                        &host.controller,
+                        &host.transport,
+                        host.until,
+                    )
+                }
+
+                pub(in crate::runtime::input) fn reserve(host: &mut Host) -> FlushReply {
+                    let action = FlushAction::Reserve {
+                        director_member_id: host.fixture.run.director_member_id,
+                        expires_at_mono_ns: expires(host),
+                    };
+                    flush(host, action).unwrap()
+                }
+
+                pub(in crate::runtime::input) fn settle(
+                    host: &mut Host,
+                    flush_input_id: i64,
+                    outcome: FlushWriteOutcome,
+                ) -> std::result::Result<FlushReply, InputFailure> {
+                    flush(
+                        host,
+                        FlushAction::Settle {
+                            flush_input_id,
+                            outcome,
+                        },
+                    )
+                }
+
+                pub(in crate::runtime::input) fn refusal(reply: FlushReply) -> String {
+                    match reply {
+                        FlushReply::Refused { cause } => cause,
+                        FlushReply::Empty => panic!("expected a refusal, got Empty"),
+                        FlushReply::Reserved { .. } => panic!("expected a refusal, got Reserved"),
+                        FlushReply::Settled { .. } => panic!("expected a refusal, got Settled"),
+                        FlushReply::NotOutstanding { .. } => {
+                            panic!("expected a refusal, got NotOutstanding")
+                        }
+                    }
+                }
+
+                pub(in crate::runtime::input) fn reserved(reply: FlushReply) -> Reserved {
+                    match reply {
+                        FlushReply::Reserved {
+                            flush_input_id,
+                            literal,
+                            submit_key,
+                            settle_ms,
+                            flushed_input_ids,
+                            message_ids,
+                            remaining_input_ids,
+                        } => Reserved {
+                            flush_input_id,
+                            literal,
+                            submit_key,
+                            settle_ms,
+                            flushed_input_ids,
+                            message_ids,
+                            remaining_input_ids,
+                        },
+                        FlushReply::Refused { cause } => panic!("the flush was refused: {cause}"),
+                        _ => panic!("expected a reservation"),
+                    }
+                }
+
+                /// Previews queued behind a form that has since closed, so no queue turn has
+                /// started them and the composer shows the empty synthetic state.
+                pub(in crate::runtime::input) fn queued_previews(
+                    host: &mut Host,
+                    bodies: &[&str],
+                ) -> Vec<(MessageRecord, i64)> {
+                    form(host);
+                    let previews = bodies
+                        .iter()
+                        .map(|body| {
+                            let message = host.message(body);
+                            let request =
+                                preview_request(host, &message, &canonical_preview(&message));
+                            let id = queued(host, request, "interaction_open");
+                            (message, id)
+                        })
+                        .collect();
+                    close_observed(host);
+                    previews
+                }
+
+                /// Starts an immediate prompt, whose unconfirmed write keeps it the in-flight
+                /// attempt, and queues a preview behind it.
+                fn preview_behind_an_in_flight_attempt(host: &mut Host, body: &str) {
+                    assert!(
+                        host.handle(host.request("prompt:in-flight"))
+                            .unwrap()
+                            .is_none()
+                    );
+                    while host.pty.stages.is_empty() {
+                        assert!(Instant::now() < host.until, "the attempt starts writing");
+                        host.drain();
+                        assert!(host.advance().is_none());
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(host.coordinator.pending.is_some());
+                    let message = host.message(body);
+                    let request = preview_request(host, &message, &canonical_preview(&message));
+                    queued(host, request, "earlier_input");
+                }
+
+                fn ids(previews: &[(MessageRecord, i64)]) -> Vec<i64> {
+                    previews.iter().map(|(_, id)| *id).collect()
+                }
+
+                fn message_ids(previews: &[(MessageRecord, i64)]) -> Vec<i64> {
+                    previews
+                        .iter()
+                        .map(|(message, _)| message.message_id)
+                        .collect()
+                }
+
+                fn literal_of(lines: impl IntoIterator<Item = String>) -> String {
+                    format!(
+                        "{MARKER}{}",
+                        lines.into_iter().collect::<Vec<_>>().join(" ")
+                    )
+                }
+
+                fn result_payloads(host: &Host, input_id: i64) -> Vec<Value> {
+                    host.fixture
+                        .conn
+                        .prepare(
+                            "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                        )
+                        .unwrap()
+                        .query_map(rusqlite::params![host.fixture.run.run_id, input_id], |row| {
+                            row.get::<_, String>(0)
+                        })
+                        .unwrap()
+                        .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                        .collect()
+                }
+
+                fn await_results(host: &mut Host, input_ids: &[i64]) {
+                    while input_ids
+                        .iter()
+                        .any(|id| result_payloads(host, *id).is_empty())
+                    {
+                        assert!(Instant::now() < host.until, "flush results are published");
+                        host.drain();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
+
+                fn notified_at(host: &Host, message_id: i64) -> Option<String> {
+                    host.fixture
+                        .conn
+                        .query_row(
+                            "SELECT notified_at FROM messages WHERE message_id=?1",
+                            [message_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap()
+                }
+
+                fn queued_ids(host: &Host) -> Vec<i64> {
+                    host.coordinator
+                        .queue
+                        .iter()
+                        .map(|queued| queued.input_id)
+                        .collect()
+                }
+
+                fn flush_rows(host: &Host) -> i64 {
+                    host.fixture
+                        .conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM member_input_operations WHERE kind='flush'",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap()
+                }
+
+                fn show(host: &mut Host, rows: &[&str]) {
+                    let mut bytes = b"\x1b[2J".to_vec();
+                    for (index, row) in rows.iter().enumerate() {
+                        bytes.extend(
+                            format!("\x1b[{};1H{row}", 24 - rows.len() + index + 1).into_bytes(),
+                        );
+                    }
+                    host.show(bytes);
+                }
+
+                fn queued_prompt(host: &mut Host, key: &str) -> i64 {
+                    queued(host, host.request(key), "interaction_open")
+                }
+
+                #[test]
+                fn reserve_moves_every_live_preview_into_the_slot_and_marks_it_forced() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["first stalled", "second stalled"]);
+                        let reservation = reserved(reserve(host));
+                        let run_id = host.fixture.run.run_id;
+                        assert_eq!(
+                            reservation.literal,
+                            literal_of(
+                                previews
+                                    .iter()
+                                    .map(|(message, _)| canonical_preview(message))
+                            )
+                        );
+                        assert_eq!(reservation.submit_key, "Enter");
+                        assert_eq!(reservation.settle_ms, 500);
+                        assert_eq!(reservation.flushed_input_ids, ids(&previews));
+                        assert_eq!(reservation.message_ids, message_ids(&previews));
+                        assert!(reservation.remaining_input_ids.is_empty());
+                        let receipt = row(host, reservation.flush_input_id);
+                        assert_eq!(receipt.kind, storage::InputKind::Flush);
+                        assert_eq!(receipt.state, storage::InputState::InProgress);
+                        assert_eq!(
+                            receipt.delivery_method,
+                            Some(storage::DeliveryMethod::Forced)
+                        );
+                        assert_eq!(receipt.message_id, None);
+                        assert_eq!(receipt.operation_key, format!("flush:{run_id}:1"));
+                        let mut digested = reservation.literal.as_bytes().to_vec();
+                        digested.push(b'\r');
+                        assert_eq!(receipt.payload_digest, crate::digest::sha256_hex(&digested));
+                        for (_, id) in &previews {
+                            let preview = row(host, *id);
+                            assert_eq!(preview.state, storage::InputState::InProgress);
+                            assert_eq!(
+                                preview.delivery_method,
+                                Some(storage::DeliveryMethod::Forced)
+                            );
+                            assert_eq!(preview.flush_input_id, Some(reservation.flush_input_id));
+                        }
+                        assert!(
+                            queued_ids(host).is_empty(),
+                            "the slot holds the selected entries"
+                        );
+                        assert!(host.coordinator.flush.is_some());
+                        assert!(
+                            host.pty.offers.is_empty(),
+                            "the runner writes no flush byte"
+                        );
+                    });
+                }
+
+                #[test]
+                fn reserve_selects_in_in_memory_fifo_order_even_when_a_requeued_head_has_a_higher_id()
+                 {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["older receipt", "requeued head"]);
+                        let requeued = host.coordinator.queue.pop_back().unwrap();
+                        host.coordinator.queue.push_front(requeued);
+                        assert_eq!(queued_ids(host), vec![previews[1].1, previews[0].1]);
+                        let reservation = reserved(reserve(host));
+                        assert_eq!(
+                            reservation.flushed_input_ids,
+                            vec![previews[1].1, previews[0].1]
+                        );
+                        assert_eq!(
+                            reservation.message_ids,
+                            vec![previews[1].0.message_id, previews[0].0.message_id]
+                        );
+                        assert_eq!(
+                            reservation.literal,
+                            literal_of([
+                                canonical_preview(&previews[1].0),
+                                canonical_preview(&previews[0].0)
+                            ])
+                        );
+                    });
+                }
+
+                #[test]
+                fn reserve_leaves_consumed_previews_to_housekeeping_and_replies_empty_without_live_ones()
+                 {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["consumed", "live"]);
+                        host.fixture
+                            .conn
+                            .execute(
+                                "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                                [previews[0].0.message_id],
+                            )
+                            .unwrap();
+                        let reservation = reserved(reserve(host));
+                        assert_eq!(reservation.flushed_input_ids, vec![previews[1].1]);
+                        assert_eq!(row(host, previews[0].1).state, storage::InputState::Ready);
+                    });
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["consumed only"]);
+                        host.fixture
+                            .conn
+                            .execute(
+                                "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                                [previews[0].0.message_id],
+                            )
+                            .unwrap();
+                        assert!(matches!(reserve(host), FlushReply::Empty));
+                        assert_eq!(flush_rows(host), 0);
+                        assert_eq!(row(host, previews[0].1).state, storage::InputState::Ready);
+                    });
+                    with_flush_host(Value::Null, |host| {
+                        assert!(matches!(reserve(host), FlushReply::Empty));
+                        assert_eq!(flush_rows(host), 0);
+                    });
+                }
+
+                #[test]
+                fn a_fenced_runner_or_failed_manual_accounting_refuses_the_flush() {
+                    for fault in ["fenced", "manual"] {
+                        with_flush_host(Value::Null, |host| {
+                            let previews = queued_previews(host, &["stalled"]);
+                            if fault == "fenced" {
+                                host.coordinator.input_fenced = true;
+                            } else {
+                                host.coordinator.manual_accounting_failed = true;
+                            }
+                            assert_eq!(refusal(reserve(host)), "the member's input is fenced");
+                            assert_eq!(flush_rows(host), 0);
+                            assert_eq!(row(host, previews[0].1).state, storage::InputState::Ready);
+                        });
+                    }
+                }
+
+                #[test]
+                fn an_outstanding_flush_or_an_in_flight_attempt_refuses_another_flush() {
+                    with_flush_host(Value::Null, |host| {
+                        queued_previews(host, &["first"]);
+                        reserved(reserve(host));
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            "a runner input attempt is in flight; retry"
+                        );
+                        assert_eq!(flush_rows(host), 1);
+                    });
+                    with_flush_host(Value::Null, |host| {
+                        preview_behind_an_in_flight_attempt(host, "behind an attempt");
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            "a runner input attempt is in flight; retry"
+                        );
+                        assert_eq!(flush_rows(host), 0);
+                    });
+                }
+
+                #[test]
+                fn unresolved_ordinary_receipts_refuse_the_flush_listing_every_id() {
+                    with_flush_host(Value::Null, |host| {
+                        queued_previews(host, &["behind unresolved"]);
+                        let writing = reserve_unrelated(host, "prompt:still-writing");
+                        let uncertain = reserve_unrelated(host, "prompt:uncertain");
+                        let owner = host.fixture.run.owner();
+                        storage::record_input_uncertain(
+                            &mut host.fixture.conn,
+                            &owner,
+                            uncertain,
+                            storage::StopCause::WriteFailed,
+                        )
+                        .unwrap();
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            format!(
+                                "input {writing},{uncertain} is unresolved; reconcile it with cafleet input reconcile before flushing"
+                            )
+                        );
+                        assert_eq!(flush_rows(host), 0);
+                    });
+                }
+
+                #[test]
+                fn a_queued_prompt_or_exec_refuses_the_flush_naming_the_lowest_and_the_rest() {
+                    with_flush_host(Value::Null, |host| {
+                        form(host);
+                        let message = host.message("preview behind prompts");
+                        let request = preview_request(host, &message, &canonical_preview(&message));
+                        queued(host, request, "interaction_open");
+                        let first = queued_prompt(host, "prompt:first-queued");
+                        let mut exec = host.request("exec:queued");
+                        exec.operation = InputControlOperation::SubmitExec(SubmitInput {
+                            operation_key: "exec:queued".into(),
+                            input_kind: storage::InputKind::Exec,
+                            message_id: None,
+                            literal: LITERAL.into(),
+                        });
+                        let second = queued(host, exec, "interaction_open");
+                        close_observed(host);
+                        let director = host.fixture.run.director_member_id;
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            format!(
+                                "queued prompt input {first} cannot be rebuilt from its receipt; settle it with 'cafleet input reconcile {first} --from-member-id {director} --disposition not-submitted --evidence-ref REFERENCE', then resend it; also queued: {second}"
+                            )
+                        );
+                        assert_eq!(flush_rows(host), 0);
+                    });
+                }
+
+                #[test]
+                fn an_open_interaction_refuses_the_flush() {
+                    with_flush_host(Value::Null, |host| {
+                        queued_previews(host, &["behind a reopened form"]);
+                        form(host);
+                        let cause = refusal(reserve(host));
+                        assert!(
+                            cause.starts_with("an interaction is open (") && cause.ends_with(')'),
+                            "{cause}"
+                        );
+                        assert_eq!(flush_rows(host), 0);
+                    });
+                }
+
+                #[test]
+                fn an_unreadable_or_mode_switched_draft_refuses_the_flush() {
+                    with_flush_host(Value::Null, |host| {
+                        queued_previews(host, &["behind an unreadable composer"]);
+                        show(host, &["no composer on screen"]);
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            "the composer draft cannot be read from the screen"
+                        );
+                        show(host, &["Synthetic state", "!ls -la", "State end"]);
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            "the composer draft starts with mode prefix '!'"
+                        );
+                        show(
+                            host,
+                            &["Synthetic state", "a leftover draft !", "State end"],
+                        );
+                        let reservation = reserved(reserve(host));
+                        assert_eq!(reservation.flushed_input_ids.len(), 1);
+                    });
+                }
+
+                #[test]
+                fn a_profile_without_a_prompt_plan_refuses_the_flush() {
+                    let catalog = flush_catalog(Value::Null).without_submission(
+                        crate::coding_agent::CodingAgent::Codex,
+                        ComposerOperation::Prompt,
+                    );
+                    with_profile_host_until(
+                        catalog,
+                        encoded(),
+                        HostProfile::metadata(),
+                        Instant::now() + Duration::from_secs(30),
+                        |host| {
+                            queued_previews(host, &["without a plan"]);
+                            assert_eq!(
+                                refusal(reserve(host)),
+                                format!(
+                                    "the codex profile has no submission plan for native version {VERSION}"
+                                )
+                            );
+                        },
+                    );
+                }
+
+                #[test]
+                fn refusals_follow_the_reserve_check_order() {
+                    with_flush_host(Value::Null, |host| {
+                        queued_previews(host, &["ordered refusals"]);
+                        reserve_unrelated(host, "prompt:unresolved");
+                        host.coordinator.input_fenced = true;
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            "the member's input is fenced",
+                            "fencing precedes unresolved receipts"
+                        );
+                    });
+                    with_flush_host(Value::Null, |host| {
+                        preview_behind_an_in_flight_attempt(host, "ordered refusals");
+                        reserve_unrelated(host, "prompt:unresolved");
+                        assert_eq!(
+                            refusal(reserve(host)),
+                            "a runner input attempt is in flight; retry",
+                            "an in-flight attempt precedes unresolved receipts"
+                        );
+                    });
+                    with_flush_host(Value::Null, |host| {
+                        form(host);
+                        let message = host.message("ordered refusals");
+                        let request = preview_request(host, &message, &canonical_preview(&message));
+                        queued(host, request, "interaction_open");
+                        let prompt = queued_prompt(host, "prompt:queued");
+                        let unresolved = reserve_unrelated(host, "prompt:unresolved");
+                        assert!(
+                            refusal(reserve(host))
+                                .starts_with(&format!("input {unresolved} is unresolved")),
+                            "unresolved receipts precede a queued prompt"
+                        );
+                        let owner = host.fixture.run.owner();
+                        storage::record_input_state(
+                            &mut host.fixture.conn,
+                            &owner,
+                            unresolved,
+                            storage::InputState::InProgress,
+                            storage::InputState::Accepted,
+                        )
+                        .unwrap();
+                        host.fixture
+                            .conn
+                            .execute(
+                                "UPDATE member_input_operations SET state='settled',disposition='submitted',evidence_ref='audit' WHERE input_id=?1",
+                                [unresolved],
+                            )
+                            .unwrap();
+                        assert!(
+                            refusal(reserve(host))
+                                .starts_with(&format!("queued prompt input {prompt} ")),
+                            "a queued prompt precedes an open interaction"
+                        );
+                    });
+                }
+
+                fn bytes_limit(max: u64) -> Value {
+                    json!({"unit":"bytes","max":max})
+                }
+
+                #[test]
+                fn an_oversized_canonical_literal_falls_back_to_pointer_lines() {
+                    with_flush_host(Value::Null, |host| {
+                        let body = "x".repeat(3900);
+                        let bodies = vec![body.as_str(); 20];
+                        let previews = queued_previews(host, &bodies);
+                        let canonical = literal_of(
+                            previews
+                                .iter()
+                                .map(|(message, _)| canonical_preview(message)),
+                        );
+                        assert!(canonical.len() > crate::runtime::input::FLUSH_LITERAL_LIMIT);
+                        let reservation = reserved(reserve(host));
+                        assert_eq!(
+                            reservation.literal,
+                            literal_of(previews.iter().map(|(message, _)| {
+                                crate::delivery::pointer_preview_line(message)
+                            }))
+                        );
+                        assert!(
+                            reservation.literal.len() <= crate::runtime::input::FLUSH_LITERAL_LIMIT
+                        );
+                        assert_eq!(reservation.flushed_input_ids, ids(&previews));
+                        assert!(reservation.remaining_input_ids.is_empty());
+                    });
+                }
+
+                #[test]
+                fn a_plan_limit_flushes_the_longest_fitting_pointer_prefix_and_keeps_the_rest_queued()
+                 {
+                    let messages_fit = |previews: &[(MessageRecord, i64)], count: usize| {
+                        literal_of(
+                            previews[..count]
+                                .iter()
+                                .map(|(message, _)| crate::delivery::pointer_preview_line(message)),
+                        )
+                        .len() as u64
+                    };
+                    with_flush_host(bytes_limit(1), |host| {
+                        let previews = queued_previews(host, &["one", "two", "three"]);
+                        let cause = refusal(reserve(host));
+                        assert!(
+                            cause.starts_with("the first queued preview is ")
+                                && cause.ends_with(
+                                    " bytes as a pointer line, above the flush limit of 1 bytes"
+                                ),
+                            "{cause}"
+                        );
+                        assert!(messages_fit(&previews, 1) > 1);
+                        assert_eq!(flush_rows(host), 0);
+                    });
+                    let body = "a body longer than its pointer line ".repeat(8);
+                    let bodies = [body.as_str(); 3];
+                    let mut limit = 0;
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &bodies);
+                        limit = messages_fit(&previews, 2);
+                        let canonical = literal_of(
+                            previews[..1]
+                                .iter()
+                                .map(|(message, _)| canonical_preview(message)),
+                        );
+                        assert!(
+                            canonical.len() as u64 > limit,
+                            "even one canonical line exceeds two pointer lines"
+                        );
+                    });
+                    with_flush_host(bytes_limit(limit), |host| {
+                        let previews = queued_previews(host, &bodies);
+                        let reservation = reserved(reserve(host));
+                        assert_eq!(
+                            reservation.flushed_input_ids,
+                            vec![previews[0].1, previews[1].1]
+                        );
+                        assert_eq!(reservation.remaining_input_ids, vec![previews[2].1]);
+                        assert_eq!(
+                            reservation.literal,
+                            literal_of(previews[..2].iter().map(|(message, _)| {
+                                crate::delivery::pointer_preview_line(message)
+                            }))
+                        );
+                        assert_eq!(queued_ids(host), vec![previews[2].1]);
+                        assert_eq!(row(host, previews[2].1).state, storage::InputState::Ready);
+                    });
+                }
+
+                #[test]
+                fn an_acknowledged_settle_submits_every_preview_and_publishes_forced_results() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["first", "second"]);
+                        let reservation = reserved(reserve(host));
+                        let flush_id = reservation.flush_input_id;
+                        let director = host.fixture.run.director_member_id;
+                        assert!(matches!(
+                            settle(host, flush_id, FlushWriteOutcome::Acknowledged).unwrap(),
+                            FlushReply::Settled { flush_input_id } if flush_input_id == flush_id
+                        ));
+                        let receipt = row(host, flush_id);
+                        assert_eq!(receipt.state, storage::InputState::Settled);
+                        assert_eq!(
+                            receipt.disposition,
+                            Some(storage::InputDisposition::Submitted)
+                        );
+                        assert_eq!(
+                            receipt.evidence_ref.as_deref(),
+                            Some(
+                                format!(
+                                    "director={director}; multiplexer acknowledged forced flush"
+                                )
+                                .as_str()
+                            )
+                        );
+                        for (message, id) in &previews {
+                            let preview = row(host, *id);
+                            assert_eq!(preview.state, storage::InputState::Settled);
+                            assert_eq!(
+                                preview.disposition,
+                                Some(storage::InputDisposition::Submitted)
+                            );
+                            assert_eq!(
+                                preview.evidence_ref.as_deref(),
+                                Some(format!("forced flush input {flush_id}").as_str())
+                            );
+                            assert!(notified_at(host, message.message_id).is_some());
+                        }
+                        await_results(host, &ids(&previews));
+                        for (_, id) in &previews {
+                            let payloads = result_payloads(host, *id);
+                            assert_eq!(payloads.len(), 1);
+                            let payload = &payloads[0];
+                            assert_eq!(payload["stage"], "submitted");
+                            assert_eq!(
+                                payload["delivery"],
+                                json!({"status":"submitted","method":"forced","reason":null})
+                            );
+                            assert_eq!(payload["flush_input_id"], flush_id);
+                            assert_eq!(payload["director_action"], Value::Null);
+                        }
+                        assert!(
+                            result_payloads(host, flush_id).is_empty(),
+                            "the flush receipt publishes no event"
+                        );
+                        assert!(host.coordinator.flush.is_none());
+                    });
+                }
+
+                #[test]
+                fn a_not_started_settle_returns_the_previews_to_the_fifo_front_in_order() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["first", "second"]);
+                        let reservation = reserved(reserve(host));
+                        let flush_id = reservation.flush_input_id;
+                        let director = host.fixture.run.director_member_id;
+                        form(host);
+                        let later = queued_prompt(host, "prompt:queued-during-the-flush");
+                        assert!(matches!(
+                            settle(host, flush_id, FlushWriteOutcome::NotStarted).unwrap(),
+                            FlushReply::Settled { .. }
+                        ));
+                        let receipt = row(host, flush_id);
+                        assert_eq!(
+                            receipt.disposition,
+                            Some(storage::InputDisposition::NotSubmitted)
+                        );
+                        assert_eq!(
+                            receipt.evidence_ref.as_deref(),
+                            Some(
+                                format!("director={director}; no multiplexer process started")
+                                    .as_str()
+                            )
+                        );
+                        for (_, id) in &previews {
+                            let preview = row(host, *id);
+                            assert_eq!(preview.state, storage::InputState::Ready);
+                            assert_eq!(preview.delivery_method, None);
+                            assert_eq!(preview.flush_input_id, None);
+                            assert!(result_payloads(host, *id).is_empty());
+                        }
+                        assert_eq!(queued_ids(host), vec![previews[0].1, previews[1].1, later]);
+                        assert!(host.coordinator.flush.is_none());
+                    });
+                }
+
+                #[test]
+                fn an_uncertain_settle_leaves_the_flush_and_its_previews_uncertain_with_unknown_results()
+                 {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["first", "second"]);
+                        let flush_id = reserved(reserve(host)).flush_input_id;
+                        assert!(matches!(
+                            settle(host, flush_id, FlushWriteOutcome::Uncertain).unwrap(),
+                            FlushReply::Settled { .. }
+                        ));
+                        for id in [flush_id].into_iter().chain(ids(&previews)) {
+                            let input = row(host, id);
+                            assert_eq!(input.state, storage::InputState::Uncertain);
+                            assert_eq!(input.stop_cause, Some(storage::StopCause::WriteFailed));
+                        }
+                        await_results(host, &ids(&previews));
+                        for (_, id) in &previews {
+                            let payload = &result_payloads(host, *id)[0];
+                            assert_eq!(payload["stage"], "unknown");
+                            assert_eq!(payload["cause"], json!({"kind":"write_failed"}));
+                            assert_eq!(
+                                payload["delivery"],
+                                json!({"status":"uncertain","method":"forced","reason":null})
+                            );
+                            assert_eq!(payload["flush_input_id"], flush_id);
+                        }
+                        assert!(host.coordinator.flush.is_none());
+                    });
+                }
+
+                fn expire_slot(host: &mut Host) {
+                    host.coordinator.flush.as_mut().unwrap().expires_at = Instant::now()
+                        .checked_sub(Duration::from_millis(1))
+                        .unwrap();
+                    housekeep(host);
+                }
+
+                #[test]
+                fn an_expired_reservation_becomes_uncertain_at_housekeeping() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["expiring"]);
+                        let flush_id = reserved(reserve(host)).flush_input_id;
+                        expire_slot(host);
+                        assert!(host.coordinator.flush.is_none());
+                        for id in [flush_id, previews[0].1] {
+                            let input = row(host, id);
+                            assert_eq!(input.state, storage::InputState::Uncertain);
+                            assert_eq!(input.stop_cause, Some(storage::StopCause::WriteFailed));
+                        }
+                    });
+                }
+
+                #[test]
+                fn a_late_or_mismatched_settle_reports_the_durable_state_and_writes_nothing() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["late"]);
+                        let flush_id = reserved(reserve(host)).flush_input_id;
+                        expire_slot(host);
+                        let before = [row(host, flush_id), row(host, previews[0].1)];
+                        match settle(host, flush_id, FlushWriteOutcome::Acknowledged).unwrap() {
+                            FlushReply::NotOutstanding {
+                                flush_input_id,
+                                state,
+                                disposition,
+                            } => {
+                                assert_eq!(flush_input_id, flush_id);
+                                assert_eq!(state, storage::InputState::Uncertain);
+                                assert_eq!(disposition, None);
+                            }
+                            _ => panic!("a late settle is not outstanding"),
+                        }
+                        assert_eq!([row(host, flush_id), row(host, previews[0].1)], before);
+                        host.receipt(crate::runtime::ReceiptAction::Reconcile {
+                            input_id: flush_id,
+                            expected: storage::InputState::Uncertain,
+                            disposition: storage::InputDisposition::Submitted,
+                            evidence_ref: "audit:pane-shows-the-flush".into(),
+                        })
+                        .unwrap();
+                        match settle(host, flush_id, FlushWriteOutcome::NotStarted).unwrap() {
+                            FlushReply::NotOutstanding {
+                                state, disposition, ..
+                            } => {
+                                assert_eq!(state, storage::InputState::Settled);
+                                assert_eq!(disposition, Some(storage::InputDisposition::Submitted));
+                            }
+                            _ => panic!("a settle after reconciliation is not outstanding"),
+                        }
+                        assert!(
+                            settle(host, i64::MAX, FlushWriteOutcome::Acknowledged).is_err(),
+                            "an unknown flush identity is a receipt-identity error"
+                        );
+                    });
+                }
+
+                #[test]
+                fn reconcile_refuses_a_flush_whose_slot_is_still_outstanding() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["outstanding"]);
+                        let flush_id = reserved(reserve(host)).flush_input_id;
+                        let failure = host
+                            .receipt(crate::runtime::ReceiptAction::Reconcile {
+                                input_id: flush_id,
+                                expected: storage::InputState::InProgress,
+                                disposition: storage::InputDisposition::Submitted,
+                                evidence_ref: "audit:too-early".into(),
+                            })
+                            .err()
+                            .expect("an outstanding flush is not reconciled");
+                        assert!(
+                            format!("{failure:?}")
+                                .contains(&format!("flush {flush_id} is still outstanding")),
+                            "{failure:?}"
+                        );
+                        assert_eq!(row(host, flush_id).state, storage::InputState::InProgress);
+                        assert_eq!(
+                            row(host, previews[0].1).state,
+                            storage::InputState::InProgress
+                        );
+                    });
+                }
+
+                #[test]
+                fn fencing_settles_an_outstanding_flush_uncertain_as_runner_stopped() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["fenced"]);
+                        let flush_id = reserved(reserve(host)).flush_input_id;
+                        host.coordinator.fence(host.until).unwrap();
+                        for id in [flush_id, previews[0].1] {
+                            let input = row(host, id);
+                            assert_eq!(input.state, storage::InputState::Uncertain);
+                            assert_eq!(input.stop_cause, Some(storage::StopCause::RunnerStopped));
+                        }
+                        assert!(host.coordinator.flush.is_none());
+                    });
+                }
+
+                #[test]
+                fn the_queue_head_behind_an_outstanding_flush_stalls_as_forced_flush() {
+                    with_flush_host(Value::Null, |host| {
+                        let previews = queued_previews(host, &["flushed"]);
+                        let flush_id = reserved(reserve(host)).flush_input_id;
+                        form(host);
+                        let head = queued_prompt(host, "prompt:behind-the-flush");
+                        close_observed(host);
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::stall_watchdog::assert_stalled_by(
+                            host,
+                            head,
+                            "forced_flush",
+                            Some(flush_id),
+                            Value::Null,
+                        );
+                        assert_eq!(
+                            row(host, previews[0].1).state,
+                            storage::InputState::InProgress
+                        );
+                    });
+                }
+
+                mod gate_tolerance {
+                    use crate::runtime::input::tests::ordinary_prompt::deferred_queue::forced_flush::*;
+
+                    fn proceeds(host: &mut Host, gate: &str) {
+                        let reservation = reserved(reserve(host));
+                        assert_eq!(reservation.flushed_input_ids.len(), 1, "{gate} proceeds");
+                    }
+
+                    #[test]
+                    fn transient_drain_blockers_and_lagging_persistence_let_the_flush_proceed() {
+                        for blocker in ["reply", "arriving"] {
+                            with_flush_host(Value::Null, |host| {
+                                queued_previews(host, &["behind a pending drain"]);
+                                if blocker == "reply" {
+                                    host.type_human(b"\x1b");
+                                    assert_eq!(host.quiesce_once(), InputDrain::Pending);
+                                } else {
+                                    host.child_output(b"more output arriving");
+                                }
+                                proceeds(host, blocker);
+                            });
+                        }
+                    }
+
+                    #[test]
+                    fn an_interrupted_terminal_read_lets_the_flush_proceed() {
+                        with_flush_host(Value::Null, |host| {
+                            queued_previews(host, &["behind an interrupted read"]);
+                            host.human.interruptions = 1;
+                            assert_eq!(host.quiesce_once(), InputDrain::Pending);
+                            assert_eq!(
+                                host.transport.drain_blocker(),
+                                Some("terminal input interrupted")
+                            );
+                            proceeds(host, "terminal input interrupted");
+                        });
+                    }
+
+                    #[test]
+                    fn lagging_transition_or_evidence_persistence_lets_the_flush_proceed() {
+                        for lag in ["transitions", "evidence"] {
+                            with_flush_host(Value::Null, |host| {
+                                queued_previews(host, &["behind lagging persistence"]);
+                                if lag == "transitions" {
+                                    host.controller.hold_pending_transition();
+                                    assert!(host.controller.pending_transition_count() > 0);
+                                } else {
+                                    host.controller.hold_pending_evidence();
+                                    assert!(host.controller.status().retained_evidence);
+                                }
+                                proceeds(host, lag);
+                                host.controller.release_held_health();
+                            });
+                        }
+                    }
+
+                    #[test]
+                    fn a_degraded_or_unclassified_observation_refuses_the_flush() {
+                        with_flush_host(Value::Null, |host| {
+                            queued_previews(host, &["behind a degraded observer"]);
+                            host.controller.degrade("observer_error");
+                            assert_eq!(
+                                refusal(reserve(host)),
+                                "the member's screen observation is unavailable: observation degraded: observer_error"
+                            );
+                        });
+                        with_flush_host(Value::Null, |host| {
+                            queued_previews(host, &["behind an unknown screen"]);
+                            host.controller.lose_visibility();
+                            assert_eq!(
+                                refusal(reserve(host)),
+                                "the member's screen observation is unavailable: unknown"
+                            );
+                        });
+                    }
+
+                    #[test]
+                    fn an_incomplete_observation_lets_the_flush_proceed_as_a_last_resort() {
+                        with_flush_host(Value::Null, |host| {
+                            queued_previews(host, &["behind an incomplete observation"]);
+                            host.child_output(b"\x1b[0m");
+                            let deadline = Instant::now() + Duration::from_millis(30);
+                            let latched = host.coordinator.progress_with_manual(
+                                &mut host.transport,
+                                |transport| {
+                                    transport.quiesce_for_input(
+                                        &mut host.human,
+                                        &mut host.pty,
+                                        &mut host.output,
+                                        &mut crate::runtime::input::tests::ordinary_prompt::deferred_queue::ExpiringObserver {
+                                            inner: host.controller.observer(
+                                                &host.writer,
+                                                &crate::runtime::RealObservationClock,
+                                            ),
+                                            deadline,
+                                        },
+                                        deadline,
+                                    )
+                                },
+                            );
+                            assert!(latched.is_err());
+                            proceeds(host, "observation incomplete");
+                        });
+                    }
+
+                    #[test]
+                    fn a_closed_terminal_end_refuses_the_flush() {
+                        for (end, reason) in [
+                            ("outer", "outer terminal closed"),
+                            ("native", "native output closed"),
+                        ] {
+                            with_flush_host(Value::Null, |host| {
+                                queued_previews(host, &["behind a closed end"]);
+                                if end == "outer" {
+                                    host.human.eof = true;
+                                } else {
+                                    host.pty.child.eof = true;
+                                }
+                                let _ = host.quiesce_once();
+                                assert_eq!(
+                                    refusal(reserve(host)),
+                                    format!(
+                                        "the member's screen observation is unavailable: {reason}"
+                                    )
+                                );
+                            });
+                        }
+                    }
+
+                    #[test]
+                    fn a_pending_finalization_lets_the_flush_proceed() {
+                        with_flush_host(Value::Null, |host| {
+                            form(host);
+                            let finalizing = queued_prompt(host, "prompt:finalizing");
+                            let message = host.message("behind a finalization");
+                            let request =
+                                preview_request(host, &message, &canonical_preview(&message));
+                            let preview = queued(host, request, "interaction_open");
+                            close_observed(host);
+                            assert_eq!(
+                                host.coordinator.queue.pop_front().unwrap().input_id,
+                                finalizing
+                            );
+                            host.coordinator.finalization =
+                                Some(crate::runtime::input::PendingFinalization {
+                                    input_id: finalizing,
+                                    expected: storage::InputState::Ready,
+                                    reason: "target_changed",
+                                });
+                            let reservation = reserved(reserve(host));
+                            assert_eq!(reservation.flushed_input_ids, vec![preview]);
+                        });
+                        with_flush_host(Value::Null, |host| {
+                            let previews =
+                                queued_previews(host, &["behind an attempt finalization"]);
+                            let attempted = reserve_unrelated(host, "prompt:finalizing-attempt");
+                            assert_eq!(row(host, attempted).state, storage::InputState::InProgress);
+                            host.coordinator.finalization =
+                                Some(crate::runtime::input::PendingFinalization {
+                                    input_id: attempted,
+                                    expected: storage::InputState::InProgress,
+                                    reason: "pane_input_busy",
+                                });
+                            let reservation = reserved(reserve(host));
+                            assert_eq!(
+                                reservation.flushed_input_ids,
+                                vec![previews[0].1],
+                                "the in-progress receipt awaiting finalization is no unresolved receipt"
+                            );
+                        });
+                    }
+
+                    #[test]
+                    fn a_pending_stamp_is_the_unresolved_receipt_exception() {
+                        with_flush_host(Value::Null, |host| {
+                            queued_previews(host, &["behind a pending stamp"]);
+                            let stamped = reserve_unrelated(host, "prompt:awaiting-its-stamp");
+                            let owner = host.fixture.run.owner();
+                            storage::record_input_state(
+                                &mut host.fixture.conn,
+                                &owner,
+                                stamped,
+                                storage::InputState::InProgress,
+                                storage::InputState::Accepted,
+                            )
+                            .unwrap();
+                            assert!(
+                                refusal(reserve(host))
+                                    .starts_with(&format!("input {stamped} is unresolved"))
+                            );
+                            host.coordinator.pending_stamp =
+                                Some(crate::runtime::input::PendingStamp {
+                                    input_id: stamped,
+                                    stage: SubmissionStage::Submitted,
+                                });
+                            proceeds(host, "pending_stamp");
+                        });
+                    }
+                }
+            }
+
+            mod flush_reconcile {
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::*;
+
+                /// An uncertain flush receipt owning two uncertain forced previews, as a flush
+                /// whose write outcome was unreadable leaves them.
+                fn uncertain_flush(host: &mut Host) -> (i64, [i64; 2]) {
+                    let run_id = host.fixture.run.run_id;
+                    let now = crate::time::now_stamp();
+                    host.fixture
+                        .conn
+                        .execute(
+                            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,delivery_method,stop_cause) VALUES(?1,?2,'flush',?3,'uncertain',?4,?4,'forced','write_failed')",
+                            rusqlite::params![run_id, format!("flush:{run_id}:1"), "f".repeat(64), now],
+                        )
+                        .unwrap();
+                    let flush = host.fixture.conn.last_insert_rowid();
+                    let previews = ["first flushed preview", "second flushed preview"].map(|body| {
+                        let message = host.message(body);
+                        host.fixture
+                            .conn
+                            .execute(
+                                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,preview_attempt,delivery_method,flush_input_id,stop_cause) VALUES(?1,?2,'preview',?3,'uncertain',?4,?4,?5,1,'forced',?6,'write_failed')",
+                                rusqlite::params![
+                                    run_id,
+                                    crate::broker::runtime::preview_operation_key(run_id, message.message_id, 1).unwrap(),
+                                    "e".repeat(64),
+                                    now,
+                                    message.message_id,
+                                    flush
+                                ],
+                            )
+                            .unwrap();
+                        host.fixture.conn.last_insert_rowid()
+                    });
+                    (flush, previews)
+                }
+
+                fn reconcile(
+                    host: &mut Host,
+                    input_id: i64,
+                    disposition: storage::InputDisposition,
+                ) -> std::result::Result<InputControlReply, InputFailure> {
+                    host.receipt(crate::runtime::ReceiptAction::Reconcile {
+                        input_id,
+                        expected: storage::InputState::Uncertain,
+                        disposition,
+                        evidence_ref: "audit:pane-shows-the-flush".into(),
+                    })
+                }
+
+                #[test]
+                fn reconciling_a_flush_settles_it_and_every_forced_preview_it_owns() {
+                    for disposition in [
+                        storage::InputDisposition::Submitted,
+                        storage::InputDisposition::NotSubmitted,
+                        storage::InputDisposition::AbandonedUncertain,
+                    ] {
+                        with_permission_host(Duration::from_secs(10), |host| {
+                            let (flush, previews) = uncertain_flush(host);
+                            let reply = reconcile(host, flush, disposition).unwrap();
+                            assert!(
+                                matches!(
+                                    reply,
+                                    InputControlReply::Receipt(crate::runtime::ReceiptReply::Settled {
+                                        input_id
+                                    }) if input_id == flush
+                                ),
+                                "{disposition:?}"
+                            );
+                            for id in [flush].into_iter().chain(previews) {
+                                let settled = row(host, id);
+                                assert_eq!(
+                                    settled.state,
+                                    storage::InputState::Settled,
+                                    "{disposition:?}: {settled:?}"
+                                );
+                                assert_eq!(
+                                    settled.disposition,
+                                    Some(disposition),
+                                    "{disposition:?}: {settled:?}"
+                                );
+                            }
+                        });
+                    }
+                }
+
+                #[test]
+                fn reconciling_one_forced_preview_is_refused_in_favour_of_its_flush() {
+                    with_permission_host(Duration::from_secs(10), |host| {
+                        let (flush, previews) = uncertain_flush(host);
+                        let before = [flush, previews[0], previews[1]].map(|id| row(host, id));
+                        let failure =
+                            reconcile(host, previews[0], storage::InputDisposition::Submitted)
+                                .err()
+                                .expect("a forced preview settles only with its flush");
+                        let expected = format!(
+                            "input {} belongs to forced flush {flush}; reconcile the flush",
+                            previews[0]
+                        );
+                        assert!(format!("{failure:?}").contains(&expected), "{failure:?}");
+                        assert_eq!(
+                            [flush, previews[0], previews[1]].map(|id| row(host, id)),
+                            before
+                        );
+                    });
+                }
+            }
+
+            pub(super) mod stall_watchdog {
+                use crate::pane_lock::PaneLock;
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::*;
+                use serde_json::Value;
+                use serde_json::json;
+
+                const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.";
+
+                /// A head queued behind an interaction that has since closed, so no queue turn
+                /// has started it and no live gate holds it.
+                pub(in crate::runtime::input) fn waiting_head(host: &mut Host, key: &str) -> i64 {
+                    form(host);
+                    let id = queued(host, host.request(key), "interaction_open");
+                    close_observed(host);
+                    id
+                }
+
+                /// Closes the interaction and drives frames until the observer no longer reports
+                /// it, so the head's wait is no longer reset by an obscured interaction.
+                pub(in crate::runtime::input) fn close_observed(host: &mut Host) {
+                    close(host);
+                    while crate::runtime::input::ordinary_blocker(&host.controller.status())
+                        .is_some()
+                    {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the observer reports the interaction closed"
+                        );
+                        std::thread::sleep(Duration::from_millis(5));
+                        host.drain();
+                    }
+                }
+
+                pub(in crate::runtime::input) fn reserve_unrelated(
+                    host: &mut Host,
+                    key: &str,
+                ) -> i64 {
+                    let owner = host.fixture.run.owner();
+                    let input = storage::test_support::reserve_input(
+                        &mut host.fixture.conn,
+                        &owner,
+                        &storage::NewInput {
+                            operation_key: key.into(),
+                            kind: storage::InputKind::Prompt,
+                            payload_digest: "e".repeat(64),
+                            message_id: None,
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(input.state, storage::InputState::InProgress);
+                    input.input_id
+                }
+
+                fn await_stalled(host: &mut Host, head: i64) -> Value {
+                    loop {
+                        host.drain();
+                        let mut payloads = stalled_payloads(host, head);
+                        if !payloads.is_empty() {
+                            assert_eq!(payloads.len(), 1, "{payloads:?}");
+                            return payloads.remove(0);
+                        }
+                        assert!(
+                            Instant::now() < host.until,
+                            "the watchdog publishes the stalled head"
+                        );
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
+
+                fn settle_publications(host: &mut Host) {
+                    let until = Instant::now() + Duration::from_millis(300);
+                    while Instant::now() < until {
+                        host.drain();
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+
+                fn assert_unpublished(host: &mut Host, head: i64) {
+                    settle_publications(host);
+                    assert!(stalled_payloads(host, head).is_empty());
+                }
+
+                fn review_stalled_queue(host: &Host, head: i64) -> Value {
+                    let run = &host.fixture.run;
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    json!({
+                        "kind":"review_stalled_queue",
+                        "instruction":REVIEW_STALLED_QUEUE,
+                        "inspect_argv":["cafleet","input","show",head.to_string(),"--json","--database-url",url],
+                        "flush_argv":["cafleet","member","flush",run.member_id.to_string(),
+                            "--from-member-id",run.director_member_id.to_string(),"--database-url",url],
+                    })
+                }
+
+                /// Backdates the head, runs housekeeping and checks the single published event.
+                pub(in crate::runtime::input) fn assert_stalled_by(
+                    host: &mut Host,
+                    head: i64,
+                    kind: &str,
+                    blocking: Option<i64>,
+                    detail: Value,
+                ) {
+                    backdate_head_since(host, head);
+                    housekeep(host);
+                    let payload = await_stalled(host, head);
+                    assert_eq!(
+                        payload["cause"],
+                        json!({"kind":kind,"detail":detail}),
+                        "{payload}"
+                    );
+                    assert_eq!(payload["blocking_input_id"], json!(blocking), "{payload}");
+                    assert_eq!(payload["director_action"], review_stalled_queue(host, head));
+                    let waiting = chrono::DateTime::parse_from_rfc3339(
+                        payload["waiting_since"].as_str().unwrap(),
+                    )
+                    .unwrap();
+                    assert!(
+                        chrono::Utc::now().signed_duration_since(waiting)
+                            >= chrono::Duration::seconds(180),
+                        "waiting_since is the head's wait start: {payload}"
+                    );
+                    housekeep(host);
+                    housekeep(host);
+                    settle_publications(host);
+                    assert_eq!(
+                        stalled_payloads(host, head).len(),
+                        1,
+                        "the watchdog publishes once per head"
+                    );
+                }
+
+                fn until_head_obstacle(host: &mut Host, obstacle: &str) {
+                    while host.coordinator.queue.front().unwrap().obstacle != obstacle {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the queue turn records {obstacle}"
+                        );
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
+
+                #[test]
+                fn a_head_no_listed_gate_explains_stalls_as_queue_turn_not_reached() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:unexplained");
+                        assert_stalled_by(host, head, "queue_turn_not_reached", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_an_in_flight_immediate_attempt_stalls_as_immediate_attempt() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        assert!(
+                            host.handle(host.request("prompt:in-flight"))
+                                .unwrap()
+                                .is_none()
+                        );
+                        while host.pty.stages.is_empty() {
+                            assert!(Instant::now() < host.until, "the attempt starts writing");
+                            host.drain();
+                            assert!(host.advance().is_none());
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        let attempt = host.hooks.input_id();
+                        let head =
+                            queued(host, host.request("prompt:behind-attempt"), "earlier_input");
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "immediate_attempt",
+                            Some(attempt),
+                            Value::Null,
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_a_pending_finalization_stalls_as_pending_finalization() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                        form(host);
+                        let finalizing =
+                            queued(host, host.request("prompt:finalizing"), "interaction_open");
+                        let head = queued(
+                            host,
+                            host.request("prompt:behind-finalization"),
+                            "interaction_open",
+                        );
+                        close_observed(host);
+                        assert_eq!(
+                            host.coordinator.queue.pop_front().unwrap().input_id,
+                            finalizing
+                        );
+                        host.coordinator.finalization =
+                            Some(crate::runtime::input::PendingFinalization {
+                                input_id: finalizing,
+                                expected: storage::InputState::Ready,
+                                reason: "target_changed",
+                            });
+                        backdate_head_since(host, head);
+                        let mut outage = crate::db::connect(&url).unwrap();
+                        let exclusive = outage
+                            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+                            .unwrap();
+                        housekeep(host);
+                        drop(exclusive);
+                        assert!(
+                            host.coordinator.finalization.is_some(),
+                            "storage kept the finalization retry outstanding"
+                        );
+                        let payload = await_stalled(host, head);
+                        assert_eq!(
+                            payload["cause"],
+                            json!({"kind":"pending_finalization","detail":null})
+                        );
+                        assert_eq!(payload["blocking_input_id"], finalizing);
+                        assert_eq!(payload["director_action"], review_stalled_queue(host, head));
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_unresolved_inputs_names_the_lowest_unresolved_receipt() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-unresolved");
+                        let first = reserve_unrelated(host, "prompt:first-unresolved");
+                        reserve_unrelated(host, "prompt:second-unresolved");
+                        assert_stalled_by(host, head, "unresolved_input", Some(first), Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_behind_a_pending_drain_stalls_as_drain_pending_with_its_blocker() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-drain");
+                        host.type_human(b"\x1b");
+                        assert_eq!(host.quiesce_once(), InputDrain::Pending);
+                        host.coordinator.record_queue_drain(InputDrain::Pending);
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "drain_pending",
+                            None,
+                            json!("terminal reply pending"),
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_head_whose_queue_turn_met_a_busy_pane_lock_stalls_as_pane_input_busy() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                        let head = waiting_head(host, "prompt:behind-busy-pane");
+                        let _held = PaneLock::try_acquire(&url, &host.placement())
+                            .unwrap()
+                            .unwrap();
+                        until_head_obstacle(host, "pane_input_busy");
+                        assert_stalled_by(host, head, "pane_input_busy", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_whose_attempt_budget_cannot_fit_its_stages_stalls_as_delivery_budget_exhausted()
+                 {
+                    with_profile_host_until(
+                        crate::runtime::input::tests::ordinary_prompt::staged_delivery::permission_catalog(),
+                        encoded(),
+                        HostProfile {
+                            stage_settle: Duration::from_secs(6),
+                            ..HostProfile::metadata()
+                        },
+                        Instant::now() + Duration::from_secs(20),
+                        |host| {
+                            let head = waiting_head(host, "prompt:over-budget");
+                            for _ in 0..8 {
+                                host.drain();
+                                host.advance();
+                            }
+                            assert!(host.pty.offers.is_empty(), "the head never starts");
+                            assert_eq!(row(host, head).state, storage::InputState::Ready);
+                            assert_stalled_by(
+                                host,
+                                head,
+                                "delivery_budget_exhausted",
+                                None,
+                                Value::Null,
+                            );
+                        },
+                    );
+                }
+
+                #[test]
+                fn a_head_whose_housekeeping_read_met_a_storage_outage_stalls_as_storage_unavailable()
+                 {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                        let head = waiting_head(host, "prompt:behind-outage");
+                        let mut outage = crate::db::connect(&url).unwrap();
+                        let exclusive = outage
+                            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+                            .unwrap();
+                        housekeep(host);
+                        drop(exclusive);
+                        assert_eq!(row(host, head).state, storage::InputState::Ready);
+                        assert_stalled_by(host, head, "storage_unavailable", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn a_head_whose_queue_turn_failed_stalls_as_attempt_failed_with_the_bounded_error()
+                {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-failure");
+                        host.coordinator
+                            .record_attempt_failure(&CafleetError::App("é".repeat(200)));
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "attempt_failed",
+                            None,
+                            json!("é".repeat(128)),
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_live_cause_takes_precedence_over_a_recorded_obstacle() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:live-and-recorded");
+                        host.coordinator
+                            .record_attempt_failure(&CafleetError::App("recorded".into()));
+                        let unresolved = reserve_unrelated(host, "prompt:live-unresolved");
+                        assert_stalled_by(
+                            host,
+                            head,
+                            "unresolved_input",
+                            Some(unresolved),
+                            Value::Null,
+                        );
+                    });
+                }
+
+                #[test]
+                fn an_interaction_resets_the_head_wait_and_a_fresh_wait_publishes_after_it_closes()
+                {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-reopened-form");
+                        backdate_head_since(host, head);
+                        form(host);
+                        housekeep(host);
+                        host.advance();
+                        assert_eq!(
+                            host.coordinator.queue.front().unwrap().head_since,
+                            None,
+                            "an interaction blocking the head excludes its time"
+                        );
+                        assert_unpublished(host, head);
+                        close_observed(host);
+                        housekeep(host);
+                        let restarted = host
+                            .coordinator
+                            .queue
+                            .front()
+                            .unwrap()
+                            .head_since
+                            .expect("the head's wait restarts when the interaction closes");
+                        assert!(restarted.elapsed() < Duration::from_secs(10));
+                        assert_unpublished(host, head);
+                        assert_stalled_by(host, head, "queue_turn_not_reached", None, Value::Null);
+                    });
+                }
+
+                #[test]
+                fn each_head_publishes_its_own_single_event() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        form(host);
+                        let first =
+                            queued(host, host.request("prompt:first-head"), "interaction_open");
+                        let second =
+                            queued(host, host.request("prompt:second-head"), "interaction_open");
+                        close_observed(host);
+                        assert_stalled_by(host, first, "queue_turn_not_reached", None, Value::Null);
+                        cancel_queued(host, first);
+                        housekeep(host);
+                        assert_unpublished(host, second);
+                        assert_stalled_by(
+                            host,
+                            second,
+                            "queue_turn_not_reached",
+                            None,
+                            Value::Null,
+                        );
+                        assert_eq!(stalled_payloads(host, first).len(), 1);
+                    });
+                }
             }
 
             #[test]
@@ -10040,6 +12952,40 @@ mod tests {
                     row(host, input_id).state,
                     storage::InputState::Accepted | storage::InputState::Settled
                 )
+            }
+
+            #[test]
+            fn a_head_waiting_on_a_busy_composer_stalls_as_composer_busy() {
+                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::stall_watchdog;
+                with_busy_host(busy_catalog(), encoded(), |host| {
+                    busy(host);
+                    let head =
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued(
+                            host,
+                            host.request("prompt:behind-draft"),
+                            "composer_busy",
+                        );
+                    while host
+                        .coordinator
+                        .queue
+                        .front()
+                        .unwrap()
+                        .composer_busy_since
+                        .is_none()
+                    {
+                        assert!(Instant::now() < host.until, "the queue turn waits");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    stall_watchdog::assert_stalled_by(
+                        host,
+                        head,
+                        "composer_busy",
+                        None,
+                        serde_json::Value::Null,
+                    );
+                });
             }
 
             #[test]

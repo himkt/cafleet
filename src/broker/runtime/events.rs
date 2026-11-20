@@ -267,6 +267,7 @@ fn published_delivery(
         cause: result_stop_cause(&input, published.status),
         action: left_input_action(conn, &get_run(conn, event.run_id)?, &input)?,
         stalled: None,
+        flush_input_id: input.flush_input_id,
         delivery: published,
         stage: payload["stage"].clone(),
     })
@@ -303,7 +304,8 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
         cause_json: if view.event.kind == RuntimeEventKind::InputDeliveryStalled {
             Some(
                 json!({"kind":"input_delivery_stalled","input_id":payload["input_id"],
-                "blocking_input_id":payload["blocking_input_id"],"waiting_since":payload["waiting_since"]}),
+                "blocking_input_id":payload["blocking_input_id"],"waiting_since":payload["waiting_since"],
+                "cause":payload["cause"]}),
             )
         } else if view.event.kind == RuntimeEventKind::InputDeliveryResult {
             let mut cause = json!({"kind":"input_delivery_result",
@@ -402,27 +404,7 @@ pub(crate) fn validate_transition(
         if transition.kind == RuntimeEventKind::InputDeliveryResult {
             validate_delivery_cause(transition)?;
         } else if transition.kind == RuntimeEventKind::InputDeliveryStalled {
-            let record = transition
-                .cause_json
-                .as_ref()
-                .and_then(Value::as_object)
-                .ok_or_else(|| invalid("cause_json", "stalled delivery record required"))?;
-            require(
-                record.len() == 4
-                    && record["kind"] == "input_delivery_stalled"
-                    && record["input_id"].as_i64().is_some_and(|id| id > 0)
-                    && record["blocking_input_id"]
-                        .as_i64()
-                        .is_some_and(|id| id > 0),
-                "cause_json",
-                "a stalled record names its head, blocker and wait start",
-            )?;
-            rfc3339(
-                record["waiting_since"]
-                    .as_str()
-                    .ok_or_else(|| invalid("waiting_since", "timestamp required"))?,
-                "waiting_since",
-            )?;
+            validate_stalled_record(transition)?;
         } else {
             validate_cause(transition)?;
         }
@@ -434,6 +416,138 @@ pub(crate) fn validate_transition(
         )?;
     }
     Ok(())
+}
+
+/// What a stalled queue cause requires of `blocking_input_id`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StalledBlocker {
+    Required,
+    Optional,
+    Absent,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StalledCause {
+    ForcedFlush,
+    ImmediateAttempt,
+    PendingFinalization,
+    HeldComposer,
+    UnresolvedInput,
+    DrainPending,
+    PaneInputBusy,
+    DeliveryBudgetExhausted,
+    StorageUnavailable,
+    AttemptFailed,
+    ComposerBusy,
+    QueueTurnNotReached,
+}
+
+impl StalledCause {
+    fn parse(kind: &str) -> Result<Self, CafleetError> {
+        Ok(match kind {
+            "forced_flush" => Self::ForcedFlush,
+            "immediate_attempt" => Self::ImmediateAttempt,
+            "pending_finalization" => Self::PendingFinalization,
+            "held_composer" => Self::HeldComposer,
+            "unresolved_input" => Self::UnresolvedInput,
+            "drain_pending" => Self::DrainPending,
+            "pane_input_busy" => Self::PaneInputBusy,
+            "delivery_budget_exhausted" => Self::DeliveryBudgetExhausted,
+            "storage_unavailable" => Self::StorageUnavailable,
+            "attempt_failed" => Self::AttemptFailed,
+            "composer_busy" => Self::ComposerBusy,
+            "queue_turn_not_reached" => Self::QueueTurnNotReached,
+            _ => return Err(invalid("cause.kind", "unknown stalled queue cause")),
+        })
+    }
+
+    fn blocker(self) -> StalledBlocker {
+        match self {
+            Self::HeldComposer
+            | Self::ForcedFlush
+            | Self::PendingFinalization
+            | Self::UnresolvedInput => StalledBlocker::Required,
+            Self::ImmediateAttempt => StalledBlocker::Optional,
+            Self::DrainPending
+            | Self::PaneInputBusy
+            | Self::DeliveryBudgetExhausted
+            | Self::StorageUnavailable
+            | Self::AttemptFailed
+            | Self::ComposerBusy
+            | Self::QueueTurnNotReached => StalledBlocker::Absent,
+        }
+    }
+
+    fn has_detail(self) -> bool {
+        matches!(self, Self::DrainPending | Self::AttemptFailed)
+    }
+}
+
+const STALLED_DETAIL_LIMIT: usize = 256;
+
+/// Validates a stalled record's shape and returns its cause.
+fn stalled_cause(record: &Value) -> Result<StalledCause, CafleetError> {
+    let cause = record["cause"]
+        .as_object()
+        .filter(|cause| cause.len() == 2)
+        .ok_or_else(|| invalid("cause", "a stalled cause has exactly kind and detail"))?;
+    let kind = StalledCause::parse(
+        cause["kind"]
+            .as_str()
+            .ok_or_else(|| invalid("cause.kind", "stalled cause kind required"))?,
+    )?;
+    let detail = cause
+        .get("detail")
+        .ok_or_else(|| invalid("cause.detail", "stalled cause detail required"))?;
+    require(
+        if kind.has_detail() {
+            detail
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty() && text.len() <= STALLED_DETAIL_LIMIT)
+        } else {
+            detail.is_null()
+        },
+        "cause.detail",
+        "only drain_pending and attempt_failed carry a bounded detail",
+    )?;
+    let blocking = &record["blocking_input_id"];
+    let named = blocking.as_i64().is_some_and(|id| id > 0);
+    require(
+        named || blocking.is_null(),
+        "blocking_input_id",
+        "a stalled blocker is a positive input ID or null",
+    )?;
+    require(
+        match kind.blocker() {
+            StalledBlocker::Required => named,
+            StalledBlocker::Optional => true,
+            StalledBlocker::Absent => blocking.is_null(),
+        },
+        "blocking_input_id",
+        "the stalled cause decides whether it names a blocker",
+    )?;
+    Ok(kind)
+}
+
+fn validate_stalled_record(transition: &ObservedTransition) -> Result<(), CafleetError> {
+    let record = transition
+        .cause_json
+        .as_ref()
+        .filter(|record| record.as_object().is_some_and(|record| record.len() == 5))
+        .ok_or_else(|| invalid("cause_json", "stalled delivery record required"))?;
+    require(
+        record["kind"] == "input_delivery_stalled"
+            && record["input_id"].as_i64().is_some_and(|id| id > 0),
+        "cause_json",
+        "a stalled record names its head, blocker, wait start and cause",
+    )?;
+    rfc3339(
+        record["waiting_since"]
+            .as_str()
+            .ok_or_else(|| invalid("waiting_since", "timestamp required"))?,
+        "waiting_since",
+    )?;
+    stalled_cause(record).map(|_| ())
 }
 
 fn validate_delivery_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
@@ -603,7 +717,14 @@ struct DeliveryFields {
     stage: Value,
     cause: Option<StopCause>,
     action: Value,
-    stalled: Option<(i64, String)>,
+    stalled: Option<StalledFields>,
+    flush_input_id: Option<i64>,
+}
+
+struct StalledFields {
+    blocking_input_id: Option<i64>,
+    waiting_since: String,
+    cause: Value,
 }
 
 fn input_press_argv(conn: &Connection, run: &RunRecord) -> Result<Value, CafleetError> {
@@ -670,32 +791,50 @@ fn stalled_delivery(
     let input_id = record["input_id"]
         .as_i64()
         .ok_or_else(|| invalid("input_id", "stalled head identity required"))?;
-    let blocking_input_id = record["blocking_input_id"]
-        .as_i64()
-        .ok_or_else(|| invalid("blocking_input_id", "blocking identity required"))?;
+    let cause = stalled_cause(record)?;
+    let blocking_input_id = record["blocking_input_id"].as_i64();
     let input = get_input(conn, input_id)?;
-    let blocking = get_input(conn, blocking_input_id)?;
     require(
         input.run_id == run.run_id
-            && blocking.run_id == run.run_id
             && input.kind != InputKind::PermissionResponse
-            && blocking.kind != InputKind::PermissionResponse
-            && input.deferred_at.is_some()
-            && input_id != blocking_input_id,
+            && input.deferred_at.is_some(),
         "input_id",
-        "a stalled head and its ordinary blocker belong to this run",
+        "a stalled head is a queued ordinary input of this run",
     )?;
+    let blocking = blocking_input_id
+        .map(|blocking_input_id| {
+            let blocking = get_input(conn, blocking_input_id)?;
+            require(
+                blocking.run_id == run.run_id && blocking_input_id != input_id,
+                "blocking_input_id",
+                "a stalled blocker is another input of this run",
+            )?;
+            Ok::<_, CafleetError>(blocking)
+        })
+        .transpose()?;
     if published.is_none() {
         require(
             input.state == InputState::Ready,
             "input_id",
             "a new stalled head must be ready",
         )?;
+    }
+    if cause == StalledCause::HeldComposer {
+        let blocking = blocking
+            .as_ref()
+            .expect("a held-composer cause names its blocker");
         require(
-            blocking.has_stalled_blocker_provenance(),
+            blocking.kind != InputKind::PermissionResponse,
             "blocking_input_id",
-            "a new stalled blocker retains its selected ordinary attempt provenance",
+            "a held composer is held by an ordinary input",
         )?;
+        if published.is_none() {
+            require(
+                blocking.has_stalled_blocker_provenance(),
+                "blocking_input_id",
+                "a new stalled blocker retains its selected ordinary attempt provenance",
+            )?;
+        }
     }
     let expected_delivery = DeliveryProjection {
         status: DeliveryStatus::Queued,
@@ -724,28 +863,65 @@ fn stalled_delivery(
         .ok_or_else(|| invalid("waiting_since", "timestamp required"))?
         .to_owned();
     rfc3339(&waiting_since, "waiting_since")?;
-    let action = left_input_action(conn, run, &blocking)?;
-    let mut inspect = vec![
-        "cafleet".to_owned(),
-        "input".into(),
-        "show".into(),
-        blocking_input_id.to_string(),
-        "--json".into(),
-    ];
-    inspect.extend(action_database_args(conn)?);
+    let action = match blocking
+        .as_ref()
+        .filter(|_| cause == StalledCause::HeldComposer)
+    {
+        Some(blocking) => {
+            let left = left_input_action(conn, run, blocking)?;
+            json!({"kind":"review_stalled_input",
+                "instruction":REVIEW_STALLED_INPUT_INSTRUCTION,
+                "inspect_argv":input_show_argv(conn, blocking.input_id)?,
+                "press_argv":left.get("press_argv").cloned().unwrap_or(Value::Null)})
+        }
+        None => json!({"kind":"review_stalled_queue",
+            "instruction":REVIEW_STALLED_QUEUE_INSTRUCTION,
+            "inspect_argv":input_show_argv(conn, input_id)?,
+            "flush_argv":member_flush_argv(conn, run)?}),
+    };
     Ok(DeliveryFields {
         input_id,
         message_id: input.message_id,
         delivery,
         stage: Value::Null,
         cause: None,
-        stalled: Some((blocking_input_id, waiting_since)),
-        action: json!({"kind":"review_stalled_input",
-            "instruction":"Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.",
-            "inspect_argv":inspect,
-            "press_argv":action.get("press_argv").cloned().unwrap_or(Value::Null)}),
+        stalled: Some(StalledFields {
+            blocking_input_id,
+            waiting_since,
+            cause: record["cause"].clone(),
+        }),
+        flush_input_id: None,
+        action,
     })
 }
+
+fn input_show_argv(conn: &Connection, input_id: i64) -> Result<Value, CafleetError> {
+    let mut argv = vec![
+        "cafleet".to_owned(),
+        "input".into(),
+        "show".into(),
+        input_id.to_string(),
+        "--json".into(),
+    ];
+    argv.extend(action_database_args(conn)?);
+    Ok(json!(argv))
+}
+
+fn member_flush_argv(conn: &Connection, run: &RunRecord) -> Result<Value, CafleetError> {
+    let mut argv = vec![
+        "cafleet".to_owned(),
+        "member".into(),
+        "flush".into(),
+        run.member_id.to_string(),
+        "--from-member-id".into(),
+        run.director_member_id.to_string(),
+    ];
+    argv.extend(action_database_args(conn)?);
+    Ok(json!(argv))
+}
+
+const REVIEW_STALLED_INPUT_INSTRUCTION: &str = "Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.";
+const REVIEW_STALLED_QUEUE_INSTRUCTION: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.";
 
 fn payload(
     run: &RunRecord,
@@ -779,13 +955,17 @@ fn payload(
         }
         payload["input_id"] = json!(fields.input_id);
         payload["message_id"] = json!(fields.message_id);
-        if let Some((blocking_input_id, waiting_since)) = &fields.stalled {
-            payload["blocking_input_id"] = json!(blocking_input_id);
-            payload["waiting_since"] = json!(waiting_since);
+        if let Some(stalled) = &fields.stalled {
+            payload["blocking_input_id"] = json!(stalled.blocking_input_id);
+            payload["waiting_since"] = json!(stalled.waiting_since);
         }
         payload["delivery"] = fields.delivery.to_json();
-        if fields.stalled.is_none() {
-            payload["stage"] = fields.stage.clone();
+        match &fields.stalled {
+            Some(stalled) => payload["cause"] = stalled.cause.clone(),
+            None => {
+                payload["stage"] = fields.stage.clone();
+                payload["flush_input_id"] = json!(fields.flush_input_id);
+            }
         }
     }
     payload["director_action"] = if let Some(fields) = delivery {
@@ -894,6 +1074,7 @@ pub(crate) fn persist_transition_in_transaction(
                 cause: result_stop_cause(&input, delivery.status),
                 action: left_input_action(conn, run, &input)?,
                 stalled: None,
+                flush_input_id: input.flush_input_id,
                 delivery,
                 stage: record["stage"].clone(),
             })
@@ -3627,6 +3808,7 @@ mod tests {
                 cause_json: Some(json!({
                     "kind":"input_delivery_stalled", "input_id":head,
                     "blocking_input_id":blocker, "waiting_since":NOW,
+                    "cause":{"kind":"held_composer","detail":null},
                 })),
                 ..native_exit(owner.run_id, 1)
             }
@@ -4571,7 +4753,8 @@ mod tests {
                     kind: RuntimeEventKind::InputDeliveryStalled,
                     cause_json: Some(
                         json!({"kind":"input_delivery_stalled","input_id":waiting.input_id,
-                    "blocking_input_id":blocked.input_id,"waiting_since":NOW}),
+                    "blocking_input_id":blocked.input_id,"waiting_since":NOW,
+                    "cause":{"kind":"held_composer","detail":null}}),
                     ),
                     ..native_exit(owner.run_id, 1)
                 },
@@ -4590,6 +4773,10 @@ mod tests {
             assert_eq!(payload["blocking_input_id"], blocked.input_id);
             assert_eq!(payload["waiting_since"], NOW);
             assert_eq!(payload["delivery"]["status"], "queued");
+            assert_eq!(
+                payload["cause"],
+                json!({"kind":"held_composer","detail":null})
+            );
             assert_eq!(payload["director_action"]["kind"], "review_stalled_input");
             assert_eq!(
                 payload["director_action"]["instruction"],
@@ -4623,6 +4810,268 @@ mod tests {
             );
             assert!(view.interaction.is_none());
         }
+
+        mod stalled_queue_causes {
+            use crate::broker::runtime::events::tests::composer_reliability::*;
+
+            const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.";
+
+            const BLOCKER_KINDS: [&str; 3] =
+                ["forced_flush", "pending_finalization", "unresolved_input"];
+
+            const NULL_BLOCKER_KINDS: [(&str, &str); 7] = [
+                ("drain_pending", "terminal reply pending"),
+                ("pane_input_busy", ""),
+                ("delivery_budget_exhausted", ""),
+                ("storage_unavailable", ""),
+                ("attempt_failed", "native input write failed"),
+                ("composer_busy", ""),
+                ("queue_turn_not_reached", ""),
+            ];
+
+            fn detail(text: &str) -> Value {
+                if text.is_empty() {
+                    Value::Null
+                } else {
+                    json!(text)
+                }
+            }
+
+            fn queue_transition(
+                owner: &RunOwner,
+                head: i64,
+                blocker: Option<i64>,
+                kind: &str,
+                detail: Value,
+            ) -> ObservedTransition {
+                ObservedTransition {
+                    kind: RuntimeEventKind::InputDeliveryStalled,
+                    cause_json: Some(json!({
+                        "kind":"input_delivery_stalled", "input_id":head,
+                        "blocking_input_id":blocker, "waiting_since":NOW,
+                        "cause":{"kind":kind,"detail":detail},
+                    })),
+                    ..native_exit(owner.run_id, 1)
+                }
+            }
+
+            fn review_stalled_queue(fixture: &Fixture, head: i64) -> Value {
+                let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
+                json!({
+                    "kind":"review_stalled_queue",
+                    "instruction":REVIEW_STALLED_QUEUE,
+                    "inspect_argv":["cafleet","input","show",head.to_string(),"--json","--database-url",url],
+                    "flush_argv":["cafleet","member","flush",fixture.member.to_string(),
+                        "--from-member-id",fixture.director.to_string(),"--database-url",url],
+                })
+            }
+
+            fn assert_persists(
+                kind: &str,
+                blocker_of: impl FnOnce(&InputOperation) -> Option<i64>,
+                detail: Value,
+            ) {
+                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let blocking = blocker_of(&blocker);
+                let transition =
+                    queue_transition(&owner, head.input_id, blocking, kind, detail.clone());
+                let event = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap_or_else(|cause| panic!("{kind}: {cause:?}"))
+                .0;
+                let view = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
+                let payload = &view.event.payload_json;
+                assert_eq!(payload["input_id"], head.input_id, "{kind}");
+                assert_eq!(payload["blocking_input_id"], json!(blocking), "{kind}");
+                assert_eq!(payload["waiting_since"], NOW, "{kind}");
+                assert_eq!(
+                    payload["cause"],
+                    json!({"kind":kind,"detail":detail}),
+                    "{kind}"
+                );
+                let keys = payload
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>();
+                let delivery = keys.iter().position(|key| *key == "delivery").unwrap();
+                assert_eq!(
+                    keys[delivery + 1..],
+                    ["cause", "director_action"],
+                    "{kind}: cause follows delivery"
+                );
+                assert_eq!(
+                    payload["director_action"],
+                    review_stalled_queue(&fixture, head.input_id),
+                    "{kind}"
+                );
+                assert_eq!(
+                    original(&view).unwrap(),
+                    transition,
+                    "{kind}: the outbox reconstruction carries the cause"
+                );
+            }
+
+            fn assert_rejected(
+                kind: &str,
+                blocker_of: impl FnOnce(&InputOperation, &InputOperation) -> Option<i64>,
+            ) {
+                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let before = durable_state(&fixture.reopen());
+                let transition = queue_transition(
+                    &owner,
+                    head.input_id,
+                    blocker_of(&blocker, &head),
+                    kind,
+                    Value::Null,
+                );
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live
+                    )
+                    .is_err(),
+                    "{kind}"
+                );
+                assert_eq!(durable_state(&fixture.reopen()), before, "{kind}");
+            }
+
+            #[test]
+            fn blocker_naming_queue_causes_persist_their_cause_and_route_review_stalled_queue() {
+                for kind in BLOCKER_KINDS {
+                    assert_persists(kind, |blocker| Some(blocker.input_id), Value::Null);
+                }
+                assert_persists(
+                    "immediate_attempt",
+                    |blocker| Some(blocker.input_id),
+                    Value::Null,
+                );
+                assert_persists("immediate_attempt", |_| None, Value::Null);
+            }
+
+            #[test]
+            fn blockerless_queue_causes_persist_their_detail_and_route_review_stalled_queue() {
+                for (kind, text) in NULL_BLOCKER_KINDS {
+                    assert_persists(kind, |_| None, detail(text));
+                }
+            }
+
+            #[test]
+            fn queue_causes_reject_a_blocker_their_kind_does_not_name() {
+                for kind in BLOCKER_KINDS {
+                    assert_rejected(kind, |_, _| None);
+                    assert_rejected(kind, |_, head| Some(head.input_id));
+                }
+                assert_rejected("immediate_attempt", |_, head| Some(head.input_id));
+                for (kind, _) in NULL_BLOCKER_KINDS {
+                    assert_rejected(kind, |blocker, _| Some(blocker.input_id));
+                }
+            }
+
+            #[test]
+            fn an_unknown_cause_kind_fails_stalled_validation() {
+                for blocker in [false, true] {
+                    assert_rejected("waiting_for_godot", |stalled, _| {
+                        blocker.then_some(stalled.input_id)
+                    });
+                }
+            }
+
+            #[test]
+            fn held_composer_cause_keeps_review_stalled_input_and_requires_attempt_provenance() {
+                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let event = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &stalled_transition(&owner, head.input_id, blocker.input_id),
+                    PersistenceMode::Live,
+                )
+                .unwrap()
+                .0;
+                let payload = storage::get_event(&fixture.reopen(), event.event_id)
+                    .unwrap()
+                    .event
+                    .payload_json;
+                assert_eq!(
+                    payload["cause"],
+                    json!({"kind":"held_composer","detail":null})
+                );
+                assert_eq!(payload["director_action"]["kind"], "review_stalled_input");
+                assert_rejected("held_composer", |_, _| None);
+                assert_rejected("held_composer", |_, head| Some(head.input_id));
+                let (mut fixture, owner, _, head) = stalled_fixture(true);
+                let reserved =
+                    fixture.input(&owner, "prompt:unattested-blocker", InputKind::Prompt, None);
+                let unattested = storage::record_input_state(
+                    &mut fixture.conn,
+                    &owner,
+                    reserved.input_id,
+                    InputState::InProgress,
+                    InputState::Accepted,
+                )
+                .unwrap();
+                assert!(!unattested.has_stalled_blocker_provenance());
+                let before = durable_state(&fixture.reopen());
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &stalled_transition(&owner, head.input_id, unattested.input_id),
+                        PersistenceMode::Live,
+                    )
+                    .is_err()
+                );
+                assert_eq!(durable_state(&fixture.reopen()), before);
+            }
+
+            #[test]
+            fn a_retried_stalled_transition_replays_its_cause_and_a_different_cause_conflicts() {
+                let (mut fixture, owner, _, head) = stalled_fixture(true);
+                let transition = queue_transition(
+                    &owner,
+                    head.input_id,
+                    None,
+                    "drain_pending",
+                    json!("observation incomplete"),
+                );
+                let (event, created) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(created);
+                let (replayed, created) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(!created);
+                assert_eq!(replayed.event_id, event.event_id);
+                let conflicting =
+                    queue_transition(&owner, head.input_id, None, "composer_busy", Value::Null);
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &conflicting,
+                        PersistenceMode::Live
+                    )
+                    .is_err(),
+                    "the same event sequence with another cause is a conflicting original"
+                );
+            }
+        }
     }
 
     mod input_delivery_result_events {
@@ -4645,6 +5094,7 @@ mod tests {
             object.insert("message_id".into(), message_id);
             object.insert("delivery".into(), delivery);
             object.insert("stage".into(), json!(stage));
+            object.insert("flush_input_id".into(), Value::Null);
             object.insert("director_action".into(), Value::Null);
             Value::Object(object)
         }
@@ -4712,12 +5162,13 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>();
             assert_eq!(
-                keys[keys.len() - 5..],
+                keys[keys.len() - 6..],
                 [
                     "input_id",
                     "message_id",
                     "delivery",
                     "stage",
+                    "flush_input_id",
                     "director_action"
                 ]
             );

@@ -188,7 +188,7 @@ fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()>
             request.message_id.is_none(),
             "explicit input has no preview message",
         )?,
-        InputKind::PermissionResponse => {
+        InputKind::PermissionResponse | InputKind::Flush => {
             return Err(CafleetError::Usage("ordinary input kind required".into()));
         }
     }
@@ -548,7 +548,9 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         let operation = match input.input_kind {
             InputKind::Preview | InputKind::Prompt => InputControlOperation::SubmitPrompt(input),
             InputKind::Exec => InputControlOperation::SubmitExec(input),
-            InputKind::PermissionResponse => unreachable!("validated ordinary input kind"),
+            InputKind::PermissionResponse | InputKind::Flush => {
+                unreachable!("validated ordinary input kind")
+            }
         };
         let request = control_request(expected_run, &attempt.expiration, operation);
         held.validate_binding(&settings.database_url, expected_placement)?;

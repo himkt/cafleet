@@ -197,6 +197,7 @@ Read the default 20 lines directly and capture more when insufficient. Captures 
 | `cafleet member exec <member-id> --from-member-id <my-member-id> COMMAND` (or `--file PATH`) | Submit the actual one-line native shell command and return dispatch metadata |
 | `cafleet member prompt <member-id> --from-member-id <my-member-id> TEXT` | Submit explicitly authorized composer input or post-command continuation; it rejects the Director's pane, and `delivery` reports submission/queue acceptance |
 | [member press](#member-press) | Request explicitly authorized ordered manual keys |
+| `cafleet member flush <member-id> --from-member-id <my-member-id>` | Force-submit a stalled member's queued previews, only under [Reconcile generated input](#reconcile-generated-input) |
 
 All writers share the bounded pane-input lock. Prompt/exec requires the pinned runner and durable receipt; [wrapped delivery methods](../reference/cli.md#wrapped-delivery-methods) owns profile submission, zero-byte queueing, fallback and delivery arbitration. [Member Press](#member-press) owns manual keys, their authorization and outcome evidence.
 
@@ -224,7 +225,7 @@ Backend acknowledgment establishes neither PTY input nor native outcome. Manual 
 
 ## Runtime events
 
-The Director owns `permission inspect`/`respond`, `input reconcile` and `member recover`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond`, `input reconcile` and `member recover`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
+The Director owns `permission inspect`/`respond`, `input reconcile`, `member flush` and `member recover`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond`, `input reconcile`, `member flush` and `member recover`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
 
 New members use CAFleet-owned PTYs with separate launch-policy, detection, empty-composer, prompt/native-exec and request-bound answer capabilities. `member create` selects the bundled profile that supplies every capability from the native version and refuses a version below the first boundary ([member create](../reference/cli.md#member-create)); failed probes/unknown coverage preserve manual work and generated-input fallback. [Runtime command facts](../reference/cli.md#member-runtime) owns commands and fields.
 
@@ -280,6 +281,17 @@ On `input_delivery_stalled` with `director_action.kind=review_stalled_input`:
 4. Reconcile an uncertain blocking receipt only after the pane/native evidence establishes its disposition. A settled left-in-composer blocker needs no reconciliation.
 
 A verified empty composer resumes the FIFO, and the waiting head delivers on the next queue turn; when the member's poll already consumed its message, the runner cancels the head as `message_consumed` instead. You never poll another member's inbox. A composer rule that never verifies empty after clearing is a profile defect: record it and route it for correction of the bundled profile. Each later event identifies its own head.
+
+On `input_delivery_stalled` with `director_action.kind=review_stalled_queue`:
+
+1. Verify the event and record its waiting head, `cause` and any `blocking_input_id`.
+2. Capture the member's pane, run its `inspect_argv` and confirm with `member show MEMBER_ID --json` that no interaction is open.
+3. Resolve the named cause when you can ([stall causes](../reference/cli.md#runtime-events)): reconcile an in-progress or uncertain blocker only after pane evidence establishes its disposition. Cancel a queued prompt or exec that blocks the flush with `input reconcile INPUT_ID --disposition not-submitted`, then resend it deliberately. A `queue_turn_not_reached` cause is a runner defect: record it and route it for correction.
+4. When the queue stays stalled, ask the user through {decision_surface} to confirm a forced flush of the member's queued previews.
+5. With that confirmation, run the event's `flush_argv` under host authorization: `cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID`, retaining the selected database.
+6. Inspect the result. A refusal names its cause and wrote nothing; resolve it and repeat from step 2. `remaining_input_ids` stay queued for a later flush. For an uncertain flush, capture the pane and reconcile `FLUSH_INPUT_ID` from that evidence; the reconciliation settles every preview it owns.
+
+Run `member flush` only with both stall evidence — an `input_delivery_stalled` event, or a queue confirmed stalled through `member show` and `input show` — and the user's confirmation through {decision_surface}. The flush types after whatever the composer holds behind the marker ` [cafleet: ignore any text before this marker, if present] `, which tells the member to ignore text before it; it sends no Escape or clear key.
 
 ## Supervision
 
