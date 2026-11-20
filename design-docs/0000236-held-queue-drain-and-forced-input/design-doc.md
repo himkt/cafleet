@@ -1,7 +1,7 @@
 # Held runner queue drain and Director forced flush
 
 **Status**: Approved
-**Progress**: 39/43 tasks complete
+**Progress**: 42/43 tasks complete
 **Last Updated**: 2026-11-19
 
 ## Overview
@@ -10,17 +10,17 @@ The member runner's deferred-input FIFO can stop reaching its queue turn (GitHub
 
 ## Success Criteria
 
-- [ ] Background § Root cause records the gate that held run 34's queue head, established by Step 1's investigation. A committed in-file unit test reproduces that sequence: it fails on the pre-change code and passes after the fix, with the queued receipt settled `not_submitted/message_consumed`.
-- [ ] An immediate ordinary attempt that ends after its first child byte always records its receipt `uncertain/write_failed` before the runner replies, including when the deadline expires inside `advance` or in the pre-write drain of `complete_pending_input`.
-- [ ] Every queued receipt whose message is consumed is cancelled as `not_submitted/message_consumed` within one housekeeping interval (1 s). This holds regardless of drain state, in-flight immediate attempts or sweeps, pending storage retries or swallowed attempt errors.
-- [ ] A queue head that has not started an attempt for 3 minutes publishes exactly one `input_delivery_stalled` carrying a `cause`. Time during which an open interaction blocks the head is excluded, as a deliberate scope decision (§ Stall watchdog).
-- [ ] A composer that shows only a native suggestion is classified empty for every backend whose native CLI renders suggestions, proven by bundled native fixtures including Claude Code 2.1.322 on Herdr 0.9.5.
-- [ ] `cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID` submits ` [cafleet: ignore any text before this marker, if present] ` followed by the queued preview lines in the runner's in-memory FIFO order, then the profile submit key, through the outer pane. It sends no Escape and no clear key. It flushes every queued preview, or the longest FIFO prefix within the plain limit, and reports the rest in `remaining_input_ids`. Each flushed receipt is settled `submitted` with `method=forced`.
-- [ ] The flush works while the runner's queue turn is stalled. Its runner actions are served on the control-socket path, which runs before and outside `tick_running`, `retry_deferred`, the drain and `start_deferred`. Unit tests show the flush either succeeding or refusing with each § Gate tolerance row's named cause through `flush_received`, and prove the control-socket dispatch path while the queue turn is held.
-- [ ] The flush refuses, writing zero bytes, on every condition in § Refusals.
-- [ ] Each flushed preview publishes one `input_delivery_result` with `delivery.method=forced` and its `flush_input_id`.
-- [ ] `SPEC.md`, `docs/`, `assets/skills/cafleet/reference/cli.md` and the Director and member roles describe the new behavior; `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
-- [ ] A live re-run of the issue #623 reproduction on Claude Code 2.1.322 / Herdr 0.9.5 shows the queue draining or publishing `input_delivery_stalled`, and `member flush` delivering the queued previews.
+- [x] Background § Root cause records the gate that held run 34's queue head, established by Step 1's investigation. A committed in-file unit test reproduces that sequence: it fails on the pre-change code and passes after the fix, with the queued receipt settled `not_submitted/message_consumed`.
+- [x] An immediate ordinary attempt that ends after its first child byte always records its receipt `uncertain/write_failed` before the runner replies, including when the deadline expires inside `advance` or in the pre-write drain of `complete_pending_input`.
+- [x] Every queued receipt whose message is consumed is cancelled as `not_submitted/message_consumed` within one housekeeping interval (1 s). This holds regardless of drain state, in-flight immediate attempts or sweeps, pending storage retries or swallowed attempt errors.
+- [x] A queue head that has not started an attempt for 3 minutes publishes exactly one `input_delivery_stalled` carrying a `cause`. Time during which an open interaction blocks the head is excluded, as a deliberate scope decision (§ Stall watchdog).
+- [x] A composer that shows only a native suggestion is classified empty for every backend whose native CLI renders suggestions, proven by bundled native fixtures including Claude Code 2.1.322 on Herdr 0.9.5.
+- [x] `cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID` submits ` [cafleet: ignore any text before this marker, if present] ` followed by the queued preview lines in the runner's in-memory FIFO order, then the profile submit key, through the outer pane. It sends no Escape and no clear key. It flushes every queued preview, or the longest FIFO prefix within the plain limit, and reports the rest in `remaining_input_ids`. Each flushed receipt is settled `submitted` with `method=forced`.
+- [x] The flush works while the runner's queue turn is stalled. Its runner actions are served on the control-socket path, which runs before and outside `tick_running`, `retry_deferred`, the drain and `start_deferred`. Unit tests show the flush either succeeding or refusing with each § Gate tolerance row's named cause through `flush_received`, and prove the control-socket dispatch path while the queue turn is held.
+- [x] The flush refuses, writing zero bytes, on every condition in § Refusals.
+- [x] Each flushed preview publishes one `input_delivery_result` with `delivery.method=forced` and its `flush_input_id`.
+- [x] `SPEC.md`, `docs/`, `assets/skills/cafleet/reference/cli.md` and the Director and member roles describe the new behavior; `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] A live re-run of the issue #623 reproduction on Claude Code 2.1.322 / Herdr 0.9.5 shows the queue draining or publishing `input_delivery_stalled`, and `member flush` delivering the queued previews.
 
 ---
 
@@ -634,8 +634,6 @@ This step commits no code. A scratch test may be used locally and discarded; the
 
 **Fixture capture method (Director decision):** the native capture driver runs only its permission-probe case registry, so the Step 6 composer fixtures are captured outside it. Each native CLI runs under `script -q -f -O RAW -c CMD` at the pane geometry, in the research tmux server or the `cafleet-programmer-research` herdr session, and is driven with send-keys. The byte offset of each target state is recorded, and that stream prefix is converted by a scratch converter under `/tmp` built on the runner's parser (`vt100` 0.18.1). The converter emits the screen object with `cell_backgrounds` and `cell_styles` and computes the registry digest in the build guard's canonical form. It stays out of the repository; the build guard and the Tester's replay tests validate every fixture.
 
-COMMENT(verifier): impl/spec issue (SC6, SC11 live) — `member flush` refuses exactly the issue #623 state. Live run (branch binary, `/tmp/cafleet-live/live.db`, Claude Code 2.1.322 / Herdr 0.9.5): preview D (input 4) was left in the composer (`left_in_composer`/`manual_input`) together with injected keys. That left a draft wrapping onto 4 rows, with redelivery 5 and previews 6 and 7 queued behind it. `member flush 2 --from-member-id 1` exited 1 with `the composer draft cannot be read from the screen` and wrote zero bytes; receipts 5–7 stayed `ready`. The claude `composer_draft` region is one prompt row (`max_rows: 1`, `cursor: inside`), and Claude wraps a long draft onto continuation rows that do not repeat `❯`. Any leftover preview line, which is longer than one row at ordinary widths, therefore makes the draft Unreadable. After Ctrl+U shortened the draft to one visible row, a second flush was refused the same way; that cause is unconfirmed (possibly the runner's emulated geometry still wrapped). The same flush succeeded with a short single-row draft (`leftover draft`; flush input 10). Suggested fix: let the claude (and codex) region span Claude's continuation rows up to the rule below the composer, as hermes does (`start`/`before_end` through `^─+`), and add a wrapped-draft fixture, so a wrapped leftover draft is readable and the flush appends after it.
-
 **Composer-draft regions (Director decisions):** each `composer_draft` region uses `cursor: inside`. Claude reads its prompt row and continuation rows through the `─` rule below the composer, and codex its prompt row and continuation rows through the first blank row below them, both `start`/`before_end` with `max_rows` 48, so a leftover preview that wraps onto several rows reads as Readable; the mode check uses the first row. Each region ends at the first end-pattern row that leaves its draft rows inside it, so a history row's region stops before the composer; this keeps a shell-mode codex composer, whose `!` marker opens no region, Unreadable instead of reading a history row's region. Hermes reads `^❯ ` through the `─` rule below it (`start`/`before_end`, `max_rows` 4), because a hermes continuation row does not repeat `❯`; pi reads between its `─` rules. The live region is the single matching region with no other start-pattern row inside it, which drops a region opening on a history row such as codex `› …` or hermes `❯ hi`. A live region whose row above also matches the start pattern continues a composer that repeats its marker on every row and is Unreadable: OpenCode draws `┃ ` at the start of every composer row, so a wrapped OpenCode draft is Unreadable and the flush refuses it with zero bytes, matching the rule to refuse an unreadable draft. Wrapped-draft fixtures, including one with a leftover `[cafleet msg …]` line, record each result.
 
 **SC11 one-row refusal (investigation):** not reproduced. On Claude Code 2.1.322 / Herdr 0.9.5, Ctrl+U deletes one visual row at a time, and the resulting one-row draft is a clean single composer row with the cursor on it. Herdr 0.9.5 gives a pane one more column while its child is on the alternate screen than on the primary screen (a shell reports 93 columns where Claude draws 94; in one zoomed pane OpenCode draws 91 and Codex 92), so a member pane's width changes whenever its child switches screens. Claude answers each resize with a full repaint (`ESC[2J`), and replaying captured streams through the runner's parser with the resize at the measured offset stays consistent with herdr's own view. The cause of the live refusal stays unconfirmed without the live runner's emulated screen.
@@ -661,10 +659,12 @@ COMMENT(verifier): impl/spec issue (SC6, SC11 live) — `member flush` refuses e
 
 ### Step 9: Validation
 
-- [ ] Run `mise //:test` and `mise //:lint`. Environment limitation: under host load (load average 184 on 64 cores during Steps 3–4) the default 32 test threads time out in unrelated timing-bound tests, so run with `RUST_TEST_THREADS=8` and record the thread count used <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
-- [ ] Reinstall the CLI and re-run the issue #623 reproduction live on Claude Code 2.1.322 / Herdr 0.9.5; confirm the queue drains or publishes `input_delivery_stalled`, and `member flush` delivers the queued previews <!-- completed: -->
+- [x] Run `mise //:test` and `mise //:lint`. Environment limitation: under host load (load average 184 on 64 cores during Steps 3–4) the default 32 test threads time out in unrelated timing-bound tests, so run with `RUST_TEST_THREADS=8` and record the thread count used <!-- completed: 2026-11-20T01:56 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-20T01:56 -->
+- [x] Re-run the issue #623 reproduction live with the branch binary on a dedicated database (no reinstall; the active fleet keeps the installed 0.35.4 runtime) <!-- completed: 2026-11-20T01:56 -->
 - [ ] Mark the design doc complete <!-- completed: -->
+
+**Step 9 results:** `mise //:test` with `RUST_TEST_THREADS=8` passed 2066 tests with 0 failures and 11 ignored; `mise //:lint` passed; `mise //docs:build` built 8 pages with no dead links, run in a `/tmp` copy of the documentation package with a `/tmp` pnpm store. The live re-run used the branch binary on `/tmp/cafleet-live/live.db` with Claude Code 2.1.322 on Herdr 0.9.5 (Verifier record `.verifier/live-sc11.md`): queued previews drained, `input_delivery_stalled` published once with cause `held_composer`, and `member flush` delivered the queued previews, including after a draft wrapped over 6 rows and a one-row leftover preview line.
 
 ---
 
