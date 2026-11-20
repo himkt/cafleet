@@ -36,7 +36,7 @@ CLI -> coding-agent backends -> availability probes
 CLI -> ordered output presenters
 ```
 
-The broker persists/queries typed data. It performs no pane I/O. Multiplexer utilities use injected process runners; bounded pipe draining and owned-child cleanup remain independent of native command submission. Pane ownership transfers only after a successful member pane spawn, with explicit rollback guards.
+The broker persists/queries typed data. It performs no pane I/O. Multiplexer utilities run processes through one bounded runner; bounded pipe draining and owned-child cleanup remain independent of native command submission. Pane ownership transfers only after a successful member pane spawn, with explicit rollback on every failure path.
 
 ## 5. Shared domain model
 
@@ -58,7 +58,7 @@ The full column and index declarations are in §8. Records decode required colum
 
 ### 5.3 Enums
 
-`MemberStatus` is `active` / `deregistered`; `MessageStatus` is `input_required` / `completed`. Unknown required enum strings fail. Supported backend tokens come from their registries.
+A member's `status` is `active` or `deregistered`; a message's `status_state` is `input_required` or `completed`. Unknown required enum strings fail. Supported backend tokens come from their registries.
 
 ### 5.4 Member kind discriminator
 
@@ -80,13 +80,13 @@ Schema compatibility and the application identity are specified in §8 Database 
 
 Connections use SQLite foreign-key enforcement and a normal five-second busy timeout; a bounded operation caps that wait to its remaining budget. The selected file path resolves per §6.3 Database selection, and its canonical database file keys lock-directory construction.
 
-Format validation, baseline initialization, incompatible-file refusal and file preservation follow §6.3 Schema-version guard. An invocation's validated connection serves its internal send, poll consumption and notification stamp operations; standalone public broker write functions retain their own format guard.
+Format validation, baseline initialization, incompatible-file refusal and file preservation follow §6.3 Schema-version guard. Every operation that writes the database validates the current format first.
 
 ### 6.2 Broker
 
 #### Fleets
 
-Bootstrap validates the Director's multiplexer server, pane and backend token, then inserts the fleet in a transaction to allocate its ID. A placement factory receives that ID once, names and verifies the Director window (§6.3 `fleet create`), and supplies the placement before the broker inserts the Director and placement and backfills the Director reference. Construct the returned Director from rows read inside the transaction, then commit. The database-only `create_fleet` wrapper supplies a cloned placement through the same registration implementation. The Director placement is ordinal `0`, column `left`; public creation records `cafleet-<fleet_id>-0`, and the fleet starts with `last_window_ordinal` `0`. The current session remains the Director; no pane split or process launch occurs.
+Bootstrap validates the Director's multiplexer server, pane and backend token, then inserts the fleet in a transaction to allocate its ID. A placement factory receives that ID once, names and verifies the Director window (§6.3 `fleet create`), and supplies the placement before the broker inserts the Director and placement and backfills the Director reference. Construct the returned Director from rows read inside the transaction, then commit. The Director placement is ordinal `0`, column `left`; public creation records `cafleet-<fleet_id>-0`, and the fleet starts with `last_window_ordinal` `0`. The current session remains the Director; no pane split or process launch occurs.
 
 List, show and delete follow §6.3 `fleet list`, `fleet show` and `fleet delete`; deletion preserves messages, and repeat deletion returns zero newly deregistered members.
 
@@ -139,7 +139,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 #### Database selection
 
-The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the package version (the version field of `cafleet --version`, e.g. `0.31.1`).
+The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
 
 The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; resolve a relative file path against the invoking working directory before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
 
@@ -208,11 +208,11 @@ Text rows use the format `"  {:<9}  {:<13}  {:<8}  {backend:<8}  {window:<13}  {
 
 #### JSON output (`--json`)
 
-Place `--json` among the subcommand options, before a `--` separator that introduces literal key arguments. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors are stderr text (§6.3 Error Messages); parse errors exit 2. Commands marked no reject the flag, including the root group.
+Place `--json` among the subcommand options, before a `--` separator that introduces literal key arguments. It emits one line of JSON (§6.4 JSON encoding) with complete untruncated message text. Application errors are stderr text, and a parse error exits 2 (§6.3 Error Messages). Commands marked no reject the flag, including the root group.
 
 #### Positional subject ids
 
-Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults; a Director-only command also takes its caller's literal ID as `--from-member-id` (§ Director-only command guard). A missing or malformed subject uses the parser's native error, exit 2.
+Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults; a Director-only command also takes its caller's literal ID as `--from-member-id` (§ Director-only command guard). A missing or malformed subject is a parse error (§6.3 Error Messages).
 
 Spawned members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:`, `CODING AGENT:` and `DATABASE URL:` lines, pass these literal IDs on each invocation and apply `DATABASE URL:` per § Database selection.
 
@@ -281,7 +281,7 @@ Validation is lazy: a site reads and validates a variable only when it resolves 
 
 ##### Asset installation
 
-The binary embeds the data files of the repository's `assets/` tree at build time; the native screen fixtures are test-suite inputs:
+The binary carries the data files of the `assets/` tree listed below. The native screen fixtures are catalog provenance records: the bundled catalog cites them, and setup installs none of them.
 
 | Source tree | Contents | Consumer |
 |---|---|---|
@@ -289,7 +289,7 @@ The binary embeds the data files of the repository's `assets/` tree at build tim
 | `assets/presets/` | One directory per backend with presets | Preset installation (table below) |
 | `assets/extensions/` | One directory per backend with an extension | Extension installation (table below) |
 | `assets/migrations/` | The schema baseline `V1__baseline.sql` | Baseline initialization (§8 Database schema) |
-| `assets/profiles/` | The embedded bundled catalog `bundled.json`, and the native screen fixtures `native/<backend>.json` that the test suite reads | The profile catalog and the bundled-catalog build guard (§6.9 Bundled profiles and native screen fixtures) |
+| `assets/profiles/` | The embedded bundled catalog `bundled.json`, and the native screen fixtures `native/<backend>.json` that it cites | The profile catalog (§6.9 Bundled profiles and native screen fixtures) |
 
 Each agent's presets and extensions, where they exist, are static files embedded in the binary next to the skills; their targets resolve per §6.3 Config-dir resolution. Per backend, setup replaces every embedded skill sequentially, then each preset in table order, then each extension target followed by its executable record, then (for `hermes`) runs the plugin enablement:
 
@@ -362,9 +362,9 @@ hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup
 
 #### Schema-version guard
 
-Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and the invocation guards share it, and guard and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the baseline atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated, identified or malformed file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
+Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the baseline atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated, identified or malformed file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
 
-`--help` renders at parse time and exits before any command body runs, so neither group-level help (`cafleet fleet --help`) nor subcommand help (`cafleet fleet create --help`) triggers the guard; both print help even under a missing database.
+`--help` renders at parse time and exits before any command body runs, so neither group-level help (`cafleet fleet --help`) nor subcommand help (`cafleet fleet create --help`) triggers the guard; both print help and exit 0 even under a missing database.
 
 #### `cafleet fleet` — Fleet Management
 
@@ -399,9 +399,9 @@ Read the pane on the chosen server — `tmux -S <server> display-message -p -t <
 
 `--pane`, optionally with `--mux-server`, is the only override of caller pane verification.
 
-Registration follows the §6.2 Fleets bootstrap transaction. After allocating the fleet ID, overwrite the resolved Director window/tab name with `cafleet-<fleet_id>-0` through `rename_window`, read it back and require exact equality (§6.5 Backend operations). Re-read the Director pane context and require the original session, window ID and pane ID. Record the canonical name as `mux_window_name`, construct the result before commit, and emit success only after confirmed commit. The Director has `name="Director"` and `description="Root Director for this fleet"`; its pane title/label retains its current value.
+Registration follows the §6.2 Fleets bootstrap transaction. After allocating the fleet ID, overwrite the resolved Director window/tab name with `cafleet-<fleet_id>-0` through the Rename window operation, read it back and require exact equality (§6.5 Backend operations). Re-read the Director pane context and require the original session, window ID and pane ID. Record the canonical name as `mux_window_name`, construct the result before commit, and emit success only after confirmed commit. The Director has `name="Director"` and `description="Root Director for this fleet"`; its pane title/label retains its current value.
 
-Any naming, verification, insertion or result-construction failure exits 1 and rolls back active uncommitted registration, with no success payload even under `--json`. Keep the transaction guard through commit inspection: a failed commit rolls back an active transaction, or reports the registry outcome as unconfirmed if SQLite already ended it. Append a rollback failure to the original error. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, describe the terminal name as potentially changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. A rolled-back fleet ID can be reused.
+Any naming, verification, insertion or result-construction failure exits 1 and rolls back active uncommitted registration, with no success payload even under `--json`. Keep the registration transaction open until the commit result is known: a failed commit rolls back an active transaction, or reports the registry outcome as unconfirmed if SQLite already ended it. Append a rollback failure to the original error. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, describe the terminal name as potentially changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. A rolled-back fleet ID can be reused.
 
 Applied names remain after a failure, crash or fleet deletion, and the Director pane keeps running. The rename and database commit are separate operations: a crash can leave a changed name without registration, or committed registration without delivered output. An output error after confirmed commit preserves registration and the name. Existing fleets keep their recorded names, and subsequent user renames leave placement snapshots unchanged.
 
@@ -437,12 +437,12 @@ A walk that records 4096 entries stops at the last recorded pid.
 
 | Platform | Parent and argv | Nested PID namespace |
 |---|---|---|
-| Linux | `/proc/<pid>/stat` field 4 (the second field after the last `)`) is the parent, and `/proc/<pid>/cmdline` split on NUL is the argv, with a trailing empty segment dropped and an empty `cmdline` giving an empty argv. A `NotFound` read of either file means the process no longer exists | `/proc/self/status` `NSpid:` lists more than one pid; no `NSpid:` line means not nested |
+| Linux | `/proc/<pid>/stat` field 4 (the second field after the last `)`) is the parent, and `/proc/<pid>/cmdline` split on NUL is the argv, with a trailing empty segment dropped and an empty `cmdline` giving an empty argv. An `ENOENT` (file not found) read of either file means the process no longer exists | `/proc/self/status` `NSpid:` lists more than one pid; no `NSpid:` line means not nested |
 | Other (macOS) | `ps -o ppid= -o args= -p <pid>` with null stdin: the first whitespace field is the parent and the remaining fields are the argv. Output with no non-blank line means the process no longer exists | Never nested |
 
 | Reader | Condition | Error |
 |---|---|---|
-| Linux entry | A read error other than `NotFound`; `<file>` is `stat` or `cmdline` | `cannot read /proc/<pid>/<file>: <io error>` |
+| Linux entry | A read error other than `ENOENT` (file not found); `<file>` is `stat` or `cmdline` | `cannot read /proc/<pid>/<file>: <io error>` |
 | Linux entry | The parent field is absent or not an integer | `malformed /proc/<pid>/stat` |
 | Linux namespace | Reading `/proc/self/status` fails | `cannot read /proc/self/status: <io error>` |
 | Linux namespace | An `NSpid:` field is not an integer | `malformed /proc/self/status NSpid line: <line>` |
@@ -512,7 +512,7 @@ The shared-server body names both multiplexers because a shared server's environ
 |---|---|
 | 2 | `the pane does not exist on the <backend> server <server>` |
 | 3 | `this command runs in a nested PID namespace` |
-| 5 | `the process ancestry could not be read: <read error>` (e.g. `… could not be read: cannot read /proc/412/stat: Permission denied (os error 13)`) |
+| 5 | `the process ancestry could not be read: <read error>` (e.g. `… could not be read: cannot read /proc/412/stat: <io error>`, where `<io error>` is the OS description of `EACCES`) |
 | 6 | `the process ancestry stopped at pid <pid> before reaching pid 1` |
 | 7 | `the pane's process <pane_pid> is not an ancestor of this command` |
 
@@ -534,7 +534,7 @@ List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain t
 
 `cafleet fleet delete FLEET_ID [--json]` ends every active ordinary member that owns a concrete pane, then deregisters the fleet. It retains messages and is idempotent; an unknown ID fails with `fleet 'X' not found.`, exit 1. One operation-wide five-second deadline bounds the whole command, extended by the time each Hermes work settlement takes (§6.3 `member delete`).
 
-1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds; a set change releases every acquired guard and restarts within the same deadline. Contention until the deadline releases every acquired guard, leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.` After all pane locks, acquire the fleet layout lock once within the layout lock wait (60 s) (§6.5 Fleet window layout), moving the deadline later by the wait's duration; expiry exits 1 with the fleet delete busy error (§6.3 Error Messages) and leaves every member unchanged.
+1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds; a set change releases every acquired lock and restarts within the same deadline. Contention until the deadline releases every acquired lock, leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.` After all pane locks, acquire the fleet layout lock once within the layout lock wait (60 s) (§6.5 Fleet window layout), moving the deadline later by the wait's duration; expiry exits 1 with the fleet delete busy error (§6.3 Error Messages) and leaves every member unchanged.
 2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure with the held layout lock: runner shutdown and recovery for a wrapped member, pane close in the placement's recorded window, that member's deregistration, then optional layout restoration of that window. The root Director's pane stays open.
 3. **Deregister the fleet.** One transaction revalidates the placement set, stamps deletion, deregisters the remaining active members (the root Director and members with a pending placement) and removes their placements.
 
@@ -831,13 +831,13 @@ Notify any active member's pending messages as UTF-8 JSONL. Derive and pin its f
 
 | Surface | Contract |
 |---|---|
-| Lease | Optional integer `1..=1800`; absence runs until closure, cancellation or failure |
+| Lease | Optional integer from 1 through 1800 inclusive; absence runs until closure, cancellation or failure |
 | Expiry | One monotonic lease from startup; activity leaves expiry unchanged |
 | Output | Compact tagged JSON object plus LF, flushed per record; JSON strings escape controls/newlines |
 | Startup | Validate/pin identity, then emit and flush `ready` before replay |
 | Idle | Check immediately, then wait one second after a snapshot that emits nothing or whose notice is refused, shortened by the lease |
 | Completion | Flush `closed`, then exit 0 for expiry or normal subject/fleet closure |
-| Failure | Diagnostic on stderr and exit 1; parser usage errors retain exit 2 |
+| Failure | Diagnostic on stderr and exit 1; a parse error (§6.3 Error Messages) exits 2 |
 
 The command always emits JSONL; text mode and `--json` are absent. Stdout contains protocol records only:
 
@@ -903,7 +903,7 @@ Every notice's pending set is the full pending set, so every pending ID in an ea
 
 Listening leaves consumption and `notified_at` unchanged and performs no pane retry, lock or dispatch; stamped pending self-sends remain notice-eligible. Concurrent listeners are independent read-only observers with no consumer lock, each with its own hold.
 
-Each snapshot has a fresh database deadline at most five seconds away, shortened by the remaining lease. Scoped busy waiting and an execution progress handler every 1,000 VM instructions bound lock/SQL work, checking the deadline before/after prepare and execution, before/after decoding each row and before commit. Expiry discards a partial snapshot; interrupted SQL maps to deadline exceeded only when that deadline expired. Every path restores busy handling and removes the listener-owned progress handler, preserving cleanup failures alongside the original cause. These cooperative boundaries cover row collection but give no hard real-time preemption of one allocation or SQL operation.
+Each snapshot has a fresh database deadline at most five seconds away, shortened by the remaining lease. Lock waits and statement execution stay within that deadline: a running statement is interrupted once the deadline passes, and the deadline is checked before and after each statement, each decoded row and the commit. Expiry discards a partial snapshot; interrupted SQL maps to deadline exceeded only when that deadline expired. These cooperative boundaries cover row collection but give no hard real-time preemption of one allocation or SQL operation.
 
 Output writes one serialized record at a time and applies backpressure before selecting more messages. Nonblocking filesystem/poll output preserves/restores descriptor flags on normal return, resumes partial writes at their byte offset and checks every write/flush, under a five-second deadline shortened by the lease. Broken pipe, write-zero, flush failure or output-deadline exhaustion exits 1 visibly, even after partial records; normal lease expiry between records writes `closed` with a separate bounded final write. Complete records survive a later error; an incomplete final line stays unconsumed and recovers through broker replay. Listener memory holds only the current snapshot, one record and the held IDs.
 
@@ -951,7 +951,7 @@ Require an active member and placement for pane operations; concrete pane IDs re
 
 ##### `member create`
 
-Register a member **and** spawn its coding-agent pane. A fleet has exactly one root Director, so the command takes no identity or override flag: it first resolves the acting Director from `fleets.director_member_id`, before registration, and uses that id for backend inheritance and spawn-prompt substitution. Per-backend child argv and omitted permission defaults are in §6.7 Per-backend `build_spawn_argv` (exact, token-by-token).
+Register a member **and** spawn its coding-agent pane. A fleet has exactly one root Director, so the command takes no identity or override flag: it first resolves the acting Director from `fleets.director_member_id`, before registration, and uses that id for backend inheritance and spawn-prompt substitution. Per-backend child argv and omitted permission defaults are in §6.7 Per-backend spawn argv (exact, token-by-token).
 
 | Argument | Required | Notes |
 |---|---|---|
@@ -968,7 +968,7 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 | `--file PATH` | one of | UTF-8 spawn-prompt file (`-` = stdin) under the shared body-input and transport contract (§6.3 Text bodies (positional `TEXT` / `--file`)). |
 | `--json` | no | Output as JSON |
 
-A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight). The pi backend also requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a missing or unreadable extension exits 1 (§6.7 Contract error strings), and a pi prompt beginning with `@` exits 2 before registration (§6.7 Per-backend `build_spawn_argv`).
+A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight). The pi backend also requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a missing or unreadable extension exits 1 (§6.7 Contract error strings), and a pi prompt beginning with `@` exits 2 before registration (§6.7 Per-backend spawn argv).
 
 After prompt validation, `member create` acquires the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
 
@@ -1019,7 +1019,7 @@ Compensation continues past a failed cleanup and never re-closes a pane the back
 | Backend close failure | `cleanup failed for pane <id>: <detail>` |
 | Unconfirmed owned-child shutdown | Its shutdown diagnostics, or `owned child cleanup remains unconfirmed` when it reports none |
 | Failed descriptor removal, run update or deregistration | Its own cause; a recorded run with remaining diagnostics keeps `cleanup_state=incomplete` |
-| Panic during launch | `native launch unwound; performing owned compensation`, after the same compensation |
+| An internal fault aborts the launch step before it returns a result | `native launch unwound; performing owned compensation`, after the same compensation |
 | Interrupted pending creation | `pending creation was interrupted` |
 
 Once the runner reports `started` under the matching identity, creation removes the descriptor and emits its result; placement publication alone keeps the rollback armed. Output keys keep their documented order and nullability; runtime fields follow §6.3 Runtime presentation.
@@ -1036,7 +1036,7 @@ Revalidate pending placement and deregister atomically. For a concrete pane, ret
 
 ##### `member show`
 
-`cafleet member show MEMBER_ID [--json]` reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement sub-dict and the appended runtime summary (§6.3 Runtime presentation).
+`cafleet member show MEMBER_ID [--json]` reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement object and the appended runtime summary (§6.3 Runtime presentation).
 
 ##### `member list`
 
@@ -1048,7 +1048,7 @@ Revalidate pending placement and deregister atomically. For a concrete pane, ret
 
 A root Director target exits 1 with `cannot prompt the Director's own pane`. The runner's submission plan is profile delivery (§6.3 Member targeting and key delivery); success returns ordered `{member_id, pane_id, text, input_id, delivery}`.
 
-A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queued prompt prints `Queued prompt for member ID (PANE).` Both add the delivery and input lines (§6.3 Runtime presentation).
+A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queued prompt prints `Queued prompt for member ID (PANE).` Both add the delivery and input lines (§6.3 Runtime presentation). `TEXT_REPR` follows §6.4 Quoted text.
 
 Pre-write error, including a held runner reply: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
 
@@ -1096,7 +1096,7 @@ Exit 0 prints compact ordered JSON when `--json` is selected:
 
 Otherwise print `Acknowledged keys KEYS_JSON for member ID (PANE).`, where `KEYS_JSON` is the compact JSON array of canonical keys. Both modes end with one newline. The result carries no native-byte count, delivered-prefix count or permission receipt.
 
-Missing/extra positional arguments and a nonpositive/malformed member ID use the parser's native usage errors; key validation uses these bodies, with one-based `N` and JSON-quoted invalid input:
+Missing/extra positional arguments and a nonpositive/malformed member ID are parse errors (§6.3 Error Messages); key validation uses these bodies, with one-based `N` and JSON-quoted invalid input:
 
 | Condition | Error body (exit 2) |
 |---|---|
@@ -1326,7 +1326,7 @@ For a response audit, the `Input:` line is followed by `Permission decision: int
 
 #### Error Messages
 
-Application errors print to stderr even with `--json`, which selects only successful output; the permission-response exception (§6.3 Permission commands) also prints its structured held/rejected/uncertain response to stdout, alongside its stderr diagnostic, before exit 1. Input errors use the documented usage/application category. Dispatch, input-lock, compatibility and deletion-lock errors are specified at their action owners above. The executable prefixes the first stderr line of every application error with `Error: `, including messages this document quotes without it.
+Application errors print to stderr even with `--json`, which selects only successful output; the permission-response exception (§6.3 Permission commands) also prints its structured held/rejected/uncertain response to stdout, alongside its stderr diagnostic, before exit 1. Input errors use the documented usage/application category; a parse error follows its row below. Dispatch, input-lock, compatibility and deletion-lock errors are specified at their action owners above. The executable prefixes the first stderr line of every application error with `Error: `, including messages this document quotes without it. `<quoted>` in a message follows §6.4 Quoted text.
 
 | Command | Situation | Error message | Exit |
 |---|---|---|---|
@@ -1366,7 +1366,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `setup` | The Hermes plugin enablement fails; no `asset_installs` row for `hermes` (§6.3 Hermes plugin enablement) | `failed to enable hermes plugin cafleet in <config path>: <cause>` | 1 |
 | `message listen --codex-thread` | `codex` is not on `PATH`, or no Codex ancestor process exists; before `ready` | §6.3 Codex forwarding | 1 |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path, before registration or multiplexer effects. `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
-| (any parser-validated input) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is non-normative. | 2 |
+| (any command-line argument) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is non-normative. | 2 |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID; for `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The live-fleet guard: the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
@@ -1441,13 +1441,15 @@ Text bodies use a fixed 200 codepoints plus `…`; `--json` preserves the comple
 
 A runtime notification is an ordinary inbox record whose `text` is the complete versioned event JSON. The pinned observed member is its sender and the Director its recipient; verify the durable event/message association through `event show` before acting. Its typed source distinguishes runner observation from model-authored speech. Version-2 permission-opening events carry a broker-built `director_action` (review instruction and inspection argv), validated against the stored event/Director association (§6.9 Request-bound permission responses). The Director's poll consumes the message independently of the attributed decision, answer submission, event visibility and actual continuation. §6.9 Persistence, notification and read interfaces owns evidence policy, atomic association and archived recovery.
 
-#### `strip_ansi` regex and CR-defrag
+#### ANSI stripping and CR-defrag
 
-The CSI regex is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC, `[`, any run of parameter bytes (`0x30`–`0x3F`), any run of intermediate bytes (`0x20`–`0x2F`), then one final byte (`0x40`–`0x7E`). Only CSI sequences are stripped; OSC, DCS and single-character escapes deliberately remain. After stripping, split on `\n`; per line, trim the trailing run of `\r` (a CR with nothing written after it, such as a CRLF terminator's, overwrites nothing), then keep only the substring after the **last** remaining `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps `NEW`, a CRLF-terminated `row\r\n` keeps `row`); re-join with `\n`. An empty/falsy input returns unchanged.
+The CSI pattern (§6.9 Pattern syntax) is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC, `[`, any run of parameter bytes (`0x30`–`0x3F`), any run of intermediate bytes (`0x20`–`0x2F`), then one final byte (`0x40`–`0x7E`). Only CSI sequences are stripped; OSC, DCS and single-character escapes deliberately remain. After stripping, split on `\n`; per line, trim the trailing run of `\r` (a CR with nothing written after it, such as a CRLF terminator's, overwrites nothing), then keep only the substring after the **last** remaining `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps `NEW`, a CRLF-terminated `row\r\n` keeps `row`); re-join with `\n`. An empty input yields the empty string.
 
 #### Formatter helper semantics
 
-Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eight characters after `T`; absent/non-string/no-T values render `-`. Idle renders null as `-`, seconds below 60, floor minutes below 3600 and floor hours afterward. Required fields fail if absent; nullable activity and pending placement are documented valid cases.
+Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eight characters after `T`; an absent value or one without a `T` renders `-`. Idle renders null as `-`, seconds below 60, floor minutes below 3600 and floor hours afterward. Required fields fail if absent; nullable activity and pending placement are documented valid cases.
+
+##### Quoted text
 
 `TEXT_REPR` and `<quoted>` denote the value wrapped in `"` with these escapes: `"` → `\"`, `\` → `\\`, U+0009 → `\t`, U+000A → `\n`, U+000D → `\r`, U+0000 → `\0`; any other scalar whose general category is Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs (except U+0020), or which has the Grapheme_Extend property, → `\u{H}` with lowercase hex and no leading zeros. Every other scalar, including `'`, is written as itself. Categories and properties follow the Unicode version the implementation ships; the rendering of a scalar whose classification differs between Unicode versions is non-normative.
 
@@ -1523,7 +1525,7 @@ Deletion closes the pane (tmux `kill-pane`, herdr `pane close`), then, after reg
 
 #### Pane input lock
 
-Every operation that writes pane input uses one process-shared OS file lock. Acquire the guard before placement revalidation. For wrapped prompt/exec/preview submissions the runner owns the lock: wrapped clients validate and submit without holding it while awaiting the runner, and the runner acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and retains it across an active staged write through durable receipt/stamp settlement (§6.9 Runner-owned deferred delivery). A merely queued request holds no lock. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Close the non-cloned owned handle on every path.
+Every operation that writes pane input uses one process-shared OS file lock. Acquire the lock before placement revalidation. For wrapped prompt/exec/preview submissions the runner owns the lock: wrapped clients validate and submit without holding it while awaiting the runner, and the runner acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and retains it across an active staged write through durable receipt/stamp settlement (§6.9 Runner-owned deferred delivery). A merely queued request holds no lock. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Hold the lock through exactly one open file descriptor and close it on every exit path; no duplicate of that descriptor outlives the operation.
 
 | Property | Contract |
 |---|---|
@@ -1547,7 +1549,7 @@ No database statement runs while a writer waits for the lock.
 
 #### Termination during pane input
 
-Interrupting a host turn, including through Escape-first delivery fallback, can also end the turn's in-flight shell tool, such as a running `cafleet` command. The CLI therefore blocks `SIGINT`, `SIGTERM` and `SIGHUP` across every pane-input and lifecycle span; a signal received meanwhile takes its default action when the span ends. Spans nest and restore the outer signal mask.
+Interrupting a host turn, including through Escape-first delivery fallback, can also end the turn's in-flight shell tool, such as a running `cafleet` command. The CLI therefore defers `SIGINT`, `SIGTERM` and `SIGHUP` across every pane-input and lifecycle span: a signal received meanwhile takes its default action when the outermost span ends; spans nest.
 
 | Command | Span |
 |---|---|
@@ -1596,9 +1598,9 @@ Acquire the canonical pane-input lock shared with deletion and validate its reta
 
 Validation establishes the tuple within the current recorded server only: the placement records no socket/server-generation identity, so it supplies no cross-server fallback or proof of historical server/build equivalence. Keep one adapter/environment across every probe and the write.
 
-Capture one inherited-or-new five-second absolute deadline before invocation database validation. Every press process — the availability, current-context and target-metadata probes and the write — runs under absolute `run_until` with that bound through spawn, collection and cleanup, and a nested runner clips it by any earlier retained bound. The lock wait reserves one second for metadata/dispatch/cleanup (not the prompt reservation). Every later check uses the remaining original budget, and insufficient launch/cleanup reserve starts no new writing process.
+Capture one inherited-or-new five-second absolute deadline before invocation database validation. Every press process — the availability, current-context and target-metadata probes and the write — runs under that absolute deadline through spawn, collection and cleanup, and a nested runner clips it by any earlier retained bound. The lock wait reserves one second for metadata/dispatch/cleanup (not the prompt reservation). Every later check uses the remaining original budget, and insufficient launch/cleanup reserve starts no new writing process.
 
-Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll `try_wait` with sleeps at most 2 milliseconds while the original cleanup deadline has time remaining, checking that deadline after every interruption. Explicit cleanup and unwind fallback use the same deadline and perform no blocking wait. An explicit cleanup attempt prevents a second Drop retry cycle; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors, the primary process error (a timed run error keeps its original cause) and the ordered cleanup diagnostics; unwind emits cleanup diagnostics to stderr. Relative and untimed execution serve no press process and follow § Subprocess output and deadlines. Synchronous calls have no hard scheduler/syscall return-time guarantee.
+Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll for its exit without blocking (`waitpid` with `WNOHANG`), sleeping at most 2 milliseconds between polls, while the original cleanup deadline has time remaining, checking that deadline after every interruption. Cleanup on an error path and cleanup of an abandoned operation use the same deadline and perform no blocking wait, and each child is cleaned up at most once; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors, the primary process error (a timed run error keeps its original cause) and the ordered cleanup diagnostics; cleanup of an abandoned operation writes its diagnostics to stderr. Relative and untimed execution serve no press process and follow § Subprocess output and deadlines. Synchronous calls have no hard scheduler/syscall return-time guarantee.
 
 Both writing adapters acknowledge only successful process completion with empty/whitespace stdout. Unexpected non-whitespace stdout on success is unreadable acknowledgment with uncertain effects; herdr metadata retains its command-specific JSON parsing. Backend keyboard modes or key interception can affect actual PTY bytes even after acknowledgment. Use the CLI result/error contract (§6.3 `member press`), including its zero-write and no-retry cases, and observe actual native effects separately.
 
@@ -1608,7 +1610,7 @@ Every ordinary member uses a pinned, healthy control socket and its runner's own
 
 Validate a nonblank literal line without CR/LF or C0/DEL controls before starting any process. No input path captures the pane or consults its state. Native shell input starts with `! ` followed by the actual validated command; composer controls begin the submitted input.
 
-An OpenCode member (`opencode mini`, §6.7 Per-backend `build_spawn_argv`) receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command.
+An OpenCode member (`opencode mini`, §6.7 Per-backend spawn argv) receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command.
 
 Deletion and prompt/exec operations start their five-second budgets after the invocation's schema-version guard. Resolve native command bodies before starting their input budget. Runner-owned staged writes use the original attempt deadline (§6.9 Runner-owned deferred delivery).
 
@@ -1802,7 +1804,7 @@ argv in § Prompt dispatch and § Explicit key dispatch.
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
 | Close | `tmux kill-pane -t <pane>`, then the restoration of the caller-supplied window | `herdr pane close <pane>`, then the delete-time restoration of the caller-supplied tab | Close tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`); restoration is best effort (§ Delete-time pane layout) |
 
-`pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`.
+`pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`. `<quoted>` follows §6.4 Quoted text.
 
 Process failures preserve their context in the multiplexer error:
 `<backend> binary not found: <detail>`, `<backend> command was not started:
@@ -2016,19 +2018,11 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 
 #### Interface
 
-A coding-agent backend is a stateless value selected per member at spawn time, with three read-only properties and five operations:
+Each backend has a registry token (its `--coding-agent` value, stored `placement.coding_agent` value and executable name) and zero or more shared-server signatures (§ Shared-server signatures). `member create` checks, in order, model, effort, prompt body, availability (config directory, executable on `PATH`, the backend's own prerequisite), then builds argv. A model, effort or prompt failure is a usage error (exit 2) with the backend's message and precedes every side effect; an availability failure exits 1. An omitted `--model` or `--effort` is always valid.
 
-- **`name`** — the registry key: a stable lowercase string that MUST equal its `--coding-agent` token, the persisted `placement.coding_agent` lookup value and its registration key.
-- **`binary_name`** — the executable resolved against `PATH`; equal to `name` for every backend.
-- **`shared_server_signatures`** — the backend's shared-server signatures (§ Shared-server signatures), empty for a backend without one.
-- **`ensure_available()`** — fails on the first unmet spawn precondition, in order: the config directory resolves per §6.3 CLI *Config-dir resolution* (an invalid config-location variable fails first); the binary resolves on `PATH`; the backend's own check (opencode: the selected preset file is readable; hermes: the effective approvals configuration passes § Hermes availability preflight; pi: the CAFleet pi extension `<pi base>/extensions/cafleet.ts` is readable). A shared helper resolves `binary_name` to an absolute path per §6.9 Member PTY runtime *Native executable resolution*, failing with `binary {binary_name} not found on PATH`. Preconditions read the host through a **spawn probe** (binary lookup, home directory, `env_var(name) -> optional string`); the system probe reads the process environment.
-- **`validate_model(model)`**, **`validate_effort(effort)`** — raise a value-error for a value malformed or unacceptable for this backend; `None` (flag omitted) is always valid. A backend without a reasoning-effort control rejects every non-`None` effort.
-- **`validate_prompt(prompt)`** — raises a value-error for a spawn-prompt body this backend cannot carry as its prompt argument; only pi rejects a body (§ Per-backend `build_spawn_argv`), and every other backend accepts every prompt. `member create` checks the raw body, before placeholder substitution.
-- **`build_spawn_argv(prompt, display_name, cwd, model, effort)`** — the full argv (binary + flags + prompt) for the multiplexer's member pane spawn. Its leading token is `binary_name`; the launched `argv[0]` follows §6.9 Native executable resolution and later tokens are unchanged. `display_name` is the member pane name (§6.5 Window and pane naming). `cwd` is the member's resolved absolute working directory (§6.5 Pane spawn working directory); only hermes emits it, and every other backend's argv is independent of it.
+The availability check resolves the config directory per §6.3 Config-dir resolution (an invalid config-location variable fails first), resolves the executable per §6.9 Native executable resolution, failing with `binary <name> not found on PATH`, then runs the backend's own check: opencode reads the selected preset file, hermes passes § Hermes availability preflight, and pi reads the CAFleet pi extension `<pi base>/extensions/cafleet.ts`. A backend without a reasoning-effort control rejects every given `--effort`. The prompt check reads the raw body, before placeholder substitution, Director placement lookup and registration; only pi rejects a body (§ Per-backend spawn argv). Argv construction takes the prompt, the member pane name `<display_name>` (§6.5 Window and pane naming), the member's resolved absolute working directory `<cwd>` (§6.5 Pane spawn working directory; only hermes emits it), the model and the effort. Its leading token is the executable name; the launched `argv[0]` follows §6.9 Native executable resolution. Broker value-errors (§7.2) exit 1.
 
-**Ordering invariant:** `member create` MUST call `validate_model` → `validate_effort` → `validate_prompt` → `ensure_available` → `build_spawn_argv`, so a malformed model, effort or prompt fails before any precondition check or side effect, as a usage error (exit 2) with the backend's message; broker value-errors (§7.2) exit 1. `validate_prompt` runs on the resolved prompt body before the Director placement lookup and registration.
-
-**No-model byte-identity:** a `None` model emits no `--model` tokens (never an empty `--model ""`) and a `None` effort emits no effort tokens, so each argv is byte-identical to its omitted form. An invalid effort never reaches argv construction.
+An omitted `--model` emits no `--model` tokens (never an empty `--model ""`) and an omitted `--effort` emits no effort tokens, so each argv is byte-identical to its omitted form. An invalid effort never reaches argv construction.
 
 #### Registry resolution
 
@@ -2046,17 +2040,17 @@ A shared-server signature identifies a long-lived backend server whose tool comm
 
 An argv matches when some token `argv[i]`, whose final `/`-separated component equals one of `programs`, is followed somewhere after `i` by the `subcommand` tokens as a contiguous run; options may sit between the program token and the run. The label is the backend name followed by the `subcommand` tokens joined by spaces. §6.3 Caller pane verification row 1 tests every ancestor against the signatures of every backend in registry order, whatever `--coding-agent` declares. OpenCode has no signature; the ancestry check refuses a second client of `opencode serve --service`.
 
-#### Per-backend `build_spawn_argv` (exact, token-by-token)
+#### Per-backend spawn argv (exact, token-by-token)
 
-The blocks below are the child argv with omitted permission selection. The leading token names the backend binary (launched `argv[0]`: §6.9 *Native executable resolution*). The multiplexer starts the CAFleet PTY runner, which preserves the literal child argv, cwd and required environment. Every backend honors the leading-`!` shell shortcut that `member exec` dispatches through, and every member can run its broker commands from the moment it is spawned (§ Backend capabilities). Every backend's `validate_model` and `validate_effort` follow § Model selection and § Reasoning effort.
+The blocks below are the child argv with omitted permission selection. The leading token names the backend binary (launched `argv[0]`: §6.9 *Native executable resolution*). The multiplexer starts the CAFleet PTY runner, which preserves the literal child argv, cwd and required environment. Every backend honors the leading-`!` shell shortcut that `member exec` dispatches through, and every member can run its broker commands from the moment it is spawned (§ Backend capabilities). Every backend's model and effort validation follows § Model selection and § Reasoning effort.
 
-**claude** — `ensure_available` resolves the claude config directory and checks `claude` on `PATH`. `display_name` becomes `--name` (§ Backend capabilities).
+**claude** — Availability resolves the claude config directory and checks `claude` on `PATH`. The member pane name becomes `--name` (§ Backend capabilities).
 
 ```
 ["claude", "--permission-mode", "auto", "--prompt-suggestions", "false", "--allowedTools", <rule>...,
  "--name", <display_name>]                           # explicit selection replaces "auto" with <mode>
-  (+ ["--model", <model>]  if model is not None)
-  (+ ["--effort", <effort>]  if effort is not None)
+  (+ ["--model", <model>]  when --model is given)
+  (+ ["--effort", <effort>]  when --effort is given)
   (+ <prompt>)                                       # bare trailing positional
 ```
 
@@ -2066,14 +2060,14 @@ The `--allowedTools` values are the claude member's **spawn-time allow rules**, 
 - The managed setting `allowManagedPermissionRulesOnly` makes Claude Code ignore `--allowedTools`.
 - A blocking `PreToolUse` hook stops a tool call before permission rules are evaluated.
 - Settings can change after spawn, so overdue member readiness or replies are inspected directly.
-- Work commands (`mise`, `git commit`, package managers) stay under the user's own read/edit/command rules; a denied one is routed through `member exec`.
+- Work commands (test runners, `git commit`, package managers) stay under the user's own read/edit/command rules; a denied one is routed through `member exec`.
 
-**codex** — `ensure_available` resolves the codex home and checks `codex` on `PATH`. `display_name` is ignored.
+**codex** — Availability resolves the codex home and checks `codex` on `PATH`. The member pane name is ignored.
 
 ```
 ["codex", "--no-daemon", "--approve-for-me"]
-  (+ ["--model", <model>]  if model is not None)
-  (+ ["--config=model_reasoning_effort=<effort>"]  if effort is not None)  # ONE token
+  (+ ["--model", <model>]  when --model is given)
+  (+ ["--config=model_reasoning_effort=<effort>"]  when --effort is given)  # ONE token
   (+ <prompt>)                                       # bare trailing positional
 ```
 
@@ -2081,40 +2075,40 @@ An explicit `on-request` or `never` replaces `"--approve-for-me"` with `"--ask-f
 
 Every launch policy keeps `"--no-daemon"`, so the member runs its own Codex session instead of starting or reusing the shared background app-server. The member's tool commands are then children of the pane's own `codex` process and inherit that pane's multiplexer variables; a shared app-server keeps the environment of the pane that started it. Codex 0.163.0 accepts `--no-daemon`.
 
-**opencode** — `validate_model` examples: `"openai/gpt-4"` accepted; `"a/b/c"` accepted as provider `a` / model `b/c`; `"a/"`, `"/b"`, `"abc"` rejected. `validate_effort` rejects every non-`None` value, so `build_spawn_argv` never emits effort tokens. `member create` resolves the launch policy before `ensure_available`, whose opencode check (§ Interface order) reads only the selected preset `<preset base>/agents/<mode>.md` for the resolved mode (§ opencode preset); only opencode has a required preset. `display_name` is ignored; the prompt is a two-token `--prompt <prompt>` pair, unlike claude/codex's bare positional.
+**opencode** — Model validation examples: `"openai/gpt-4"` accepted; `"a/b/c"` accepted as provider `a` / model `b/c`; `"a/"`, `"/b"`, `"abc"` rejected. Effort validation rejects every given `--effort`, so the opencode argv never carries effort tokens. `member create` resolves the launch policy before the availability check, whose opencode step (§ Interface) reads only the selected preset `<preset base>/agents/<mode>.md` for the resolved mode (§ opencode preset); only opencode has a required preset. The member pane name is ignored; the prompt is a two-token `--prompt <prompt>` pair, unlike claude/codex's bare positional.
 
 ```
 ["opencode", "mini", "--standalone", "--agent", <mode>]   # <mode> is cafleet or cafleet-ask
-  (+ ["--model", <model>]  if model is not None)
+  (+ ["--model", <model>]  when --model is given)
   (+ ["--prompt", <prompt>])                         # prompt via flag — TWO tokens
 ```
 
 The pane runs `opencode mini --standalone`, the long-lived minimal interactive interface with a private server per pane; `mini` takes no positional message. The `--agent` value is the only argv difference between the two launch policies, and `member create` separately probes the native version for profile selection. Spawn, preset loading, broker input and native shell input are validated against opencode 2.1.4; the OpenCode profile from `2.1.4` is the first boundary, so `member create` refuses an earlier probed version (§6.9 Profile selection by minimum version).
 
-**hermes** — `ensure_available` resolves the Hermes home per §6.3 *Config-dir resolution* (`HERMES_HOME`, default `~/.hermes`), checks `hermes` on `PATH`, then runs § Hermes availability preflight. `display_name` is ignored; Hermes has no `--name` analog.
+**hermes** — Availability resolves the Hermes home per §6.3 *Config-dir resolution* (`HERMES_HOME`, default `~/.hermes`), checks `hermes` on `PATH`, then runs § Hermes availability preflight. The member pane name is ignored; Hermes has no `--name` analog.
 
 ```
 ["hermes", "chat", "--cli", "--source", "tool", "--in", <cwd>]
-  (+ ["--model", <model>]       if model is not None)
-  (+ ["--reasoning", <effort>]  if effort is not None)
+  (+ ["--model", <model>]       when --model is given)
+  (+ ["--reasoning", <effort>]  when --effort is given)
   (+ ["-q", <prompt>])                               # prompt via flag — TWO tokens
 ```
 
 The argv carries no permission tokens (the operator configuration's `approvals.mode` governs the native session) and never `--provider` (the operator's configuration selects the provider). Every spawn starts a fresh conversation: the argv never contains `--resume`, `--continue` or `--create-if-missing`. `--source tool` keeps member sessions out of the operator's default session lists, and `-q` on a terminal seeds the interactive session with the prompt as its literal first turn.
 
-**pi** — `ensure_available` resolves the pi base per §6.3 *Config-dir resolution* (`PI_CODING_AGENT_DIR`, default `~/.pi/agent`), checks `pi` on `PATH`, then reads the CAFleet pi extension `<pi base>/extensions/cafleet.ts` in every launch mode, because every pi member depends on its gate (§ pi member gate). `display_name` becomes `--name`; `cwd` is unused.
+**pi** — Availability resolves the pi base per §6.3 *Config-dir resolution* (`PI_CODING_AGENT_DIR`, default `~/.pi/agent`), checks `pi` on `PATH`, then reads the CAFleet pi extension `<pi base>/extensions/cafleet.ts` in every launch mode, because every pi member depends on its gate (§ pi member gate). The member pane name becomes `--name`; the working directory is unused.
 
 ```
 ["pi", "--cafleet-gate", "cafleet", "--no-approve", "--tui-mode", "fullscreen", "--name", <display_name>]
                                                      # explicit selection replaces "cafleet" with <mode>
-  (+ ["--model", <model>]     if model is not None)
-  (+ ["--thinking", <effort>] if effort is not None)
+  (+ ["--model", <model>]     when --model is given)
+  (+ ["--thinking", <effort>] when --effort is given)
   (+ ["--", <prompt>])                               # bare trailing positional after --
 ```
 
 The permission argv is the `--cafleet-gate <mode>` pair, where `<mode>` is `cafleet` or `cafleet-ask`. `--no-approve` ignores trust-gated project-local configuration and resources, so no project-trust dialog blocks a member; CAFleet skills load from `<pi base>/skills`, and `AGENTS.md` and `CLAUDE.md` still load. `--tui-mode fullscreen` pins the layout the pi profile matches, whatever the operator's `tuiMode` setting. `--` keeps a prompt that begins with `-` positional. Every spawn starts a fresh session: the argv never contains `--continue`, `--resume`, `--session`, `--session-id` or `--fork`. Spawn is validated against pi 1.5.0; the pi profile from `1.5.0` is the first boundary, so `member create` refuses an earlier probed version (§6.9 Profile selection by minimum version).
 
-**Prompt rule.** pi reads a positional argument beginning with `@` as a file attachment, so pi's `validate_prompt` rejects a prompt body whose first character is `@` with usage exit 2 and `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).`, before registration: no member row, run or pane is created. Checking the raw body is equivalent to checking the rendered prompt, because a leading placeholder renders to digits, `default`, a backend token or `sqlite:///…`. `build_spawn_argv` asserts the invariant for every prompt it receives.
+**Prompt rule.** pi reads a positional argument beginning with `@` as a file attachment, so pi's prompt check rejects a prompt body whose first character is `@` with usage exit 2 and `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).`, before registration: no member row, run or pane is created. Checking the raw body is equivalent to checking the rendered prompt, because a leading placeholder renders to digits, `default`, a backend token or `sqlite:///…`. No pi argv carries a prompt that begins with `@`.
 
 #### Model selection
 
@@ -2229,7 +2223,7 @@ Both postures are allowlists; standalone un-enumerated commands fall to the `"*"
 |---|---|---|
 | MCP-contributed tools | — | Their participation in preset permission evaluation is unverified on opencode 2.1.4; evaluation is established only for loaded configurations free of MCP servers. |
 | Compound shell commands | <code>cafleet message poll 7; curl … &#124; sh</code> against `cafleet message poll *` | Permission matching for compound lines is unverified on opencode 2.1.4, under both presets; matching is established for one command per invocation. |
-| Interpreter or hook execution via a command the Director allows | `mise //:test` executes workspace-writable test code; `git commit` runs `.git/hooks` | An allowed command also runs the code and hooks it executes, under that one-time permission. |
+| Interpreter or hook execution via a command the Director allows | a test-runner command executes workspace-writable test code; `git commit` runs `.git/hooks` | An allowed command also runs the code and hooks it executes, under that one-time permission. |
 | `.env` files | `cafleet message send --from-member-id 7 --to-member-id 1 --file .env` | The `read` and `edit` `.env` denials govern OpenCode's file tools; an allowed broker `message send --file` naming a `.env` file copies its contents into a broker message. |
 
 cafleet ships no MCP stanzas.
@@ -2380,7 +2374,7 @@ The form has no timeout. Concurrent bash calls of one assistant message are eval
 
 | Surface | Limit |
 |---|---|
-| Allowed tooling | The gate constrains a cooperative member's tool calls and is not containment. A command the Director allows on the form or dispatches with `member exec` runs the workspace code it executes, which a member can edit (test code, `build.rs`, the `mise.toml` task definitions), and that code can write anywhere the user can, protected directories included |
+| Allowed tooling | The gate constrains a cooperative member's tool calls and is not containment. A command the Director allows on the form or dispatches with `member exec` runs the workspace code it executes, which a member can edit (test code, build scripts, task-runner definitions), and that code can write anywhere the user can, protected directories included |
 | No sandbox | `read`, `grep`, `find` and `ls` reach any path, and a symbolic link inside the cwd can target a path outside it |
 | `.env` files | The `.env` rule refuses only a `read`, `grep`, `find`, `ls`, `edit` or `write` call whose path names a `.env` file; a directory search (`grep` on `.`), an allowlisted broker `message send --file` naming a `.env` file, which copies its contents into a broker message, and a command the Director allows or dispatches still read `.env` contents |
 | Protected directories | The rule covers only `edit` and `write`, and its path check follows no symbolic link, so a link elsewhere in the cwd that targets a protected directory stays writable; a command the Director allows or dispatches writes where its own tool writes, as `git` does under `.git/`, and workspace code it runs writes these directories like any other path |
@@ -2396,7 +2390,7 @@ A `composer_empty` rule may declare an optional `suggestion` object, `{"style": 
 
 | Backend | Checked version | Suggestion rendering | STYLE |
 |---|---|---|---|
-| `claude` | 2.1.322 on tmux and Herdr 0.9.5 | A startup hint `Try "…"` and, while a message is queued, `Press up to edit queued messages`, both after `❯\u{a0}`. The post-turn suggestion was not reproduced in 4 runs, with and without `--prompt-suggestions false` | `{"faint": true}` |
+| `claude` | 2.1.322 on tmux and Herdr 0.9.5 | A startup hint `Try "…"` and, while a message is queued, `Press up to edit queued messages`, both after `❯` followed by U+00A0. The post-turn suggestion was not reproduced in 4 runs, with and without `--prompt-suggestions false` | `{"faint": true}` |
 | `codex` | 0.166.0 and 0.167.0 | `Ask Codex to do anything` at startup and after every turn | `{"faint": true}` |
 | `opencode` | 2.2.7 | `Ask anything, / for commands, @ for context…` at startup only | `{"foreground": {"kind": "rgb", "r": 128, "g": 128, "b": 128}}` |
 | `hermes` | 2026.9.24 | A rotating italic placeholder at startup and after a failed turn; post-turn rendering after a completed turn is not researched, because the checked installation has no provider token | `{"foreground": {"kind": "indexed", "index": 136}}` |
@@ -2410,10 +2404,10 @@ Every backend profile declares a `composer_draft` section, which only the runner
 
 ```json
 "composer_draft": {
-  "region": {"screen": "either", "start_pattern": "^❯\\u{a0}", "end_pattern": "^─+ *$",
+  "region": {"screen": "either", "start_pattern": "^❯\\x{a0}", "end_pattern": "^─+ *$",
              "max_rows": 48, "cursor": "inside"},
   "draft_rows": {"first": "start", "last": "before_end"},
-  "prompt_pattern": "^❯\\u{a0}",
+  "prompt_pattern": "^❯\\x{a0}",
   "mode_switch_prefixes": ["!", "/"],
   "fixture_ids": ["claude-2.1.322-draft-herdr-094-1", "claude-2.1.322-suggestion-herdr-094-1"]
 }
@@ -2423,7 +2417,7 @@ Every backend profile declares a `composer_draft` section, which only the runner
 |---|---|---|
 | `region` | The `composer_empty` region schema | Locates the composer exactly as the backend's `composer_empty` rule does, matching only the normal-mode composer |
 | `draft_rows` | Object: `first` is `start` or `after_start`; `last` is `end` or `before_end` | The rows of the matched region that hold the draft, as inclusive bounds relative to the region's start and end rows |
-| `prompt_pattern` | Regex or `null` | The prompt marker stripped from the first draft row; `null` for a composer without one |
+| `prompt_pattern` | Pattern (§6.9 Pattern syntax) or `null` | The prompt marker stripped from the first draft row; `null` for a composer without one |
 | `mode_switch_prefixes` | Nonempty array of strings of 1–4 Unicode scalars | Draft prefixes that switch the native input mode, each verified against the native CLI |
 | `fixture_ids` | Nonempty array | Native fixtures proving extraction, including a suggestion-only fixture where the backend renders suggestions and a mode-switched fixture where the mode changes the marker |
 
@@ -2447,7 +2441,7 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 
 | Condition | Error |
 |---|---|
-| PATH miss | `binary {binary_name} not found on PATH` |
+| PATH miss | `binary <name> not found on PATH` |
 | Selected opencode preset missing or unreadable | `cannot read opencode agent preset at {preset}: {cause}; run 'cafleet setup --coding-agent opencode' first` |
 | CAFleet pi extension missing or unreadable | `cannot read the CAFleet pi extension at {path}: {cause}; run 'cafleet setup --coding-agent pi' first` |
 | Invalid config-path variable (§6.3 *Config-dir resolution*) | `{var} must be an absolute path (got '{value}')` |
@@ -2639,7 +2633,7 @@ Record `requested_mode` as nullable text, `resolved_mode` as required text, `mod
 
 `effective_policy_json` remains null unless a tested native observation supplies it (§ Effective policy record); an installed version, argv or selected profile alone proves no effective authorization decision.
 
-Launch is independent of every profile capability; detection, annotation, composer, submission and answer capabilities resolve independently through the selected profile (§ Profile selection by minimum version), and answer profiles declare each semantic decision independently. A bundled tested answer declaration rests on measured single-request answer stages. Synthetic fixtures exercise rule and capability validation in the test suite while unverified components remain unknown or unsupported. A failed probe or a backend without bundled profiles yields `coverage=unknown` and an initial coverage notification; it still permits manual terminal operation, records the selected mode and delivers ordinary programmatic input through delivery fallback, and automatic/fixed policies remain useful where screen detection is unknown. The `cafleet` OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
+Launch is independent of every profile capability; detection, annotation, composer, submission and answer capabilities resolve independently through the selected profile (§ Profile selection by minimum version), and answer profiles declare each semantic decision independently. A bundled tested answer declaration rests on measured single-request answer stages. Unverified components remain unknown or unsupported. A failed probe or a backend without bundled profiles yields `coverage=unknown` and an initial coverage notification; it still permits manual terminal operation, records the selected mode and delivers ordinary programmatic input through delivery fallback, and automatic/fixed policies remain useful where screen detection is unknown. The `cafleet` OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
 
 ##### Native executable resolution
 
@@ -2663,7 +2657,7 @@ The probe yields a version only when it exits with status `0` and the first stdo
 | `v2.1.4 2.1.5` | Probe failure: several version tokens |
 | `tool 2.1` | Probe failure: no version token |
 
-Hermes replaces the one-token rule with its own first-line rule. The first stdout line must match `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$`, and the captured value must parse as canonical SemVer; that value is the recorded `native_version`. A non-matching line, or a capture that is not canonical SemVer, is a probe failure:
+Hermes replaces the one-token rule with its own first-line rule. The first stdout line must match `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$` (§ Pattern syntax), and the captured value must parse as canonical SemVer; that value is the recorded `native_version`. A non-matching line, or a capture that is not canonical SemVer, is a probe failure:
 
 | First stdout line (hermes) | Recorded `native_version` |
 |---|---|
@@ -2695,7 +2689,7 @@ selected = eligible profile with greatest min_version
 
 A known version below the first boundary fails with `Error: unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`. For example, boundaries `2.1.302` and `2.1.310` select the first profile for `2.1.308` and `2.1.310-beta.1` and the second for `2.1.310` and `2.2.0`, while `2.1.301` is unsupported. A prerelease can itself be a boundary when a measured prerelease requires a new profile.
 
-One shared SemVer parser and precedence comparison serves profile validation, native-version admission, the build guard's fixture validation and selection. Numeric components compare numerically, prerelease identifiers by SemVer precedence, and a release ranks above its prereleases. Build metadata contributes no precedence. Selection is independent of catalog order.
+One SemVer 2.0.0 precedence comparison serves profile validation, native-version admission, fixture provenance validation and selection. Numeric components compare numerically, prerelease identifiers by SemVer precedence, and a release ranks above its prereleases. Build metadata contributes no precedence. Selection is independent of catalog order.
 
 The run retains the actual probed `native_version`; the backend and that version determine the selected profile within one binary. A composer plan and an answer capability retain the actual run version, while each fixture record keeps its original capture version; input validation compares the backend and native version with the run rather than requiring the run version to equal a capture version or boundary.
 
@@ -2703,15 +2697,15 @@ The runner pins its selected profile for its lifetime. Fresh creation and observ
 
 The rules match screen patterns, so a changed native UI fails safe for detection: an unmatched form yields the `unknown` or `unknown_interaction` observation and offers no answer plan, and an unverified composer selects delivery fallback for ordinary input. An answer plan writes only after its request rule, choices and gates match the fresh observation.
 
-Native evidence is the provenance of a profile interval. The bundled-catalog build guard (§ Bundled profiles and native screen fixtures) requires every cited fixture's backend to match its profile and its capture version to lie at or above the profile's `min_version` and, when the backend has a next boundary, below it. Each subsequent native release within the interval reuses the declaration without another exact-version capture. A new profile is added only when an observed native change requires different rules or plans, with `min_version` set to the first native version requiring the change.
+Native evidence is the provenance of a profile interval. Catalog provenance validity (§ Bundled profiles and native screen fixtures) requires every cited fixture's backend to match its profile and its capture version to lie at or above the profile's `min_version` and, when the backend has a next boundary, below it. Each subsequent native release within the interval reuses the declaration without another exact-version capture. A new profile is added only when an observed native change requires different rules or plans, with `min_version` set to the first native version requiring the change.
 
 ##### Bundled profiles and native screen fixtures
 
-The binary embeds the bundled catalog; the native screen fixtures recorded in its fixture registry are test-suite inputs that the bundled-catalog build guard reads. Each profile's capabilities rest on accepted native captures taken on a native version within its interval. A bundled profile entry has required `backend`, `min_version`, `rules` and `capabilities`, and no other key; documentation and messages name a profile by its backend and boundary, as in "the OpenCode profile from `2.1.4`". Each fixture entry keeps its own `native_version` as the actual capture version. Each existing profile's `min_version` is the capture version of its earliest native fixtures; fixtures captured on later versions inside the interval add declarations to the same entry, and adding operation plans to an existing entry changes its contents without introducing a new boundary.
+The binary embeds the bundled catalog; the native screen fixtures recorded in its fixture registry are its provenance records. A shipped bundled catalog satisfies every provenance rule below. Each profile's capabilities rest on accepted native captures taken on a native version within its interval. A bundled profile entry has required `backend`, `min_version`, `rules` and `capabilities`, and no other key; documentation and messages name a profile by its backend and boundary, as in "the OpenCode profile from `2.1.4`". Each fixture entry keeps its own `native_version` as the actual capture version. Each existing profile's `min_version` is the capture version of its earliest native fixtures; fixtures captured on later versions inside the interval add declarations to the same entry, and adding operation plans to an existing entry changes its contents without introducing a new boundary.
 
-The fixture registry uses `assets/profiles/native/<backend>.json` (§6.3 Asset installation) for each backend with catalogued native screens. A fixture entry has required `id,kind,backend,native_version,rows,cols,source_ref,sha256` and optional `composer_evidence` and `composer_draft` (§6.7 Composer drafts and native suggestions); `source_ref` selects `native/<backend>.json`, and `sha256` is the lowercase SHA-256 hex of `digest::canonical_json` applied to that entry's screen object. The build guard validates every catalog fixture entry, including screens that no profile capability cites. The production catalog loader skips the contents of the `fixtures` registry and of every `fixture_ids` value; the build guard owns their provenance rules: unique ids, lowercase 32-byte digests, non-empty citations, citations inside the profile's backend interval and continuations citing native fixtures.
+The fixture registry uses `assets/profiles/native/<backend>.json` (§6.3 Asset installation) for each backend with catalogued native screens. Every catalog pattern this section quotes uses § Pattern syntax. A fixture entry has required `id,kind,backend,native_version,rows,cols,source_ref,sha256` and optional `composer_evidence` and `composer_draft` (§6.7 Composer drafts and native suggestions); `source_ref` selects `native/<backend>.json`, and `sha256` is the SHA-256 of the canonical JSON (§6.4 JSON encoding) of that entry's screen object. Provenance validation covers every catalog fixture entry, including screens that no profile capability cites. Run-time catalog loading ignores the `fixtures` registry contents and every `fixture_ids` value; only provenance validation reads them. Its rules are unique ids, lowercase 32-byte digests, non-empty citations, citations inside the profile's backend interval and continuations citing native fixtures.
 
-`composer_evidence` is a nonempty array of explicit native measurement records. Each record requires `operation` (`prompt` or `exec`), `multiplexer` (`tmux` or `herdr`) and one `kind` from the table below. The build guard rejects unknown fields or values and duplicate `(operation,multiplexer,kind)` records on one fixture. The native trial and its captured state establish each record's meaning; fixture naming alone supplies no claim.
+`composer_evidence` is a nonempty array of explicit native measurement records. Each record requires `operation` (`prompt` or `exec`), `multiplexer` (`tmux` or `herdr`) and one `kind` from the table below. Provenance validation rejects unknown fields or values and duplicate `(operation,multiplexer,kind)` records on one fixture. The native trial and its captured state establish each record's meaning; fixture naming alone supplies no claim.
 
 | Kind | Additional required fields | Evidence |
 |---|---|---|
@@ -2797,16 +2791,16 @@ The request identity follows the displayed rows. A resize that rewraps a multi-r
 
 Claude Code 2.1.302 in `auto` shows a native permission form only through an explicit `permissions.ask` rule. That form differs from the `default` form: it carries a `│ Ask rule … overrides auto mode for this command.` row and a `/permissions to let auto mode decide` row, has no `This command requires approval` line, and offers `2. No` as its deny choice. Rule `claude-auto-ask-permission` spans from `^ Bash command$` to `^ Esc to cancel · Tab to amend$` and requires these line matchers:
 
-- `^ │ Ask rule \S`
+- `^ │ Ask rule [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]`
 - `^ /permissions to let auto mode decide$`
-- `^ Do you want to proceed\?\s*$`
+- `^ Do you want to proceed\?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`
 - `^ ❯ [1-9]\. ` for the focus, `^ [❯ ] 1\. (?P<label>Yes)$` and `^ [❯ ] 2\. (?P<label>No)$` for the choices
 
 Under a non-automatic mode such as an explicit `default`, Claude Code 2.1.302 can show another Bash form for a workspace file write. It replaces the `This command requires approval` line with a `Tip: auto mode handles these prompts for you — choose "switch to auto mode" below` row and a description row, and offers four choices. Rule `claude-bash-permission-auto-tip` spans from `^ Bash command$` to `^ Esc to cancel · Tab to amend$` and requires these line matchers:
 
 - `^ Do you want to proceed\?$` and `^ ❯ [1-9]\. ` for the focus
 - `^ [❯ ] 1\. (?P<label>Yes)$` and `^ [❯ ] 4\. (?P<label>No)$` for the single-request choices
-- `^ [❯ ] 2\. Yes, and always allow access to \S.* from this project$` and `^ [❯ ] 3\. Yes, and switch to auto mode · auto mode handles these prompts for you$` for the broadened choices
+- `^ [❯ ] 2\. Yes, and always allow access to [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}].* from this project$` and `^ [❯ ] 3\. Yes, and switch to auto mode · auto mode handles these prompts for you$` for the broadened choices
 
 The form was captured at 120 columns only, so a wrapped or boxed rendering of it is not detected.
 
@@ -2822,8 +2816,8 @@ Two question rules (cursor inside, at most 14 rows) claim the two stages as sepa
 
 | Rule | Start | End | Matchers and choices |
 |---|---|---|---|
-| `claude-auto-startup` (offer) | `^  Teach auto mode about your environment\?\s*$` | `^  Enter to confirm · Esc to cancel\s*$` | heading, footer, focus `^  ❯ [1-9]\. `, `^  [❯ ] 1\. Yes\s*$`, and the choices `not-now` (`^  [❯ ] 2\. (?P<label>Not now)\s*$`) and `dont-show-again` (`^  [❯ ] 3\. (?P<label>Don't show again)\s*$`), both `persistent` |
-| `claude-auto-env-setup-wizard` | `^   Teach auto mode about your environment\?\s*$` | `^   ←/→ to change · Enter to continue · Esc to cancel\s*$` | heading, footer, focus `^   ❯ \S`; no choices |
+| `claude-auto-startup` (offer) | `^  Teach auto mode about your environment\?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | `^  Enter to confirm · Esc to cancel[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | heading, footer, focus `^  ❯ [1-9]\. `, `^  [❯ ] 1\. Yes[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, and the choices `not-now` (`^  [❯ ] 2\. (?P<label>Not now)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`) and `dont-show-again` (`^  [❯ ] 3\. (?P<label>Don't show again)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`), both `persistent` |
+| `claude-auto-env-setup-wizard` | `^   Teach auto mode about your environment\?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | `^   ←/→ to change · Enter to continue · Esc to cancel[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | heading, footer, focus `^   ❯ [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]`; no choices |
 
 Neither rule declares an operation. The offer and the wizard differ in their two- and three-space margins, so the wizard, which opens only after a manual `1. Yes`, starts its own episode. The offer's answer plans `claude-auto-env-setup-not-now-digit` (byte `32`) and `claude-auto-env-setup-dont-show-again-digit` (byte `33`) are one ungated stage each; no plan selects `1. Yes`, and the wizard has no answer plan. In the 2.1.312 captures each digit closed the offer and changed only its documented `autoModeEnvSetup` key.
 
@@ -2840,29 +2834,29 @@ Claude Code 2.1.312 can show `Make auto mode your default permission mode?` when
      No, keep manual mode
 ```
 
-The second label names the user-settings default (`No, keep manual mode` for `default`, `No, keep accept edits` for `acceptEdits`). Focus starts on `Yes` and is marked only by the `❯` glyph and a foreground colour; Ctrl+N and Ctrl+P (also the arrow keys) move and wrap it, Enter confirms the focused choice, typed text is discarded and Escape declines. `Yes` writes `permissions.defaultMode` `auto` into the user settings and switches the session; `No` and Escape set `hasSeenAutoDefaultNudge` `true`. The hidden terminal cursor sits at column 3 of the focused choice row. Question rule `claude-auto-default-nudge` (cursor inside, at most 10 rows) spans from `^ Make auto mode your default permission mode\?\s*$` to `^   (?:❯ |  )No, keep \S.*$` and declares the interaction frame guard rejecting `^❯\u{a0}`, so a quoted dialog above a live composer never matches:
+The second label names the user-settings default (`No, keep manual mode` for `default`, `No, keep accept edits` for `acceptEdits`). Focus starts on `Yes` and is marked only by the `❯` glyph and a foreground colour; Ctrl+N and Ctrl+P (also the arrow keys) move and wrap it, Enter confirms the focused choice, typed text is discarded and Escape declines. `Yes` writes `permissions.defaultMode` `auto` into the user settings and switches the session; `No` and Escape set `hasSeenAutoDefaultNudge` `true`. The hidden terminal cursor sits at column 3 of the focused choice row. Question rule `claude-auto-default-nudge` (cursor inside, at most 10 rows) spans from `^ Make auto mode your default permission mode\?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` to `^   (?:❯ |  )No, keep [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}].*$` and declares the interaction frame guard rejecting `^❯\x{a0}`, so a quoted dialog above a live composer never matches:
 
-- `heading` `^ Make auto mode your default permission mode\?\s*$`
-- `focus` `^   ❯ \S` with `focus_style` `marker` (§ Focused-choice resolution)
-- choice `accept` (`^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)\s*$`) and choice `decline` (`^   (?:❯ |  )(?P<label>No, keep \S.*?)\s*$`), both `persistent`
+- `heading` `^ Make auto mode your default permission mode\?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`
+- `focus` `^   ❯ [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]` with `focus_style` `marker` (§ Focused-choice resolution)
+- choice `accept` (`^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`) and choice `decline` (`^   (?:❯ |  )(?P<label>No, keep [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}].*?)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`), both `persistent`
 
 The `decline` label carries the kept default's name and is part of the fingerprint; the explanatory paragraph has no matcher, and the rule declares no operation. Answer plan `claude-auto-default-decline` for choice `decline` has two focus-gated stages: `0e` (Ctrl+N) while `accept` is focused moves the focus to `No, keep …`, then `0d` (Enter) while `decline` is focused closes the dialog as declined. Ctrl+N wraps, so a focus already on `decline` fails the first gate before any byte. `accept` is declared only so a gate can name it and has no plan. In the captures the plan closed the dialog and changed only `hasSeenAutoDefaultNudge`.
 
-When a draft reaches the composer before the dialog mounts, Claude hides the dialog and shows the notice row `Claude has a question for you — it shows once you send or clear what you're typing.` at column 0 above the composer. Question rule `claude-question-pending-notice` (cursor any, one row) matches that row, `^Claude has a question for you — it shows once you send or clear what you're typing\.\s*$`, and declares the Claude annotation rules' frame guard; model text quoting the words renders with the `● ` or two-space transcript margin and does not match. It declares no choices, operation or answer plan. As a candidate interaction the notice stops a profile submission after its literal stage and before its submit key (§ Measured submission plans and settle intervals) and queues later input. Two native outcomes remove it and close its episode as `not_visible`:
+When a draft reaches the composer before the dialog mounts, Claude hides the dialog and shows the notice row `Claude has a question for you — it shows once you send or clear what you're typing.` at column 0 above the composer. Question rule `claude-question-pending-notice` (cursor any, one row) matches that row, `^Claude has a question for you — it shows once you send or clear what you're typing\.[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, and declares the Claude annotation rules' frame guard; model text quoting the words renders with the `● ` or two-space transcript margin and does not match. It declares no choices, operation or answer plan. As a candidate interaction the notice stops a profile submission after its literal stage and before its submit key (§ Measured submission plans and settle intervals) and queues later input. Two native outcomes remove it and close its episode as `not_visible`:
 
 | User action on the native surface | Native outcome in the 2.1.312 captures |
 |---|---|
 | Clear the draft | The notice disappears and the dialog is drawn in its place at once, opening its own `question` episode |
 | Send the draft | For a draft typed during a turn, the first Enter submits it and the notice disappears; a draft typed at startup before any turn needs a second Enter. The dialog does not reappear in that process and `hasSeenAutoDefaultNudge` stays unset, so it returns at the next launch |
 
-Claude Code 2.1.309 asks before a file tool reads outside the working directories, also in `auto`. The dialog shows the read operation between dashed rules, an explanatory paragraph, the question and four choices, and opens focused on choice 1. Once the native configuration's `.claude.json` holds `hasSeenAutoModeOutsideReadPrompt` `true`, later reads outside the working directories in `auto` proceed without asking; when Claude writes the flag is not established. Rule `claude-read-outside-permission` spans from `^ Read outside the working directories\s*$` to `^ Esc to cancel · Tab to amend\s*$` and requires `^ Read outside the working directories\s*$` for the heading, `^ Allow this read outside the working directories\?\s*$` for the question, `^ ❯ [1-9]\. ` for the focus and one line matcher per choice:
+Claude Code 2.1.309 asks before a file tool reads outside the working directories, also in `auto`. The dialog shows the read operation between dashed rules, an explanatory paragraph, the question and four choices, and opens focused on choice 1. Once the native configuration's `.claude.json` holds `hasSeenAutoModeOutsideReadPrompt` `true`, later reads outside the working directories in `auto` proceed without asking; when Claude writes the flag is not established. Rule `claude-read-outside-permission` spans from `^ Read outside the working directories[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` to `^ Esc to cancel · Tab to amend[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` and requires `^ Read outside the working directories[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` for the heading, `^ Allow this read outside the working directories\?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` for the question, `^ ❯ [1-9]\. ` for the focus and one line matcher per choice:
 
 | Choice matcher | Scope |
 |---|---|
-| `^ [❯ ] 1\. Yes, and keep allowing any reads outside the working directories\s*$` | Changes a persistent setting |
-| `^ [❯ ] 2\. No, and block reads outside the working directories from now on\s*$` | Changes a persistent setting |
-| `^ [❯ ] 3\. (?P<label>No, and ask again next time)\s*$` | This read only, as `deny-once` |
-| `^ [❯ ] 4\. (?P<label>Yes, but ask again next time)\s*$` | This read only, as `allow-once` |
+| `^ [❯ ] 1\. Yes, and keep allowing any reads outside the working directories[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | Changes a persistent setting |
+| `^ [❯ ] 2\. No, and block reads outside the working directories from now on[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | Changes a persistent setting |
+| `^ [❯ ] 3\. (?P<label>No, and ask again next time)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | This read only, as `deny-once` |
+| `^ [❯ ] 4\. (?P<label>Yes, but ask again next time)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` | This read only, as `allow-once` |
 
 The operation is the displayed `Read(<path>)` rows. A long path continues on a further row with the one-space margin, so the evidence reports it with `operation_rows` above 1. The explanatory paragraph has no matcher. The rule rests on 2.1.309 captures at 120 columns; an earlier version that never renders the dialog never matches it.
 
@@ -2873,7 +2867,7 @@ The operation is the displayed `Read(<path>)` rows. A long path continues on a f
 | Panes too short to show the heading row | The region has no start row, so the frame is `unknown` until a resize redraws the dialog in full |
 | Other file tools | In the 2.1.309 captures, Edit first read its target and showed this same dialog, Write ran without a dialog under the auto mode classifier, and the session offered no Glob or Grep tool. An outside-working-directory dialog with other literals is an `unknown` frame with no event |
 
-In `default` mode, Claude Code 2.1.312 asks before a file tool touches a path outside the working directories. Each form has a heading, dashed `╌` rules around the operation, a question, three numbered choices and the footer ` Esc to cancel · Tab to amend`; the cursor sits on the focused choice row. Three request rules, ending at `^ Esc to cancel · Tab to amend\s*$`, claim them. They share the focus matcher `^ ❯ [1-9]\. `, the single-request choices `allow-once` (`^ [❯ ] 1\. (?P<label>Yes)\s*$`) and `deny-once` (`^ [❯ ] 3\. (?P<label>No)\s*$`), and a choice-2 matcher anchored on the label's start, because choice 2 can wrap onto a six-space continuation row:
+In `default` mode, Claude Code 2.1.312 asks before a file tool touches a path outside the working directories. Each form has a heading, dashed `╌` rules around the operation, a question, three numbered choices and the footer ` Esc to cancel · Tab to amend`; the cursor sits on the focused choice row. Three request rules, ending at `^ Esc to cancel · Tab to amend[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, claim them. They share the focus matcher `^ ❯ [1-9]\. `, the single-request choices `allow-once` (`^ [❯ ] 1\. (?P<label>Yes)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`) and `deny-once` (`^ [❯ ] 3\. (?P<label>No)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`), and a choice-2 matcher anchored on the label's start, because choice 2 can wrap onto a six-space continuation row:
 
 | Rule | Heading | Operation | Question | Choice 2 (no plan) |
 |---|---|---|---|---|
@@ -2883,16 +2877,16 @@ In `default` mode, Claude Code 2.1.312 asks before a file tool touches a path ou
 
 The Edit form shows the diff and the Create form the new content between the dashed rules; neither is extracted, and the Director reviews it from the capture excerpt. Edit first shows the Read form for its target unless reads of that path are allowed.
 
-When auto mode cannot be offered (`permissions.disableAutoMode` `disable`, an unavailable plan or model, fast mode, an ask rule or hook, or `plan` mode), Claude Code 2.1.312 drops the Tip row and the `switch to auto mode` choice from its Bash form and shows three choices. Rule `claude-bash-permission-no-tip` (from `^ Bash command\s*$` to `^ Esc to cancel · Tab to amend\s*$`) claims both of its variants:
+When auto mode cannot be offered (`permissions.disableAutoMode` `disable`, an unavailable plan or model, fast mode, an ask rule or hook, or `plan` mode), Claude Code 2.1.312 drops the Tip row and the `switch to auto mode` choice from its Bash form and shows three choices. Rule `claude-bash-permission-no-tip` (from `^ Bash command[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` to `^ Esc to cancel · Tab to amend[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`) claims both of its variants:
 
 | Variant | Shown for | Rows after the description row |
 |---|---|---|
 | Approval | A command inside the working directories | The operation with the one-space margin, ` This command requires approval`, a blank row, the question and choice 2 ` Yes, and don’t ask again for: <command prefix> *` (U+2019 apostrophe) |
 | Access | A command touching a path outside the working directories | The operation in the boxed `│ ` gutter, then the question with no blank row, and choice 2 ` Yes, and always allow access to <dir> from this project` |
 
-Besides the shared operation matcher (which keeps the boxed gutter, as for `claude-bash-permission`), the rule requires `^ Do you want to proceed\?\s*$`, the focus `^ ❯ [1-9]\. `, `allow-once` `^ [❯ ] 1\. (?P<label>Yes)\s*$`, the choice-2 matcher `remember` (either label, no choice entry) and `deny-once` `^ [❯ ] 3\. (?P<label>No)\s*$`. The approval line has no matcher, and the model-authored description row has none either. `claude-bash-permission` and `claude-bash-permission-auto-tip` require `4. No`, and `claude-auto-ask-permission` requires its `│ Ask rule` row and `2. No`, so the four Bash rules match disjoint forms.
+Besides the shared operation matcher (which keeps the boxed gutter, as for `claude-bash-permission`), the rule requires `^ Do you want to proceed\?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, the focus `^ ❯ [1-9]\. `, `allow-once` `^ [❯ ] 1\. (?P<label>Yes)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, the choice-2 matcher `remember` (either label, no choice entry) and `deny-once` `^ [❯ ] 3\. (?P<label>No)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`. The approval line has no matcher, and the model-authored description row has none either. `claude-bash-permission` and `claude-bash-permission-auto-tip` require `4. No`, and `claude-auto-ask-permission` requires its `│ Ask rule` row and `2. No`, so the four Bash rules match disjoint forms.
 
-When Claude Code 2.1.312 issues several tool calls in one turn, it asks for them one form at a time and right-aligns a request counter `N of M` at the end of each form's heading row (` Read file` … `1 of 2`). The `claude-read-file-permission`, `claude-edit-file-permission` and `claude-create-file-permission` rules and every rule anchored on the ` Bash command` heading accept an optional `(?:\s+\d+ of \d+)?` before the end of their region start pattern and their heading matcher; the Edit and Create rules also accept it on the heading line of their operation matcher. The counter is not evidence, not part of the operation and not part of the request identity, so a batched form classifies with the same rule and evidence as its single form. The answer plans stay the single-stage digits:
+When Claude Code 2.1.312 issues several tool calls in one turn, it asks for them one form at a time and right-aligns a request counter `N of M` at the end of each form's heading row (` Read file` … `1 of 2`). The `claude-read-file-permission`, `claude-edit-file-permission` and `claude-create-file-permission` rules and every rule anchored on the ` Bash command` heading accept an optional `(?:[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]+[0-9]+ of [0-9]+)?` before the end of their region start pattern and their heading matcher; the Edit and Create rules also accept it on the heading line of their operation matcher. The counter is not evidence, not part of the operation and not part of the request identity, so a batched form classifies with the same rule and evidence as its single form. The answer plans stay the single-stage digits:
 
 | Answer on a batched Read file form | Native outcome in the 2.1.312 captures |
 |---|---|
@@ -2916,13 +2910,13 @@ Claude Code opens a diff sidebar beside the transcript at 144 columns or more (1
 | Sidebar widths other than 144, 166 and 180 columns | The separator is found per frame, so other widths clip the same way. Live acceptance observed 166 and 180 columns (separator at column 92 and 99 on tmux), and 144 columns rests on its fixture only |
 | The pending-question notice, the `1. Yes` wizard, `Make auto mode your default permission mode?` on an onboarding process's primary screen, and its `No, keep accept edits` label | Not produced in live acceptance; their rules rest on the native fixtures |
 
-Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, primary or alternate screen, cursor any) declares the same frame guard: require `^❯\u{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
+Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, primary or alternate screen, cursor any) declares the same frame guard: require `^❯\x{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
 
 | Rule | Region | Captured screen |
 |---|---|---|
-| `claude-auto-refusal` | Start `^● [A-Z][A-Za-z]*\(`, end `^  ⎿ \u{a0}Denied by auto mode classifier ∙ \[`, at most 8 rows | The verbose-view transcript block `● Bash(<command>)` followed by `  ⎿  Denied by auto mode classifier ∙ [<category>] ∙ see https://code.claude.com/docs/s/claude-code-auto-mode`, kept in the live transcript |
-| `claude-auto-refusal-notice` | Start `^ +[a-z][a-z_]* denied by auto mode · \[[^\]]+\] · /permissions`, end the composer border `^─{3,}(?: \S.* ─)?$`, at most 2 rows | The default-view status-row notice `<tool> denied by auto mode · [<category>] · /permissions` above the composer border, shown for about 8–10 seconds |
-| `claude-auto-unavailable` | Start `^ +auto mode disabled by settings\b`, end the composer border, at most 2 rows | The transient notice `auto mode disabled by settings`, induced by `permissions.disableAutoMode`; the footer then shows `⏸ manual mode on` |
+| `claude-auto-refusal` | Start `^● [A-Z][A-Za-z]*\(`, end `^  ⎿ \x{a0}Denied by auto mode classifier ∙ \[`, at most 8 rows | The verbose-view transcript block `● Bash(<command>)` followed by `  ⎿  Denied by auto mode classifier ∙ [<category>] ∙ see https://code.claude.com/docs/s/claude-code-auto-mode`, kept in the live transcript |
+| `claude-auto-refusal-notice` | Start `^ +[a-z][a-z_]* denied by auto mode · \[[^\]]+\] · /permissions`, end the composer border `^─{3,}(?: [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}].* ─)?$`, at most 2 rows | The default-view status-row notice `<tool> denied by auto mode · [<category>] · /permissions` above the composer border, shown for about 8–10 seconds |
+| `claude-auto-unavailable` | Start <code>^ +auto mode disabled by settings(?:$&#124;[^0-9A-Za-z_])</code>, end the composer border, at most 2 rows | The transient notice `auto mode disabled by settings`, induced by `permissions.disableAutoMode`; the footer then shows `⏸ manual mode on` |
 | `claude-auto-mode-indicator` | Start and end `^  ⏵⏵ auto mode on \(shift\+tab to cycle\)`, one row | The footer badge on every live `auto` frame; its `mode` capture records `observed_mode` `auto mode` |
 
 `claude-auto-refusal` matches its region with one region-scoped matcher that captures the refused tool, the operation between the parentheses and the category, so the operation evidence is the refused command. Its first row follows `● Bash(` and carries no margin, so the rule declares no `row_margin`, and a wrapped operation reports its continuation rows with their two-space margin. `claude-auto-refusal-notice` captures `<tool> denied by auto mode · [<category>]` as its operation, because the default view never shows the refused command. `claude-auto-unavailable` captures its notice with a null operation. The native result prefix carries a U+00A0 after `⎿`, while a model quote of the same words carries two ASCII spaces, so quotes do not match.
@@ -2943,8 +2937,8 @@ The rules anchor on the live form's heading and closing lines rather than on abs
 
 Codex 0.163.0 in `approve-for-me` routes every escalation to its automatic reviewer and shows no native permission form, so the profile adds no request rule. Both Codex annotation rules (priority 40, alternate screen, cursor any) declare the same frame guard: require `^(?:› Ask Codex to do anything|  \? for shortcuts)` (the live composer or its hint line) and reject `^  k keep & next · esc dismiss & close` (the f2 warnings overlay).
 
-- `codex-auto-review-refusal` spans from `^✗ Request denied for codex to run \S` to the next blank row `^\s*$` within 6 rows. Its region matcher `\A✗ Request denied for codex to run (?P<operation>[^\n]*\S(?:\n  [^\n]*\S)*)\s*\n\s*\z` captures the refused command, and its `row_margin` is two spaces. The line stays in the transcript at column 0, followed by `• Failed (exit 1) <command>`; model quotes render indented or `• `-prefixed, never at column 0, so they do not match. Codex wraps a long command inside a token with a two-space continuation margin, and the fingerprint strips that margin before removing the row break, so a resize keeps the fingerprint.
-- `codex-auto-review-indicator` matches the one row `^  Permissions: +Workspace \(Approve for me\)\s*$` in the `/status` block. Its `mode` capture records `observed_mode` `Workspace (Approve for me)`.
+- `codex-auto-review-refusal` spans from `^✗ Request denied for codex to run [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]` to the next blank row `^[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` within 6 rows. Its region matcher `\A✗ Request denied for codex to run (?P<operation>[^\n]*[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}](?:\n  [^\n]*[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}])*)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*\n[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*\z` captures the refused command, and its `row_margin` is two spaces. The line stays in the transcript at column 0, followed by `• Failed (exit 1) <command>`; model quotes render indented or `• `-prefixed, never at column 0, so they do not match. Codex wraps a long command inside a token with a two-space continuation margin, and the fingerprint strips that margin before removing the row break, so a resize keeps the fingerprint.
+- `codex-auto-review-indicator` matches the one row `^  Permissions: +Workspace \(Approve for me\)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` in the `/status` block. Its `mode` capture records `observed_mode` `Workspace (Approve for me)`.
 
 The captures showed an allowed escalation only as an ordinary `• Ran …` transcript line, and the reviewer at work as `• Reviewing approval request (Ns • esc to interrupt)`; both are verified non-interaction frames with the composer visible, so neither needs a rule.
 
@@ -2982,18 +2976,18 @@ A command taller than the form's command box scrolls inside the box: in the 57-c
 
 | Rule | Element | Pattern |
 |---|---|---|
-| `opencode-shell-permission` | Region | Start `^  △ Permission required\s*$`, end `  ⇆ select  enter confirm  esc reject\s*$`, 24 rows |
-| `opencode-shell-permission` | `heading`, `shell` (line) | `^  △ Permission required\s*$`, <code>^   # Shell command(?:\s&#124;$)</code> |
-| `opencode-shell-permission` | `operation` (region) | `(?m)^  \$ (?P<operation>\S[^\n]*(?:\n  \S[^\n]*)*)(?:\n *(?:█ *)?)*\n   Allow once   `, with `row_margin` two spaces, `margin_rows` `continuation` and `row_trailer` `█` |
-| `opencode-shell-permission` | `unclipped` (region) | `(?m)^   # Shell command +█ *\n(?: *█ *\n)*  \$ [^\n]*█ *(?:\n  \S[^\n]*█ *)*(?:\n *(?:█ *)?)*\n   Allow once   ` |
+| `opencode-shell-permission` | Region | Start `^  △ Permission required[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, end `  ⇆ select  enter confirm  esc reject[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, 24 rows |
+| `opencode-shell-permission` | `heading`, `shell` (line) | `^  △ Permission required[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, <code>^   # Shell command(?:[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]&#124;$)</code> |
+| `opencode-shell-permission` | `operation` (region) | `(?m)^  \$ (?P<operation>[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}][^\n]*(?:\n  [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}][^\n]*)*)(?:\n *(?:█ *)?)*\n   Allow once   `, with `row_margin` two spaces, `margin_rows` `continuation` and `row_trailer` `█` |
+| `opencode-shell-permission` | `unclipped` (region) | `(?m)^   # Shell command +█ *\n(?: *█ *\n)*  \$ [^\n]*█ *(?:\n  [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}][^\n]*█ *)*(?:\n *(?:█ *)?)*\n   Allow once   ` |
 | `opencode-shell-permission` | `controls` (region) | <code>(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *&#124; *(?:\n *)*\n  ⇆ select  enter confirm  esc reject *)\z</code> |
-| `opencode-shell-permission` | `focus`, `allow`, `deny` (line) | `^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\s*$` with `focus_style` `background`, `^   (?P<label>Allow once)   `, <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code> |
-| `opencode-shell-permission-compact` | Region | Start `^△ Permission required\s*$`, end `pgup/pgdn scroll\s*$`, 24 rows |
-| `opencode-shell-permission-compact` | `heading`, `shell` (line) | `^△ Permission required\s*$`, <code>^# Shell command(?:\s&#124;$)</code> |
-| `opencode-shell-permission-compact` | `operation` (region) | `(?m)^\$ (?P<operation>\S[^\n]*(?:\n\S[^\n]*)*)(?:\n *(?:█ *)?)*\n Allow once   `, with `row_trailer` `█` and no `row_margin` |
-| `opencode-shell-permission-compact` | `unclipped` (region) | `(?m)^# Shell command +█ *\n(?: *█ *\n)*\$ [^\n]*█ *(?:\n\S[^\n]*█ *)*(?:\n *(?:█ *)?)*\n Allow once   ` |
+| `opencode-shell-permission` | `focus`, `allow`, `deny` (line) | `^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` with `focus_style` `background`, `^   (?P<label>Allow once)   `, <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code> |
+| `opencode-shell-permission-compact` | Region | Start `^△ Permission required[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, end `pgup/pgdn scroll[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, 24 rows |
+| `opencode-shell-permission-compact` | `heading`, `shell` (line) | `^△ Permission required[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, <code>^# Shell command(?:[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]&#124;$)</code> |
+| `opencode-shell-permission-compact` | `operation` (region) | `(?m)^\$ (?P<operation>[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}][^\n]*(?:\n[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}][^\n]*)*)(?:\n *(?:█ *)?)*\n Allow once   `, with `row_trailer` `█` and no `row_margin` |
+| `opencode-shell-permission-compact` | `unclipped` (region) | `(?m)^# Shell command +█ *\n(?: *█ *\n)*\$ [^\n]*█ *(?:\n[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}][^\n]*█ *)*(?:\n *(?:█ *)?)*\n Allow once   ` |
 | `opencode-shell-permission-compact` | `controls` (region) | <code>(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *&#124; *(?:\n *)*\npgup/pgdn scroll *)\z</code> |
-| `opencode-shell-permission-compact` | `focus`, `allow`, `deny` (line) | `^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\s*$` with `focus_style` `background`, `^ (?P<label>Allow once)   `, <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code> |
+| `opencode-shell-permission-compact` | `focus`, `allow`, `deny` (line) | `^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` with `focus_style` `background`, `^ (?P<label>Allow once)   `, <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code> |
 
 `mini` hides the cursor while a form or dialog shows, and its recorded position varies, including the pending-wrap position on the row below the form. Every OpenCode permission rule therefore matches with cursor `any` and relies on its heading and control-text anchors.
 
@@ -3010,10 +3004,10 @@ The continuation rules `opencode-reject-reason` and `opencode-reject-reason-comp
 
 | Rule | Element | Pattern |
 |---|---|---|
-| `opencode-reject-reason` | Region | Start `^  △ Reject permission\s*$`, end `  enter confirm  esc cancel\s*$`, 24 rows |
-| `opencode-reject-reason` | `heading` (line), `empty_reason` (region) | `^  △ Reject permission\s*$`; <code>(?m)^  △ Reject permission *(?:\n *)*\n  Tell OpenCode what to do differently *(?:\n *)*\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *&#124; *(?:\n *)*\n  enter confirm  esc cancel *)\z</code> |
-| `opencode-reject-reason-compact` | Region | Start `^△ Reject permission\s*$`, end `^enter reject esc back\s*$`, 24 rows |
-| `opencode-reject-reason-compact` | `heading` (line), `empty_reason` (region) | `^△ Reject permission\s*$`; `(?m)^△ Reject permission *(?:\n *)*\nTell OpenCode what to do differently *(?:\n *)*\nenter reject esc back *\z` |
+| `opencode-reject-reason` | Region | Start `^  △ Reject permission[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, end `  enter confirm  esc cancel[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, 24 rows |
+| `opencode-reject-reason` | `heading` (line), `empty_reason` (region) | `^  △ Reject permission[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`; <code>(?m)^  △ Reject permission *(?:\n *)*\n  Tell OpenCode what to do differently *(?:\n *)*\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *&#124; *(?:\n *)*\n  enter confirm  esc cancel *)\z</code> |
+| `opencode-reject-reason-compact` | Region | Start `^△ Reject permission[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, end `^enter reject esc back[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, 24 rows |
+| `opencode-reject-reason-compact` | `heading` (line), `empty_reason` (region) | `^△ Reject permission[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`; `(?m)^△ Reject permission *(?:\n *)*\nTell OpenCode what to do differently *(?:\n *)*\nenter reject esc back *\z` |
 
 The native captures showed this decision evidence:
 
@@ -3149,30 +3143,19 @@ Each screen object has exactly these fields, of which only `cell_backgrounds` an
 | `cell_backgrounds` | Optional runs `{"row":N,"start_col":C,"end_col":E,"bg":COLOUR}`, one per maximal run of cells in an unmasked row that share one non-default background, `end_col` exclusive; `COLOUR` is `{"kind":"indexed","index":I}` or `{"kind":"rgb","r":R,"g":G,"b":B}`. An absent key means every cell has the default background. |
 | `cell_styles` | Optional runs `{"row":N,"start_col":C,"end_col":E,"faint":BOOL,"foreground":COLOUR_OR_NULL}`, one per maximal run of cells in an unmasked row that share one non-default `faint`/`foreground` pair, `end_col` exclusive; `COLOUR` uses the `cell_backgrounds` form. An absent key means every cell has the default style. |
 
-The capture-to-fixture conversion inserts the converted screen under its catalog fixture `id` in `assets/profiles/native/<backend>.json`. It derives `cell_backgrounds` from the capture grid's per-cell `bg` and `cell_styles` from its per-cell faint and foreground attributes, and fixture replay applies each run's background and style before writing its row text. A fixture therefore reproduces the focus styling a `focus_style` matcher reads, the separator backgrounds that sidebar clipping reads (§ Diff sidebar clipping) and the suggestion style a `composer_empty` `suggestion` rule reads (§6.7 Composer drafts and native suggestions).
+A fixture's `cell_backgrounds` and `cell_styles` runs record the captured screen's per-cell background, faint and foreground attributes, so a fixture reproduces the focus styling a `focus_style` matcher reads, the separator backgrounds that sidebar clipping reads (§ Diff sidebar clipping) and the suggestion style a `composer_empty` `suggestion` rule reads (§6.7 Composer drafts and native suggestions).
 
-A run spans the continuation cell of a wide character together with its leading cell. The terminal parser gives a continuation cell default attributes whenever its leading cell receives a wide character, both on the runtime screen and in replay: replay writes the run's attributes onto the leading cell and leaves the continuation cell to the parser. A joined run therefore reproduces the runtime cells exactly. A `cell_styles` run lies at or before the last non-blank cell of its row, because no rule reads `faint` or `foreground` on a row's trailing blanks: a suggestion rule checks cells only up to the row's last non-blank cell, and draft extraction trims trailing blanks. `cell_backgrounds` runs keep trailing blanks, because separator clipping and background focus read them.
+A run spans the continuation cell of a wide character together with its leading cell. Writing a wide scalar resets its continuation cell to the default background and style (§ Screen model facts), so a run spanning both cells reproduces the runtime cells exactly. A `cell_styles` run lies at or before the last non-blank cell of its row, because no rule reads `faint` or `foreground` on a row's trailing blanks: a suggestion rule checks cells only up to the row's last non-blank cell, and draft extraction trims trailing blanks. `cell_backgrounds` runs keep trailing blanks, because separator clipping and background focus read them.
 
 Masking applies only to rows removed by the reviewed capture privacy policy, such as home paths and account, model or plan text. Every other row keeps its captured text exactly, including trailing spaces. The detection region of every rule citing the fixture lies entirely in unmasked rows.
 
-These checks are the bundled catalog's build guard: a CAFleet build whose bundled backend files fail them does not pass its test suite. The guard reports these validation errors:
-
-| Condition | Error |
-|---|---|
-| The source file is absent from the test suite's fixture bytes | `bundled fixture bytes are not embedded` |
-| File `schema_version` differs from `1`, `provenance` differs from `native`, or `backend` differs from the entry | `bundled fixture file identity differs from its catalog entry` |
-| The entry's `id` is absent from `screens` | `bundled fixture screen is missing` |
-| A `screens` key has no catalog fixture entry | `bundled fixture file holds an uncited screen` |
-| The canonical screen digest differs from the entry's `sha256` | `bundled fixture digest mismatch for <ID>: catalog <SHA>, computed <SHA>` |
-| Screen `rows` or `cols` differ from the entry | `bundled fixture identity differs from its catalog entry` |
+Each fixture file has `schema_version` `1`, `provenance` `native` and its catalog entry's `backend`. It holds a screen for every catalog fixture entry's `id` and no uncited screen, and each screen's canonical digest equals its entry's `sha256` and its `rows` and `cols` equal its entry's.
 
 Each file and screen parses with exactly its fields above. Every row declared in `masked_rows` is in range and empty. Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour. Every `cell_styles` run satisfies the same placement rules against the other `cell_styles` runs and carries at least one non-default attribute with a valid colour. JSON formatting leaves the canonical screen digest unchanged.
 
 Every bundled catalog pattern spells its classes explicitly: it contains no Perl class or boundary (`\s \S \d \D \w \W \b \B`) and no escape outside the syntax (§ Pattern syntax).
 
-Synthetic fixtures, which the build guard rejects for the bundled catalog, remain available to explicitly selected test catalogs, which pass the same provenance rules.
-
-A rule's cursor condition treats a pending-wrap cursor as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
+A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts) as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
 
 ###### Pattern syntax
 
@@ -3203,7 +3186,7 @@ The operation evidence joins the processed rows with `\n`, and `operation_rows` 
 
 A rule's region may declare `panel_separator`, a single non-whitespace glyph. When any rule of the profile declares it, the detector derives one clipped line set per screen:
 
-1. A row is a panel row when, at some column `C` with `40 <= C < cols - 1`, the cell holds the separator glyph, its background differs from the cell at `C - 1` and equals the cell at `C + 1`.
+1. A row is a panel row when, at some column `C` with `40 <= C < cols - 1`, the cell (§ Screen model facts) holds the separator glyph, its background differs from the cell at `C - 1` and equals the cell at `C + 1`.
 2. Every panel row of the screen must share one `C`; otherwise no row is clipped.
 3. Each panel row keeps cells `0..C-1`; other rows are unchanged. A clipped row ends a logical line and is never joined to the next row.
 
@@ -3237,7 +3220,7 @@ A stage without a gate is focus-independent; every bundled stage is ungated exce
 - a plan with a focus gate has a focus matcher that declares `focus_style`, and every choice label it compares is captured by a line-scoped matcher;
 - a `permission_continuation` rule declares no operation, choices or answers.
 
-The build guard additionally requires every `permission_continuation` rule to cite a native fixture.
+Provenance validity additionally requires every `permission_continuation` rule to cite a native fixture.
 
 ###### Focused-choice resolution
 
@@ -3253,7 +3236,7 @@ The majority rule holds in every layout: the OpenCode compact layout has no left
 
 A focus on an option without a choice entry, on several options or on none resolves to no choice, and a gate that does not hold is never written. The focus value compared in the observed request, the answer match and the write-time binding is the resolved focused choice id (or none) together with a capture that depends on the focus style. Under `background` the capture is the focus matcher's capture; the focus text alone does not change when a styling-only focus moves, so the resolved choice id makes a styling-only focus change start a new request generation. Under `marker` the capture is the choice-label row layout, the row each choice label matched, which stays constant while only the marker moves (the focus matcher's own text changes), so a between-stage focus gate compares an unchanged capture and only a change in the choice rows' layout changes it.
 
-The composer object at `capabilities.composer` has required `rule_ids,fixture_ids` and `submission`. `submission` has exactly the required operation definitions `prompt,exec`, each an object with exactly `prefix_hex,submit_hex,literal_framing,plain_literal_limit,fixture_ids`. Prompt has an empty prefix; exec has prefix `2120`, the UTF-8 bytes of `! `; `submit_hex` is the measured native submit key. Prompt and exec carry independent provenance. Every plan's fixture references establish the complete composer/work boundary for that operation, and the build guard checks them against the profile's interval provenance (§ Profile selection by minimum version). Unknown fields fail catalog loading, and incomplete or incompatible provenance fails the build guard.
+The composer object at `capabilities.composer` has required `rule_ids,fixture_ids` and `submission`. `submission` has exactly the required operation definitions `prompt,exec`, each an object with exactly `prefix_hex,submit_hex,literal_framing,plain_literal_limit,fixture_ids`. Prompt has an empty prefix; exec has prefix `2120`, the UTF-8 bytes of `! `; `submit_hex` is the measured native submit key. Prompt and exec carry independent provenance. Every plan's fixture references establish the complete composer/work boundary for that operation, and provenance validation checks them against the profile's interval provenance (§ Profile selection by minimum version). Unknown fields fail catalog loading, and incomplete or incompatible provenance fails provenance validation.
 
 | Composer field | Required value |
 |---|---|
@@ -3272,7 +3255,7 @@ Bracketed framing writes the operation prefix plainly, then opening marker `1b5b
 | Encoded native ordinary submission | At most 65536 bytes for prefix, literal UTF-8, both paste markers when framed (12 bytes) and submit key together; the complete control JSON independently satisfies the control-frame limit (§ Input arbitration and the original native answer). |
 | Hex byte definitions | Even-length lowercase hexadecimal, with nonempty bytes wherever the domain above requires them. |
 
-Validate the complete shape, reference set, hex form and byte/stage bounds before decoding and constructing an executable plan. Keep selected native bytes and live semantic identity in memory, outside ordinary errors, debug output and persistence. An ordinary submission writes its chunked literal stage and submit-key stage separately (§ Measured submission plans and settle intervals). WouldBlock or Interrupted with zero bytes yields and requires fresh validation before another write. Answer stages retain their independently measured order and request/choice/focus gates; a positive short answer stage stops the remaining plan with uncertainty.
+Validate the complete shape, reference set, hex form and byte/stage bounds before decoding and constructing an executable plan. Keep selected native bytes and live semantic identity in memory, outside error messages, diagnostic output and persistence. An ordinary submission writes its chunked literal stage and submit-key stage separately (§ Measured submission plans and settle intervals). A write that transfers zero bytes because the descriptor would block (`EAGAIN`/`EWOULDBLOCK`) or the call was interrupted (`EINTR`) yields and requires fresh validation before another write. Answer stages retain their independently measured order and request/choice/focus gates; a positive short answer stage stops the remaining plan with uncertainty.
 
 ##### Measured submission plans and settle intervals
 
@@ -3303,7 +3286,7 @@ Fallback applies the same selection to its literal stage. A run without a select
 A verified-composer run is one whose recorded backend and native version select empty-composer observation and an executable plan for the operation: `prompt` for previews/prompts, `exec` for native commands. The runner and every client derive this predicate from the same recorded identity. Such an attempt begins only when its remaining budget covers `500 ms × settles + 2 s + 250 ms`: one settle for profile delivery, two for fallback. An immediate attempt below that bound queues with zero bytes and `defer_reason=delivery_budget_exhausted`; a deferred head waits with zero bytes under the same obstacle and retries with its own five-second attempt budget.
 
 1. Revalidate run, placement, observer and interaction state, then durably reserve the input before any child byte.
-2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to `AwaitBeforeWrite` without settling; each chunk consumes a new guard after fresh ordinary draining and keyboard/pointer/interaction/observer/accounting checks.
+2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to the pre-write wait without settling; each further chunk needs a fresh write authorization after fresh ordinary draining and keyboard/pointer/interaction/observer/accounting checks.
 3. Start the 500 ms settle only after the last literal chunk, including any closing paste marker. Service child output, outer input and control traffic throughout it.
 4. Revalidate identity, interaction state and keyboard generation; pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget stops as `left_in_composer/deadline_expired`, stage `literal_complete`.
 5. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
@@ -3356,7 +3339,7 @@ Until `start`, the runner exits if its creator disconnects or the handshake expi
 
 #### Terminal transport and lifecycle
 
-The runner relays terminal input and child output as bytes, with the outer terminal in raw mode under a restoration guard. Preserve interactive control sequences, UTF-8 fragments, bracketed paste and alternate-screen transitions. Size the PTY from the outer terminal, propagate resize to both PTY and parser, and preserve the native child's cwd, intended environment and exit status. Child bytes and runner diagnostics use separate logical channels, so diagnostics never become child input or detector evidence.
+The runner relays terminal input and child output as bytes, with the outer terminal in raw mode, restoring its settings on every exit path. Preserve interactive control sequences, UTF-8 fragments, bracketed paste and alternate-screen transitions. Size the PTY from the outer terminal, propagate resize to the PTY and the screen model (§ Screen model facts), and preserve the native child's cwd, intended environment and exit status. Child bytes and runner diagnostics use separate logical channels, so diagnostics never become child input or detector evidence.
 
 Forward outer-terminal input so a burst spanning several reads reaches the child together. One read of the raw-mode outer terminal returns at most the line discipline's 4096-byte buffer, and a longer terminal reply that reaches the child a tick late can be parsed as keys:
 
@@ -3368,7 +3351,7 @@ Forward outer-terminal input so a burst spanning several reads reaches the child
 | Pacing | A tick that moved input bytes, by reading outer bytes or writing a positive count to the PTY master, is followed immediately by the next tick; every other tick, including one whose queued input the master did not accept, keeps the loop's idle sleep |
 | Framing | None: forwarded bytes pass unchanged and in order, with no holding or timeout. Keyboard bytes advance `human_generation` and complete pointer reports advance `pointer_generation` (§ Terminal reply classification); replies advance neither |
 
-The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens, OSC title and a monotonic output sequence. Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and parser callbacks never synthesize a second reply to a query the outer terminal already handled.
+The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens, OSC title and a monotonic output sequence. Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and the screen model never answers a terminal query itself; every reply comes from the outer terminal.
 
 Terminal transport, classification and event storage are separate: database waits, Director receiver loss and event-spool retries never stop draining child output or accepting a human's native answer. Use bounded byte buffers and ordinary terminal backpressure for a slow outer display; a broken outer terminal triggers owned-child cleanup. Classification may coalesce intermediate working-screen snapshots, but it processes every potential interaction transition from the ordered parser stream before such coalescing. This is an observation contract for output actually rendered/read, not a guarantee to capture a dialog opened and closed between observable states.
 
@@ -3390,7 +3373,7 @@ One shutdown clock starts at normal native-child exit, runner failure or termina
 | 3 s | Nonblocking outer-display flushing ends; discard only undelivered display-tail bytes, recording their count and a truncation diagnostic. |
 | 4 s | Event-worker flush/SQLite attempts end, including transaction completion and retry delays, with no additional grace budget. Retain complete uncommitted outbox frames for explicit recovery and record any unsaved in-memory gap. |
 
-Run every runner SQLite attempt under a bounded database budget from the remaining absolute work/shutdown deadline: it replaces the connection's default five-second busy wait, cancels long-running statements within that deadline and restores the prior handler and connection hooks after each attempt.
+Run every runner SQLite attempt under a bounded database budget from the remaining absolute work/shutdown deadline: each attempt is bounded by its own deadline, and after each attempt the connection's default busy timeout and handlers are in effect again.
 
 Restore terminal settings and release ownership after stopping/joining the writer, regardless of EOF, display or database completion. Retain actual child code/signal separately from `cleanup_state=complete|incomplete` and bounded diagnostic reasons for truncated output, pending events or unconfirmed descendants. When cleanup/restoration is complete, return the native status (`128 + signal` for a signal exit). With incomplete cleanup, preserve a native nonzero return; use runner exit `1` if the native status was zero or unavailable, and report its distinct recorded native status. Hard-kill or restoration failure remains an explicit host-recovery condition.
 
@@ -3478,7 +3461,7 @@ A pointer report between literal chunks can enter an open paste as text or move 
 A pending prefix resolves as manual input once 100 milliseconds pass since its last byte:
 
 - The runner resolves expired prefixes at the start of each tick's outer read and of every drain round, before reading, and advances `human_generation` by the resolved manual count.
-- While a prefix is pending, the transport is not quiescent: a drain returns `Pending` with blocker `terminal reply pending`, an earlier drain proof fails validation with `input transport is no longer quiescent`, and no programmatic stage, permission answer or deferred write proceeds.
+- While a prefix is pending, the transport is not quiescent: a drain is *pending* with blocker `terminal reply pending`, an earlier drain proof fails validation with `input transport is no longer quiescent`, and no programmatic stage, permission answer or deferred write proceeds.
 - Outer EOF resolves a pending prefix as manual before EOF is reported.
 - A lone Escape key is pending for at most 100 milliseconds and then counts as manual, so a staged delivery whose settle sees that key stops with `manual_input` once the bound resolves it.
 - The bound runs inside the deadline of the write attempt it delays (the runner's five-second ordinary-input attempt budget for a deferred write, or the invoking command's five-second deadline for a prompt, exec or permission answer), adding no deadline of its own.
@@ -3513,7 +3496,7 @@ The fingerprint contains backend, interaction class, visible operation and stabl
 | Verified noninteraction boundary stable for 250 ms | `interaction_closed` with `not_visible`; record the observation rather than inferring a decision. |
 | Different interaction replaces the active form | Once the replacement is stable, close with `superseded` and open the next episode in order. |
 | Child exits or exclusive recovery confirms observer loss | Close with `process_exited` or `monitor_lost`; a suspect/unreachable observer leaves the episode open and approval outcome remains unknown. |
-| Continuation screen of the active permission episode | Keep the episode open and `Visible` with ordinary input queued for the interaction. Emit no event, start no obscured timer and keep the stored request evidence. |
+| Continuation screen of the active permission episode | Keep the episode open and `visible` with ordinary input queued for the interaction. Emit no event, start no obscured timer and keep the stored request evidence. |
 
 Equivalent redraw evidence uses one bounded coalesced worker slot, with a bounded local snapshot during an in-flight attempt. Apply the evidence policy before queuing, bind the refresh to the current owner/run/open episode and output sequence, and coalesce only newer evidence for that same active episode. Persist it in an ownership-checked transaction under an absolute deadline; equal sequence with identical evidence is idempotent, while regressing, conflicting, closed-episode or stale-episode updates fail explicitly.
 
@@ -3543,7 +3526,7 @@ An annotation is a transcript result or notice, not a live form. The detector ev
 | `automatic_review_unavailable` | Automatic review is unavailable or degraded, for example unavailable for the account or model or fallen back to prompting | `automatic_review_unavailable` (§ Unavailable automatic review event) and `automatic_review=unavailable` in the effective policy record |
 | `automatic_review_available` | A positive automatic-mode indicator, such as a mode badge | `automatic_review=available` in the effective policy record; no event |
 
-Observation kinds parse and render each annotation kind by those exact strings. Profiles declare annotation rules in the required capability group `annotations`, either `null` or `{ "rule_ids": [...], "fixture_ids": [...] }`, with nonempty rule ids; the build guard checks their fixtures under the provenance rules of every other capability group (§ Profile selection by minimum version). Every bundled profile declares the key. The catalog compiles only when:
+Observation kinds parse and render each annotation kind by those exact strings. Profiles declare annotation rules in the required capability group `annotations`, either `null` or `{ "rule_ids": [...], "fixture_ids": [...] }`, with nonempty rule ids; provenance validation checks their fixtures under the rules of every other capability group (§ Profile selection by minimum version). Every bundled profile declares the key. The catalog compiles only when:
 
 - The `annotations` group accepts only annotation kinds, and the `detection`, `composer` and continuation groups reject them; an annotation rule outside the `annotations` group is invalid.
 - An annotation rule has empty `extract.choices` and `verified_noninteraction` `false`. `automatic_refusal` requires an `operation` capture, and the other two kinds require a null one.
@@ -3647,7 +3630,7 @@ Run-level events use null interaction/classification, `source=runner_lifecycle` 
 
 Launch-only `--event-evidence <metadata|redacted>` defaults to `metadata`. Metadata mode persists only identities, classification, rule and native version, sequence, timestamps and health/closure causes; every screen-derived operation, choice and excerpt is null. Semantic fingerprints for live episode comparison stay in memory, never in logs, outbox or database. `evidence_digest` is SHA-256 of the canonical post-policy evidence object, so metadata mode exposes no hash of hidden screen text.
 
-Redacted mode requires `--event-redaction-file <ABSOLUTE_PATH>` naming readable UTF-8 JSON `{ "schema_version": 1, "patterns": ["regex"], "sensitive_rules": ["rule-id"] }`. Require a nonempty pattern array, known rule IDs and compilable expressions. Missing/malformed configuration, an unsupported policy or a redaction file supplied with metadata mode fails before registration with usage exit `2`, never falling back to raw evidence. Compile the file once at launch and keep the compiled policy in memory; events store the policy name, not raw patterns or the file contents.
+Redacted mode requires `--event-redaction-file <ABSOLUTE_PATH>` naming readable UTF-8 JSON `{ "schema_version": 1, "patterns": ["regex"], "sensitive_rules": ["rule-id"] }`. Require a nonempty pattern array, known rule IDs and expressions in the pattern syntax (§ Pattern syntax). Missing/malformed configuration, an unsupported policy or a redaction file supplied with metadata mode fails before registration with usage exit `2`, never falling back to raw evidence. Compile the file once at launch and keep the compiled policy in memory; events store the policy name, not raw patterns or the file contents.
 
 In redacted mode, apply the same configured patterns to every normalized screen-derived field before any persistence, including operations, choices and latest interaction evidence. Replace matching fields in full with `[redacted]`; a rule named by `sensitive_rules` uses metadata-only evidence for the entire form. Apply UTF-8 bounds and escaping after policy transformation, then compute `evidence_digest`; persist no pre-policy screen hash or semantic fingerprint. Unmatched text is allowed only by this explicit operator choice, which does not promise automatic secret discovery.
 
@@ -3655,7 +3638,7 @@ Persist a transition, its event and a normal `input_required` inbox message to t
 
 Before persistence, the outbox stores an observed transition keyed by `(run_id, event_seq)` and nullable `episode_seq`, with kind, original observation time and immutable evidence. The transaction allocates or resolves interaction/event/message IDs and produces the final public payload. Idempotence compares these original transition fields, excluding generated IDs and commit timestamps.
 
-The runner uses the broker library directly and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence or listener restart. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may replay historical frames as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`, retaining the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
+The runner writes events and inbox messages through its own database transactions and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence or listener restart. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may replay historical frames as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`, retaining the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
 
 `event show` returns the complete durable event with its notification/archive state and current interaction/run state, and `input show` returns a durable programmatic-input receipt (§ CLI presentation contract). Runtime events use the ordinary broker message envelope and poll-time consumption.
 
@@ -3758,7 +3741,7 @@ Housekeeping derives the cause at publication time from the first row that holds
 | `pending_finalization` | live | A pending zero-byte finalization or notification-stamp retry is set | That receipt | `null` |
 | `held_composer` | live | The held composer is set | The held blocker | `null` |
 | `unresolved_input` | live | Another ordinary receipt of the run is `in_progress` | That receipt, lowest ID | `null` |
-| `drain_pending` | live | The latest queue turn's input drain returned `Pending` | `null` | The drain blocker string, e.g. `terminal reply pending` |
+| `drain_pending` | live | The latest queue turn's input drain was *pending* | `null` | The drain blocker string, e.g. `terminal reply pending` |
 | `pane_input_busy` | recorded | Obstacle `pane_input_busy`, e.g. a `member press` holding the lock | `null` | `null` |
 | `delivery_budget_exhausted` | recorded | Obstacle `delivery_budget_exhausted` | `null` | `null` |
 | `storage_unavailable` | recorded | Obstacle `storage_unavailable` | `null` | `null` |
@@ -3898,30 +3881,30 @@ Preview requires a positive message ID; prompt/exec require null `message_id`. `
 
 Replies retain exactly `protocol_version` plus one of `result` or textual `error`. Input results have exactly `kind` plus the following field: submission/`submission`, inspection/`request`, permission_response/`response`, or receipt/`receipt`. Submission contains exactly `status,input_id,stage,output_seq,reason,delivery`, where `delivery` is the ordered `status,method,reason` projection (§ Delivery reporting); permission response and inspection carry the complete ordered public objects fixed by the CLI contract. A receipt object has exactly `status,input_id,submission`: missing has null ID/submission; present has a positive ID and submission object; retired or settled has a positive ID and null submission. A flush result carries `flush` with a `status` and that status's fields: `reserved` adds `flush_input_id,literal,submit_key,settle_ms,flushed_input_ids,message_ids,remaining_input_ids`; `empty` adds nothing; `refused` adds `cause`; `settled` adds `flush_input_id`; `not_outstanding` adds `flush_input_id,state,disposition`. Result kind must match the requested operation. Clients validate and reload durable input/audit rows from their supplied database connection; socket receipt metadata never replaces durable identity.
 
-The original invocation captures one expiration and carries it through framing, transit, queues, SQL and every native stage. Convert using paired clock samples `Instant_before,CLOCK_MONOTONIC,Instant_after`, validating sample order and checked arithmetic. Sender expiration adds the remaining original deadline measured at Instant_after to the earlier monotonic sample. Receiver deadline adds remaining expiration measured at the later monotonic sample to Instant_before. Scheduling delay can shorten this budget and grants no extension; use no wall clock. Clock failure, overflow or expiration fails before new reservation/native bytes while preserving prior committed or possibly transmitted state.
+The original invocation captures one expiration and carries it through framing, transit, queues, SQL and every native stage. Convert using three samples taken in order: the process's internal monotonic clock, `CLOCK_MONOTONIC`, and the internal monotonic clock again, validating sample order and overflow-checked arithmetic. Sender expiration adds the remaining original deadline measured at the third sample to the `CLOCK_MONOTONIC` sample. Receiver deadline adds the remaining expiration measured at the `CLOCK_MONOTONIC` sample to the first sample. Scheduling delay can shorten this budget and grants no extension; use no wall clock. Clock failure, overflow or expiration fails before new reservation/native bytes while preserving prior committed or possibly transmitted state.
 
 The service also caps new-operation admission at five seconds from the first observed frame-header byte; delayed framing and queueing consume that cap. Client exchange, lock acquisition, supplied-connection SQL scopes and stage advancement retain their earlier original/inherited deadline. Validate the declared frame size (above) before allocation and the complete serialized size before sending.
 
 ##### Bounded input draining
 
-Before a programmatic input attempt, drain actual human and child input through the runner's manual queue, terminal parser, ordered observer and outer display. A drain returns `Pending` or `Quiescent` with cumulative `human_generation`, `pointer_generation` (§ Terminal reply classification) and terminal `output_seq`. `DrainedInput` and its opaque proof retain both counters: `validate_ordinary` compares keyboard generation, and `validate_permission` compares both. Quiescence describes transport and observation health; the input coordinator separately validates composer/request eligibility, ownership, reservation and the original deadline before a write.
+Before a programmatic input attempt, drain actual human and child input through the runner's manual queue, terminal parser, ordered observer and outer display. A drain ends *pending* or *quiescent* and reports cumulative `human_generation`, `pointer_generation` (§ Terminal reply classification) and terminal `output_seq`. The drain proof records both counters: ordinary input validation compares the keyboard generation, and permission validation compares both. Quiescence describes transport and observation health; the input coordinator separately validates composer/request eligibility, ownership, reservation and the original deadline before a write.
 
-Each call executes at most eight rounds under the original deadline. A round attempts at most one human read, one manual-queue PTY write, one child read, one display-queue write and one display flush, in that order. Skip an operation only for unavailable capacity or remaining quota, an empty queue or previously observed stream `EOF`. Let B be 16384 bytes, the per-drain transfer quota; each actual read buffer is bounded by the minimum of B, the remaining stream quota and available queue capacity.
+Each call executes at most eight rounds under the original deadline. A round attempts at most one human read, one manual-queue PTY write, one child read, one display-queue write and one display flush, in that order. Skip an operation only for unavailable capacity or remaining quota, an empty queue or a previously observed end of file on the stream. Let B be 16384 bytes, the per-drain transfer quota; each actual read buffer is bounded by the minimum of B, the remaining stream quota and available queue capacity.
 
 | Work per drain call | Inclusive bound |
 |---|---|
 | Human reads, child reads, manual PTY writes, display writes | Eight calls and B positive bytes for each; child bytes include previously deferred child bytes. |
 | Display flushes | Eight calls. |
 | Final observation-health samples | One sample, taken only for a candidate completed quiet round. |
-| Rounds | Eight; unresolved work returns `Pending`. |
+| Rounds | Eight; unresolved work leaves the drain *pending*. |
 
-`Quiescent` requires both actual reads to return `WouldBlock` in the same completed round, an empty manual queue, consumed deferred child bytes, successful parser/observer processing and positive free display capacity. The final health sample must be present, nondegraded, have `pending_count=0` and `pending_evidence=false`. An absent health adapter supplies no proof; a healthy `Hold(Unknown)` state may establish physical quiescence while remaining ineligible for programmatic input. `Quiescent` also requires no pending terminal-reply prefix: each round first resolves expired prefixes, and a round that would otherwise certify quiescence while a prefix is pending returns `Pending` with blocker `terminal reply pending` and installs no proof. The eighth round may certify these facts; quota exhaustion, a skipped read, `Interrupted` or `EOF` supplies `Pending` instead. A continuously readable source terminates at the round or byte bound. Deferred child bytes precede subsequent reads and consume the same child quota.
+A *quiescent* drain requires both actual reads to report `EAGAIN`/`EWOULDBLOCK` in the same completed round, an empty manual queue, consumed deferred child bytes, successful parser/observer processing and positive free display capacity. The final health sample must be present, nondegraded, have `pending_count=0` and `pending_evidence=false`. An absent health adapter supplies no proof; an observer that is healthy but holds input eligibility with unknown visibility may establish physical quiescence while remaining ineligible for programmatic input. A *quiescent* drain also requires no pending terminal-reply prefix: each round first resolves expired prefixes, and a round that would otherwise certify quiescence while a prefix is pending leaves the drain *pending* with blocker `terminal reply pending` and installs no proof. The eighth round may certify these facts; quota exhaustion, a skipped read, `EINTR` or end of file leaves it *pending* instead. A continuously readable source terminates at the round or byte bound. Deferred child bytes precede subsequent reads and consume the same child quota.
 
-In both ordinary progress and input draining, classify every actual positive human read immediately and advance keyboard and pointer counts with checked cumulative unsigned 64-bit arithmetic; the counts and literal queued bytes survive a later PTY, child, display, parser or observer failure. The service delivers both observed before/after deltas to authority invalidation after successful and failed progress alike, before propagating any error; a simultaneous notification failure accompanies the primary error. Nonrecoverable errors propagate, and a zero-length write fails with `terminal write made no progress`. `Interrupted` requires a later fresh read pair; `EOF` records the stream state and leaves shutdown to the normal service path.
+In both ordinary progress and input draining, classify every actual positive human read immediately and advance keyboard and pointer counts with checked cumulative unsigned 64-bit arithmetic; the counts and literal queued bytes survive a later PTY, child, display, parser or observer failure. The service delivers both observed before/after deltas to authority invalidation after successful and failed progress alike, before propagating any error; a simultaneous notification failure accompanies the primary error. Nonrecoverable errors propagate, and a zero-length write fails with `terminal write made no progress`. A read interrupted with `EINTR` requires a later fresh read pair; end of file records the stream state and leaves shutdown to the normal service path.
 
 Clear stored drain proof at entry, check the original deadline before I/O and before each endpoint/callback, and recheck after completed work, retaining the bytes/counts of successful completed I/O before reporting expiry. In-memory bookkeeping and observation of a completed read may finish after expiry; an observed expiration permits no later endpoint call or proof installation. Synchronous I/O and callbacks have no preemption guarantee, so finite work bounds and clock checks impose no hard syscall or callback latency cap. Every call keeps the original deadline, with no internal sleep or deadline renewal.
 
-Retain every completed child read for display and preserve the exact prefix processed by the terminal parser and ordered observer. When a deadline expiry or an observer error interrupts the observation of a positive child chunk, the transport retains the suffix the parser has not consumed as a pending observation remainder; the fed prefix is never replayed and no byte is dropped. The next drain round or ordinary progress feeds that remainder before any new child read, under its own deadline and the child byte quota, and observation becomes complete again once the remainder is fed with a successful observer callback. Until then drains continue bounded manual and display progress and return `Pending` with blocker `observation incomplete` and no proof. A terminal parser failure leaves no resumable boundary, so its observation-incomplete fence persists for the `Transport` lifetime. Fully completed observation remains complete when only a later deadline or display operation fails.
+Retain every completed child read for display and preserve the exact prefix processed by the terminal parser and ordered observer. When a deadline expiry or an observer error interrupts the observation of a positive child chunk, the transport retains the suffix the parser has not consumed as a pending observation remainder; the fed prefix is never replayed and no byte is dropped. The next drain round or ordinary progress feeds that remainder before any new child read, under its own deadline and the child byte quota, and observation becomes complete again once the remainder is fed with a successful observer callback. Until then drains continue bounded manual and display progress and stay *pending* with blocker `observation incomplete` and no proof. A terminal parser failure leaves no resumable boundary, so its observation-incomplete fence persists for the lifetime of that runner's terminal transport. Fully completed observation remains complete when only a later deadline or display operation fails.
 
 Only a successful final check installs an opaque, single-use proof bound to its transport instance, drain turn and actual health/generation/sequence facts. The visible result fields describe evidence and grant no write authority. Taking the stored proof consumes it once, and validating it while a terminal-reply prefix is pending fails with `input transport is no longer quiescent`. Ordinary progress, resize, prefetch, display mutation/discard and a new drain invalidate it before their validation or I/O, including later error paths; pure generation/snapshot reads preserve it. A new transport begins with generation 0 and no proof. Programmatic writing consumes actual coordinator-owned authority, never a caller-constructed result.
 
@@ -3942,11 +3925,11 @@ Preview keys are exactly `preview:<run_id>:<message_id>:<attempt>`, independent 
 
 Only the table's per-message holds, and the runner's uncertain/left-in-composer reply for this invocation on a verified-composer run, enter the drain's skip set. Other held/rejected runner results, unavailable pane/observer/ownership/storage, placement/run changes and all holds on other runs end the drain. A held/rejected zero-byte attempt creates no side-effect receipt; a reserved row returns to `ready` only after positively recording zero bytes. Conflicting key/digest reuse fails.
 
-An ordinary `receipt query` reads the durable operation for its fixed run/key and reports its durable status with the last real retained stage and output sequence. `missing` requires an absent durable row and absent matching cache entry. A durable row remains `present` after cache retirement; a cache entry without its durable reservation is an identity error. Validate the retained immutable input identity before using its stage. The receipt projection table in § Delivery reporting maps each durable receipt to its `submission.status` and its stage without a cache entry. With a matching retained entry, return its actual stage and output sequence alongside that durable status; otherwise the output sequence is null. Query preserves pending writers, clients, permits, receipts and native bytes. Its results describe observations: new write authority and zero-byte retirement proof still require their separate validated guards. A settled `not_submitted` or `abandoned_uncertain` disposition alone supplies no observed byte stage; its absent-cache result remains `unknown` and leaves the original transmission uncertainty intact.
+An ordinary `receipt query` reads the durable operation for its fixed run/key and reports its durable status with the last real retained stage and output sequence. `missing` requires an absent durable row and absent matching cache entry. A durable row remains `present` after cache retirement; a cache entry without its durable reservation is an identity error. Validate the retained immutable input identity before using its stage. The receipt projection table in § Delivery reporting maps each durable receipt to its `submission.status` and its stage without a cache entry. With a matching retained entry, return its actual stage and output sequence alongside that durable status; otherwise the output sequence is null. Query preserves pending writers, clients, permits, receipts and native bytes. Its results describe observations: new write authority and zero-byte retirement proof still require their separate validated authorizations. A settled `not_submitted` or `abandoned_uncertain` disposition alone supplies no observed byte stage; its absent-cache result remains `unknown` and leaves the original transmission uncertainty intact.
 
 Before the first child byte, commit `in_progress` to `member_input_operations` under the current ownership epoch and bounded database budget. A failed commit permits zero child bytes. After writing, persist `accepted`, `uncertain` or `settled/left_in_composer` before promising that outcome; when that persistence fails, the runner records the row `uncertain/write_failed` (§ Immediate attempt failure bookkeeping) and returns uncertainty, and the row stays in progress only when that record also fails. The live runner may reconcile retained stage evidence into the same row. On a verified-composer run, recorded writes forming a complete prefix permit the runner to settle a stopped ordinary input as `left_in_composer` with `stop_cause` and `left_stage` in the transaction that clears its in-memory write authority (§ Stop cause); permission responses retain uncertainty.
 
-Retire only the in-memory receipt after validating durable settlement, the current full run/owner and original run lock, exclusion of every active writer, and absence of a leased guard or available attempt permit for that input. Cache absence is idempotent only after the same durable and ownership checks. For a preview, atomically stamp `notified_at` (or verify the message is already consumed) and set its input row to `settled/submitted`; a later `receipt retire` verifies that transaction before freeing memory. For prompt/exec, the durable accepted input row itself is the queryable submission record: the creator or runner can settle it as submitted and retire the cache after verifying that stored row. Printed stdout only presents its input ID and supplies no durable acknowledgement. Settled operation keys/digests/dispositions persist for the lifetime of the database file, so a delayed request still returns the prior disposition and never types again.
+Retire only the in-memory receipt after validating durable settlement, the current full run/owner and original run lock, exclusion of every active writer, and absence of a held write authorization or available attempt permit for that input. Cache absence is idempotent only after the same durable and ownership checks. For a preview, atomically stamp `notified_at` (or verify the message is already consumed) and set its input row to `settled/submitted`; a later `receipt retire` verifies that transaction before freeing memory. For prompt/exec, the durable accepted input row itself is the queryable submission record: the creator or runner can settle it as submitted and retire the cache after verifying that stored row. Printed stdout only presents its input ID and supplies no durable acknowledgement. Settled operation keys/digests/dispositions persist for the lifetime of the database file, so a delayed request still returns the prior disposition and never types again.
 
 Bound unretired side-effect receipts, including queued deferred inputs, to 4096: while that unresolved set is full, new side-effect attempts fail with an explicit zero-byte capacity error; settled receipts leave the set. Keep uncertain receipts until the Director records an evidence-based disposition through `input reconcile` (§6.3 Runtime event and input commands), which settles the key and permits cache retirement. For prompt/exec and permission responses, a consumed not-submitted key requires a new deliberate operation key. For previews, every `not_submitted` disposition, including reconciliation after possible bytes, permits the runner sweep or the next send to start N+1 in the same run; it grants no permission answer or prompt/exec replay.
 
@@ -3954,15 +3937,15 @@ For a preview stopped as `left_in_composer`, one immediate transaction settles a
 
 `left_stage` records the exact complete prefix: `escape_only` for only fallback Escape, `partial` for less than the complete literal with no submit key, `literal_complete` for the entire closed literal with no submit key, and `submitted` for the complete literal and key whose effect is unconfirmed. The `submitted` stage pairs exactly with `submit_unconfirmed`, and `escape_only` requires method `fallback`; recording and receipt reads validate both associations. Escape-only typed no text. Prompt/exec left in the composer exit 1 and are retried only by a deliberate action; later input follows the held-composer rules. The runner sends no second submit key and leaves composer clearing to the human or Director.
 
-Reconciliation runs under the original deadline clipped to any inherited SQL bound, and every transaction it commits is a supplied-connection immediate transaction. It pins the original input row in its supplied-connection snapshot: `input_id`, `run_id`, `operation_key`, `kind`, `payload_digest`, `message_id`, `created_at`, the complete immutable permission-response audit where present, and expected state remain fixed through live reconciliation and settlement. For a recorded concrete placement, acquire its genuine pane/input lock and retain that same guard through current-owner synchronization. Synchronize with the pinned runner's receipt handler so an active byte-writing operation cannot be settled concurrently. An unreachable writer leaves the receipt uncertain, and the Director records `abandoned-uncertain` through `input reconcile`. Compare-and-swap the original expected operation state in the settlement transaction; a changed row requires a separate invocation. Settlement records the observed input disposition, not the native command's execution outcome.
+Reconciliation runs under the original deadline clipped to any inherited SQL bound, and every transaction it commits is a supplied-connection immediate transaction. It pins the original input row in its supplied-connection snapshot: `input_id`, `run_id`, `operation_key`, `kind`, `payload_digest`, `message_id`, `created_at`, the complete immutable permission-response audit where present, and expected state remain fixed through live reconciliation and settlement. For a recorded concrete placement, acquire its genuine pane/input lock and hold that same lock through current-owner synchronization. Synchronize with the pinned runner's receipt handler so an active byte-writing operation cannot be settled concurrently. An unreachable writer leaves the receipt uncertain, and the Director records `abandoned-uncertain` through `input reconcile`. Compare-and-swap the original expected operation state in the settlement transaction; a changed row requires a separate invocation. Settlement records the observed input disposition, not the native command's execution outcome.
 
-For an ordinary or permission receipt already settled with the requested disposition, reconciliation returns the unchanged validated durable row and its original `evidence_ref` before live locks, health probes or exchange. A conflicting disposition fails with the row unchanged. This historical return grants no new input authority. For a live nonsettled receipt, validate the full fixed identity and original ownership lock inside the transaction of the expected-state settlement CAS, after the SQL wait. After a new reconciliation, require the matching `settled` acknowledgment and a validated durable reread, then exactly one `retire` exchange with a matching input ID under the same pane guard and original expiration. A post-commit failure retains the known input context and original cause while the durable settlement remains authoritative. A changed expected state requires a separately reconciled attempt.
+For an ordinary or permission receipt already settled with the requested disposition, reconciliation returns the unchanged validated durable row and its original `evidence_ref` before live locks, health probes or exchange. A conflicting disposition fails with the row unchanged. This historical return grants no new input authority. For a live nonsettled receipt, validate the full fixed identity and original ownership lock inside the transaction of the expected-state settlement CAS, after the SQL wait. After a new reconciliation, require the matching `settled` acknowledgment and a validated durable reread, then exactly one `retire` exchange with a matching input ID under the same held pane lock and original expiration. A post-commit failure retains the known input context and original cause while the durable settlement remains authoritative. A changed expected state requires a separately reconciled attempt.
 
-Reconciliation for ordinary and permission inputs accepts the fixed placement state from that original snapshot. A present placement requires its matching, continuously held pane/input guard. An absent placement (a deregistered member or a deleted fleet) has no live runner, so reconciliation fails with `receipt reconciliation requires the member's live runner; the input stays uncertain` and the receipt stays uncertain. Revalidate the exact placement, complete fixed run/input identity and historical relationships inside the settlement transaction after preceding waits. A changed placement, identity or expected input state invalidates the attempt.
+Reconciliation for ordinary and permission inputs accepts the fixed placement state from that original snapshot. A present placement requires its matching, continuously held pane/input lock. An absent placement (a deregistered member or a deleted fleet) has no live runner, so reconciliation fails with `receipt reconciliation requires the member's live runner; the input stays uncertain` and the receipt stays uncertain. Revalidate the exact placement, complete fixed run/input identity and historical relationships inside the settlement transaction after preceding waits. A changed placement, identity or expected input state invalidates the attempt.
 
 A durable ready row is positive zero-byte evidence only under actual writer exclusion and exact associations. Owner death or an attributed not-submitted disposition alone supplies no such proof; recovered in-progress, accepted and uncertain records keep their transmission uncertainty. Proven-zero settlement and matching claim release commit atomically within the same proof lifetime. A ready response from a different epoch/token requires a fresh inspection and separate deliberate key; its immutable metadata is never rebound.
 
-The live input guard distinguishes native-write authority, receipt-only writer exclusion and current-plan ready rearm. A production zero-byte proof borrows its still-held guard, binds the complete immutable input/audit and current ownership, and carries a non-Send marker; its constructors and fields remain private. Receipt-only exclusion authorizes bookkeeping without a write permit or current visible prompt. With a retained entry, proof requires its actual zero-byte stage and cumulative count zero; without one, only a validated durable ready row under genuine writer exclusion supplies it. A projected retry stage or a settled not-submitted label supplies no replacement observation.
+Live input authorization distinguishes native-write authority, receipt-only writer exclusion and current-plan ready rearm. A zero-byte proof is valid only while the writer exclusion it was taken under is still held and only on the runner thread that holds it; it binds the complete immutable input/audit and current ownership, and only the input coordinator can create one. Receipt-only exclusion authorizes bookkeeping without a write permit or current visible prompt. With a retained entry, proof requires its actual zero-byte stage and cumulative count zero; without one, only a validated durable ready row under genuine writer exclusion supplies it. A projected retry stage or a settled not-submitted label supplies no replacement observation.
 
 Rearm additionally requires the unchanged old token/epoch/metadata and the actual current request, selected answer plan, both `human_generation` and `pointer_generation` and healthy complete observation drain. Revalidate owner/audit/claim under the bounded immediate transaction, CAS ready to in-progress once, then require fresh normal pre-stage checks before any native byte. Retain the input ID, original audit, decision timestamp, key and digest. Preserve its matching claim, or restore that exact pair only when a released ready row has no competing claim. The exclusion-only proof grants no rearm authority. Each explicit ready invocation captures one expiration; an in-progress stage continuation retains its original attempt expiration.
 
@@ -4056,9 +4039,9 @@ Each sweep:
 3. Applies the head's target result: a removed or changed target settles the head `not_submitted/target_inactive` or `target_changed` and removes it.
 4. Runs the stall watchdog (§ Input delivery stalled event).
 
-A transient storage failure (`DatabaseBusy` or an expired storage deadline) on the read leaves every entry unchanged and records the head obstacle `storage_unavailable`. A sweep first retries a pending zero-byte finalization; a cancellation that storage prevents becomes that pending finalization, and the sweep settles nothing further until it commits.
+A transient storage failure (SQLite busy/locked contention or an expired storage deadline) on the read leaves every entry unchanged and records the head obstacle `storage_unavailable`. A sweep first retries a pending zero-byte finalization; a cancellation that storage prevents becomes that pending finalization, and the sweep settles nothing further until it commits.
 
-Every receipt write for a queued entry is made by the runner itself, so a non-`ready` queued receipt is an invariant violation. The queue turn records a non-fatal attempt error as the head obstacle `attempt_failed`, with its message bounded to 256 bytes, alongside its runner-stderr diagnostic. It also records its input-drain result: `Pending` stores the drain's blocker string, and `Quiescent` clears it. The receipt `reconcile` action that settles a queued entry removes it from the FIFO in the same call and publishes nothing. It also accepts a queued `ready` prompt or exec with disposition `not_submitted` and settles it with zero bytes, which is how the Director cancels a queued prompt or exec that blocks a forced flush.
+Every receipt write for a queued entry is made by the runner itself, so a non-`ready` queued receipt is an invariant violation. The queue turn records a non-fatal attempt error as the head obstacle `attempt_failed`, with its message bounded to 256 bytes, alongside its runner-stderr diagnostic. It also records its input-drain result: a *pending* drain stores its blocker string, and a *quiescent* drain clears it. The receipt `reconcile` action that settles a queued entry removes it from the FIFO in the same call and publishes nothing. It also accepts a queued `ready` prompt or exec with disposition `not_submitted` and settles it with zero bytes, which is how the Director cancels a queued prompt or exec that blocks a forced flush.
 
 ##### Runner pending-preview sweep
 
@@ -4067,7 +4050,7 @@ Each ordinary member's runner retries that member's own unnotified pending previ
 | Property | Contract |
 |---|---|
 | Cadence | From the runner event loop, at most once per preview sweep interval (1 s), and not before the run-wide backoff expires |
-| Preconditions | The run is live and its native child is running; `pending_input_client` and `pending_sweep` are both empty; the runner FIFO holds no preview request and no forced flush reservation is outstanding |
+| Preconditions | The run is live and its native child is running; no client-owned attempt and no sweep attempt is awaiting its result; the runner FIFO holds no preview request and no forced flush reservation is outstanding |
 | Selection | One short read snapshot confirms that the run's member is an active ordinary member whose recorded run is this run with a concrete placement, then takes the oldest `to_member_id=<member> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
 | Attempt decision | The latest-attempt table of § Durable input receipts and settlement for `preview:<run_id>:<message_id>:<attempt>`: no receipt starts attempt 1, a not-submitted settlement starts N+1, and accepted or submitted history settles and stamps without typing |
 | Skips | Only a per-message hold of that table on a verified-composer run (an in-progress, uncertain or abandoned receipt) moves to the next message; every other hold, and every per-message hold on a run without composer verification, ends the sweep for this tick |
@@ -4076,11 +4059,11 @@ Stamped self-sends are excluded by `notified_at`, and a consumed message is neve
 
 **Submission.** The sweep acquires no lock beforehand. It hands the canonical preview to the same runner-internal entry point a control-socket preview request reaches, as an input control request built with the run's own control identity. That entry point reserves the `preview:` receipt, applies § Delivery method and interaction priority, and either submits immediately or queues with zero bytes. A sweep request that meets the pane input lock held by another process at submission queues with zero bytes under `earlier_input`. For actual stages the runner acquires the pane input lock nonblockingly from its event loop (§6.5 Pane input lock), so a merely queued sweep request holds no lock. A send's synchronous drain and the sweep serialize through that lock and the runner's under-lock revalidation of message status, notification stamp and receipt.
 
-**Clientless tracking.** A sweep request has no control-socket client, so it is never recorded in `pending_input_client`. The runner service keeps a distinct `pending_sweep` slot holding the attempt deadline:
+**Clientless tracking.** A sweep request has no control-socket client. The runner tracks a sweep attempt separately from client-owned attempts, holding its attempt deadline:
 
-- When the entry point leaves an immediate sweep attempt awaiting its result, the service records `pending_sweep`. The completion path that drives client-owned attempts drives it to its reply and settles it without replying to any client, feeding the reply's delivery status and reason to the backoff.
-- A reply returned at once (queued or settled) is handled the same way, and no slot is recorded.
-- An accepted immediate attempt requires both slots empty. A control-socket request arriving while `pending_sweep` is set is handled exactly as one arriving while a client-owned attempt is in flight.
+- When the entry point leaves an immediate sweep attempt awaiting its result, the runner records it as the pending sweep attempt. The completion path that drives client-owned attempts drives it to its reply and settles it without replying to any client, feeding the reply's delivery status and reason to the backoff.
+- A reply returned at once (queued or settled) is handled the same way, and no pending sweep attempt is recorded.
+- An accepted immediate attempt requires that no client-owned attempt and no sweep attempt is awaiting its result. A control-socket request arriving while a sweep attempt awaits its result is handled exactly as one arriving while a client-owned attempt is in flight.
 - Orderly shutdown settles a pending sweep attempt like a client-owned one, with no reply.
 
 **Settlement.** The runner settles a sweep attempt: an accepted attempt's settlement transaction stamps `notified_at` and marks the receipt `settled/submitted`, the same transaction that settles a drained queued preview.
@@ -4099,7 +4082,7 @@ Stamped self-sends are excluded by `notified_at`, and a consumed message is neve
 2. No runner attempt holds a written or in-flight composer write.
 3. No ordinary receipt of the run is `in_progress`, `accepted` or `uncertain`, except the `accepted` preview whose notification stamp awaits storage.
 4. The FIFO holds no queued `ready` prompt or exec.
-5. Observation permits a forced write: no current interaction or candidate (visibility `Visible` or `Obscured`, or eligibility held on an interaction or candidate), visibility not `Unknown`, no degraded observation, and both terminal ends open. Visibility describes the interaction, so an idle screen with no visible interaction proceeds.
+5. Observation permits a forced write: no current interaction or candidate (visibility `visible` or `obscured`, or eligibility held on an interaction or candidate), visibility not `unknown`, no degraded observation, and both terminal ends open. Visibility describes the interaction, so an idle screen with no visible interaction proceeds.
 6. The draft is readable (§6.7 Composer drafts and native suggestions), and its first row does not start with a mode-switch prefix.
 7. The profile has a prompt composer plan for the recorded native version.
 8. The FIFO holds at least one preview whose message is `input_required`; otherwise the reply is `empty`, and consumed previews are left to housekeeping.
@@ -4179,10 +4162,10 @@ Self-sends and sends to a root Director project as §6.3 `message send` specifie
 
 Preview forms, body folding, inline limits and long-body pointers follow §6.5 Push notifications.
 
-Ordinary inputs (`preview`, `prompt` and `exec`) use SHA-256 over `digest::canonical_json` of `run_id,kind,message_id,literal`. The preview client sends the canonical base preview, the method-independent wrapped line ending at the resume clause, in `SubmitInput.literal`. The runner reloads the immutable broker message, validates its run/recipient/key relationship, reconstructs the same canonical base and requires byte equality before reserving or reusing the receipt. Prompt and exec use their submitted literal and a null `message_id`. A preview preimage is:
+Ordinary inputs (`preview`, `prompt` and `exec`) use the SHA-256 over the canonical JSON (§6.4 JSON encoding) of the object with keys `run_id`, `kind`, `message_id` and `literal`. The preview client sends the canonical base preview, the method-independent wrapped line ending at the resume clause, in the `literal` field of its `submit_prompt` request. The runner reloads the immutable broker message, validates its run/recipient/key relationship, reconstructs the same canonical base and requires byte equality before reserving or reusing the receipt. Prompt and exec use their submitted literal and a null `message_id`. A preview preimage is:
 
 ```json
-{"run_id":42,"kind":"preview","message_id":99,"literal":"CANONICAL_BASE_PREVIEW"}
+{"kind":"preview","literal":"CANONICAL_BASE_PREVIEW","message_id":99,"run_id":42}
 ```
 
 Method, appended clause, framing, inline/pointer rendering, native prefix/key bytes and timing are outside the digest preimage. The runner selects and renders afresh only while zero bytes are established; once a stage writes, its method and rendered bytes stay pinned through its result. Queries and duplicate requests validate canonical identity before current composer state, so a later method change preserves the digest and grants no replay of an existing key.
@@ -4264,9 +4247,9 @@ Inspection exposes the selected current post-policy evidence only through its §
 
 Use versioned control operations `permission_inspect` and `permission_respond` and the receipt query/retire boundary (§ Durable input receipts and settlement). A five-second command deadline covers locking, database work and socket exchange. Before the first byte, the serialized runner resolves pending manual input and unread output, revalidates the current visible stable permission request/token and tested answer capability, and commits the response receipt, audit and episode claim atomically under the current ownership epoch. The capability binds to the response without a profile identifier: its backend and native version equal the run's, its answer rule equals the response metadata's `answer_rule_id`, its request rule equals the event evidence `rule_id`, and its plan key equals the requested decision or choice with a non-empty fixture list. The request token, expected owner epoch and event/message association bind the response to the inspection that minted the token. A decision on a question, a choice on another class, a choice without a tested plan of the current question, other interaction classes, uncertain state, stale identity or unavailable storage receive zero-byte rejection. Write only the profile's answer plan for that key, rechecking relevant state and each stage's gate before that stage; partial writes or ambiguous state retain durable uncertainty. The CLI accepts semantic allow/deny decisions and declared question choice ids, not arbitrary key sequences.
 
-Track answer progress as cumulative actual positive byte counts across ordered stages. A complete nonfinal stage retains `partial` progress and durable `in_progress`; only complete final-stage submission establishes `submitted`, followed by durable `accepted` before returning acceptance. A stage syscall returning WouldBlock or Interrupted with zero bytes may yield within the same attempt and original expiration. Retain the untouched next-stage index and any cumulative `partial` progress, then retry only that stage after fresh actual drain, current token/request/choice/focus/plan, `human_generation`, `pointer_generation`, owner and immediate-transaction validation through a newly consumed guard. Completed stages stay completed, and this continuation is neither a new invocation nor a ready-state rearm.
+Track answer progress as cumulative actual positive byte counts across ordered stages. A complete nonfinal stage retains `partial` progress and durable `in_progress`; only complete final-stage submission establishes `submitted`, followed by durable `accepted` before returning acceptance. A stage write returning `EAGAIN`/`EWOULDBLOCK` or `EINTR` with zero bytes may yield within the same attempt and original expiration. Retain the untouched next-stage index and any cumulative `partial` progress, then retry only that stage after fresh actual drain, current token/request/choice/focus/plan, `human_generation`, `pointer_generation`, owner and immediate-transaction validation under a fresh write authorization. Completed stages stay completed, and this continuation is neither a new invocation nor a ready-state rearm.
 
-Record a syscall result before yielding. A recorded zero-byte WouldBlock or Interrupted preserves the actual prior stage/count and releases its lease while consuming that guard; a yielding operation remains `in_progress` and supplies no zero-byte retirement proof. Dropping a consumed guard before I/O preserves its actual no-I/O state, while possible I/O without a recorded result retains uncertainty and every known earlier byte count. A positive short write, incompatible state, unrecorded possible I/O or expiration stops the remaining plan. Preserve cumulative progress, the original cause and any known input identity; persist uncertainty only within the original budget, retaining durable `in_progress` when bookkeeping fails.
+Record a syscall result before yielding. A recorded zero-byte `EAGAIN`/`EWOULDBLOCK` or `EINTR` preserves the actual prior stage/count and releases its write authorization; a yielding operation remains `in_progress` and supplies no zero-byte retirement proof. Abandoning a write authorization before any I/O records that no I/O occurred, while possible I/O without a recorded result retains uncertainty and every known earlier byte count. A positive short write, incompatible state, unrecorded possible I/O or expiration stops the remaining plan. Preserve cumulative progress, the original cause and any known input identity; persist uncertainty only within the original budget, retaining durable `in_progress` when bookkeeping fails.
 
 ##### Permission response storage
 
@@ -4276,7 +4259,7 @@ Audit fields use the displayed column order. Every field is required except `dec
 
 In the same immediate transaction, require input kind `permission_response`, an active pinned Director, an inbox-linked opening event of class `permission_request` for a decision or `question` for a choice, and the matching unclosed interaction/run. Validate the expected epoch, event/message association and answer capability binding before inserting the input, immutable audit and claim. Other input kinds have no audit row. The composite claim foreign key binds its input to the same interaction; same-run/event and recorded ownership relationships are also checked on reads while preserving closed/inactive history; active/current eligibility applies to new attempts only.
 
-The canonical payload digest covers `run_id,owner_epoch,interaction_id,event_id,director_member_id,request_token,decision,choice_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id`, with JSON null for the absent one of `decision` and `choice_id`. The `owner_epoch` value is the request's `expected_owner_epoch`. Encode this metadata as canonical JSON with sorted keys before SHA-256; `input_id`, timestamps, operation key and literal native keys are excluded. Validate a matching key against this digest before any new action.
+The canonical payload digest covers `run_id,owner_epoch,interaction_id,event_id,director_member_id,request_token,decision,choice_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id`, with JSON null for the absent one of `decision` and `choice_id`. The `owner_epoch` value is the request's `expected_owner_epoch`. Encode this metadata as canonical JSON (§6.4 JSON encoding) before SHA-256; `input_id`, timestamps, operation key and literal native keys are excluded. Validate a matching key against this digest before any new action.
 
 Retain a claim after possible submission, accepted submission, uncertain settlement or `abandoned_uncertain`. Release it only in the synchronized transaction that proves zero bytes, no active writer and `ready` or settled `not_submitted`; a disposition label alone supplies no zero-byte evidence. Audit rows and consumed operation keys remain retained after claim release.
 
@@ -4284,11 +4267,11 @@ Permission inputs reuse the ordinary receipt states, settlement dispositions, 40
 
 §6.3 Permission commands fixes the inspection, response and audit output, exit codes and failure output. When asking the user to execute a response, present the concrete command with actual snapshot values; stale values fail before bytes.
 
-Answer-profile capability belongs to the run's selected profile, rests on native evidence that the build guard verifies (§ Profile selection by minimum version) and is independently tested for allow and deny, and for each question choice. It specifies request form/rule, single-request choice semantics for a decision or the declared choice for a question, focus/selection requirements, exact key stages and output revalidation. Use real native evidence rather than invented Enter/Escape mappings. Persistent/session-wide permission changes have no decision answer. Unsupported answer profiles preserve manual native input. Lacking an atomic native request API, serialize available input/output, reject observed mismatches and retain uncertainty for remaining races and indistinguishable requests.
+Answer-profile capability belongs to the run's selected profile, rests on native evidence that provenance validation verifies (§ Profile selection by minimum version) and is independently tested for allow and deny, and for each question choice. It specifies request form/rule, single-request choice semantics for a decision or the declared choice for a question, focus/selection requirements, exact key stages and output revalidation. Use real native evidence rather than invented Enter/Escape mappings. Persistent/session-wide permission changes have no decision answer. Unsupported answer profiles preserve manual native input. Lacking an atomic native request API, serialize available input/output, reject observed mismatches and retain uncertainty for remaining races and indistinguishable requests.
 
 #### Director consumption and continuation
 
-The Director consumes runtime events through the `poll --json` each `message listen` notice prompts, or through manual `poll --json` when no receiver is available. Runtime events reach the Director's stdout receiver and durable inbox; they provide no composer injection, Escape-first wake, goal activation or host interrupt guarantee (latency targets: § Native acceptance and coverage). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
+The Director consumes runtime events through the `poll --json` each `message listen` notice prompts, or through manual `poll --json` when no receiver is available. Runtime events reach the Director's stdout receiver and durable inbox; they provide no composer injection, Escape-first wake, goal activation or host interrupt guarantee (latency targets: § Coverage and latency). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
 
 The poll consumes the message. Before running any other command after it, the Director records the unfinished action in host-owned state; it then reads the complete event, verifies its durable event/message link with `event show` and reconciles the current run/interaction. An ordinary member can quote event JSON; a claimed event identity is verified against stored ownership, never trusted from message text alone. Old/closed events remain readable but are not a new request to answer.
 
@@ -4318,59 +4301,11 @@ The Director handles the automatic review events (§ Automatic review events) th
 
 A routed request that arrives with no event follows the refusal route above.
 
-#### Native acceptance and coverage
+#### Coverage and latency
 
-Acceptance evidence for every declared detector, composer and answer capability consists of synthetic terminal replay and real native PTYs on each registered multiplexer. A run without a selected profile, and a capability its selected profile does not declare, retain explicit `unknown` coverage and manual operation; fixed-policy launch modes use the version-selected profile like every other mode.
+A run without a selected profile, and a capability its selected profile does not declare, retain explicit `unknown` coverage and manual operation; fixed-policy launch modes use the version-selected profile like every other mode.
 
-The release minimum is a real interactive permission request under Claude's native `default` policy and under Codex's native `on-request` policy with `workspace-write`, each on both tmux and herdr. Acceptance records pin exact installed CLI versions to their corresponding bundled profiles, and their permitted disposable fixtures actually reach the native approval surface. Every minimum case demonstrates blocked-model-independent detection, a committed actionable event/inbox record, Director consumption and a preserved original request. Separate fresh requests cover verified Director-auto allow and deny, user-authorized responses under non-auto/unknown modes, manual original-surface input and a user-executed complete bound command. The records show zero response bytes before required user permission. Missing native availability, unknown coverage or an unobserved required case fails overall feature acceptance; unknown coverage is only the compatibility path for other versions/backends. Additional profiles retain their own declared acceptance gates.
-
-Automatic-mode acceptance covers Claude `auto` and Codex `approve-for-me` on both tmux and herdr, with automatic review available for the account and model: the omitted-default launch, an auto-approved fixture, an auto-refused fixture with its event and Director handling, and, where the native host shows one, an escalated form answered allow and deny. A later-version case repeats the launch, auto-approved, auto-refused and escalated cases on a native version above its profile's `min_version`, recording the selected profile and each UI difference that failed to match. A fixture that does not produce its intended screen is a recorded limit for that backend, not a pass.
-
-Minimum-version delivery acceptance covers every bundled backend on each registered multiplexer, using isolated native sessions and databases and benign marker commands:
-
-| Case | Required evidence |
-|---|---|
-| Threshold selection | Equal/between/above/below boundaries, catalog permutation, multiple backends, numeric component ordering, prerelease ordering, build-metadata ties, malformed thresholds and failed probes |
-| Complete profile reuse | Detection, annotations, both composer operations and each available semantic answer resolve the same profile and retain actual run/capture identities |
-| Native operation plans | Prompt preview and direct prompt create a native user turn; native exec runs a harmless marker command and exposes its result, with literal-to-submit timing recorded |
-| Fallback operation | Missing plan and failed-probe cases show the rule-5 fallback sequence (§ Delivery method and interaction priority) and explicit fallback results |
-| Busy composer | A busy composer with an executable plan follows rule 4 (`composer_busy` with zero bytes, profile drain, `idle_timeout` after 3 minutes) without any earlier Escape; a working member with an empty composer row receives profile delivery |
-| Interaction deferral | Permission and question remain open with no Escape/literal bytes; answering on the original native surface yields closure and exactly one queued delivery without another send |
-| Adversarial transition | Candidate/obscured/superseding interaction, keyboard/pointer input during chunks/settles, observer/owner loss and partial stages follow the complete-prefix stop outcomes |
-| Durable retry | A queued canonical preview drains by fallback and retains one ID/digest after composer changes and repeated queries; duplicate keys, conflicting digests, concurrent sender/drain, lost replies and stamp failures avoid duplicate dispatch |
-| Deferred failure and liveness | After closure with a busy pane lock and no further output/commands, the runner timer either delivers when the lock frees or publishes not submitted at the deadline; temporary storage/observer failure and terminal-commit recovery preserve FIFO/result visibility |
-| Schema and reporting | Fresh-baseline initialization, canonical digest validation, referential integrity, sequence preservation, self-send/no-pane output and durable reason/state projection for ordinary/history/permission-response receipts |
-
-Composer-submit acceptance uses the installed evidence versions on both tmux and herdr for every bundled backend. Each record verifies versions from the capturing server's pane and records commands, screen fixtures and timings:
-
-| Case | Required result |
-|---|---|
-| Pointer at 0.3 s | Hover, wheel and click during the settle submit normally; pointer between literal chunks stops continuation and closes an open paste; permission tokens/stages are revoked |
-| Keyboard `x` at 0.3 s | Verified-composer stop is `left_in_composer/manual_input`; later previews queue, and automatic re-delivery waits for verified empty |
-| Plain threshold | Codex previews of 1007 and 1037 bytes and Hermes previews of 2027 and 2057 characters submit using measured framing or pointer rendering |
-| Positive short writes | Japanese previews of 7987 and 12085 bytes continue chunks and submit within 5 s |
-| Ineffective submit key | Post-submit verification ends as `left_in_composer/submit_unconfirmed`, stage `submitted` |
-| Held composer | Re-delivery and heads behind uncertain bytes stay queued past `idle_timeout`; consumption cancels it on the next queue turn and a 3-minute held-composer wait emits one stalled event |
-| Hermes deletion | Drafts of 2057 characters and 8192 scalars clear and work settlement completes; the larger draft clears within 10 s |
-
-Unit coverage replays each unsubmitted-literal fixture through post-submit verification and obtains `submit_unconfirmed`, and exercises complete-prefix stops, close-stage failures, latest-attempt decisions, schema constraints and projection/recovery actions.
-
-Measurements establish submitted native input separately from model consumption, permission decisions and command completion.
-
-Live acceptance records carry the source/installed CAFleet version, native CLI version, native configuration/mode, detector and answer profiles, Director mode/provenance, attributed decision/evidence references, request identity/token, receipt/stage, multiplexer, terminal size, cwd and redacted evidence. They include a permitted operation, an ordinary command failure after allow, an actual permission refusal, an approval that blocks the model, both supported answer routes and observed continuation. The exercised cases cover stale tokens/epochs/events, same/different operation keys, conflicting decisions, partial writes/lost replies, redraw, fragmented ANSI/UTF-8, primary/alternate screens, resize, title-only prompts, question/trust/update screens, transcript quotes, identical requests, concurrent human/output/input, slow display, database locks, outbox pressure, startup compensation, runner hard kill and deletion. Unavailable native modes or unobserved cases remain explicit coverage limits and cannot pass that profile's release gate.
-
-Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the next notice announces the committed message, after the receiver's poll releases the hold or the ceiling fires.
-
-- Exact child argv for the selected native policy, with native/managed restrictions and sandbox boundaries preserved.
-- Equal run IDs across sibling databases, and replacement at an unchanged path.
-- A held write transaction and a long statement, showing that restoration and exit are independent of the connection's default timeout.
-- A child exiting while its descendant holds the slave, exit during a stalled display and a locked database, and deadline-bounded terminal restoration.
-- Timeout followed by the original runner's recovery, and concurrent recovery attempts.
-- A command containing a known secret, which is absent from every database/message/outbox field in metadata mode and with a matching redaction pattern, including interaction updates.
-- Hard kill with complete uncommitted frames, replay of an opening before loss closure, concurrent recovery, interruption during recovery, and deregistration before replay with archived rather than fabricated inbox records.
-- A live unlinked lock, verified death, unknown identity without attestation, matching/stale attestations, positive live evidence rejecting an attestation and concurrent database-only recovery.
-- Cross-invocation accepted-then-failed-stamp recovery, queued-then-drained delivery after interaction closure, disconnected partial writes, receipt retirement followed by delayed replay, and a lost explicit-command stdout result.
-- Every registered backend's omitted-policy argv and each adapter-declared explicit policy.
+With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the next notice announces the committed message, after the receiver's poll releases the hold or the ceiling fires.
 
 ## 7. Cross-cutting concerns
 
@@ -4380,11 +4315,11 @@ The database URL resolves per §6.3 Database selection, and config directories r
 
 ### 7.2 Error handling & exit-code policy
 
-Usage/parser/model/effort/line-validation errors exit 2. Application, database and transport errors exit 1 and print per §6.3 Error Messages. A successful finite timeout exits 0. Preserve primary causes alongside explicit cleanup failures. Missing required state or unknown enum/column values propagate instead of substituting meaningless defaults.
+Usage errors, parse errors (§6.3 Error Messages) and model/effort/line-validation errors exit 2. Application, database and transport errors exit 1 and print per §6.3 Error Messages. A successful finite timeout exits 0. Preserve primary causes alongside explicit cleanup failures. Missing required state or unknown enum/column values propagate instead of substituting meaningless defaults.
 
 ### 7.3 Output / JSON / truncation
 
-JSON uses explicit ordered presenters and unescaped UTF-8 (§6.3 JSON output (`--json`)); message-body truncation follows §6.3 Message Body Truncation.
+JSON follows §6.4 JSON encoding with the member orders §6.3 lists; message-body truncation follows §6.3 Message Body Truncation.
 
 ### 7.4 Logging & stdout discipline
 
@@ -4392,11 +4327,11 @@ Successful command records stay on stdout. Post-commit notification diagnostics 
 
 ### 7.5 Time discipline
 
-Use UTC for durable timestamps, monotonic clocks for budgets and deadlines. Cap every bounded process/database operation to remaining time. Every guard/owned child releases resources on ordinary errors and process exit.
+Use UTC for durable timestamps, monotonic clocks for budgets and deadlines. Cap every bounded process/database operation to remaining time. Every acquired lock, descriptor and owned child process is released on every error path and at process exit.
 
 ### 7.6 Packaging & distribution
 
-Ship one `cafleet` binary per release target. The release version, printed by `cafleet --version` and used bare as the release tag, names the default database file and asset stamps. Archives are `cafleet-v<version>-<target>.tar.gz` containing the binary, where `<target>` is the platform name in target-triple form, for example `x86_64-unknown-linux-musl`. The release version (above) owns `--version`, asset stamps and doctor's installation checks. Embed the `assets/` tree (§6.3 Asset installation) offline. Rust builds/release packaging require no frontend output. The documentation site retains its independent Node/pnpm tooling.
+Ship one `cafleet` binary per release target. The release version, printed by `cafleet --version` and used bare as the release tag, names the default database file and asset stamps. Archives are `cafleet-v<version>-<target>.tar.gz` containing the binary, where `<target>` is the platform name in target-triple form, for example `x86_64-unknown-linux-musl`. The release version (above) owns `--version`, asset stamps and doctor's installation checks. Embed the `assets/` tree (§6.3 Asset installation) offline. Building the binary requires no documentation-site output.
 
 ### 7.7 Agent-operation contract — one-shot command isolation
 
@@ -4404,7 +4339,7 @@ Agents run each CAFleet process as the only command in its shell-tool invocation
 
 ## 8. Database schema
 
-The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.sql` (§6.3 Asset installation), whose application identity is `PRAGMA application_id` `1128351289` (`0x43414639`, ASCII `CAF9`). Each cafleet version owns its default database file, `cafleet_<VERSION>.db`, where `<VERSION>` is the package version, so each version starts from a fresh file; baseline initialization records that version in the `cafleet_database` row. The fresh baseline creates exactly the application tables declared in the schema, and its ledger holds exactly the row `(1, 'baseline')`. Compatibility diagnosis verifies, in order, the application identity, that baseline ledger, every required table’s column shape with required indexes/foreign keys, and a recorded version equal to the running binary's. Any other identified or populated file, including one recorded by another cafleet version or one whose ledger holds a row beyond the baseline, is an incompatible format whose bytes are preserved, and `cafleet doctor` reports the version's default file as absent until `cafleet setup` creates it. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
+The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.sql` (§6.3 Asset installation), whose application identity is `PRAGMA application_id` `1128351289` (`0x43414639`, ASCII `CAF9`). Each cafleet version owns its default database file, `cafleet_<VERSION>.db`, where `<VERSION>` is the release version (§7.6), so each version starts from a fresh file; baseline initialization records that version in the `cafleet_database` row. The fresh baseline creates exactly the application tables declared in the schema, and its ledger holds exactly the row `(1, 'baseline')`. Compatibility diagnosis verifies, in order, the application identity, that baseline ledger, every required table’s column shape with required indexes/foreign keys, and a recorded version equal to the running binary's. Any other identified or populated file, including one recorded by another cafleet version or one whose ledger holds a row beyond the baseline, is an incompatible format whose bytes are preserved, and `cafleet doctor` reports the version's default file as absent until `cafleet setup` creates it. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
 
 | Table | Responsibility |
 |---|---|
@@ -4669,12 +4604,12 @@ A concrete placement selects the shared pane input lock, and duplicate entries t
 
 Runtime records keep their run/member/fleet/Director references after soft deregistration, so history survives member and fleet closure.
 
-The binary appends `INSERT INTO cafleet_database(singleton_id, cafleet_version) VALUES(1, '<VERSION>');` to the baseline SQL, with `<VERSION>` its package version, and applies both in one transaction, so a failed initialization leaves no identity, table, ledger or version row.
+Initialization applies the baseline and inserts the `cafleet_database` row for the running version in one transaction, so a failed initialization leaves no identity, table, ledger or version row.
 
 `native_session_json` records a `hermes` run's native session identity for work settlement (§6.7 Hermes work settlement) and is null for every other backend and for a run whose identity is not yet captured.
 
-The DDL above owns every runtime table column, type, enum, nullability constraint, foreign key, uniqueness invariant and partial unique index. Section 6.9 specifies their runtime semantics, including database-instance identity, preview attempt sequencing, complete-prefix settlement and durable left stages, transactional same-run/event/Director response checks, privacy, zero-byte claim release and immutable audit semantics. Setup's required-shape guard includes `preview_attempt`, `stop_cause`, `left_stage` and `flush_input_id` on `member_input_operations`; runtime validates the free-text defer/outcome reasons of §6.9 Delivery reporting.
+The DDL above owns every runtime table column, type, enum, nullability constraint, foreign key, uniqueness invariant and partial unique index. Section 6.9 specifies their runtime semantics, including database-instance identity, preview attempt sequencing, complete-prefix settlement and durable left stages, transactional same-run/event/Director response checks, privacy, zero-byte claim release and immutable audit semantics. Setup's required-shape check includes `preview_attempt`, `stop_cause`, `left_stage` and `flush_input_id` on `member_input_operations`; runtime validates the free-text defer/outcome reasons of §6.9 Delivery reporting.
 
 ## 9. Testing strategy
 
-The test suite covers current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/pending notification behavior and consuming-poll exactness; the runner pending-preview sweep, its strict oldest-first order, clientless tracking and run-wide backoff, and retried-preview result suppression; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, stop-cause and left-stage recording, pointer accounting, framing/limits, chunk continuation, post-submit verification and preview re-delivery, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; immediate-attempt failure bookkeeping, retention and later feeding of an interrupted drain feed's remainder, queue housekeeping independent of every queue-turn gate, the stall watchdog's cause derivation, suggestion-only composers, composer-draft extraction and the forced flush served while the queue turn is held; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, concurrent-poll races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; caller-pane verification through injected process tables and fake multiplexers, with the process-entry parsers tested on every platform; backend/multiplexer smoke coverage; links, embedding and release builds; and general timed pipe draining and owned-child cleanup.
+A conforming implementation is verified at four levels. Command level: every §6.3 command's exit code, stdout/stderr text and JSON bytes, the multiplexer argv it issues, and the §8 rows it leaves, driven through the CLI with stand-in multiplexer and native executables. Function level: argv construction, multiplexer command choreography, terminal-reply and key parsing, ANSI stripping, catalog validation and screen classification of every catalogued native screen. Runtime level: the §6.9 runner fed scripted screens, commands and storage faults under a controlled clock, asserting events, rows, receipts and bytes written to the child. Operating-system level: real PTYs, process groups, signals, pane-lock exclusion and release on process death, and shutdown deadlines in real time.

@@ -1,7 +1,7 @@
 # SPEC Neutrality, Test Simplification and Feature Reduction
 
 **Status**: Approved
-**Progress**: 4/83 tasks complete
+**Progress**: 9/83 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -261,6 +261,11 @@ Sweep items found beyond the audit:
 | S6 | §7.6 "The compile-time version owns `--version`…" | "The release version (above) owns `--version`, asset stamps and doctor's installation checks." |
 | S7 | Internal constant names (D12) | § Source-only constants |
 | S8 | Any further hit of a § Verification check | Recorded here as S9, S10, … with its replacement during Step A2 |
+| S9 | §6.7 Per-backend spawn argv and Contract error strings: `ensure_available`, `validate_model`, `validate_effort`, `validate_prompt`, `display_name`, `if model/effort is not None`, `binary {binary_name} not found on PATH` | "Availability …", "model/effort validation", "the prompt check", "the member pane name", "when `--model`/`--effort` is given", `binary <name> not found on PATH` |
+| S10 | §6.9 Runner pending-preview sweep, Clientless tracking: `pending_sweep` slot | "the pending sweep attempt"; "no client-owned attempt and no sweep attempt is awaiting its result" |
+| S11 | `guard` in its implementation sense: §6.3 Schema-version guard ("invocation guards"), `fleet delete` lock step, §6.5 Pane input lock, §6.9 Terminal transport ("restoration guard"), composer plan provenance ("build guard"), Durable input receipts (validated, leased, pane and pane/input guards), §8 required-shape guard | "every guarded command", "acquired lock", "the lock", "restoring its settings on every exit path", "provenance validation", "authorizations", "held write authorization", "held pane lock", "pane/input lock", "required-shape check" |
+| S12 | §6.7 claude spawn-time allow rules: work-command example `mise` | "test runners" |
+| S13 | §6.9 `#### Native acceptance and coverage` after F62 keeps no acceptance content | Heading "Coverage and latency"; §6.9 Director consumption pointer updated |
 
 #### §9 rewrite
 
@@ -544,11 +549,11 @@ Per TD-1 (a), `CLAUDE.md` § Tests is unchanged.
 
 ### Step A2: Findings sweep
 
-- [ ] Apply F1–F68 per § Finding dispositions <!-- completed: -->
-- [ ] Apply S1–S7 <!-- completed: -->
-- [ ] Update every catalog pattern quoted in `SPEC.md` to its § Bundled pattern rewrite form <!-- completed: -->
-- [ ] Rewrite §9 per § §9 rewrite <!-- completed: -->
-- [ ] Run every § Verification check, resolve each hit and record further items as S9+ <!-- completed: -->
+- [x] Apply F1–F68 per § Finding dispositions <!-- completed: 2026-11-21T08:40 -->
+- [x] Apply S1–S7 <!-- completed: 2026-11-21T08:40 -->
+- [x] Update every catalog pattern quoted in `SPEC.md` to its § Bundled pattern rewrite form <!-- completed: 2026-11-21T08:40 -->
+- [x] Rewrite §9 per § §9 rewrite <!-- completed: 2026-11-21T08:40 -->
+- [x] Run every § Verification check, resolve each hit and record further items as S9+ <!-- completed: 2026-11-21T08:40 -->
 
 ### Step A3: Dependent surfaces, data and confirmation tests
 
