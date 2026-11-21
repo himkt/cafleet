@@ -12,7 +12,6 @@ use crate::coding_agent::AnswerMatch;
 use crate::coding_agent::Detector;
 use crate::coding_agent::ProfileCatalog;
 use crate::runtime::*;
-use std::ops::RangeInclusive;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -68,7 +67,6 @@ impl ObservationClock for RealObservationClock {
 stored_enum!(ObservationFailure, "observation.diagnostic", {
     Parser => "parser_unavailable",
     Detector => "detector_unavailable",
-    Sequence => "sequence_unavailable",
     Sink => "sink_unavailable",
 });
 #[derive(Debug)]
@@ -100,7 +98,7 @@ pub(crate) struct ObservationController {
     run: RunRecord,
     detector: Detector,
     tracker: EpisodeTracker,
-    pool: EventSequencePool,
+    next_event_seq: i64,
     pending: Option<PendingEpisodeUpdate>,
     gap: Option<PendingGap>,
     gap_count: u64,
@@ -230,9 +228,8 @@ impl ObservationController {
                 && run.child_start_identity.is_none()
                 && run.started_at.is_none()
                 && run.ended_at.is_none()
-                && run.recovery_origin_status.is_none()
-                && run.event_seq_reserved_through == 256,
-            "observation controller requires fresh committed initial grant",
+                && run.recovery_origin_status.is_none(),
+            "observation controller requires a fresh starting run",
         )?;
         let backend = crate::coding_agent::coding_agent(&run.backend)
             .ok_or_else(|| error("unknown observer backend"))?;
@@ -240,13 +237,11 @@ impl ObservationController {
             catalog.detection_coverage(backend, run.native_version.as_deref()) == run.coverage,
             "observer coverage mismatch",
         )?;
-        let mut pool = EventSequencePool::default();
-        pool.supply(1..=256)?;
         Ok(Self {
             run: run.clone(),
             detector: Detector::new(catalog, backend, run.native_version.as_deref()),
             tracker: EpisodeTracker::new(run.run_id)?,
-            pool,
+            next_event_seq: 1,
             pending: None,
             gap: None,
             gap_count: 0,
@@ -553,27 +548,20 @@ impl ObservationController {
         }
     }
     fn route(&mut self, writer: &EventWriter, now: &ObservationMoment) -> Result<()> {
-        if self.pool.exhausted()
-            && let Some(range) = writer.take_sequence_range()
-        {
-            self.pool.supply(range)?;
-        }
         while let Some(pending) = &mut self.pending {
             if pending.next_draft < pending.update.transitions.len() {
                 if pending.materialized.is_none() {
-                    if self.pool.exhausted() {
-                        writer.request_sequence_range()?;
-                        self.delivery_pressure(ObservationFailure::Sequence, now)?;
-                        return Ok(());
-                    }
-                    pending.materialized = Some(
-                        self.pool
-                            .materialize(&pending.update.transitions[pending.next_draft])?,
-                    );
+                    pending.materialized = Some(materialize(
+                        &pending.update.transitions[pending.next_draft],
+                        self.next_event_seq,
+                    )?);
                 }
                 let value = pending.materialized.take().expect("materialized original");
                 match writer.try_submit(value) {
-                    Ok(()) => pending.next_draft += 1,
+                    Ok(()) => {
+                        pending.next_draft += 1;
+                        self.next_event_seq += 1;
+                    }
                     Err(retained) => {
                         pending.materialized = Some(retained.transition);
                         self.pending_error = Some(retained.cause);
@@ -5682,7 +5670,7 @@ pub(crate) mod native_capture {
             ];
             argv.extend(parts.iter().map(|s| (*s).to_owned()));
             SystemRunner
-                .run_until(&argv, until)
+                .run_for(&argv, until.saturating_duration_since(Instant::now()))
                 .map_err(|cause| error(format!("owned tmux command failed: {cause:?}")))
         }
         fn driver_validate_tmux(
@@ -7842,53 +7830,28 @@ impl EpisodeTracker {
         })
     }
 }
-#[derive(Default)]
-pub(crate) struct EventSequencePool {
-    range: Option<RangeInclusive<i64>>,
-    high_water: i64,
-}
-impl EventSequencePool {
-    pub(crate) fn exhausted(&self) -> bool {
-        self.range.as_ref().is_none_or(|range| range.is_empty())
-    }
-    pub(crate) fn supply(&mut self, reserved: RangeInclusive<i64>) -> Result<()> {
-        ensure(self.exhausted(), "consume the current sequence grant first")?;
-        let first = *reserved.start();
-        let last = *reserved.end();
-        ensure(
-            first > 0 && first > self.high_water && last.checked_sub(first) == Some(255),
-            "positive increasing 256-value sequence grant required",
-        )?;
-        self.high_water = last;
-        self.range = Some(reserved);
-        Ok(())
-    }
-    pub(crate) fn materialize(&mut self, draft: &TransitionDraft) -> Result<ObservedTransition> {
-        ensure(
-            draft.run_id > 0
-                && draft.episode_seq.is_some() == draft.classification.is_some()
-                && draft.episode_seq.is_none_or(|seq| seq > 0),
-            "valid transition identity required",
-        )?;
-        storage::validate_evidence(&draft.evidence_json)?;
-        wall_time(&draft.observed_at)?;
-        let sequence = self
-            .range
-            .as_mut()
-            .and_then(Iterator::next)
-            .ok_or_else(|| error("reserved event sequence range exhausted"))?;
-        Ok(ObservedTransition {
-            run_id: draft.run_id,
-            event_seq: sequence,
-            episode_seq: draft.episode_seq,
-            kind: draft.kind,
-            classification: draft.classification,
-            observed_at: draft.observed_at.clone(),
-            evidence_json: draft.evidence_json.clone(),
-            close_reason: draft.close_reason,
-            cause_json: draft.cause_json.clone(),
-        })
-    }
+/// `draft` as event `sequence`; the commit transaction accepts only the run's next sequence.
+pub(crate) fn materialize(draft: &TransitionDraft, sequence: i64) -> Result<ObservedTransition> {
+    ensure(
+        draft.run_id > 0
+            && sequence > 0
+            && draft.episode_seq.is_some() == draft.classification.is_some()
+            && draft.episode_seq.is_none_or(|seq| seq > 0),
+        "valid transition identity required",
+    )?;
+    storage::validate_evidence(&draft.evidence_json)?;
+    wall_time(&draft.observed_at)?;
+    Ok(ObservedTransition {
+        run_id: draft.run_id,
+        event_seq: sequence,
+        episode_seq: draft.episode_seq,
+        kind: draft.kind,
+        classification: draft.classification,
+        observed_at: draft.observed_at.clone(),
+        evidence_json: draft.evidence_json.clone(),
+        close_reason: draft.close_reason,
+        cause_json: draft.cause_json.clone(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8776,9 +8739,7 @@ mod tests {
                 .to_string()
                 .contains(secret)
         );
-        let mut pool = EventSequencePool::default();
-        pool.supply(1..=256).unwrap();
-        let event = pool.materialize(&opened.transitions[0]).unwrap();
+        let event = materialize(&opened.transitions[0], 1).unwrap();
         assert!(!serde_json::to_string(&event).unwrap().contains(secret));
         for (sequence, detail) in [(2, "first"), (3, secret)] {
             let mut redraw = secret_observation(secret, 100, sequence);
@@ -8813,37 +8774,19 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_sequence_pool_uses_only_committed_grants_and_retains_borrowed_drafts() {
+    fn runtime_episode_materialize_numbers_the_draft_and_refuses_a_non_positive_sequence() {
         let origin = Instant::now();
         let mut tracker = tracker();
         let update = open(&mut tracker, &permission("write disposable.txt"), origin);
         let draft = &update.transitions[0];
-        let mut pool = EventSequencePool::default();
-        assert!(pool.materialize(draft).is_err());
-        assert_eq!(draft.observed_at, NOW);
-        pool.supply(1..=256).unwrap();
-        assert!(pool.supply(257..=512).is_err());
-        for expected in 1..=256 {
-            let event = pool.materialize(draft).unwrap();
-            assert_eq!(event.event_seq, expected);
+        for sequence in [1, 2, 513] {
+            let event = materialize(draft, sequence).unwrap();
+            assert_eq!(event.event_seq, sequence);
             assert_eq!(event.observed_at, draft.observed_at);
             assert_eq!(event.evidence_json, draft.evidence_json);
         }
-        assert!(pool.materialize(draft).is_err());
-        assert!(
-            pool.supply(1..=256).is_err(),
-            "a consumed grant is not re-supplied"
-        );
-        pool.supply(513..=768).unwrap();
-        assert_eq!(pool.materialize(draft).unwrap().event_seq, 513);
-        for range in [
-            0..=255,
-            1..=255,
-            1..=257,
-            (-255)..=0,
-            (i64::MAX - 1)..=i64::MAX,
-        ] {
-            assert!(EventSequencePool::default().supply(range).is_err());
+        for sequence in [0, -1] {
+            assert!(materialize(draft, sequence).is_err());
         }
     }
 
@@ -9808,7 +9751,6 @@ mod tests {
             for (reason, code) in [
                 (ObservationFailure::Parser, "parser_unavailable"),
                 (ObservationFailure::Detector, "detector_unavailable"),
-                (ObservationFailure::Sequence, "sequence_unavailable"),
                 (ObservationFailure::Sink, "sink_unavailable"),
             ] {
                 let mut fixture = WriterFixture::new();
@@ -9926,6 +9868,23 @@ mod tests {
             let clock = Clock::new();
             let (mut controller, _child, mut terminal) =
                 started_controller(&mut fixture, &writer, &clock, &catalog);
+            let preview = crate::broker::messaging::insert_message_validated(
+                &fixture.fixture.conn,
+                fixture.fixture.run.director_member_id,
+                fixture.fixture.run.member_id,
+                "preview",
+            )
+            .unwrap();
+            controller.publish_delivery_result(storage::preview_delivery_result_cause(
+                preview.message_id,
+                storage::DeliveryMethod::Profile,
+                "partial",
+                storage::StopCause::ShortWrite,
+            ));
+            controller
+                .poll(&terminal.snapshot(), &writer, &clock)
+                .unwrap();
+            assert_eq!(writer.status().pending_count, 1);
             let mut last_opening_sequence = 0;
             for index in 0..32 {
                 clock.set(index * 200);
@@ -9941,34 +9900,12 @@ mod tests {
                 controller
                     .poll(&terminal.snapshot(), &writer, &clock)
                     .unwrap();
-                assert_eq!(writer.status().pending_count, index * 2 + 1);
+                assert_eq!(writer.status().pending_count, index * 2 + 2);
                 assert!(!controller.has_pending());
             }
-            assert_eq!(writer.status().pending_count, 63);
-            let obscuring = String::from_utf8(form("write fixture-31.txt"))
-                .unwrap()
-                .replace("Synthetic permission request", "Synthetic partial redraw");
-            clock.set(6400);
-            terminal.feed(obscuring.as_bytes()).unwrap();
-            controller
-                .observer(&writer, &clock)
-                .observe(&terminal.snapshot())
-                .unwrap();
-            clock.set(8500);
-            controller
-                .poll(&terminal.snapshot(), &writer, &clock)
-                .unwrap();
             assert_eq!(writer.status().pending_count, 64);
             assert!(!writer.status().diagnostic.is_some());
-            assert!(!controller.has_pending());
             assert_eq!(committed(&fixture), 0);
-            clock.set(8550);
-            terminal
-                .feed_observed(
-                    &form("write fixture-31.txt"),
-                    &mut controller.observer(&writer, &clock),
-                )
-                .unwrap();
             clock.set(8600);
             let replacement = form("write final-original.txt");
             assert_eq!(replacement[0], 0x1b);

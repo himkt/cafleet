@@ -1226,11 +1226,11 @@ mod tests {
              database_identity_json,launch_nonce,runtime_path,resolved_mode,mode_source,
              permission_argv_json,coverage,status,
              owner_epoch,owner_kind,owner_pid,owner_start_identity,
-             cleanup_state,event_seq_reserved_through,native_session_json)
+             cleanup_state,native_session_json)
              VALUES(?1,?2,?3,?7,?4,?5,'/isolated/runtime','never','default',
              '[\"--ask-for-approval\",\"never\",\"--sandbox\",\"workspace-write\"]',
              'unknown',?6,1,'creator',1234,'fixture-owner',
-             'incomplete',0,?8)",
+             'incomplete',?8)",
             params![self.member,self.fleet,self.director,
                 json!({"canonical_path": self.conn.path().unwrap(), "instance_id": "a".repeat(32), "device":1,"inode":2}).to_string(),
                 "b".repeat(64),status,backend,native_session_json],
@@ -1392,15 +1392,6 @@ mod tests {
                     "{field}"
                 );
             }
-            assert!(
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET event_seq_reserved_through=-1 WHERE run_id=?1",
-                        [run]
-                    )
-                    .is_err()
-            );
         }
 
         #[test]

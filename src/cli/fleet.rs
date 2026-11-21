@@ -1076,7 +1076,6 @@ pub(crate) mod test_support {
                 settings,
                 expected_run,
                 expected_placement,
-                None,
                 deadline.instant(),
                 held,
                 self.recovery(),
@@ -1776,7 +1775,6 @@ mod tests {
             assert_eq!(recovered.exit_code, Some(143));
             assert_eq!(recovered.cleanup_state, CleanupState::Complete);
             assert!(events(&case).is_empty());
-            assert!(case.spool_bytes().is_none_or(|bytes| bytes.is_empty()));
             let status: String = case
                 .fixture
                 .conn
@@ -1800,7 +1798,6 @@ mod tests {
                 let mut case = Case::new();
                 case.seed(&[opening(&case.fixture.run, 1, 1)]);
                 let epoch = case.fixture.run.owner_epoch;
-                let original_bytes = case.spool_bytes().unwrap();
                 case.release();
                 let deadline = Deadline::until(Instant::now() + Duration::from_secs(2));
                 let mut host = DeletionTestHost::recovering(&case, deadline);
@@ -1821,9 +1818,8 @@ mod tests {
                 match mutation {
                     Mutation::BeforeRecovery => {
                         assert_eq!(host.calls, vec!["shutdown", "recover"]);
-                        assert!(events(&case).is_empty());
+                        assert_eq!(events(&case).len(), 1);
                         assert_eq!(current.owner_epoch, epoch + 1);
-                        assert_eq!(case.spool_bytes().unwrap(), original_bytes);
                     }
                     Mutation::AfterRecovery => {
                         assert_eq!(host.calls, vec!["shutdown", "recover"]);
@@ -1885,7 +1881,6 @@ mod tests {
             let mut case = Case::new();
             case.seed(&[opening(&case.fixture.run, 1, 1)]);
             let before = rows(&case.fixture.conn);
-            let bytes = case.spool_bytes().unwrap();
             case.release();
             let deadline = Deadline::until(
                 Instant::now()
@@ -1904,7 +1899,6 @@ mod tests {
                 .is_err()
             );
             assert_eq!(rows(&case.fixture.conn), before);
-            assert_eq!(case.spool_bytes().unwrap(), bytes);
             assert_registry_active(&case.fixture);
             assert!(host.calls.is_empty());
         }
@@ -1964,7 +1958,7 @@ mod tests {
             let deadline = Deadline::until(inner);
             let mut host = DeletionTestHost::recovering(&case, deadline);
             host.recovery().action = Some(Box::new(move |boundary, _, _| {
-                if boundary == "before_compact" {
+                if boundary == "after_commit" {
                     panic!("owned injected recovery unwind");
                 }
                 Ok(())
@@ -1983,7 +1977,7 @@ mod tests {
                     host.recovery()
                         .calls
                         .iter()
-                        .any(|name| name == "before_compact")
+                        .any(|name| name == "after_commit")
                 );
                 std::thread::sleep(
                     (inner + Duration::from_millis(20)).saturating_duration_since(Instant::now()),

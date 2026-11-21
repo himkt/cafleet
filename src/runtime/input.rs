@@ -10537,15 +10537,6 @@ mod tests {
                     assert!(!stored.contains(&first));
                     assert!(!stored.contains("PRIVATE_INSPECTION_OPERATION"));
                 }
-                let paths = RuntimePaths::for_run(
-                    &h.fixture.run.database_identity_json,
-                    h.fixture.run.run_id,
-                )
-                .unwrap();
-                let outbox = std::fs::read(paths.outbox).unwrap();
-                for secret in [first.as_bytes(), b"PRIVATE_INSPECTION_OPERATION".as_slice()] {
-                    assert!(!outbox.windows(secret.len()).any(|window| window == secret));
-                }
                 assert!(notified.is_none());
             });
         }

@@ -1,7 +1,6 @@
 use crate::assets::HermesSetup;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
-use crate::broker::MemberRunRegistry;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::SpawnProbe;
 use crate::coding_agent::hermes::HermesCli;
@@ -19,14 +18,11 @@ use crate::multiplexer::caller::Verification;
 use crate::runtime::ProcessTable;
 use crate::runtime::SystemProcessTable;
 use crate::runtime::control::CheckStatus;
-use crate::runtime::control::MemberState;
 use crate::runtime::system::SystemProbe;
 use crate::runtime::system::SystemRunner;
 use clap::Args;
-use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
-use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -42,11 +38,10 @@ pub(crate) struct SetupArgs {
 }
 
 pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
-    let mut conn = prepare_database(settings)?;
+    prepare_database(settings)?;
     let home = crate::config::home_dir()?;
     let hermes = SystemProbe.resolve_binary(CodingAgent::Hermes.name());
     install_selected(
-        &mut conn,
         &args.coding_agent,
         &crate::config::process_env,
         &home,
@@ -54,7 +49,7 @@ pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetErr
     )
 }
 
-fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
+fn prepare_database(settings: &Settings) -> Result<(), CafleetError> {
     let path = crate::db::database_path(&settings.database_url)?;
     if path.is_empty() {
         return Err(CafleetError::App("database URL has no file path".into()));
@@ -86,11 +81,10 @@ fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
         ))?,
         _ => schema.require_current()?,
     }
-    Ok(conn)
+    Ok(())
 }
 
 fn install_selected(
-    conn: &mut Connection,
     selected: &[CodingAgent],
     env: EnvLookup<'_>,
     home: &Path,
@@ -107,7 +101,7 @@ fn install_selected(
                 None if selected.contains(&CodingAgent::Hermes) => HermesSetup::MissingRequired,
                 None => HermesSetup::Absent,
             };
-            install_agent(conn, *agent, &paths, hermes, &mut std::io::stdout())?;
+            install_agent(*agent, &paths, hermes, &mut std::io::stdout())?;
         }
     }
     Ok(())
@@ -115,9 +109,6 @@ fn install_selected(
 
 #[derive(Args)]
 pub(crate) struct DoctorArgs {
-    /// Print one row per individual check instead of the per-component summary.
-    #[arg(long)]
-    verbose: bool,
     /// Output in JSON format.
     #[arg(long)]
     json: bool,
@@ -129,32 +120,10 @@ pub(crate) struct Check {
     #[serde(serialize_with = "status_text")]
     status: CheckStatus,
     detail: String,
-    #[serde(skip)]
-    problem: Option<Problem>,
-    #[serde(flatten)]
-    runtime: Option<RuntimeFields>,
-}
-
-/// How a non-`ok` backend check reads on its backend's summary line.
-#[derive(Debug)]
-struct Problem {
-    phrase: String,
-    setup_fix: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeFields {
-    member_id: Option<i64>,
-    #[serde(serialize_with = "state_token")]
-    state: MemberState,
 }
 
 fn status_text<S: serde::Serializer>(status: &CheckStatus, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(status.as_str())
-}
-
-fn state_token<S: serde::Serializer>(state: &MemberState, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_str(state.token())
 }
 
 impl Check {
@@ -163,31 +132,11 @@ impl Check {
             name: name.into(),
             status,
             detail: detail.into(),
-            problem: None,
-            runtime: None,
         }
     }
 
-    fn problem(mut self, phrase: impl Into<String>, setup_fix: bool) -> Self {
-        self.problem = Some(Problem {
-            phrase: phrase.into(),
-            setup_fix,
-        });
-        self
-    }
-
-    fn runtime(mut self, member_id: Option<i64>, state: MemberState) -> Self {
-        self.runtime = Some(RuntimeFields { member_id, state });
-        self
-    }
-
     /// A row that rerunning setup for its backend (the row's name prefix) fixes.
-    fn fixable(
-        name: impl Into<String>,
-        status: CheckStatus,
-        detail: impl Into<String>,
-        phrase: impl Into<String>,
-    ) -> Self {
+    fn fixable(name: impl Into<String>, status: CheckStatus, detail: impl Into<String>) -> Self {
         let name = name.into();
         let backend = name
             .split('.')
@@ -198,53 +147,7 @@ impl Check {
             "{}; run 'cafleet setup --coding-agent {backend}'",
             detail.into()
         );
-        Self::new(name, status, detail).problem(phrase, true)
-    }
-
-    /// An `error` row whose detail is also its summary phrase.
-    fn failure(name: impl Into<String>, detail: impl Into<String>) -> Self {
-        let detail = detail.into();
-        Self::new(name, CheckStatus::Error, detail.clone()).problem(detail, false)
-    }
-}
-
-#[derive(Serialize)]
-struct Summary {
-    component: String,
-    #[serde(serialize_with = "status_text")]
-    status: CheckStatus,
-    detail: String,
-    #[serde(flatten)]
-    members: Option<MemberGroup>,
-}
-
-#[derive(Serialize)]
-struct MemberGroup {
-    #[serde(serialize_with = "state_token")]
-    state: MemberState,
-    member_ids: Vec<i64>,
-}
-
-impl Summary {
-    fn new(component: impl Into<String>, status: CheckStatus, detail: impl Into<String>) -> Self {
-        Self {
-            component: component.into(),
-            status,
-            detail: detail.into(),
-            members: None,
-        }
-    }
-
-    fn members(
-        status: CheckStatus,
-        detail: impl Into<String>,
-        state: MemberState,
-        member_ids: Vec<i64>,
-    ) -> Self {
-        Self {
-            members: Some(MemberGroup { state, member_ids }),
-            ..Self::new("members", status, detail)
-        }
+        Self::new(name, status, detail)
     }
 }
 
@@ -281,12 +184,10 @@ pub(crate) struct DoctorInputs<'a> {
     /// The Hermes reader, present whenever `probe` resolves `hermes` and its configuration
     /// resolves.
     pub(crate) hermes: Option<&'a dyn HermesConfig>,
-    pub(crate) registry: &'a dyn Fn(&Connection) -> Result<Vec<MemberRunRegistry>, CafleetError>,
 }
 
 pub(crate) struct Report {
     checks: Vec<Check>,
-    summary: Vec<Summary>,
 }
 
 impl Report {
@@ -299,8 +200,7 @@ impl Report {
 
 #[derive(Clone, Copy)]
 pub(crate) enum Mode {
-    Summary,
-    Verbose,
+    Text,
     Json,
 }
 
@@ -321,13 +221,8 @@ pub(crate) fn doctor_with(
         probe: &SystemProbe,
         home: &home,
         hermes: hermes.as_ref().map(|cli| cli as &dyn HermesConfig),
-        registry: &crate::broker::member_run_registry,
     });
-    let mode = match (args.json, args.verbose) {
-        (true, _) => Mode::Json,
-        (false, true) => Mode::Verbose,
-        (false, false) => Mode::Summary,
-    };
+    let mode = if args.json { Mode::Json } else { Mode::Text };
     crate::cli::write_output(&render(&report, mode))?;
     if report.has_errors() {
         Err(CafleetError::App("doctor found errors".into()))
@@ -407,8 +302,8 @@ fn read_caller_pane(
     }
 }
 
-/// Runs every check: the Hermes batch starts first and overlaps the multiplexer, database,
-/// OpenCode and member checks; rows keep their order.
+/// Runs every check: the Hermes batch starts first and overlaps the multiplexer, database and
+/// OpenCode checks; rows keep their order.
 pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
     let backends = resolve_backends(inputs.probe, inputs.home);
     let hermes = backends
@@ -424,64 +319,38 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
             let deadline = Instant::now() + HERMES_DOCTOR_BUDGET;
             scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline))
         });
-        let (mut checks, mut summary) = multiplexer_rows((inputs.caller)());
-        let (conn, schema) = database(inputs.settings);
-        let (database_check, database_summary) = database_rows(inputs.settings, &schema);
-        checks.push(database_check);
-        summary.push(database_summary);
-        let (member_rows, member_summary) = match (&schema, conn.as_ref()) {
-            (SchemaState::Current, Some(conn)) => member_checks(conn, inputs.registry),
-            _ => (
-                Vec::new(),
-                vec![Summary::members(
-                    CheckStatus::Info,
-                    "not checked (database unavailable)",
-                    MemberState::NotChecked,
-                    Vec::new(),
-                )],
-            ),
-        };
+        let mut checks = multiplexer_rows((inputs.caller)());
+        checks.push(database_row(inputs.settings, &database(inputs.settings)));
         let hermes_reading = || batch.map(crate::coding_agent::hermes::joined);
-        let backend_checks = agent_checks(conn.as_ref(), &schema, &backends, hermes_reading);
-        summary.extend(
-            CodingAgent::all()
-                .iter()
-                .map(|agent| backend_summary(*agent, &backend_checks)),
-        );
-        checks.extend(backend_checks);
-        checks.extend(member_rows);
-        summary.extend(member_summary);
-        Report { checks, summary }
+        checks.extend(agent_checks(&backends, hermes_reading));
+        Report { checks }
     })
 }
 
 const HERMES_DOCTOR_BUDGET: Duration = Duration::from_secs(2);
 
 pub(crate) fn render(report: &Report, mode: Mode) -> String {
-    let rows: Vec<(CheckStatus, &str, &str)> = match mode {
-        Mode::Json => {
-            return json!({"summary": report.summary, "checks": report.checks}).to_string();
-        }
-        Mode::Verbose => report
+    match mode {
+        Mode::Json => serde_json::to_string(&report.checks).expect("doctor checks serialize"),
+        Mode::Text => report
             .checks
             .iter()
-            .map(|check| (check.status, check.name.as_str(), check.detail.as_str()))
-            .collect(),
-        Mode::Summary => report
-            .summary
-            .iter()
-            .map(|line| (line.status, line.component.as_str(), line.detail.as_str()))
-            .collect(),
-    };
-    rows.iter()
-        .map(|(status, name, detail)| format!("{} {name}: {}", status.as_str(), escape(detail)))
-        .collect::<Vec<_>>()
-        .join("\n")
+            .map(|check| {
+                format!(
+                    "{} {}: {}",
+                    check.status.as_str(),
+                    check.name,
+                    escape(&check.detail)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
 }
 
-/// The `multiplexer` and `multiplexer.caller_pane` checks and their folded summary line.
-fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
-    let ((mux_status, mux_detail), (pane_status, pane_detail), (status, short)) = match reading {
+/// The `multiplexer` and `multiplexer.caller_pane` checks.
+fn multiplexer_rows(reading: CallerReading) -> Vec<Check> {
+    let ((mux_status, mux_detail), (pane_status, pane_detail)) = match reading {
         CallerReading::SharedServer {
             label,
             pid,
@@ -493,7 +362,6 @@ fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
                     "not checked: a shared {label} server (pid {pid}) supplies the caller environment"
                 ),
             ),
-            (CheckStatus::Warn, detail.clone()),
             (CheckStatus::Warn, detail),
         ),
         CallerReading::Unavailable(cause) => (
@@ -502,7 +370,6 @@ fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
                 CheckStatus::Info,
                 "unavailable: the multiplexer is unavailable".to_owned(),
             ),
-            (CheckStatus::Error, cause.to_string()),
         ),
         CallerReading::Resolved { name, server, pane } => {
             let mux = (CheckStatus::Ok, format!("{name} server={server}"));
@@ -516,366 +383,77 @@ fn multiplexer_rows(reading: CallerReading) -> (Vec<Check>, Vec<Summary>) {
                             context.pane_id, context.session, context.window_id
                         ),
                     ),
-                    (
-                        CheckStatus::Ok,
-                        format!(
-                            "{name} (session {}, pane {})",
-                            context.session, context.pane_id
-                        ),
-                    ),
                 ),
-                Ok(PaneReading::Unverified { detail }) => (
-                    mux,
-                    (CheckStatus::Warn, detail.clone()),
-                    (
-                        CheckStatus::Warn,
-                        format!("{name} (server {server}); {detail}"),
-                    ),
-                ),
-                Err(cause) => (
-                    mux,
-                    (CheckStatus::Error, cause.to_string()),
-                    (CheckStatus::Error, cause.to_string()),
-                ),
+                Ok(PaneReading::Unverified { detail }) => (mux, (CheckStatus::Warn, detail)),
+                Err(cause) => (mux, (CheckStatus::Error, cause.to_string())),
             }
         }
     };
-    (
-        vec![
-            Check::new("multiplexer", mux_status, mux_detail),
-            Check::new("multiplexer.caller_pane", pane_status, pane_detail),
-        ],
-        vec![Summary::new("multiplexer", status, short)],
-    )
+    vec![
+        Check::new("multiplexer", mux_status, mux_detail),
+        Check::new("multiplexer.caller_pane", pane_status, pane_detail),
+    ]
 }
 
-fn database_rows(settings: &Settings, schema: &SchemaState) -> (Check, Summary) {
-    let (status, detail, short) = match schema {
+fn database_row(settings: &Settings, schema: &SchemaState) -> Check {
+    let (status, detail) = match schema {
         SchemaState::Current => {
             let path = crate::db::database_path(&settings.database_url)
                 .expect("a current schema was opened through a valid database URL");
-            let version = format!("cafleet {}", crate::cli::VERSION);
-            (CheckStatus::Ok, format!("{version} at {path}"), version)
+            (
+                CheckStatus::Ok,
+                format!("cafleet {} at {path}", crate::cli::VERSION),
+            )
         }
-        schema => {
-            let cause = schema
+        schema => (
+            CheckStatus::Error,
+            schema
                 .require_current()
                 .expect_err("a schema that is not current is unavailable")
-                .to_string();
-            (CheckStatus::Error, cause.clone(), cause)
-        }
+                .to_string(),
+        ),
     };
-    (
-        Check::new("database", status, detail),
-        Summary::new("database", status, short),
-    )
+    Check::new("database", status, detail)
 }
 
 fn escape(detail: &str) -> String {
     detail.replace('\n', "\\n").replace('\r', "\\r")
 }
 
-fn backend_summary(agent: CodingAgent, checks: &[Check]) -> Summary {
-    let name = agent.name();
-    let own = checks
-        .iter()
-        .filter(|check| {
-            check
-                .name
-                .strip_prefix(name)
-                .is_some_and(|rest| rest.starts_with('.'))
-        })
-        .collect::<Vec<_>>();
-    let find = |suffix: &str| {
-        let check_name = format!("{name}.{suffix}");
-        own.iter()
-            .find(|check| check.name == check_name)
-            .unwrap_or_else(|| panic!("every backend reports {check_name}"))
-    };
-    let configuration = find("configuration");
-    if configuration.status == CheckStatus::Error {
-        return Summary::new(name, CheckStatus::Error, configuration.detail.clone());
-    }
-    if find("executable").status != CheckStatus::Ok {
-        return Summary::new(
-            name,
-            CheckStatus::Info,
-            format!("not installed ({name} is not on PATH)"),
-        );
-    }
-    let problems = own
-        .iter()
-        .filter_map(|check| {
-            check
-                .problem
-                .as_ref()
-                .map(|problem| (check.status, problem))
-        })
-        .collect::<Vec<_>>();
-    let Some(status) = problems.iter().map(|(status, _)| *status).max() else {
-        return Summary::new(name, CheckStatus::Ok, "ready");
-    };
-    let mut phrases = Vec::<&str>::new();
-    for (_, problem) in &problems {
-        if !phrases.contains(&problem.phrase.as_str()) {
-            phrases.push(&problem.phrase);
-        }
-    }
-    let mut detail = phrases.join("; ");
-    if problems.iter().any(|(_, problem)| problem.setup_fix) {
-        detail.push_str(&format!(" — run 'cafleet setup --coding-agent {name}'"));
-    }
-    Summary::new(name, status, detail)
-}
-
-struct MemberRun<'a> {
-    row: &'a MemberRunRegistry,
-    state: MemberState,
-    phrases: Vec<String>,
-}
-
-fn classify_registry(row: &MemberRunRegistry) -> Option<MemberRun<'_>> {
-    let active = row.member_status == "active";
-    let state = match (row.is_settled(), active) {
-        (true, false) => MemberState::Ended,
-        (true, true) => MemberState::AgentExited,
-        (false, false) => MemberState::DeletedWithLeftoverRuntime,
-        (false, true) => return None,
-    };
-    Some(MemberRun {
-        row,
-        state,
-        phrases: vec![format!(
-            "run {}, cleanup {}",
-            row.run_status.as_str(),
-            row.cleanup_state.as_str()
-        )],
-    })
-}
-
-fn probe_run<'a>(source: &str, row: &'a MemberRunRegistry, deadline: Instant) -> MemberRun<'a> {
-    let now = Instant::now();
-    let (state, phrases) = if now >= deadline {
-        (
-            MemberState::NotChecked,
-            vec!["runtime diagnosis time budget exhausted".to_owned()],
-        )
-    } else {
-        let until = deadline.min(now + Duration::from_millis(100));
-        match crate::runtime::diagnose_runtime_at(source, row.run_id, until) {
-            Ok(diagnosis) => (diagnosis.state, diagnosis.diagnostics),
-            Err(cause) => (MemberState::CheckFailed, vec![cause.to_string()]),
-        }
-    };
-    MemberRun {
-        row,
-        state,
-        phrases,
-    }
-}
-
-/// The most runs probed at once, which bounds the open file descriptors.
-const PROBE_WORKERS: usize = 16;
-
-/// Probes `rows` on up to [`PROBE_WORKERS`] threads, each probing a contiguous share through its
-/// own read-only connections, and returns the runs in `rows` order.
-fn probe_runs<'a>(
-    source: &str,
-    rows: &[&'a MemberRunRegistry],
-    deadline: Instant,
-) -> Vec<MemberRun<'a>> {
-    let chunk = rows.len().div_ceil(PROBE_WORKERS).max(1);
-    std::thread::scope(|scope| {
-        let workers = rows
-            .chunks(chunk)
-            .map(|chunk| {
-                scope.spawn(move || {
-                    chunk
-                        .iter()
-                        .map(|row| probe_run(source, row, deadline))
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect::<Vec<_>>();
-        workers
-            .into_iter()
-            .flat_map(crate::coding_agent::hermes::joined)
-            .collect()
-    })
-}
-
-fn member_checks(
-    conn: &Connection,
-    registry: &dyn Fn(&Connection) -> Result<Vec<MemberRunRegistry>, CafleetError>,
-) -> (Vec<Check>, Vec<Summary>) {
-    let rows = match registry(conn) {
-        Ok(rows) => rows,
-        Err(cause) => {
-            let check = Check::new(
-                "member_runtime",
-                CheckStatus::Error,
-                format!("member runtimes could not be read: {cause}"),
-            )
-            .runtime(None, MemberState::CheckFailed);
-            let summary = Summary::members(
-                CheckStatus::Error,
-                format!("could not be checked: {cause}"),
-                MemberState::CheckFailed,
-                Vec::new(),
-            );
-            return (vec![check], vec![summary]);
-        }
-    };
-    let classified = rows.iter().map(classify_registry).collect::<Vec<_>>();
-    let unclassified = rows
-        .iter()
-        .zip(&classified)
-        .filter(|(_, run)| run.is_none())
-        .map(|(row, _)| row)
-        .collect::<Vec<_>>();
-    let mut probed = probe_runs(
-        conn.path().expect("doctor reads a file-backed database"),
-        &unclassified,
-        Instant::now() + Duration::from_secs(5),
-    )
-    .into_iter();
-    let runs = classified
-        .into_iter()
-        .map(|run| run.unwrap_or_else(|| probed.next().expect("one probe per unclassified run")))
-        .collect::<Vec<_>>();
-    let checks = runs.iter().map(runtime_check).collect();
-    let mut summary = MemberState::SUMMARY_ORDER
-        .iter()
-        .filter_map(|state| {
-            let grouped = runs
-                .iter()
-                .filter(|run| run.state == *state)
-                .collect::<Vec<_>>();
-            (!grouped.is_empty()).then(|| state_summary(*state, &grouped))
-        })
-        .collect::<Vec<_>>();
-    if summary.is_empty() {
-        summary.push(Summary::members(
-            CheckStatus::Ok,
-            "none running",
-            MemberState::Running,
-            Vec::new(),
-        ));
-    }
-    (checks, summary)
-}
-
-fn runtime_check(run: &MemberRun) -> Check {
-    let suffix = match run.state {
-        MemberState::CheckFailed => String::new(),
-        state => run_suffix(
-            state.next_commands(),
-            &run.row.member_id.to_string(),
-            &director_label(&[run.row.director_member_id]),
-        ),
-    };
-    let detail = format!(
-        "member {} {}: {}{suffix}",
-        run.row.member_id,
-        run.state.label(),
-        run.phrases.join("; ")
-    );
-    Check::new(
-        format!("member_runtime.{}", run.row.run_id),
-        run.state.status(),
-        detail,
-    )
-    .runtime(Some(run.row.member_id), run.state)
-}
-
-fn state_summary(state: MemberState, runs: &[&MemberRun]) -> Summary {
-    let mut member_ids = runs.iter().map(|run| run.row.member_id).collect::<Vec<_>>();
-    member_ids.sort_unstable();
-    member_ids.dedup();
-    let directors = runs
-        .iter()
-        .map(|run| run.row.director_member_id)
-        .collect::<Vec<_>>();
-    let detail = format!(
-        "{} {}: {}{}",
-        member_ids.len(),
-        state.label(),
-        format_id_ranges(&member_ids),
-        run_suffix(state.next_commands(), "ID", &director_label(&directors))
-    );
-    Summary::members(state.status(), detail, state, member_ids)
-}
-
-/// The literal Director ID shared by every listed run, or `<director-id>` when the runs span
-/// several fleets or a fleet records no Director.
-fn director_label(directors: &[i64]) -> String {
-    match directors.split_first() {
-        Some((first, rest)) if rest.iter().all(|other| other == first) => first.to_string(),
-        _ => "<director-id>".to_owned(),
-    }
-}
-
-fn run_suffix(commands: &[&str], member_id: &str, director_id: &str) -> String {
-    if commands.is_empty() {
-        return String::new();
-    }
-    let quoted = commands
-        .iter()
-        .map(|command| {
-            format!(
-                "'{}'",
-                command
-                    .replace("DIRECTOR", director_id)
-                    .replace("ID", member_id)
-            )
-        })
-        .collect::<Vec<_>>();
-    format!(" — run {}", quoted.join(" or "))
-}
-
-/// Renders ascending, de-duplicated IDs, collapsing three or more consecutive IDs to `a-b`.
-fn format_id_ranges(ids: &[i64]) -> String {
-    assert!(
-        ids.windows(2).all(|pair| pair[0] < pair[1]),
-        "callers pass ascending, de-duplicated IDs"
-    );
-    ids.chunk_by(|left, right| left + 1 == *right)
-        .flat_map(|run| match run {
-            [first, .., last] if run.len() >= 3 => vec![format!("{first}-{last}")],
-            _ => run.iter().map(i64::to_string).collect(),
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn database(settings: &Settings) -> (Option<Connection>, SchemaState) {
+fn database(settings: &Settings) -> SchemaState {
     match crate::db::open_existing(&settings.database_url, true) {
-        Ok(Some(conn)) => {
-            let schema = db::classify_selected_schema(&conn, &settings.database_url);
-            (Some(conn), schema)
-        }
-        Ok(None) => (None, SchemaState::Missing),
-        Err(cause) => (None, SchemaState::Unreachable { cause }),
+        Ok(Some(conn)) => db::classify_selected_schema(&conn, &settings.database_url),
+        Ok(None) => SchemaState::Missing,
+        Err(cause) => SchemaState::Unreachable { cause },
     }
 }
 
-/// One backend's configuration base and executable, each resolved once.
+/// One backend's configuration base, skills directory and executable, each resolved once.
 struct Backend {
     agent: CodingAgent,
     paths: Result<PathBuf, CafleetError>,
+    skills: Result<PathBuf, CafleetError>,
     executable: Option<PathBuf>,
 }
 
 fn resolve_backends(probe: &dyn SpawnProbe, home: &Result<PathBuf, CafleetError>) -> Vec<Backend> {
     CodingAgent::all()
         .iter()
-        .map(|agent| Backend {
-            agent: *agent,
-            paths: home
+        .map(|agent| {
+            let paths = home
                 .as_ref()
                 .map_err(Clone::clone)
-                .and_then(|home| agent.config_dir(&|name| probe.env_var(name), home)),
-            executable: probe.resolve_binary(agent.name()),
+                .and_then(|home| agent.config_dir(&|name| probe.env_var(name), home));
+            let skills = match (&paths, home) {
+                (Ok(base), Ok(home)) => Ok(crate::assets::skills_dir(*agent, base, home)),
+                (Err(cause), _) | (_, Err(cause)) => Err(cause.clone()),
+            };
+            Backend {
+                agent: *agent,
+                paths,
+                skills,
+                executable: probe.resolve_binary(agent.name()),
+            }
         })
         .collect()
 }
@@ -909,13 +487,10 @@ fn hermes_row_without_reading(name: &str, hermes: &Backend) -> Check {
             CheckStatus::Info,
             format!("unavailable: no Hermes home at {}", base.display()),
         )
-        .problem(format!("no Hermes home at {}", base.display()), true)
     })
 }
 
 fn agent_checks(
-    conn: Option<&Connection>,
-    schema: &SchemaState,
     backends: &[Backend],
     hermes_reading: impl FnOnce() -> Option<HermesReading>,
 ) -> Vec<Check> {
@@ -971,32 +546,42 @@ fn agent_checks(
                 ),
             }
         }
-        let install_name = format!("{name}.installation");
-        checks.push(match (paths, schema) {
-            (Err(cause), _) => Check::new(
-                install_name,
-                CheckStatus::Info,
-                format!("unavailable: configuration failed: {cause}"),
-            ),
-            (Ok(path), SchemaState::Current) => install_check(
-                conn.expect("a current database has an open connection"),
-                agent,
-                path,
-            ),
-            _ => {
-                let cause = schema
-                    .require_current()
-                    .expect_err("a non-current schema is unavailable");
-                Check::new(
-                    install_name,
-                    CheckStatus::Info,
-                    format!("unavailable: {cause}"),
-                )
-                .problem("assets unchecked (database unavailable)", false)
-            }
-        });
+        checks.push(skills_check(name, &backend.skills, available));
     }
     checks
+}
+
+/// Compares every embedded skill file with its installed copy under the backend's skills dir.
+fn skills_check(name: &str, skills: &Result<PathBuf, CafleetError>, available: bool) -> Check {
+    let check_name = format!("{name}.skills");
+    if let Some(row) = unavailable(&check_name, skills, available) {
+        return row;
+    }
+    let dir = skills
+        .as_ref()
+        .expect("an available backend has a skills dir");
+    let files = crate::assets::skill_files(dir);
+    let absent = |target: &Path| {
+        std::fs::symlink_metadata(target)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    };
+    if files.iter().all(|(target, _)| absent(target)) {
+        return Check::fixable(
+            check_name,
+            CheckStatus::Warn,
+            format!("skills not installed at {}", dir.display()),
+        );
+    }
+    for (target, embedded) in &files {
+        if let Some(cause) = crate::assets::installed_file_problem(target, embedded) {
+            return Check::fixable(
+                check_name,
+                CheckStatus::Error,
+                format!("{}: {cause}", target.display()),
+            );
+        }
+    }
+    Check::new(check_name, CheckStatus::Ok, dir.display().to_string())
 }
 
 fn preset_check(
@@ -1027,7 +612,6 @@ fn preset_check(
             check_name,
             CheckStatus::Error,
             format!("{}: {cause}", preset.display()),
-            format!("preset {} is unreadable: {cause}", preset.display()),
         ),
     }
 }
@@ -1040,15 +624,11 @@ fn extension_check(
     ok_detail: String,
 ) -> Check {
     for (target, embedded) in files {
-        if let Some(cause) = crate::assets::extension_file_problem(target, embedded) {
+        if let Some(cause) = crate::assets::installed_file_problem(target, embedded) {
             return Check::fixable(
                 name,
                 CheckStatus::Error,
                 format!("{}: {cause}", target.display()),
-                format!(
-                    "extension {} is missing or differs from the embedded copy",
-                    target.display()
-                ),
             );
         }
     }
@@ -1057,10 +637,6 @@ fn extension_check(
             name,
             CheckStatus::Error,
             format!("{}: {cause}", record.display()),
-            format!(
-                "extension executable record {} is unusable: {cause}",
-                record.display()
-            ),
         );
     }
     Check::new(name, CheckStatus::Ok, ok_detail)
@@ -1127,8 +703,9 @@ fn hermes_extension_check(config_path: Result<String, String>) -> Check {
             &plugin_dir.join(crate::assets::HERMES_EXECUTABLE_RECORD),
             plugin_dir.display().to_string(),
         ),
-        Err(cause) => Check::failure(
+        Err(cause) => Check::new(
             NAME,
+            CheckStatus::Error,
             format!("cannot read hermes configuration through 'hermes config path': {cause}"),
         ),
     }
@@ -1141,20 +718,21 @@ fn hermes_plugin_enabled_check(plugins: Result<Option<Value>, String>) -> Check 
     let state = match plugins.and_then(crate::coding_agent::hermes::plugin_state) {
         Ok(state) => state,
         Err(cause) => {
-            return Check::failure(
+            return Check::new(
                 NAME,
+                CheckStatus::Error,
                 format!("cannot read hermes configuration through 'hermes config get': {cause}"),
             );
         }
     };
     if state.disabled_lists_cafleet {
-        let phrase = format!("hermes {PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}");
         return Check::new(
             NAME,
             CheckStatus::Error,
-            format!("{phrase}; remove it, then run 'cafleet setup --coding-agent hermes'"),
-        )
-        .problem(phrase, false);
+            format!(
+                "hermes {PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}; remove it, then run 'cafleet setup --coding-agent hermes'"
+            ),
+        );
     }
     let missing = state.missing();
     if missing.is_empty() {
@@ -1164,27 +742,14 @@ fn hermes_plugin_enabled_check(plugins: Result<Option<Value>, String>) -> Check 
             "cafleet enabled with gateway injection",
         );
     }
-    let phrase = format!(
-        "hermes plugin {PLUGIN_NAME} is not enabled: {}",
-        missing.join(", ")
-    );
-    Check::fixable(NAME, CheckStatus::Error, phrase.clone(), phrase)
-}
-
-fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {
-    let name = format!("{}.installation", agent.name());
-    let recorded =
-        crate::broker::recorded_asset_install(conn, agent.name(), &path.display().to_string());
-    match recorded {
-        Ok(Some(when)) => Check::new(name, CheckStatus::Ok, format!("recorded at {when}")),
-        Ok(None) => Check::fixable(
-            name,
-            CheckStatus::Warn,
-            format!("no installation recorded at {}", path.display()),
-            format!("assets not installed at {}", path.display()),
+    Check::fixable(
+        NAME,
+        CheckStatus::Error,
+        format!(
+            "hermes plugin {PLUGIN_NAME} is not enabled: {}",
+            missing.join(", ")
         ),
-        Err(cause) => Check::failure(name, format!("installation query failed: {cause}")),
-    }
+    )
 }
 
 #[cfg(test)]
@@ -1291,12 +856,11 @@ mod tests {
     }
 
     #[test]
-    fn setup_records_successes_before_the_first_asset_failure() {
+    fn setup_prepares_the_database_before_the_first_asset_failure() {
         let home = tempfile::tempdir().unwrap();
         let settings = settings(home.path());
-        let mut conn = prepare_database(&settings).unwrap();
+        prepare_database(&settings).unwrap();
         let error = install_selected(
-            &mut conn,
             &[],
             &|name| Ok((name == "CODEX_HOME").then(|| "relative".into())),
             home.path(),
@@ -1304,6 +868,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.message().contains("CODEX_HOME"));
+        let conn = crate::db::connect(&settings.database_url).unwrap();
         crate::db::classify_selected_schema(&conn, "sqlite:///:memory:")
             .require_current()
             .unwrap();
@@ -1314,11 +879,8 @@ mod tests {
     #[test]
     fn selected_installation_ignores_unrelated_configuration_and_is_repeatable() {
         let home = tempfile::tempdir().unwrap();
-        let settings = settings(home.path());
         for _ in 0..2 {
-            let mut conn = prepare_database(&settings).unwrap();
             install_selected(
-                &mut conn,
                 &[CodingAgent::Claude, CodingAgent::Claude],
                 &|name| Ok((name != "CLAUDE_CONFIG_DIR").then(|| "relative".into())),
                 home.path(),
@@ -1340,7 +902,8 @@ mod tests {
         ] {
             let home = tempfile::tempdir().unwrap();
             let settings = settings(home.path());
-            let conn = prepare_database(&settings).unwrap();
+            prepare_database(&settings).unwrap();
+            let conn = crate::db::connect(&settings.database_url).unwrap();
             conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
             conn.execute_batch(mutation).unwrap();
             conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
@@ -1399,29 +962,23 @@ mod tests {
     }
 
     /// The backend rows for `probe`, with no Hermes batch read.
-    fn checks_for(
-        conn: Option<&Connection>,
-        schema: &SchemaState,
-        probe: &FakeProbe,
-        home: &Path,
-    ) -> Vec<Check> {
+    fn checks_for(probe: &FakeProbe, home: &Path) -> Vec<Check> {
         let backends = resolve_backends(probe, &Ok(home.to_path_buf()));
-        agent_checks(conn, schema, &backends, || None)
+        agent_checks(&backends, || None)
     }
 
     #[test]
     fn doctor_reports_a_modified_installed_skill() {
         let home = tempfile::tempdir().unwrap();
-        let conn = crate::db::test_support::migrated_conn(&home);
         let probe = probe(home.path(), true, None);
         let skills = home.path().join(".claude/skills");
-        let row = |conn: &Connection| {
-            let checks = checks_for(Some(conn), &SchemaState::Current, &probe, home.path());
+        let row = || {
+            let checks = checks_for(&probe, home.path());
             let row = find(&checks, "claude.skills");
             (row.status, row.detail.clone())
         };
         assert_eq!(
-            row(&conn),
+            row(),
             (
                 CheckStatus::Warn,
                 format!(
@@ -1431,12 +988,12 @@ mod tests {
             )
         );
         install_skills(&skills);
-        assert_eq!(row(&conn), (CheckStatus::Ok, skills.display().to_string()));
+        assert_eq!(row(), (CheckStatus::Ok, skills.display().to_string()));
         let (relative, _) = crate::assets::SKILLS[0];
         let modified = skills.join(relative);
         std::fs::write(&modified, "modified").unwrap();
         assert_eq!(
-            row(&conn),
+            row(),
             (
                 CheckStatus::Error,
                 format!(
@@ -1451,7 +1008,7 @@ mod tests {
     fn independent_failures_keep_executable_discovery_and_mark_dependent_checks_unavailable() {
         let home = tempfile::tempdir().unwrap();
         let probe = probe(home.path(), false, Some("OPENCODE_CONFIG_DIR"));
-        let checks = checks_for(None, &SchemaState::Missing, &probe, home.path());
+        let checks = checks_for(&probe, home.path());
         assert_eq!(
             find(&checks, "opencode.configuration").status,
             CheckStatus::Error
@@ -1501,7 +1058,7 @@ mod tests {
                 }
             }
             let probe = probe(home.path(), true, None);
-            let checks = checks_for(None, &SchemaState::Missing, &probe, home.path());
+            let checks = checks_for(&probe, home.path());
             let names = checks
                 .iter()
                 .map(|check| check.name.as_str())
@@ -1563,7 +1120,6 @@ mod tests {
             ExtensionState::Installed => {
                 assert_eq!(check.status, CheckStatus::Ok, "{context}: {}", check.detail);
                 assert_eq!(check.detail, plugin.display().to_string(), "{context}");
-                assert!(check.problem.is_none(), "{context}");
             }
             ExtensionState::Plugin(expected) => {
                 assert_eq!(
@@ -1581,19 +1137,6 @@ mod tests {
                     Some(expected) => assert_eq!(cause, *expected, "{context}"),
                     None => assert!(!cause.is_empty(), "{context}"),
                 }
-                let problem = check
-                    .problem
-                    .as_ref()
-                    .expect("an extension error has a phrase");
-                assert_eq!(
-                    problem.phrase,
-                    format!(
-                        "extension {} is missing or differs from the embedded copy",
-                        plugin.display()
-                    ),
-                    "{context}"
-                );
-                assert!(problem.setup_fix, "{context}");
             }
             ExtensionState::Record => {
                 assert_eq!(
@@ -1608,16 +1151,6 @@ mod tests {
                     .and_then(|rest| rest.strip_suffix(&fix))
                     .unwrap_or_else(|| panic!("{context}: {}", check.detail));
                 assert!(!cause.is_empty(), "{context}");
-                let problem = check.problem.as_ref().expect("a record error has a phrase");
-                assert_eq!(
-                    problem.phrase,
-                    format!(
-                        "extension executable record {} is unusable: {cause}",
-                        record.display()
-                    ),
-                    "{context}"
-                );
-                assert!(problem.setup_fix, "{context}");
             }
         }
     }
@@ -1668,7 +1201,7 @@ mod tests {
                 install_opencode_extension(&home.path().join(".config/opencode"));
             mutate(&plugin, &record);
             let probe = probe(home.path(), true, None);
-            let checks = checks_for(None, &SchemaState::Missing, &probe, home.path());
+            let checks = checks_for(&probe, home.path());
             assert_extension_check(
                 find(&checks, "opencode.extension"),
                 state,
@@ -1685,15 +1218,12 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         install_opencode_extension(&home.path().join(".config/opencode"));
         let absent = probe(home.path(), false, None);
-        let check = find(
-            &checks_for(None, &SchemaState::Missing, &absent, home.path()),
-            "opencode.extension",
-        )
-        .detail
-        .clone();
+        let check = find(&checks_for(&absent, home.path()), "opencode.extension")
+            .detail
+            .clone();
         assert_eq!(check, "unavailable: executable is absent");
         let invalid = probe(home.path(), true, Some("OPENCODE_CONFIG_DIR"));
-        let checks = checks_for(None, &SchemaState::Missing, &invalid, home.path());
+        let checks = checks_for(&invalid, home.path());
         let check = find(&checks, "opencode.extension");
         assert_eq!(check.status, CheckStatus::Info);
         assert!(
@@ -1703,7 +1233,6 @@ mod tests {
             "{}",
             check.detail
         );
-        assert!(check.problem.is_none());
     }
 
     mod hermes {
@@ -1739,8 +1268,7 @@ mod tests {
         #[test]
         fn plain_setup_without_hermes_on_path_installs_hermes_skills_and_skips_the_plugin() {
             let home = tempfile::tempdir().unwrap();
-            let mut conn = prepare_database(&settings(home.path())).unwrap();
-            install_selected(&mut conn, &[], &|_| Ok(None), home.path(), None).unwrap();
+            install_selected(&[], &|_| Ok(None), home.path(), None).unwrap();
             assert!(
                 home.path()
                     .join(".hermes/skills/cafleet/SKILL.md")
@@ -1758,10 +1286,8 @@ mod tests {
             let bin = tempfile::tempdir().unwrap();
             let log = home.path().join("hermes.log");
             let hermes = hermes_stub(bin.path(), &log, &profile);
-            let mut conn = prepare_database(&settings(home.path())).unwrap();
             crate::coding_agent::test_support::run_stub(|| {
                 install_selected(
-                    &mut conn,
                     &[CodingAgent::Hermes],
                     &|name| Ok((name == "HERMES_HOME").then(|| custom.display().to_string())),
                     home.path(),
@@ -1799,17 +1325,11 @@ mod tests {
         }
 
         #[test]
-        fn explicit_hermes_setup_without_hermes_on_path_fails_without_recording_hermes() {
+        fn explicit_hermes_setup_without_hermes_on_path_fails() {
             let home = tempfile::tempdir().unwrap();
-            let mut conn = prepare_database(&settings(home.path())).unwrap();
-            let failure = install_selected(
-                &mut conn,
-                &[CodingAgent::Hermes],
-                &|_| Ok(None),
-                home.path(),
-                None,
-            )
-            .expect_err("explicit hermes setup requires the binary");
+            let failure =
+                install_selected(&[CodingAgent::Hermes], &|_| Ok(None), home.path(), None)
+                    .expect_err("explicit hermes setup requires the binary");
             assert_eq!(failure.exit_code(), 1);
             assert_eq!(
                 failure.message(),
@@ -1833,7 +1353,7 @@ mod tests {
                 ),
             ] {
                 let probe = probe(home.path(), executable, invalid);
-                let checks = checks_for(None, &SchemaState::Missing, &probe, home.path());
+                let checks = checks_for(&probe, home.path());
                 for name in ["hermes.extension", "hermes.plugin_enabled"] {
                     let check = find(&checks, name);
                     assert_eq!(check.status, CheckStatus::Info, "{name}");
@@ -1841,7 +1361,6 @@ mod tests {
                     if !executable {
                         assert_eq!(check.detail, prefix, "{name}");
                     }
-                    assert!(check.problem.is_none(), "{name}");
                 }
             }
         }
@@ -1855,7 +1374,7 @@ mod tests {
         }
 
         fn pi_checks(probe: &FakeProbe, home: &Path) -> Vec<Check> {
-            checks_for(None, &SchemaState::Missing, probe, home)
+            checks_for(probe, home)
                 .into_iter()
                 .filter(|check| check.name.starts_with("pi."))
                 .collect()
@@ -1886,12 +1405,9 @@ mod tests {
         #[test]
         fn pi_setup_installs_skills_extension_and_record_without_pi_on_path_and_is_repeatable() {
             let home = tempfile::tempdir().unwrap();
-            let settings = settings(home.path());
             let base = home.path().join("pi agent");
             for _ in 0..2 {
-                let mut conn = prepare_database(&settings).unwrap();
                 install_selected(
-                    &mut conn,
                     &[CodingAgent::Pi],
                     &|name| Ok((name == "PI_CODING_AGENT_DIR").then(|| base.display().to_string())),
                     home.path(),
@@ -1905,19 +1421,14 @@ mod tests {
         #[test]
         fn plain_setup_installs_pi_assets_under_the_default_base() {
             let home = tempfile::tempdir().unwrap();
-            let settings = settings(home.path());
-            let mut conn = prepare_database(&settings).unwrap();
-            install_selected(&mut conn, &[], &|_| Ok(None), home.path(), None).unwrap();
+            install_selected(&[], &|_| Ok(None), home.path(), None).unwrap();
             assert_installed_pi_assets(&pi_base(home.path()));
         }
 
         #[test]
         fn pi_setup_rejects_an_invalid_base_before_writing_pi_assets() {
             let home = tempfile::tempdir().unwrap();
-            let settings = settings(home.path());
-            let mut conn = prepare_database(&settings).unwrap();
             let failure = install_selected(
-                &mut conn,
                 &[CodingAgent::Pi],
                 &|name| Ok((name == "PI_CODING_AGENT_DIR").then(|| "relative".into())),
                 home.path(),
@@ -1932,14 +1443,9 @@ mod tests {
         }
 
         #[test]
-        fn pi_rows_follow_hermes_and_order_the_extension_between_executable_and_installation() {
+        fn pi_rows_follow_hermes_and_order_the_extension_between_executable_and_skills() {
             let home = tempfile::tempdir().unwrap();
-            let checks = checks_for(
-                None,
-                &SchemaState::Missing,
-                &probe(home.path(), true, None),
-                home.path(),
-            );
+            let checks = checks_for(&probe(home.path(), true, None), home.path());
             let names = checks
                 .iter()
                 .map(|check| check.name.as_str())
@@ -2035,7 +1541,6 @@ mod tests {
             let check = find(&absent, "pi.extension");
             assert_eq!(check.status, CheckStatus::Info);
             assert_eq!(check.detail, "unavailable: executable is absent");
-            assert!(check.problem.is_none());
             let invalid = pi_checks(
                 &probe(home.path(), true, Some("PI_CODING_AGENT_DIR")),
                 home.path(),
@@ -2052,7 +1557,6 @@ mod tests {
                 check.detail,
                 "unavailable: configuration failed: PI_CODING_AGENT_DIR must be an absolute path (got 'relative')"
             );
-            assert!(check.problem.is_none());
         }
 
         #[test]
@@ -2080,8 +1584,6 @@ mod tests {
         use crate::assets::test_support::INJECTION_KEY;
         use crate::assets::test_support::PLUGINS_KEY;
         use crate::assets::test_support::Reply;
-        use crate::broker::fleets::MemberRunRegistry;
-        use crate::broker::fleets::member_run_registry;
         use crate::broker::runtime::test_support::assert_key_order;
         use crate::cli::setup::tests::*;
         use crate::multiplexer::MuxBackend;
@@ -2093,6 +1595,7 @@ mod tests {
         use crate::multiplexer::caller::unset_message;
         use crate::multiplexer::caller::unverified_message;
         use crate::runtime::test_support::FixtureProcessTable;
+        use rusqlite::Connection;
         use serde_json::Value;
         use serde_json::json;
 
@@ -2160,8 +1663,6 @@ mod tests {
         const CHILD_STDOUT_MARKER: &str = "cafleet-doctor-child-stdout-begins";
         const CHILD_ANCESTOR: i64 = 4242;
 
-        type Registry = fn(&Connection) -> Result<Vec<MemberRunRegistry>, CafleetError>;
-
         fn ready_plugins() -> Value {
             serde_json::json!({
                 "enabled": ["cafleet"],
@@ -2172,7 +1673,6 @@ mod tests {
         struct Scenario {
             home: tempfile::TempDir,
             database: PathBuf,
-            registry: Registry,
             caller: fn() -> CallerReading,
             executables: Vec<&'static str>,
             environment: Vec<(&'static str, String)>,
@@ -2180,13 +1680,12 @@ mod tests {
         }
 
         impl Scenario {
-            fn new(registry: Registry) -> Self {
+            fn new() -> Self {
                 let home = crate::runtime::test_support::short_tempdir();
                 let database = home.path().join("absent.db");
                 Self {
                     home,
                     database,
-                    registry,
                     caller: verified_caller,
                     executables: Vec::new(),
                     environment: Vec::new(),
@@ -2269,7 +1768,6 @@ mod tests {
                     probe: &probe,
                     home: &home,
                     hermes: Some(&self.hermes as &dyn HermesConfig),
-                    registry: &self.registry,
                 })
             }
 
@@ -2283,7 +1781,7 @@ mod tests {
                 let report = self.report();
                 let views = Views {
                     code: if report.has_errors() { 1 } else { 0 },
-                    text: render(&report, Mode::Verbose)
+                    text: render(&report, Mode::Text)
                         .lines()
                         .map(str::to_owned)
                         .collect(),
@@ -2331,7 +1829,11 @@ mod tests {
                         "{} {}: {}",
                         entry["status"].as_str().unwrap(),
                         entry[name_key].as_str().unwrap(),
-                        entry["detail"].as_str().unwrap()
+                        entry["detail"]
+                            .as_str()
+                            .unwrap()
+                            .replace('\n', "\\n")
+                            .replace('\r', "\\r")
                     )
                 })
                 .collect()
@@ -2720,7 +2222,7 @@ mod tests {
 
             /// The healthy scenario's views with `caller` as the caller reading.
             fn views_with(caller: fn() -> CallerReading) -> Views {
-                let mut scenario = Scenario::new(member_run_registry);
+                let mut scenario = Scenario::new();
                 scenario.connect();
                 healthy_backends(&mut scenario);
                 scenario.caller = caller;
@@ -2856,7 +2358,7 @@ mod tests {
 
         #[test]
         fn doctor_with_only_warnings_prints_ready_backends_and_exits_zero() {
-            let mut scenario = Scenario::new(member_run_registry);
+            let mut scenario = Scenario::new();
             scenario.connect();
             healthy_backends(&mut scenario);
             let views = scenario.views();
@@ -2903,7 +2405,7 @@ mod tests {
 
         #[test]
         fn doctor_reports_configuration_and_preset_errors_on_their_rows() {
-            let mut scenario = Scenario::new(member_run_registry);
+            let mut scenario = Scenario::new();
             let _conn = scenario.connect();
             for name in ["claude", "opencode"] {
                 scenario.executable(name);
@@ -2935,7 +2437,7 @@ mod tests {
 
         #[test]
         fn doctor_without_a_database_still_compares_the_installed_skills() {
-            let mut scenario = Scenario::new(member_run_registry);
+            let mut scenario = Scenario::new();
             scenario.executable("claude");
             let skills = Path::new(&scenario.config(CodingAgent::Claude)).join("skills");
             install_skills(&skills);
@@ -2954,7 +2456,7 @@ mod tests {
         }
 
         fn healthy_scenario() -> (Scenario, Connection) {
-            let mut scenario = Scenario::new(member_run_registry);
+            let mut scenario = Scenario::new();
             let conn = scenario.connect();
             healthy_backends(&mut scenario);
             (scenario, conn)
@@ -3173,7 +2675,7 @@ mod tests {
 
         #[test]
         fn doctor_reports_an_unusable_pi_record_and_a_missing_installation_on_their_rows() {
-            let mut scenario = Scenario::new(member_run_registry);
+            let mut scenario = Scenario::new();
             let _conn = scenario.connect();
             scenario.executable("pi");
             let (_, record) = scenario.seed_pi_extension();
@@ -3199,7 +2701,7 @@ mod tests {
 
         #[test]
         fn doctor_prints_each_check_as_one_escaped_row_and_one_json_object() {
-            let mut scenario = Scenario::new(member_run_registry);
+            let mut scenario = Scenario::new();
             scenario.connect();
             healthy_backends(&mut scenario);
             scenario

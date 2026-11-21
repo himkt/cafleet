@@ -85,7 +85,6 @@ struct DirectorOnly {
 
 const MEMBER_FLEET: &str = "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'";
 /// Recovery also reconciles a deregistered member's run, so its subject keeps its fleet.
-const RECOVER_FLEET: &str = "SELECT fleet_id FROM members WHERE member_id=?1";
 const INPUT_FLEET: &str = "SELECT r.fleet_id FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id WHERE i.input_id=?1";
 const INTERACTION_FLEET: &str = "SELECT r.fleet_id FROM member_interactions i JOIN member_runs r ON r.run_id=i.run_id WHERE i.interaction_id=?1";
 
@@ -107,16 +106,6 @@ fn director_only(command: &Command) -> Option<DirectorOnly> {
             director_member_id,
             ..
         }) => ("member press", MEMBER_FLEET, member_id, director_member_id),
-        Command::Member(M::Recover {
-            member_id,
-            director_member_id,
-            ..
-        }) => (
-            "member recover",
-            RECOVER_FLEET,
-            member_id,
-            director_member_id,
-        ),
         Command::Permission(runtime::PermissionCommand::Respond {
             interaction_id,
             director_member_id,

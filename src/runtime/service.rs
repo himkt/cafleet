@@ -635,7 +635,7 @@ pub(crate) fn run_service(
         process.clone(),
         handshake_deadline,
     )?;
-    let mut run = storage::get_run(&conn, owner.run_id)?;
+    let run = storage::get_run(&conn, owner.run_id)?;
     with_database_deadline(&mut conn, handshake_deadline, |conn| {
         lock.validate(conn, &owner)?;
         ensure(
@@ -644,8 +644,7 @@ pub(crate) fn run_service(
                 && run.child_start_identity.is_none()
                 && run.started_at.is_none()
                 && run.ended_at.is_none()
-                && run.recovery_origin_status.is_none()
-                && run.event_seq_reserved_through == 0,
+                && run.recovery_origin_status.is_none(),
             "live startup requires fresh run",
         )?;
         let history:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM member_interactions WHERE run_id=?1) OR EXISTS(SELECT 1 FROM member_runtime_events WHERE run_id=?1)",[run.run_id],|row|row.get(0))?;
@@ -680,10 +679,6 @@ pub(crate) fn run_service(
     )
     .map_err(io_error)?;
     listener.set_nonblocking(true).map_err(io_error)?;
-    with_database_deadline(&mut conn, handshake_deadline, |conn| {
-        storage::reserve_event_sequences(conn, &owner)
-    })?;
-    run = storage::get_run(&conn, owner.run_id)?;
     let mut controller = ObservationController::new(&run, catalog)?;
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
@@ -3041,10 +3036,10 @@ pub(crate) mod test_support {
                 boundary: WriterBoundary,
                 deadline: Instant,
             ) -> Result<(), CafleetError> {
-                if matches!(boundary, WriterBoundary::Sync)
-                    && self.directory.join("fail-sync").exists()
+                if matches!(boundary, WriterBoundary::Persist)
+                    && self.directory.join("fail-persist").exists()
                 {
-                    return Err(error("owned synthetic sync failure"));
+                    return Err(error("owned synthetic persist failure"));
                 }
                 if matches!(boundary, WriterBoundary::Persist) {
                     match std::fs::OpenOptions::new()
@@ -4667,7 +4662,7 @@ mod tests {
         use crate::runtime::service::tests::*;
         #[test]
         fn service_sqlite_and_writer_failures_keep_health_manual_display_and_resize_live() {
-            for boundary in ["fail-sync", "block-persist"] {
+            for boundary in ["fail-persist", "block-persist"] {
                 let mut fixture = ServiceFixture::configured(false, synthetic);
                 fixture.start_running();
                 let hook = fixture.fixture._dir.path().join(boundary);
@@ -4700,40 +4695,7 @@ mod tests {
             }
         }
         #[test]
-        fn service_existing_reservation_is_refused_before_native_spawn_or_new_grant() {
-            let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
-                synthetic(fixture, spec);
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET event_seq_reserved_through=256 WHERE run_id=?1",
-                        [fixture.run.run_id],
-                    )
-                    .unwrap();
-                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            });
-            let after =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert!(after.child_pid.is_none());
-            assert_eq!(after.event_seq_reserved_through, 256);
-            assert_eq!(
-                fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
-                        [after.run_id],
-                        |row| row.get::<_, i64>(0)
-                    )
-                    .unwrap(),
-                0
-            );
-            assert_eq!(count(&fixture, "interaction_opened"), 0);
-            assert!(!fixture.fixture._dir.path().join("native-started").exists());
-        }
-
-        #[test]
-        fn service_each_durable_history_table_is_checked_before_initial_reservation() {
+        fn service_each_durable_history_table_is_checked_before_native_spawn() {
             for interaction in [false, true] {
                 let mut seeded = None;
                 let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
@@ -4753,7 +4715,6 @@ mod tests {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
                 assert!(run.child_pid.is_none());
-                assert_eq!(run.event_seq_reserved_through, 0);
                 assert!(!fixture.fixture._dir.path().join("native-started").exists());
                 assert_eq!(count(&fixture, "coverage_unknown"), i64::from(!interaction));
                 let interactions: i64 = fixture

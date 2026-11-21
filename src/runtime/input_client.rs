@@ -1189,7 +1189,6 @@ pub(crate) mod test_support {
                 rusqlite::params![NOW, fixture.run.run_id],
             ).unwrap(), 1);
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();
             let evidence = crate::broker::runtime::metadata_evidence(&json!({
                     "backend":"codex","native_version":fixture.run.native_version,
                     "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false
@@ -3027,7 +3026,6 @@ mod tests {
         for stale in [false, true] {
             let mut case = History::new(InputState::Ready, None);
             let run = case.fixture.run.clone();
-            storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
             let evidence = crate::broker::runtime::metadata_evidence(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
             storage::persist_transition(
                 &mut case.fixture.conn,

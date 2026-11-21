@@ -16,7 +16,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
-use std::ops::RangeInclusive;
 use std::os::unix::fs::MetadataExt;
 
 pub(super) fn invalid(field: &str, description: impl Into<String>) -> CafleetError {
@@ -130,7 +129,6 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         owner_pid: row.get("owner_pid")?,
         owner_start_identity: row.get("owner_start_identity")?,
         cleanup_state: row.get("cleanup_state")?,
-        event_seq_reserved_through: row.get("event_seq_reserved_through")?,
         runtime_dir_identity_json: optional_json(row, "runtime_dir_identity_json", false)?,
         run_lock_identity_json: optional_json(row, "run_lock_identity_json", false)?,
         runner_pid: row.get("runner_pid")?,
@@ -295,8 +293,8 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
              coverage,status,native_version,owner_epoch,
-             owner_kind,owner_pid,owner_start_identity,cleanup_state,event_seq_reserved_through)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'starting',?13,1,'creator',?14,?15,'incomplete',0)",
+             owner_kind,owner_pid,owner_start_identity,cleanup_state)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'starting',?13,1,'creator',?14,?15,'incomplete')",
             params![new.member_id,new.fleet_id,new.director_member_id,new.backend,new.database_identity_json.to_string(),
                 new.launch_nonce,new.runtime_path,new.requested_mode,new.resolved_mode,new.mode_source.as_str(),
                 new.permission_argv_json.to_string(),new.coverage.as_str(),
@@ -342,62 +340,6 @@ pub(crate) fn set_native_session(
         Ok(())
     } else {
         Err(CafleetError::App(format!("member run {run_id} is missing")))
-    }
-}
-
-pub(crate) fn reserve_event_sequences(
-    conn: &mut Connection,
-    owner: &RunOwner,
-) -> Result<RangeInclusive<i64>, CafleetError> {
-    owned_transaction(conn, owner, |conn, run| {
-        reserve_event_sequences_in_transaction(conn, run, SequenceReservation::CurrentOwnerBlock)
-    })
-}
-
-pub(crate) enum SequenceReservation {
-    CurrentOwnerBlock,
-    RecoveryRange { ceiling: i64, count: i64 },
-}
-
-pub(crate) fn reserve_event_sequences_in_transaction(
-    conn: &Connection,
-    run: &RunRecord,
-    reservation: SequenceReservation,
-) -> Result<RangeInclusive<i64>, CafleetError> {
-    assert!(
-        !conn.is_autocommit(),
-        "sequence reservation requires its caller transaction"
-    );
-    let span =
-        |ceiling: i64, count: i64| Some(ceiling.checked_add(1)?..=ceiling.checked_add(count)?);
-    match reservation {
-        SequenceReservation::CurrentOwnerBlock => {
-            let range = span(run.event_seq_reserved_through, 256)
-                .ok_or_else(|| invalid("event_seq_reserved_through", "sequence overflow"))?;
-            let changed = conn.execute(
-                "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2 AND owner_epoch=?3 AND event_seq_reserved_through=?4",
-                params![range.end(), run.run_id, run.owner_epoch, run.event_seq_reserved_through],
-            )?;
-            require(
-                changed == 1,
-                "member_runs.owner",
-                "sequence reservation lost ownership",
-            )?;
-            Ok(range)
-        }
-        SequenceReservation::RecoveryRange { ceiling, count } => {
-            assert!(
-                count > 0,
-                "recovery reservation requires a nonempty result count"
-            );
-            let range = span(ceiling, count)
-                .ok_or_else(|| CafleetError::App("recovery sequence overflow".into()))?;
-            conn.execute(
-                "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2",
-                params![range.end(), run.run_id],
-            )?;
-            Ok(range)
-        }
     }
 }
 
@@ -548,7 +490,6 @@ pub(crate) struct RunRecord {
     pub(crate) owner_pid: i64,
     pub(crate) owner_start_identity: String,
     pub(crate) cleanup_state: CleanupState,
-    pub(crate) event_seq_reserved_through: i64,
     pub(crate) runtime_dir_identity_json: Option<Value>,
     pub(crate) run_lock_identity_json: Option<Value>,
     pub(crate) runner_pid: Option<i64>,
@@ -747,8 +688,6 @@ impl InputOperation {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::ops::RangeInclusive;
-
     use rusqlite::Connection;
     use serde_json::Value;
     use serde_json::json;
@@ -885,10 +824,6 @@ pub(crate) mod test_support {
             self.run.owner()
         }
 
-        pub(crate) fn reserve(&mut self, owner: &RunOwner) -> RangeInclusive<i64> {
-            storage::reserve_event_sequences(&mut self.conn, owner).unwrap()
-        }
-
         pub(crate) fn open(&mut self, owner: &RunOwner) -> RuntimeEventRecord {
             self.open_as(owner, InteractionClass::PermissionRequest)
         }
@@ -898,7 +833,6 @@ pub(crate) mod test_support {
             owner: &RunOwner,
             classification: InteractionClass,
         ) -> RuntimeEventRecord {
-            self.reserve(owner);
             let transition = ObservedTransition {
                 classification: Some(classification),
                 ..opening(self.run.run_id, 1, 1, metadata())
@@ -1012,32 +946,6 @@ pub(crate) mod test_support {
         }
     }
 
-    /// Registers a member and records its run at the run's own artifact directory.
-    pub(crate) fn register_member_run(
-        conn: &mut Connection,
-        fleet: i64,
-        director: i64,
-        name: &str,
-    ) -> RunRecord {
-        let member = register(conn, fleet, name, Some("%2"));
-        let next_run: i64 = conn
-            .query_row(
-                "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let mut spec = Fixture::spec(conn, fleet, director, member);
-        spec.runtime_path =
-            crate::runtime::RuntimePaths::for_run(&spec.database_identity_json, next_run)
-                .unwrap()
-                .run_dir
-                .to_str()
-                .unwrap()
-                .into();
-        create_run(conn, &spec).unwrap()
-    }
-
     pub(crate) fn replace_public_payload(
         conn: &mut Connection,
         event: &RuntimeEventRecord,
@@ -1079,7 +987,6 @@ mod tests {
         assert_eq!(run.owner_epoch, 1);
         assert_eq!(run.owner_kind, OwnerKind::Creator);
         assert_eq!(run.cleanup_state, CleanupState::Incomplete);
-        assert_eq!(run.event_seq_reserved_through, 0);
         assert_eq!(run.mode_source, ModeSource::Default);
         assert_eq!(run.requested_mode, None);
         assert_eq!(run.resolved_mode, "never");
@@ -1156,7 +1063,6 @@ mod tests {
     fn stale_owner_kind_epoch_or_database_identity_fences_every_mutation() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         for mismatch in ["epoch", "kind", "database"] {
             let mut stale = owner.clone();
             match mismatch {
@@ -1166,10 +1072,6 @@ mod tests {
                 _ => unreachable!(),
             }
             let before = durable_state(&fixture.conn);
-            assert!(
-                storage::reserve_event_sequences(&mut fixture.conn, &stale).is_err(),
-                "{mismatch}"
-            );
             assert!(
                 storage::persist_transition(
                     &mut fixture.conn,
@@ -1198,31 +1100,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn concurrent_sequence_reservations_commit_disjoint_ranges() {
-        let mut fixture = Fixture::new();
-        let owner = fixture.activate();
-        let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-        let workers = (0..2)
-            .map(|_| {
-                let url = url.clone();
-                let owner = owner.clone();
-                let barrier = barrier.clone();
-                std::thread::spawn(move || {
-                    let mut conn = crate::db::connect(&url).unwrap();
-                    barrier.wait();
-                    storage::reserve_event_sequences(&mut conn, &owner).unwrap()
-                })
-            })
-            .collect::<Vec<_>>();
-        let mut ranges = workers
-            .into_iter()
-            .map(|worker| worker.join().unwrap())
-            .collect::<Vec<_>>();
-        ranges.sort_by_key(|range| *range.start());
-        assert_eq!(ranges, [1..=256, 257..=512]);
-    }
     #[test]
     fn missing_database_instance_identity_fails_at_the_identity_read_boundary() {
         let fixture = Fixture::new();

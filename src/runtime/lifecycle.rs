@@ -1310,7 +1310,6 @@ mod tests {
             assert_ne!(self.panic_at, Some("started"), "fixture started unwind");
             if self.fast_exit {
                 let run = storage::get_run(&conn, run.run_id).unwrap();
-                storage::reserve_event_sequences(&mut conn, &run.owner()).unwrap();
                 let evidence=crate::broker::runtime::metadata_evidence(&json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
                 storage::persist_transition(
                     &mut conn,

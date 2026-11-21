@@ -221,27 +221,6 @@ pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     lines.join("\n")
 }
 
-pub(crate) fn format_runtime_recovery(report: &crate::runtime::RecoveryReport) -> String {
-    let mut text = format!(
-        "Recovery: member={} run={} outcome={} status={} replayed={} inbox={} archived={}",
-        report.member_id,
-        report.run_id,
-        report.outcome.as_str(),
-        report.status.as_str(),
-        report.replayed_count,
-        report.inbox_count,
-        report.archived_count
-    );
-    for diagnostic in &report.cleanup_diagnostics {
-        text.push_str("\nCleanup: ");
-        match diagnostic {
-            serde_json::Value::String(value) => text.push_str(value),
-            value => text.push_str(&value.to_string()),
-        }
-    }
-    text
-}
-
 pub(crate) fn format_runtime_snapshot(snapshot: &RuntimeSnapshot) -> String {
     let run = &snapshot.run;
     format!(

@@ -41,7 +41,6 @@ pub(crate) use crate::runtime::control::SubmissionResult;
 pub(crate) use crate::runtime::control::SubmissionStage;
 pub(crate) use crate::runtime::control::SubmissionStatus;
 pub(crate) use crate::runtime::control::SubmitInput;
-pub(crate) use crate::runtime::control::diagnose_runtime_at;
 #[cfg(test)]
 pub(crate) use crate::runtime::control::encode_control_frame;
 pub(crate) use crate::runtime::control::probe_health;

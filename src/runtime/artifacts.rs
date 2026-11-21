@@ -57,7 +57,6 @@ pub(crate) struct RuntimePaths {
     pub(crate) descriptor: PathBuf,
     pub(crate) control_socket: PathBuf,
     pub(crate) owner_lock: PathBuf,
-    pub(crate) outbox: PathBuf,
 }
 impl RuntimePaths {
     pub(crate) fn for_run(identity: &Value, run_id: i64) -> Result<Self> {
@@ -86,7 +85,6 @@ impl RuntimePaths {
             namespace_manifest: namespace_dir.join("identity.json"),
             descriptor: run_dir.join("launch.json"),
             owner_lock: run_dir.join("owner.lock"),
-            outbox: run_dir.join("events.outbox"),
             control_socket,
             run_dir,
             namespace_dir,
@@ -264,7 +262,6 @@ impl RunArtifacts {
                 ))
             })?;
         let lock = open_private(&paths.owner_lock, true)?;
-        open_private(&paths.outbox, true)?;
         let dir_id = identity(&private_metadata(&paths.run_dir, uid(), 0o700, true)?);
         let lock_id = identity(&lock.metadata().map_err(io_error)?);
         with_database_deadline(conn, deadline, |conn| {
@@ -835,7 +832,6 @@ mod tests {
         assert_ne!(a.namespace_dir, b.namespace_dir);
         assert_ne!(a.run_dir, b.run_dir);
         assert_ne!(a.control_socket, b.control_socket);
-        assert_ne!(a.outbox, b.outbox);
         assert_eq!(
             a.namespace_dir.parent().unwrap(),
             std::fs::canonicalize(first._dir.path())
@@ -1283,7 +1279,18 @@ mod tests {
                 lock.validate(&fixture.conn, &owner).unwrap();
             }
             assert!(
-                storage::reserve_event_sequences(&mut fixture.conn, &original.owner()).is_err()
+                storage::persist_transition(
+                    &mut fixture.conn,
+                    &original.owner(),
+                    &crate::broker::runtime::test_support::opening(
+                        original.run_id,
+                        1,
+                        1,
+                        crate::broker::runtime::test_support::metadata()
+                    ),
+                    storage::PersistenceMode::Live
+                )
+                .is_err()
             );
         }
 

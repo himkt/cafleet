@@ -111,7 +111,6 @@ mod tests {
     use crate::multiplexer::Multiplexer;
     use crate::multiplexer::PressKeys;
     use crate::multiplexer::RunError;
-    use crate::multiplexer::TimedRunError;
     use crate::pane_lock::PaneLock;
     use crate::runtime::press::*;
 
@@ -174,9 +173,6 @@ mod tests {
         }
         fn run(&self, _: &[String]) -> Result<String, RunError> {
             panic!("press bounds every process by the invocation deadline")
-        }
-        fn run_until(&self, _: &[String], _: Instant) -> Result<String, TimedRunError> {
-            panic!("press runs every process through the shared bounded runner")
         }
         fn run_for(&self, args: &[String], timeout: Duration) -> Result<String, RunError> {
             let until = self.until;

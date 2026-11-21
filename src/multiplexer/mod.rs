@@ -4,7 +4,6 @@ pub(crate) use crate::multiplexer::tmux::TmuxMultiplexer;
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
-use std::time::Instant;
 
 pub(crate) mod caller;
 pub(crate) mod herdr;
@@ -164,26 +163,10 @@ impl RunError {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct TimedRunError {
-    pub(crate) source: RunError,
-    pub(crate) cleanup_diagnostics: Vec<String>,
-}
-
-impl TimedRunError {
-    pub(crate) fn before_launch() -> Self {
-        Self {
-            source: RunError::deadline_expired(),
-            cleanup_diagnostics: Vec::new(),
-        }
-    }
-}
-
 pub(crate) trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String]) -> Result<String, RunError>;
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError>;
-    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError>;
 }
 
 const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
@@ -298,23 +281,18 @@ impl BackendCore {
         deadline: crate::time::Deadline,
         writing: bool,
     ) -> Result<String, MultiplexerError> {
-        check_deadline(deadline)?;
-        self.runner
-            .run_until(argv, deadline.instant())
-            .map_err(|error| {
-                let started =
-                    writing && matches!(&error.source, RunError::Failed { .. } | RunError::Timeout);
-                let mut mapped = self.map_error(argv, error.source);
-                for diagnostic in error.cleanup_diagnostics {
-                    mapped.message.push('\n');
-                    mapped.message.push_str(&diagnostic);
-                }
-                if started {
-                    mapped.after_write()
-                } else {
-                    mapped
-                }
-            })
+        let remaining = deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        self.runner.run_for(argv, remaining).map_err(|error| {
+            let started = writing && matches!(&error, RunError::Failed { .. } | RunError::Timeout);
+            let mapped = self.map_error(argv, error);
+            if started {
+                mapped.after_write()
+            } else {
+                mapped
+            }
+        })
     }
 
     fn send_keys(
@@ -376,14 +354,6 @@ impl CommandRunner for DeadlineRunner {
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
         let remaining = self.remaining()?;
         self.runner.run_for(argv, timeout.min(remaining))
-    }
-
-    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-        let deadline = deadline.min(self.deadline.instant());
-        if Instant::now() >= deadline {
-            return Err(TimedRunError::before_launch());
-        }
-        self.runner.run_until(argv, deadline)
     }
 }
 
@@ -846,32 +816,6 @@ pub(crate) mod test_support {
         fn run_for(&self, argv: &[String], _: std::time::Duration) -> Result<String, RunError> {
             self.run(argv)
         }
-
-        fn run_until(
-            &self,
-            argv: &[String],
-            deadline: std::time::Instant,
-        ) -> Result<String, crate::multiplexer::TimedRunError> {
-            run_until_through_run_for(self, argv, deadline)
-        }
-    }
-
-    /// The relative-budget form of `run_until` shared by the fakes that time out through `run_for`.
-    pub(crate) fn run_until_through_run_for(
-        runner: &dyn CommandRunner,
-        argv: &[String],
-        deadline: std::time::Instant,
-    ) -> Result<String, crate::multiplexer::TimedRunError> {
-        let remaining = deadline
-            .checked_duration_since(std::time::Instant::now())
-            .filter(|left| !left.is_zero())
-            .ok_or_else(crate::multiplexer::TimedRunError::before_launch)?;
-        runner
-            .run_for(argv, remaining)
-            .map_err(|source| crate::multiplexer::TimedRunError {
-                source,
-                cleanup_diagnostics: Vec::new(),
-            })
     }
 
     pub(crate) use crate::multiplexer::argv;
@@ -919,6 +863,7 @@ mod tests {
     use crate::multiplexer::*;
     use crate::time::Deadline;
     use std::cell::RefCell;
+    use std::time::Instant;
 
     const TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
     const HERDR_SESSION: &str = "default";
@@ -1203,9 +1148,6 @@ mod tests {
         fn run_for(&self, _: &[String], timeout: Duration) -> Result<String, RunError> {
             self.0.borrow_mut().push(timeout);
             Ok(String::new())
-        }
-        fn run_until(&self, _: &[String], _: Instant) -> Result<String, TimedRunError> {
-            panic!("press runs every process through the shared bounded runner")
         }
     }
 

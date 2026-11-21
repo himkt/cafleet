@@ -1047,7 +1047,6 @@ mod tests {
             for kind in [InputKind::Prompt, InputKind::Exec] {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
-                fixture.reserve(&owner);
                 let uncertain = fixture.input(&owner, "ordinary:immediate-uncertain", kind, None);
                 storage::record_input_uncertain(
                     &mut fixture.conn,

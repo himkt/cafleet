@@ -19,13 +19,6 @@ CREATE TABLE fleets (
     last_window_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(last_window_ordinal >= 0)
 );
 
-CREATE TABLE asset_installs (
-    coding_agent TEXT NOT NULL,
-    path TEXT NOT NULL,
-    installed_at TEXT NOT NULL,
-    PRIMARY KEY (coding_agent, path)
-);
-
 CREATE TABLE member_placements (
     member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members (member_id) ON DELETE CASCADE,
     mux_session TEXT NOT NULL,
@@ -87,7 +80,6 @@ CREATE TABLE member_runs (
     owner_pid INTEGER NOT NULL CHECK(owner_pid > 0),
     owner_start_identity TEXT NOT NULL CHECK(length(trim(owner_start_identity)) > 0),
     cleanup_state TEXT NOT NULL CHECK(cleanup_state IN ('complete','incomplete')),
-    event_seq_reserved_through INTEGER NOT NULL CHECK(event_seq_reserved_through >= 0),
     runtime_dir_identity_json TEXT CHECK(runtime_dir_identity_json IS NULL OR (json_valid(runtime_dir_identity_json) AND json_type(runtime_dir_identity_json) = 'object')),
     run_lock_identity_json TEXT CHECK(run_lock_identity_json IS NULL OR (json_valid(run_lock_identity_json) AND json_type(run_lock_identity_json) = 'object')),
     runner_pid INTEGER CHECK(runner_pid IS NULL OR runner_pid > 0),

@@ -424,7 +424,7 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
 }
 
 /// The runner's internal record of a deferred input's first result: its input, its stage and
-/// the receipt's recorded uncertain cause, carried through the outbox as the transition's cause.
+/// the receipt's recorded uncertain cause, carried as the transition's cause.
 pub(crate) fn input_delivery_result_cause(
     input_id: i64,
     stage: &str,
@@ -458,11 +458,9 @@ pub(crate) fn validate_transition(
     transition: &ObservedTransition,
 ) -> Result<(), CafleetError> {
     require(
-        transition.run_id == run.run_id
-            && transition.event_seq > 0
-            && transition.event_seq <= run.event_seq_reserved_through,
+        transition.run_id == run.run_id && transition.event_seq > 0,
         "event_seq",
-        "run or reserved sequence mismatch",
+        "run or sequence mismatch",
     )?;
     rfc3339(&transition.observed_at, "observed_at")?;
     validate_evidence(&transition.evidence_json)?;
@@ -978,9 +976,9 @@ pub(crate) fn persist_transition_in_transaction(
     };
     let latest = latest_event_seq(conn, run.run_id)?;
     require(
-        latest.is_none_or(|latest| transition.event_seq > latest),
+        transition.event_seq == latest.unwrap_or(0) + 1,
         "event_seq",
-        "event sequence is not increasing",
+        "event sequence is not the run's next value",
     )?;
     let interaction_id = apply_interaction(conn, transition)?;
     let (notification_state, message_id) = match archive_reason {
@@ -1243,7 +1241,6 @@ mod tests {
                 } else {
                     PersistenceMode::Live
                 };
-                fixture.reserve(&owner);
                 let transition = ObservedTransition {
                     kind,
                     cause_json: Some(cause),
@@ -1331,7 +1328,6 @@ mod tests {
     fn identical_observed_transition_is_idempotent_without_generated_ids_or_commit_time() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         let transition = opening(owner.run_id, 1, 1, metadata());
         let first = storage::persist_transition(
             &mut fixture.conn,
@@ -1359,7 +1355,6 @@ mod tests {
     fn each_conflicting_original_transition_field_rejects_sequence_reuse() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         let original = opening(owner.run_id, 1, 1, metadata());
         storage::persist_transition(&mut fixture.conn, &owner, &original, PersistenceMode::Live)
             .unwrap();
@@ -1396,7 +1391,6 @@ mod tests {
         ] {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            fixture.reserve(&owner);
             if target == "commit" {
                 use rusqlite::hooks::AuthAction;
                 use rusqlite::hooks::AuthContext;
@@ -1551,7 +1545,6 @@ mod tests {
             let mut fixture = Fixture::new();
             fixture.activate();
             let owner = fixture.recoverer();
-            fixture.reserve(&owner);
             match damage {
                 "member" => {
                     crate::broker::members::test_support::deregister_member(
@@ -1661,7 +1654,6 @@ mod tests {
     fn nonexistent_episode_closure_and_corrupt_cross_run_links_fail_explicitly() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         assert!(
             storage::persist_transition(
                 &mut fixture.conn,
@@ -1717,7 +1709,6 @@ mod tests {
     fn transition_outside_reserved_sequences_or_with_invalid_payload_is_rejected_atomically() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         for invalid in ["unreserved", "missing-evidence"] {
             let mut transition = opening(owner.run_id, 1, 1, metadata());
             match invalid {
@@ -1757,7 +1748,6 @@ mod tests {
         let status = "exited";
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         let exit = native_exit(owner.run_id, 1);
         let first =
             storage::persist_transition(&mut fixture.conn, &owner, &exit, PersistenceMode::Live)
@@ -1797,7 +1787,6 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.activate();
         let owner = fixture.recoverer();
-        fixture.reserve(&owner);
         fixture
             .conn
             .execute(
@@ -1871,7 +1860,6 @@ mod tests {
     fn event_shape_regression_requires_a_typed_lifecycle_cause_before_commit() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         let kind = RuntimeEventKind::CoverageUnknown;
         for cause in [
             None,
@@ -1904,7 +1892,6 @@ mod tests {
         let kind = RuntimeEventKind::InteractionOpened;
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         let mut transition = opening(owner.run_id, 1, 1, metadata());
         transition.cause_json =
             Some(json!({"kind":"native_exit","exit_code":7,"exit_signal":null}));
@@ -1960,7 +1947,6 @@ mod tests {
     fn event_shape_regression_rejects_missing_or_malformed_persisted_exit_causes() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.reserve(&owner);
         let event = storage::persist_transition(
             &mut fixture.conn,
             &owner,
@@ -2004,7 +1990,6 @@ mod tests {
         fn stalled_fixture() -> (Fixture, RunOwner, InputOperation) {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            fixture.reserve(&owner);
             let head = fixture.input(&owner, "prompt:stalled-head", InputKind::Prompt, None);
             let head = storage::requeue_zero_byte_immediate(
                 &mut fixture.conn,
@@ -2189,7 +2174,6 @@ mod tests {
             ] {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
-                fixture.reserve(&owner);
                 let input = immediate_uncertain(&mut fixture, &owner);
                 let transition = stopped_result(&owner, input.input_id);
                 let (event, inserted) = storage::persist_transition(
@@ -2246,7 +2230,6 @@ mod tests {
             ] {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
-                fixture.reserve(&owner);
                 let input = immediate_uncertain(&mut fixture, &owner);
                 storage::test_support::settle_input(
                     &mut fixture.conn,
@@ -2342,7 +2325,6 @@ mod tests {
 
         fn deferred_result(fixture: &mut Fixture) -> (RuntimeEventRecord, i64, Value) {
             let owner = fixture.activate();
-            fixture.reserve(&owner);
             let input = fixture.input(&owner, "prompt:deferred", InputKind::Prompt, None);
             fixture
                 .conn

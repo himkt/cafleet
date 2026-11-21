@@ -4,7 +4,6 @@
 use crate::coding_agent::SpawnProbe;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::RunError;
-use crate::multiplexer::TimedRunError;
 use nix::fcntl::FcntlArg;
 use nix::fcntl::OFlag;
 use nix::fcntl::fcntl;
@@ -66,10 +65,6 @@ impl CommandRunner for SystemRunner {
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
         run_process(argv, Some(timeout))
     }
-
-    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-        run_process_until(argv, deadline)
-    }
 }
 
 fn spawn_piped(argv: &[String]) -> Result<Child, RunError> {
@@ -114,101 +109,14 @@ fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, Run
     decode(output.status, &output.stdout, &output.stderr)
 }
 
-const COMMAND_CLEANUP_RESERVE: Duration = Duration::from_millis(250);
-
-fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-    let started = Instant::now();
-    let cutoff = deadline
-        .checked_sub(COMMAND_CLEANUP_RESERVE)
-        .filter(|cutoff| *cutoff > started)
-        .ok_or_else(TimedRunError::before_launch)?;
-    let child = spawn_piped(argv).map_err(|source| TimedRunError {
-        source,
-        cleanup_diagnostics: Vec::new(),
-    })?;
-    let mut owned = OwnedChild {
-        child,
-        reaped: false,
-        cleanup_deadline: Some(deadline),
-        cleanup_attempted: false,
-    };
-    let result = collect_until(&mut owned, cutoff, usize::MAX)
-        .map_err(RunError::from)
-        .and_then(|output| {
-            if Instant::now() >= cutoff {
-                return Err(RunError::Timeout);
-            }
-            decode(output.status, &output.stdout, &output.stderr)
-        });
-    result.map_err(|source| TimedRunError {
-        source,
-        cleanup_diagnostics: owned.cleanup_absolute(),
-    })
-}
-
 struct OwnedChild {
     child: Child,
     reaped: bool,
-    cleanup_deadline: Option<Instant>,
-    cleanup_attempted: bool,
-}
-
-impl OwnedChild {
-    fn cleanup_absolute(&mut self) -> Vec<String> {
-        let deadline = self
-            .cleanup_deadline
-            .expect("absolute cleanup retains its original deadline");
-        assert!(
-            !self.cleanup_attempted,
-            "absolute cleanup is attempted once"
-        );
-        self.cleanup_attempted = true;
-        drop(self.child.stdout.take());
-        drop(self.child.stderr.take());
-        let mut diagnostics = Vec::new();
-        if self.reaped {
-            return diagnostics;
-        }
-        let pid = self.child.id();
-        if let Err(error) = retry_interrupted(|| self.child.kill()) {
-            diagnostics.push(format!("cleanup failed for child {pid} kill: {error}"));
-        }
-        loop {
-            let Some(_) = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|left| !left.is_zero())
-            else {
-                diagnostics.push(format!("cleanup unconfirmed for child {pid}: original command deadline expired before reap"));
-                break;
-            };
-            match retry_interrupted(|| self.child.try_wait()) {
-                Ok(Some(_)) => {
-                    self.reaped = true;
-                    break;
-                }
-                Ok(None) => crate::runtime::nap_until(deadline),
-                Err(error) => {
-                    diagnostics.push(format!("cleanup failed for child {pid} try_wait: {error}"));
-                    diagnostics.push(format!(
-                        "cleanup unconfirmed for child {pid}: status inspection failed"
-                    ));
-                    break;
-                }
-            }
-        }
-        diagnostics
-    }
 }
 
 impl Drop for OwnedChild {
     fn drop(&mut self) {
-        if self.cleanup_deadline.is_some() {
-            if !self.cleanup_attempted {
-                for diagnostic in self.cleanup_absolute() {
-                    let _ = writeln!(io::stderr().lock(), "{diagnostic}");
-                }
-            }
-        } else if !self.reaped {
+        if !self.reaped {
             let _ = self.child.kill();
             let _ = retry_interrupted(|| self.child.wait());
         }
@@ -229,8 +137,6 @@ fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
     let mut owned = OwnedChild {
         child,
         reaped: false,
-        cleanup_deadline: None,
-        cleanup_attempted: false,
     };
     let result = collect_until(&mut owned, started + timeout, usize::MAX).map_err(RunError::from);
     match result {
@@ -324,8 +230,6 @@ pub(crate) fn run_until_exit(
     let mut owned = OwnedChild {
         child,
         reaped: false,
-        cleanup_deadline: None,
-        cleanup_attempted: false,
     };
     collect_until(&mut owned, deadline, cap)
 }

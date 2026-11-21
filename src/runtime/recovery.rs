@@ -16,7 +16,7 @@ use std::time::Instant;
 pub(crate) enum ProcessEvidence {
     Alive,
     Terminated,
-    Unknown(String),
+    Unknown,
 }
 #[derive(Debug)]
 pub(crate) enum RecoveryHealth {
@@ -29,9 +29,7 @@ pub(crate) enum RecoveryBoundary {
     AfterSnapshot,
     BeforeTakeover,
     AfterTakeover,
-    BeforeReplay,
     AfterCommit,
-    BeforeCompact,
     BeforeFinish,
 }
 pub(crate) trait RecoveryHost {
@@ -56,37 +54,17 @@ fn unlink_descriptor_file(path: &std::path::Path, deadline: Instant) -> Result<(
     check_deadline(Instant::now(), deadline)?;
     std::fs::remove_file(path).map_err(|cause| error(format!("descriptor unlink failed: {cause}")))
 }
-#[derive(Debug)]
-pub(crate) struct OwnerTerminationAttestation {
-    pub(crate) expected_run_id: i64,
-    pub(crate) expected_owner_epoch: i64,
-    pub(crate) evidence_ref: String,
-}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecoveryOutcome {
     Recovered,
     Recovering,
     LiveOrUnreachable,
-    OperatorReconciliationRequired,
-}
-impl RecoveryOutcome {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Recovered => "recovered",
-            Self::Recovering => "recovering",
-            Self::LiveOrUnreachable => "live_or_unreachable",
-            Self::OperatorReconciliationRequired => "operator_reconciliation_required",
-        }
-    }
 }
 #[derive(Debug)]
 pub(crate) struct RecoveryReport {
     pub(crate) member_id: i64,
     pub(crate) run_id: i64,
     pub(crate) outcome: RecoveryOutcome,
-    pub(crate) replayed_count: u64,
-    pub(crate) inbox_count: u64,
-    pub(crate) archived_count: u64,
     pub(crate) status: RunStatus,
     pub(crate) cleanup_diagnostics: Vec<Value>,
 }
@@ -139,9 +117,6 @@ fn completion(run: RunRecord, outcome: RecoveryOutcome) -> Result<RecoveryComple
             member_id: run.member_id,
             run_id: run.run_id,
             outcome,
-            replayed_count: 0,
-            inbox_count: 0,
-            archived_count: 0,
             status: run.status,
             cleanup_diagnostics: diagnostics(&run)?,
         },
@@ -182,24 +157,6 @@ fn check_snapshot(
     )?;
     Ok(current)
 }
-fn validate_attestation(
-    run: &RunRecord,
-    attestation: Option<&OwnerTerminationAttestation>,
-) -> Result<()> {
-    if let Some(claim) = attestation {
-        ensure(
-            claim.expected_run_id > 0
-                && claim.expected_owner_epoch > 0
-                && !claim.evidence_ref.trim().is_empty(),
-            "termination attestation requires positive run/epoch and nonblank evidence",
-        )?;
-        ensure(
-            claim.expected_run_id == run.run_id && claim.expected_owner_epoch == run.owner_epoch,
-            "stale termination attestation run or owner epoch",
-        )?;
-    }
-    Ok(())
-}
 pub(super) fn advance_recovery_owner(
     conn: &Connection,
     expected: &RunRecord,
@@ -226,11 +183,10 @@ pub(crate) fn recover_member_with_host(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
-    attestation: Option<&OwnerTerminationAttestation>,
     deadline: Instant,
     host: &mut impl RecoveryHost,
 ) -> Result<RecoveryReport> {
-    recover(conn, settings, member_id, attestation, deadline, None, host).map(|value| value.report)
+    recover(conn, settings, member_id, deadline, None, host).map(|value| value.report)
 }
 
 struct BorrowedPane<'a> {
@@ -239,16 +195,11 @@ struct BorrowedPane<'a> {
     guard: &'a PaneLock,
 }
 #[cfg(test)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "borrowed recovery binds the caller's fixed run, placement and held guard"
-)]
 pub(crate) fn recover_member_with_held_pane_lock(
     conn: &mut Connection,
     settings: &Settings,
     expected_run: &RunRecord,
     expected_placement: &Placement,
-    attestation: Option<&OwnerTerminationAttestation>,
     deadline: Instant,
     held: &PaneLock,
     host: &mut impl RecoveryHost,
@@ -262,7 +213,6 @@ pub(crate) fn recover_member_with_held_pane_lock(
         conn,
         settings,
         expected_run.member_id,
-        attestation,
         deadline,
         Some(borrowed),
         host,
@@ -285,35 +235,15 @@ pub(crate) fn recover_member_under_pane_lock(
         conn,
         settings,
         expected_run.member_id,
-        None,
         deadline,
         Some(borrowed),
         &mut NativeRecoveryHost,
     )
 }
-pub(crate) fn recover_member(
-    conn: &mut Connection,
-    settings: &Settings,
-    member_id: i64,
-    attestation: Option<&OwnerTerminationAttestation>,
-    deadline: Instant,
-) -> Result<RecoveryReport> {
-    recover(
-        conn,
-        settings,
-        member_id,
-        attestation,
-        deadline,
-        None,
-        &mut NativeRecoveryHost,
-    )
-    .map(|value| value.report)
-}
 fn recover(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
-    attestation: Option<&OwnerTerminationAttestation>,
     until: Instant,
     borrowed: Option<BorrowedPane<'_>>,
     host: &mut impl RecoveryHost,
@@ -332,7 +262,6 @@ fn recover(
             .guard
             .validate_binding(&settings.database_url, expected.placement)?;
     }
-    validate_attestation(&run, attestation)?;
     check_deadline(Instant::now(), until)?;
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::AfterSnapshot, &run, until)?;
@@ -374,7 +303,6 @@ fn recover(
     let run = with_database_deadline(conn, until, |conn| {
         check_snapshot(conn, &run, pinned.as_ref())
     })?;
-    validate_attestation(&run, attestation)?;
     if run.is_settled() {
         return completion(run, RecoveryOutcome::Recovered);
     }
@@ -386,11 +314,6 @@ fn recover(
     };
     let process = run.owner_process();
     let owner = host.process_evidence(&process, until)?;
-    let startup = if run.owner_kind == OwnerKind::Creator {
-        ProcessEvidence::Unknown("complete generation-bound startup process set unavailable".into())
-    } else {
-        ProcessEvidence::Terminated
-    };
     let health = host.health(&run, until)?;
     let health_live = match &health {
         RecoveryHealth::Matching => true,
@@ -402,19 +325,11 @@ fn recover(
             false
         }
     };
-    if matches!(owner, ProcessEvidence::Alive) || health_live {
+    if !matches!(owner, ProcessEvidence::Terminated)
+        || run.owner_kind == OwnerKind::Creator
+        || health_live
+    {
         return completion(run, RecoveryOutcome::LiveOrUnreachable);
-    }
-    let unknown = matches!(owner, ProcessEvidence::Unknown(_))
-        || matches!(startup, ProcessEvidence::Unknown(_));
-    if unknown && attestation.is_none() {
-        let mut result = completion(run, RecoveryOutcome::OperatorReconciliationRequired)?;
-        for evidence in [owner, startup] {
-            if let ProcessEvidence::Unknown(reason) = evidence {
-                result.report.cleanup_diagnostics.push(json!(reason));
-            }
-        }
-        return Ok(result);
     }
     check_deadline(Instant::now(), until)?;
     #[cfg(test)]
@@ -422,19 +337,10 @@ fn recover(
     let process = host.current_process()?;
     let recheck = |conn: &Connection| -> Result<()> {
         check_pane()?;
-        let current = check_snapshot(conn, &run, pinned.as_ref())?;
-        validate_attestation(&current, attestation)
+        check_snapshot(conn, &run, pinned.as_ref()).map(|_| ())
     };
-    if path_failure.is_some() || unknown {
-        return reconcile_missing_runtime(
-            conn,
-            &run,
-            pinned.as_ref(),
-            &process,
-            attestation.filter(|_| unknown),
-            until,
-            recheck,
-        );
+    if path_failure.is_some() {
+        return reconcile_missing_runtime(conn, &run, pinned.as_ref(), &process, until, recheck);
     }
     let lock = lock.expect("verified ordinary recovery lock");
     let current = lock.transfer_to_reconciler_checked(conn, &run, process, until, recheck)?;
@@ -461,7 +367,7 @@ impl RecoveryHost for NativeRecoveryHost {
         match process.is_alive() {
             Ok(true) => Ok(ProcessEvidence::Alive),
             Ok(false) => Ok(ProcessEvidence::Terminated),
-            Err(cause) => Ok(ProcessEvidence::Unknown(cause.message().into_owned())),
+            Err(_) => Ok(ProcessEvidence::Unknown),
         }
     }
     fn health(&mut self, run: &RunRecord, until: Instant) -> Result<RecoveryHealth> {
@@ -504,7 +410,6 @@ fn reconcile_missing_runtime(
     expected: &RunRecord,
     pinned: Option<&Placement>,
     process: &ProcessIdentity,
-    attestation: Option<&OwnerTerminationAttestation>,
     until: Instant,
     check: impl FnOnce(&Connection) -> Result<()>,
 ) -> Result<RecoveryCompletion> {
@@ -512,24 +417,17 @@ fn reconcile_missing_runtime(
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         check(&tx)?;
         let current = check_snapshot(&tx, expected, pinned)?;
-        validate_attestation(&current, attestation)?;
         if current.is_settled() {
             check_deadline(Instant::now(), until)?;
             tx.commit()?;
             return completion(current, RecoveryOutcome::Recovered);
         }
         let established = terminal_outcome(&tx, &current)?;
-        let mut run = advance_recovery_owner(&tx, &current, process)?;
+        let run = advance_recovery_owner(&tx, &current, process)?;
         let mut report = completion(run.clone(), RecoveryOutcome::Recovering)?.report;
         report
             .cleanup_diagnostics
             .push(json!("runtime_path_missing"));
-        if let Some(claim) = attestation {
-            report.cleanup_diagnostics.push(json!({"kind":"owner_termination_attestation",
-                "run_id":current.run_id,"owner_epoch":current.owner_epoch,"owner_pid":current.owner_pid,
-                "owner_start_identity":current.owner_start_identity,"evidence_ref":claim.evidence_ref,
-                "recorded_at":crate::time::now_stamp(),"source":"operator_via_director"}));
-        }
         tx.execute(
             "UPDATE member_runs SET cleanup_diagnostics_json=?1 WHERE run_id=?2",
             params![
@@ -540,20 +438,15 @@ fn reconcile_missing_runtime(
         let target = match established {
             Some(status) => status,
             None => {
-                let first = *reserve_recovery_range(&tx, &run, 256)?.start();
-                run = storage::get_run(&tx, run.run_id)?;
+                let first = next_event_seq(&tx, &run)?;
                 for transition in loss_transitions(&tx, &run, first, true)? {
-                    let (event, inserted) = storage::persist_transition_in_transaction(
+                    let (_, inserted) = storage::persist_transition_in_transaction(
                         &tx,
                         &run,
                         &transition,
                         PersistenceMode::Recovery,
                     )?;
-                    ensure(
-                        inserted,
-                        "exceptional recovery requires fresh reserved transitions",
-                    )?;
-                    count_commit(&mut report, &event, false)?;
+                    ensure(inserted, "missing-path recovery requires fresh transitions")?;
                 }
                 RunStatus::Lost
             }
@@ -561,11 +454,8 @@ fn reconcile_missing_runtime(
         storage::settle_lost_deferred_in_transaction(&tx, &run)?;
         let unpublished = storage::unpublished_delivery_results(&tx, run.run_id)?;
         if !unpublished.is_empty() {
-            let count = i64::try_from(unpublished.len()).expect("bounded unresolved inputs");
-            let sequences = reserve_recovery_range(&tx, &run, count)?;
-            run = storage::get_run(&tx, run.run_id)?;
             let evidence = storage::run_evidence(&run, "runtime-recovery", 0)?;
-            for (event_seq, receipt) in sequences.zip(unpublished) {
+            for (event_seq, receipt) in (next_event_seq(&tx, &run)?..).zip(unpublished) {
                 let transition = delivery_result_transition(
                     run.run_id,
                     event_seq,
@@ -573,15 +463,12 @@ fn reconcile_missing_runtime(
                     crate::time::now_stamp(),
                     evidence.clone(),
                 );
-                let (event, inserted) = storage::persist_transition_in_transaction(
+                storage::persist_transition_in_transaction(
                     &tx,
                     &run,
                     &transition,
                     PersistenceMode::Recovery,
                 )?;
-                if inserted {
-                    count_commit(&mut report, &event, false)?;
-                }
             }
         }
         tx.execute("UPDATE member_runs SET status=?1,cleanup_state='complete',ended_at=COALESCE(ended_at,?2) WHERE run_id=?3",
@@ -595,21 +482,8 @@ fn reconcile_missing_runtime(
     })
 }
 
-/// `count` recovery sequences above both the reserved ceiling and the latest committed event.
-fn reserve_recovery_range(
-    conn: &Connection,
-    run: &RunRecord,
-    count: i64,
-) -> Result<std::ops::RangeInclusive<i64>> {
-    let ceiling = storage::latest_event_seq(conn, run.run_id)?
-        .map_or(run.event_seq_reserved_through, |value| {
-            value.max(run.event_seq_reserved_through)
-        });
-    storage::reserve_event_sequences_in_transaction(
-        conn,
-        run,
-        storage::SequenceReservation::RecoveryRange { ceiling, count },
-    )
+fn next_event_seq(conn: &Connection, run: &RunRecord) -> Result<i64> {
+    Ok(storage::latest_event_seq(conn, run.run_id)?.unwrap_or(0) + 1)
 }
 
 fn reconcile_retained_runtime(
@@ -644,30 +518,10 @@ fn refresh(conn: &mut Connection, result: &mut RecoveryCompletion, until: Instan
     result.report.status = result.run.status;
     Ok(())
 }
-fn count_commit(
-    report: &mut RecoveryReport,
-    event: &RuntimeEventRecord,
-    original: bool,
-) -> Result<()> {
-    fn increment(value: &mut u64) -> Result<()> {
-        *value = value
-            .checked_add(1)
-            .ok_or_else(|| error("recovery commit count overflow"))?;
-        Ok(())
-    }
-    if original {
-        increment(&mut report.replayed_count)?;
-    }
-    match event.notification_state {
-        NotificationState::Inbox => increment(&mut report.inbox_count),
-        NotificationState::Archived => increment(&mut report.archived_count),
-    }
-}
 fn persist(
     conn: &mut Connection,
     result: &mut RecoveryCompletion,
     transition: &ObservedTransition,
-    original: bool,
     #[cfg_attr(
         not(test),
         expect(
@@ -678,7 +532,7 @@ fn persist(
     host: &mut impl RecoveryHost,
     until: Instant,
 ) -> Result<()> {
-    let (event, inserted) = with_database_deadline(conn, until, |conn| {
+    with_database_deadline(conn, until, |conn| {
         storage::persist_transition(
             conn,
             &result.run.owner(),
@@ -686,9 +540,6 @@ fn persist(
             PersistenceMode::Recovery,
         )
     })?;
-    if inserted {
-        count_commit(&mut result.report, &event, original)?;
-    }
     refresh(conn, result, until)?;
     check_deadline(Instant::now(), until)?;
     #[cfg(test)]
@@ -743,33 +594,28 @@ fn loss_transitions(
     });
     Ok(transitions)
 }
-fn publish_delivery_results<S: OutboxIo>(
+fn publish_delivery_results(
     conn: &mut Connection,
     result: &mut RecoveryCompletion,
-    outbox: &mut Outbox<S>,
     host: &mut impl RecoveryHost,
     until: Instant,
 ) -> Result<()> {
-    let unpublished = with_database_deadline(conn, until, |conn| {
-        storage::unpublished_delivery_results(conn, result.run.run_id)
+    let (unpublished, first) = with_database_deadline(conn, until, |conn| {
+        Ok((
+            storage::unpublished_delivery_results(conn, result.run.run_id)?,
+            next_event_seq(conn, &result.run)?,
+        ))
     })?;
-    for chunk in unpublished.chunks(256) {
-        let sequences = with_database_deadline(conn, until, |conn| {
-            storage::reserve_event_sequences(conn, &result.run.owner())
-        })?;
-        refresh(conn, result, until)?;
-        let evidence = storage::run_evidence(&result.run, "runtime-recovery", 0)?;
-        for (event_seq, receipt) in sequences.zip(chunk) {
-            let transition = delivery_result_transition(
-                result.run.run_id,
-                event_seq,
-                receipt,
-                crate::time::now_stamp(),
-                evidence.clone(),
-            );
-            outbox.append_synced(conn, &transition, until)?;
-            persist(conn, result, &transition, false, host, until)?;
-        }
+    let evidence = storage::run_evidence(&result.run, "runtime-recovery", 0)?;
+    for (event_seq, receipt) in (first..).zip(&unpublished) {
+        let transition = delivery_result_transition(
+            result.run.run_id,
+            event_seq,
+            receipt,
+            crate::time::now_stamp(),
+            evidence.clone(),
+        );
+        persist(conn, result, &transition, host, until)?;
     }
     Ok(())
 }
@@ -800,38 +646,20 @@ fn perform(
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::AfterTakeover, &result.run, until)?;
     let mut descriptor = RecoveryDescriptor::pin(conn, &result.run, &lock, until)?;
-    let (mut outbox, scan) = Outbox::open_recovery(conn, &result.run, lock.clone(), until)?;
-    if let Some(tail) = scan.incomplete_tail {
-        result.report.cleanup_diagnostics.push(json!(tail));
-    }
-    for frame in scan.frames {
-        with_database_deadline(conn, until, |conn| {
-            check_snapshot(conn, &result.run, pinned)
-        })?;
-        check_deadline(Instant::now(), until)?;
-        #[cfg(test)]
-        host.checkpoint(RecoveryBoundary::BeforeReplay, &result.run, until)?;
-        persist(conn, result, &frame.transition, true, host, until)?;
-    }
     let existing = with_database_deadline(conn, until, |conn| terminal_outcome(conn, &result.run))?;
     let target = match existing {
         Some(status) => status,
         None => {
-            let sequences = with_database_deadline(conn, until, |conn| {
-                storage::reserve_event_sequences(conn, &result.run.owner())
-            })?;
-            refresh(conn, result, until)?;
             let transitions = with_database_deadline(conn, until, |conn| {
-                loss_transitions(conn, &result.run, *sequences.start(), false)
+                loss_transitions(conn, &result.run, next_event_seq(conn, &result.run)?, false)
             })?;
             for transition in transitions {
-                outbox.append_synced(conn, &transition, until)?;
-                persist(conn, result, &transition, false, host, until)?;
+                persist(conn, result, &transition, host, until)?;
             }
             RunStatus::Lost
         }
     };
-    publish_delivery_results(conn, result, &mut outbox, host, until)?;
+    publish_delivery_results(conn, result, host, until)?;
     let cleanup = host.cleanup_owned(&result.run, clock)?;
     for diagnostic in &cleanup.diagnostics {
         result.report.cleanup_diagnostics.push(json!(diagnostic));
@@ -843,10 +671,6 @@ fn perform(
             .push(json!("owned recovery cleanup remains incomplete"));
         return Ok(());
     }
-    check_deadline(Instant::now(), until)?;
-    #[cfg(test)]
-    host.checkpoint(RecoveryBoundary::BeforeCompact, &result.run, until)?;
-    outbox.compact_committed(conn, &result.run.owner(), until)?;
     check_deadline(Instant::now(), until)?;
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::BeforeFinish, &result.run, until)?;
@@ -899,15 +723,18 @@ mod tests {
             identity: (u64, u64, u64, i64, i64),
         }
         fn lose_artifacts(case: &mut Case, directory: bool) -> ArtifactWitness {
-            let identity = metadata(&case.artifacts.paths.outbox);
+            let launch = LaunchDescriptor::new(&case.fixture.run, case.fixture.spec()).unwrap();
+            case.artifacts.write_descriptor(&launch).unwrap();
+            let descriptor = case.artifacts.paths.descriptor.clone();
+            let identity = metadata(&descriptor);
             case.release();
             let path = if directory {
                 let retained = case.fixture._dir.path().join("retained-runtime");
                 std::fs::rename(&case.artifacts.paths.run_dir, &retained).unwrap();
-                retained.join("events.outbox")
+                retained.join(descriptor.file_name().unwrap())
             } else {
                 std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap();
-                case.artifacts.paths.outbox.clone()
+                descriptor
             };
             ArtifactWitness { path, identity }
         }
@@ -944,16 +771,10 @@ mod tests {
                 &mut case.fixture.conn,
                 &case.settings,
                 case.fixture.run.member_id,
-                None,
                 host.deadline,
                 &mut host,
             );
-            assert!(
-                !host
-                    .calls
-                    .iter()
-                    .any(|name| matches!(name.as_str(), "before_replay" | "cleanup"))
-            );
+            assert!(!host.calls.iter().any(|name| name == "cleanup"));
             result
         }
         fn assert_terminal_bookkeeping(
@@ -973,10 +794,6 @@ mod tests {
             let process = ProcessIdentity::current().unwrap();
             assert_eq!(current.owner_pid, process.pid);
             assert_eq!(current.owner_start_identity, process.start_identity);
-            assert_eq!(
-                current.event_seq_reserved_through,
-                before.event_seq_reserved_through
-            );
             assert_eq!(current.exit_code, before.exit_code);
             assert_eq!(current.cleanup_state, CleanupState::Complete);
             assert_eq!(
@@ -987,7 +804,7 @@ mod tests {
             assert_eq!(
                 metadata(&artifact.path),
                 artifact.identity,
-                "database-only bookkeeping preserves surviving spool identity and metadata"
+                "database-only bookkeeping preserves surviving runtime artifact identity and metadata"
             );
             let diagnostics = current
                 .cleanup_diagnostics_json
@@ -1105,7 +922,6 @@ mod tests {
             let mut host = new_host();
             let report = case.recover(&mut host).unwrap();
             assert_loss(&case, &report, &original);
-            assert!(!host.calls.iter().any(|name| name == "before_replay"));
             assert!(!case.artifacts.paths.owner_lock.exists());
         }
 
@@ -1244,7 +1060,6 @@ mod tests {
             for fault in [
                 "owner",
                 "provenance",
-                "reservation",
                 "closure",
                 "loss",
                 "terminal",
@@ -1259,9 +1074,6 @@ mod tests {
                     ),
                     "provenance" => Some(
                         "CREATE TRIGGER fault BEFORE UPDATE OF cleanup_diagnostics_json ON member_runs BEGIN SELECT RAISE(ABORT,'injected provenance failure'); END",
-                    ),
-                    "reservation" => Some(
-                        "CREATE TRIGGER fault BEFORE UPDATE OF event_seq_reserved_through ON member_runs BEGIN SELECT RAISE(ABORT,'injected reservation failure'); END",
                     ),
                     "closure" => Some(
                         "CREATE TRIGGER fault BEFORE INSERT ON member_runtime_events WHEN NEW.kind='interaction_closed' BEGIN SELECT RAISE(ABORT,'injected closure failure'); END",
@@ -1282,7 +1094,6 @@ mod tests {
                 case.fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
                 assert!(result.is_err(), "{fault}");
                 assert_eq!(rows(&case.fixture.conn), before, "{fault}");
-                assert!(!host.calls.iter().any(|name| name == "before_replay"));
             }
         }
 
@@ -1550,15 +1361,14 @@ mod tests {
         }
     }
 
-    mod replay_relationships {
+    mod finalization_relationships {
         use crate::runtime::recovery::test_support::relationships::*;
         #[test]
-        fn runner_recovery_finalization_after_replay_refuses_actual_member_fleet_change_atomically()
-        {
+        fn runner_recovery_finalization_refuses_actual_member_fleet_change_atomically() {
             refusal(Stage::Finalization);
         }
         #[test]
-        fn runner_recovery_valid_historical_lifecycle_change_after_replay_allows_finalization() {
+        fn runner_recovery_valid_historical_lifecycle_change_allows_finalization() {
             historical_control(Stage::Finalization);
         }
     }
@@ -1619,7 +1429,6 @@ mod tests {
                         &case.settings,
                         &expected,
                         &placement,
-                        None,
                         host.deadline,
                         &held,
                         &mut host
@@ -1682,7 +1491,6 @@ mod tests {
             let mut mutable = run.clone();
             mutable.last_health_at = Some("2000-01-01T00:00:00Z".into());
             mutable.cleanup_diagnostics_json = Some(json!(["old bounded diagnostic"]));
-            mutable.event_seq_reserved_through += 256;
             assert_eq!(stable_run_identity(&mutable), stable);
         }
 
@@ -1747,7 +1555,6 @@ mod tests {
                         &case.settings,
                         &expected,
                         &case.placement,
-                        None,
                         until,
                         held,
                         &mut host,
@@ -1761,7 +1568,6 @@ mod tests {
                     &mut case.fixture.conn,
                     &case.settings,
                     expected.member_id,
-                    None,
                     until,
                     &mut host,
                 )
@@ -1772,7 +1578,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_standalone_cleanup_uses_original_entry_clock_after_wait_and_replay() {
+        fn runner_recovery_standalone_cleanup_uses_original_entry_clock_after_wait() {
             clock_case(false, Duration::from_secs(7), Duration::from_millis(150));
         }
 
@@ -1836,10 +1642,12 @@ mod tests {
                 expected.lock().unwrap().as_ref().unwrap(),
                 "same-owner terminal completion remains immutable"
             );
-            assert!(!host.calls.iter().any(|name| matches!(
-                name.as_str(),
-                "after_takeover" | "before_replay" | "cleanup"
-            )));
+            assert!(
+                !host
+                    .calls
+                    .iter()
+                    .any(|name| matches!(name.as_str(), "after_takeover" | "cleanup"))
+            );
             let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
             assert_eq!(run.owner(), case.fixture.run.owner());
             assert_eq!(
@@ -2032,12 +1840,7 @@ mod tests {
                     .is_none()
             );
             assert!(!case.artifacts.paths.owner_lock.exists());
-            assert!(
-                !host
-                    .calls
-                    .iter()
-                    .any(|name| name == "before_replay" || name == "cleanup")
-            );
+            assert!(!host.calls.iter().any(|name| name == "cleanup"));
         }
 
         #[test]
@@ -2093,7 +1896,6 @@ mod tests {
                     &mut case.fixture.conn,
                     &case.settings,
                     case.fixture.run.member_id,
-                    None,
                     host.deadline,
                     &mut host,
                 );
@@ -2141,7 +1943,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_settles_a_deferred_ready_receipt_not_submitted_without_replay() {
+        fn runner_recovery_settles_a_deferred_ready_receipt_not_submitted() {
             let mut case = Case::new();
             let deferred = insert(&case, "prompt:deferred", "ready", true);
             let attempted = insert(&case, "prompt:attempted", "in_progress", false);
@@ -2272,9 +2074,6 @@ pub(crate) mod test_support {
                 )
                 .unwrap();
             case.refresh();
-            storage::reserve_event_sequences(&mut case.fixture.conn, &case.fixture.run.owner())
-                .unwrap();
-            case.refresh();
             case
         }
 
@@ -2305,19 +2104,16 @@ pub(crate) mod test_support {
             }
         }
 
-        pub(crate) fn seed(&self, transitions: &[ObservedTransition]) {
-            let held = self
-                .held
-                .as_ref()
-                .expect("the original owner holds its runtime lock while seeding");
-            let deadline = Instant::now() + Duration::from_secs(1);
-            let mut conn = Connection::open(self.fixture.conn.path().unwrap()).unwrap();
-            let mut spool =
-                Outbox::open_owned(&mut conn, &self.fixture.run, held.clone(), deadline).unwrap();
+        pub(crate) fn seed(&mut self, transitions: &[ObservedTransition]) {
+            let owner = self.fixture.run.owner();
             for transition in transitions {
-                spool
-                    .append_synced(&mut conn, transition, deadline)
-                    .unwrap();
+                storage::persist_transition(
+                    &mut self.fixture.conn,
+                    &owner,
+                    transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
             }
         }
 
@@ -2366,7 +2162,6 @@ pub(crate) mod test_support {
                 &mut self.fixture.conn,
                 &self.settings,
                 self.fixture.run.member_id,
-                None,
                 host.deadline,
                 host,
             )
@@ -2383,7 +2178,6 @@ pub(crate) mod test_support {
                 &self.settings,
                 expected,
                 &self.placement,
-                None,
                 host.deadline,
                 held,
                 host,
@@ -2419,14 +2213,6 @@ pub(crate) mod test_support {
                 .unwrap()
                 .unwrap()
         }
-
-        pub(crate) fn spool_bytes(&self) -> Option<Vec<u8>> {
-            self.with_owner_lock(|| match std::fs::read(&self.artifacts.paths.outbox) {
-                Ok(bytes) => Some(bytes),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => panic!("owned spool snapshot failed: {error}"),
-            })
-        }
     }
 
     #[derive(Clone, Copy)]
@@ -2440,9 +2226,7 @@ pub(crate) mod test_support {
             match self {
                 Self::Alive => ProcessEvidence::Alive,
                 Self::Terminated => ProcessEvidence::Terminated,
-                Self::Unknown => {
-                    ProcessEvidence::Unknown("bounded injected identity uncertainty".into())
-                }
+                Self::Unknown => ProcessEvidence::Unknown,
             }
         }
     }
@@ -2614,9 +2398,7 @@ pub(crate) mod test_support {
                 RecoveryBoundary::AfterSnapshot => "after_snapshot",
                 RecoveryBoundary::BeforeTakeover => "before_takeover",
                 RecoveryBoundary::AfterTakeover => "after_takeover",
-                RecoveryBoundary::BeforeReplay => "before_replay",
                 RecoveryBoundary::AfterCommit => "after_commit",
-                RecoveryBoundary::BeforeCompact => "before_compact",
                 RecoveryBoundary::BeforeFinish => "before_finish",
             };
             self.calls.push(name.into());
@@ -2829,10 +2611,12 @@ pub(crate) mod test_support {
                 events[1].interaction.as_ref().unwrap().close_reason,
                 Some(InteractionCloseReason::MonitorLost)
             );
-            assert!(
-                events[1..]
+            assert_eq!(
+                events
                     .iter()
-                    .all(|row| row.event.event_seq > original.event_seq_reserved_through)
+                    .map(|row| row.event.event_seq)
+                    .collect::<Vec<_>>(),
+                [1, 2, 3]
             );
             assert!(
                 current
@@ -2977,12 +2761,7 @@ pub(crate) mod test_support {
                     missing_lock(&mut case);
                     case
                 }
-                Stage::Finalization => {
-                    let case = Case::new();
-                    case.seed(&[exited(&case.fixture.run, 1, Some(7), None)]);
-                    assert!(events(&case).is_empty());
-                    case
-                }
+                Stage::Finalization => established_terminal(),
             }
         }
 
@@ -2994,7 +2773,6 @@ pub(crate) mod test_support {
                     conn,
                     &case.settings,
                     case.fixture.run.member_id,
-                    None,
                     deadline,
                     host,
                 )
@@ -3025,7 +2803,12 @@ pub(crate) mod test_support {
                 }
                 assert!(Instant::now() < deadline);
                 assert!(published.lock().unwrap().is_none());
-                assert_eq!(run.status, RunStatus::Exited);
+                if matches!(stage, Stage::Finalization) {
+                    assert_eq!(run.status, RunStatus::Recovering);
+                    assert_eq!(run.recovery_origin_status, Some(RunStatus::Exited));
+                } else {
+                    assert_eq!(run.status, RunStatus::Exited);
+                }
                 assert_eq!(run.cleanup_state, CleanupState::Incomplete);
                 assert_eq!(run.exit_code, Some(7));
                 assert_eq!(
@@ -3050,17 +2833,6 @@ pub(crate) mod test_support {
                 expected.is_some(),
                 "the selected actual coordinator boundary executes"
             );
-            if matches!(stage, Stage::Finalization) {
-                for boundary in [
-                    "before_replay",
-                    "after_commit",
-                    "before_compact",
-                    "before_finish",
-                ] {
-                    assert!(host.calls.iter().any(|call| call == boundary), "{boundary}");
-                }
-                assert!(case.spool_bytes().unwrap().is_empty());
-            }
             let actual = rows(&case.fixture.conn);
             let changed = actual
                 .iter()
@@ -3078,10 +2850,12 @@ pub(crate) mod test_support {
                 "a broker relationship mismatch rejects its actual mutation transaction"
             );
             if !matches!(stage, Stage::Finalization) {
-                assert!(!host.calls.iter().any(|call| matches!(
-                    call.as_str(),
-                    "after_takeover" | "before_replay" | "cleanup"
-                )));
+                assert!(
+                    !host
+                        .calls
+                        .iter()
+                        .any(|call| matches!(call.as_str(), "after_takeover" | "cleanup"))
+                );
             }
         }
         #[derive(Clone, Copy, Debug)]
@@ -3182,10 +2956,6 @@ pub(crate) mod test_support {
             assert_eq!(run.exit_code, Some(7));
             assert_eq!(run.cleanup_state, CleanupState::Complete);
             assert_eq!(
-                run.event_seq_reserved_through,
-                original.event_seq_reserved_through
-            );
-            assert_eq!(
                 &retained_history(&case.fixture.conn),
                 prior.lock().unwrap().as_ref().unwrap(),
                 "{stage:?}/{lifecycle:?}"
@@ -3196,12 +2966,7 @@ pub(crate) mod test_support {
                 NotificationState::Inbox
             );
             if matches!(stage, Stage::MissingPathTakeover) {
-                assert!(
-                    !host
-                        .calls
-                        .iter()
-                        .any(|call| matches!(call.as_str(), "before_replay" | "cleanup"))
-                );
+                assert!(!host.calls.iter().any(|call| call == "cleanup"));
             }
         }
     }

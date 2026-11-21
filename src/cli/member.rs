@@ -3,7 +3,6 @@ use crate::broker::MemberRecord;
 use crate::broker::NewPlacement;
 use crate::broker::runtime::DeliveryProjection;
 use crate::cli::emit;
-use crate::cli::nonblank;
 use crate::cli::resolve_body;
 use crate::cli::resolve_command_body;
 use crate::coding_agent::CodingAgent;
@@ -91,30 +90,6 @@ pub(crate) struct CreateArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum MemberCommand {
-    /// Reconcile a recorded member run under exclusive ownership.
-    Recover {
-        /// The member whose recorded run is reconciled.
-        #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        member_id: i64,
-        /// The root Director issuing this Director-only command.
-        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        director_member_id: i64,
-        /// Attest that the inspected owner and startup processes have terminated.
-        #[arg(long, requires_all = ["expected_run_id", "expected_owner_epoch", "evidence_ref"])]
-        owner_terminated: bool,
-        /// Run ID from the inspected registry snapshot the attestation binds to.
-        #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
-        expected_run_id: Option<i64>,
-        /// Owner epoch from the inspected registry snapshot the attestation binds to.
-        #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
-        expected_owner_epoch: Option<i64>,
-        /// Reference to the operator's recorded termination evidence.
-        #[arg(long, requires = "owner_terminated", value_parser = nonblank("nonblank termination evidence reference required"))]
-        evidence_ref: Option<String>,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
     /// Register a member and spawn its coding-agent pane.
     Create(CreateArgs),
     /// Tear down a member's pane (when one exists) and deregister it.
@@ -252,35 +227,6 @@ pub(crate) fn run(
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
-        MemberCommand::Recover {
-            member_id,
-            director_member_id: _,
-            owner_terminated,
-            expected_run_id,
-            expected_owner_epoch,
-            evidence_ref,
-            json,
-        } => {
-            let attestation =
-                owner_terminated.then(|| crate::runtime::OwnerTerminationAttestation {
-                    expected_run_id: expected_run_id.expect("complete attestation options"),
-                    expected_owner_epoch: expected_owner_epoch
-                        .expect("complete attestation options"),
-                    evidence_ref: evidence_ref.expect("complete attestation options"),
-                });
-            let report = crate::runtime::recover_member(
-                conn,
-                settings,
-                member_id,
-                attestation.as_ref(),
-                deadline.instant(),
-            )?;
-            emit(
-                json,
-                &crate::output::json::runtime_recovery(&report),
-                || crate::output::format_runtime_recovery(&report),
-            )
-        }
         MemberCommand::Create(args) => create(conn, &args),
         MemberCommand::Delete { member_id, json } => {
             delete(conn, settings, member_id, json, deadline)
@@ -2347,14 +2293,6 @@ mod tests {
 
         fn run_for(&self, argv: &[String], _: Duration) -> Result<String, RunError> {
             self.run(argv)
-        }
-
-        fn run_until(
-            &self,
-            argv: &[String],
-            deadline: Instant,
-        ) -> Result<String, crate::multiplexer::TimedRunError> {
-            crate::multiplexer::test_support::run_until_through_run_for(self, argv, deadline)
         }
 
         /// Counts and checks the pane close; the window restoration that follows it lists a
