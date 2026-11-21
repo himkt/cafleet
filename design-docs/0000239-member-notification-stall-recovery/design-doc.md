@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 56/57 tasks complete
+**Progress**: 57/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -509,6 +509,8 @@ The Permanent phase queues its second prompt behind an open interaction, because
 - [x] Run `mise //:test` <!-- completed: 2026-11-21T20:59 -->
 - [x] Run `mise //:lint` <!-- completed: 2026-11-21T20:59 -->
 - [x] Run `mise //docs:build` <!-- completed: 2026-11-21T20:59 -->
-- [ ] Run the § Live verification phases and record each observed value <!-- completed: -->
+- [x] Run the § Live verification phases and record each observed value <!-- completed: 2026-11-21T23:45 -->
+  - Healthy: passed on the branch binary (9f302033). `member show --json` reported `observation_probe` `answered`, eligibility `composer_empty`, `degraded` false, empty `diagnostics`; doctor reported `ok member.3.runtime: run=2 observation=composer_empty` right after the `database` row.
+  - Permanent and Transient: skipped. The bundled Claude profile opens no interaction for an AskUserQuestion form, so the procedure's `interaction_opened` never arrives (himkt/cafleet#639). Re-run both phases once #639 is fixed.
 - [x] Search outside `design-docs/` for `WORK_SLICE`, `work_slice`, `unhurried_writer`, `writer_work_slice_ms` and `automatic-held-queue-flush`, and confirm nothing is found <!-- completed: 2026-11-21T20:59 -->
 - [x] Recheck every § Skills and documentation target against the shipped behavior <!-- completed: 2026-11-21T20:59 -->
