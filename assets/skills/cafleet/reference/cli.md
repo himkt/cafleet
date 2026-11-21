@@ -205,7 +205,7 @@ The runner's FIFO holds prompt and exec input only. Accepted deferred input retu
 
 Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `plain_limit_exceeded`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
 
-A preview is typed only from the runner's sweep, when the FIFO is empty and not stopped and no attempt is active, so queued prompt and exec input always goes first. On a verified-composer run it is typed only into a verified empty composer; a preview whose submission is uncertain stays unnotified and is typed again once the composer is verified empty, so a recipient can see it twice and deduplicates by message ID. On a run without composer verification an uncertain preview is stamped notified and not typed again. An uncertain preview publishes one `input_delivery_result` with `input_id` null and its `message_id`. A composer showing only a native suggestion counts as empty. Runner housekeeping checks the queue head each second, independently of the queue turn, and cancels a removed head target as `not_submitted/target_inactive`. A written immediate attempt that fails records `uncertain/write_failed`. After a prompt or exec records `uncertain`, on every run, the FIFO stays stopped and no queued input and no preview is written until `input reconcile` settles it. A head that starts no attempt within 3 minutes of becoming the head, excluding time an open interaction blocks it, generates one `input_delivery_stalled` with a `cause`; [Runtime events](#runtime-events) owns the recovery action.
+A preview is typed only from the runner's sweep, when the FIFO is empty and not stopped and no attempt is active, so queued prompt and exec input always goes first. On a verified-composer run it is typed only into a verified empty composer; a preview whose submission is uncertain stays unnotified and is typed again once the composer is verified empty, so a recipient can see it twice and deduplicates by message ID. On a run without composer verification an uncertain preview is stamped notified and not typed again. An uncertain preview publishes one `input_delivery_result` with `input_id` null and its `message_id`. A composer showing only a native suggestion counts as empty. Runner housekeeping checks the queue head each second, independently of the queue turn, and cancels a removed head target as `not_submitted/target_inactive`. A written immediate attempt that fails records `uncertain/write_failed`. After a prompt or exec records `uncertain`, on every run, the FIFO stays stopped and no queued input and no preview is written until `input reconcile` settles it; a queued head or pending preview held 3 minutes behind it generates one `input_delivery_stalled` naming it in `blocked_by_input_id`. A head that starts no attempt within 3 minutes of becoming the head, excluding time an open interaction blocks it, generates one `input_delivery_stalled` with a `cause`; [Runtime events](#runtime-events) owns the recovery action.
 
 ### Held delivery
 
@@ -293,7 +293,7 @@ Before runner shutdown, a `hermes` run's session work is stopped through native 
 
 ### `member show`
 
-`cafleet member show MEMBER_ID [--json]` reads any active member, including Director, without a multiplexer; includes `kind`, placement and runtime. Text is `ID NAME STATUS window=WINDOW`, then the runtime line for an ordinary member; `WINDOW` prints `(pending)` while pending.
+`cafleet member show MEMBER_ID [--json]` reads any active member, including Director, without a multiplexer; includes `kind`, placement and runtime. Text is `ID NAME STATUS window=WINDOW`, then the runtime line for an ordinary member; `WINDOW` prints `(pending)` while pending. For a `running` or `degraded` run it also probes the runner's health (1 s deadline) and reports the outcome in the runtime object (§ Runtime presentation); a failed probe still exits 0.
 
 ### `member prompt`
 
@@ -371,7 +371,18 @@ Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, 
 
 Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`) and `unresolved_input_ids`.
 
-Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health.
+Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. These registry fields establish no live health; member show's probe keys do.
+
+Member show alone appends, after `child_start_identity`:
+
+| Key | Value |
+|---|---|
+| `observation_probe` | `skipped` (status neither `running` nor `degraded`), `answered` or `failed` |
+| `observation` | Ordered `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since`; null when skipped, failed or the child has not started |
+| `observation_error` | The probe failure message when `failed`, otherwise null |
+| `diagnostics` | The run's latest 5 stored runner diagnostics, newest first, each `source,message,first_at,last_at,count` |
+
+`eligibility` is `composer_empty` or `hold:<reason>` (`candidate`, `interaction`, `unknown`, `observer_unavailable`, `gap`). `degraded` true means the runner cannot store its events and holds generated input; `writer_diagnostic` then names the storage failure, and `gap_open_since` is the RFC 3339 start of the open observation gap (null for a gap recorded after the child exited). Member show's text runtime line appends ` observation=STATE`, then ` degraded` when degraded; `STATE` is the eligibility, `pending` when answered without an observation, `unavailable` when failed and `-` when skipped, as in `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`.
 
 Uncertain prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write_failed (method=profile)` and `input_id=INPUT_ID`.
 
@@ -391,7 +402,11 @@ Evidence contains `backend,native_version,rule_id,screen_seq,evidence_digest` an
 
 Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification, source `runner_lifecycle`, outcome `unknown`, null `director_action` and `cause={"kind":STOP_CAUSE}` whenever a stop cause is recorded. A prompt or exec result has its input ID and null `message_id`, with delivery and cause derived from its receipt; an uncertain preview has null `input_id`, its `message_id` and delivery `{"status":"uncertain","method":METHOD,"reason":null}`, deduplicated by run and message. Stages are `zero_bytes,partial,submitted,unknown`; an uncertain or in-progress prefix short of the submit key is `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload.
 
-`input_delivery_stalled` reports input that waited 3 minutes without a delivery attempt: a queued prompt or exec head, once per run and input, or the sweep's selected preview held because the composer is not verified empty, once per run and message. Time an open interaction blocks the input does not count. It carries ordered `input_id,message_id,waiting_since`, with exactly one of the two IDs set and `waiting_since` in UTC RFC 3339; its null interaction/classification, lifecycle source and evidence shape match delivery results. Its action is `{"kind":"review_stalled_delivery","instruction":INSTRUCTION,"inspect_argv":["cafleet","member","capture","MEMBER_ID","--json"]}`. INSTRUCTION is exactly `Capture the member's pane. When the composer holds text, submit or clear it with member press keys the capture establishes, or ask the user to clear or submit it on the member's native surface.`
+`input_delivery_stalled` reports input that waited 3 minutes without a delivery attempt: a queued prompt or exec head, once per run and input; the sweep's selected preview held because the composer is not verified empty, once per run and message; or a queued head or pending preview held behind the run's lowest-ID `uncertain` prompt or exec, once per run and blocker. Time an open interaction blocks the input does not count, and a head held behind an uncertain input reports only the blocked form. It carries ordered `input_id,message_id,blocked_by_input_id,waiting_since`, with exactly one of the three IDs set and `waiting_since` in UTC RFC 3339; its null interaction/classification, lifecycle source and evidence shape match delivery results. A head or preview action is `{"kind":"review_stalled_delivery","instruction":INSTRUCTION,"inspect_argv":["cafleet","member","capture","MEMBER_ID","--json"]}`. INSTRUCTION is exactly `Capture the member's pane. When the composer holds text, submit or clear it with member press keys the capture establishes, or ask the user to clear or submit it on the member's native surface.` A blocked action is `{"kind":"reconcile_uncertain_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKER_ID","--json"]}`, with `BLOCKER_ID` the `blocked_by_input_id`. INSTRUCTION is exactly `Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.`
+
+A `runner_degraded` event with cause `{"kind":"event_rejected","rejected_kind":KIND,"rejected_observed_at":TIMESTAMP,"error":MESSAGE}` replaces a runtime event the runner could never store, at that event's sequence number; its action is null, the runner keeps working and no observation gap opens. `rejected_kind` names the lost event's kind. A rejected `interaction_opened` creates no interaction, so the native request stays visible only on the member's pane, and its later `interaction_closed` is rejected the same way.
+
+A repeated delivery record for an already-reported input, preview or blocker, and a stalled head that is no longer `ready`, are stored as archived events (`archive_reason` `duplicate_delivery` or `head_not_ready`) with no inbox message.
 
 Every argv array appends `--database-url URL` for a non-default database. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
 
@@ -461,6 +476,19 @@ pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 ```
 
 `cafleet doctor [--json]` runs every check without aborting. Text prints one `<status> <name>: <detail>` row per check in check order; `--json` prints one JSON array of `name,status,detail` objects in the same order, each detail equal to its text form without the `<status> <name>: ` prefix. Statuses are `ok`, `info`, `warn` and `error`; doctor exits 1 with `Error: doctor found errors` after printing when any check is `error`, otherwise 0, `warn` included.
+
+When the `database` check is `ok`, one `member.<member_id>.runtime` row follows it for each active ordinary member with a non-terminal run, in member-ID order; a `running` or `degraded` run is probed with a 1 s deadline. `<eligibility>` and `<code>` follow § Runtime presentation. The first matching row applies:
+
+| Situation | Status | Detail |
+|---|---|---|
+| Run `starting`, `prepared` or `recovering` | `info` | `run=<run_id> status=<status>: not probed` |
+| Probe failed | `error` | `run=<run_id> health probe failed: <cause>; <hint>` |
+| Answered without an observation | `info` | `run=<run_id> observation=pending` |
+| Observation gap open for more than 30 s | `error` | `run=<run_id> observation=<eligibility> diagnostic=<code> gap_open_since=<ts>; <hint>` |
+| Otherwise degraded | `warn` | `run=<run_id> observation=<eligibility> diagnostic=<code>` |
+| Otherwise | `ok` | `run=<run_id> observation=<eligibility>` |
+
+`<hint>` is exactly `inspect with 'cafleet member show <member_id> --json'; if it does not recover, run 'cafleet member delete <member_id>' and create a replacement member`, each quoted command appending ` --database-url URL` for a non-default database. An `error` member row makes doctor exit 1.
 
 The `multiplexer` check reports the backend and server (`ok` `<backend> server=<server>`), and the `multiplexer.caller_pane` check that follows it reports the `fleet create` pane verification without `--pane` (§ Fleet commands):
 

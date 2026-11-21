@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 0/57 tasks complete
+**Progress**: 9/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -431,15 +431,15 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 1: Documentation
 
-- [ ] Update `SPEC.md` §6.3 `member show`, Runtime presentation and `cafleet doctor` Check rows per § `member show` and § `doctor` member rows, replacing the no-live-health sentence <!-- completed: -->
-- [ ] Update `SPEC.md` §6.9 Persistence, Input delivery stalled event, Queue housekeeping and Runner pending-preview sweep per § Rejection event, § Stalled head no longer ready, § Duplicate delivery records and § Stall behind an uncertain input <!-- completed: -->
-- [ ] Rewrite `SPEC.md` §6.9 Storage pressure and durability boundary per § Skills and documentation (step bound, classification, fence, diagnostics; delete only the `degraded` clause) <!-- completed: -->
-- [ ] Update `SPEC.md` §8 with the table list row, the `member_runner_diagnostics` DDL before the ledger table and the `head_not_ready` and `duplicate_delivery` archive reasons <!-- completed: -->
-- [ ] Update `docs/docs/concepts/members.md` doctor, `member show` and stalled-event paragraphs <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md` Runtime presentation, Runtime events and doctor facts <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/roles/director.md` § Reconcile generated input with the `reconcile_uncertain_input` and `event_rejected` procedures <!-- completed: -->
-- [ ] Delete `design-docs/0000237-automatic-held-queue-flush/` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] Update `SPEC.md` §6.3 `member show`, Runtime presentation and `cafleet doctor` Check rows per § `member show` and § `doctor` member rows, replacing the no-live-health sentence <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `SPEC.md` §6.9 Persistence, Input delivery stalled event, Queue housekeeping and Runner pending-preview sweep per § Rejection event, § Stalled head no longer ready, § Duplicate delivery records and § Stall behind an uncertain input <!-- completed: 2026-11-21T14:01 -->
+- [x] Rewrite `SPEC.md` §6.9 Storage pressure and durability boundary per § Skills and documentation (step bound, classification, fence, diagnostics; delete only the `degraded` clause) <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `SPEC.md` §8 with the table list row, the `member_runner_diagnostics` DDL before the ledger table and the `head_not_ready` and `duplicate_delivery` archive reasons <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `docs/docs/concepts/members.md` doctor, `member show` and stalled-event paragraphs <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` Runtime presentation, Runtime events and doctor facts <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `assets/skills/cafleet/roles/director.md` § Reconcile generated input with the `reconcile_uncertain_input` and `event_rejected` procedures <!-- completed: 2026-11-21T14:01 -->
+- [x] Delete `design-docs/0000237-automatic-held-queue-flush/` <!-- completed: 2026-11-21T14:01 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-21T14:01 -->
 
 ### Step 2: Deadline fix
 

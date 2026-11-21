@@ -567,6 +567,7 @@ Each check has a stable `name`, a `status` and a one-line `detail`. Checks run i
 | `multiplexer` | `<backend> server=<server>` | `not checked: a shared <label> server (pid <pid>) supplies the caller environment` | — | The backend detection, server resolution or availability error |
 | `multiplexer.caller_pane` | `<VAR>=<pane_id> session=<session> window=<window_id>` | `unavailable: the multiplexer is unavailable` | A refusal body (§ Caller pane verification) | A propagated verification error, or the context read of a verified pane |
 | `database` | `cafleet <VERSION> at <path>` | — | — | The schema-version guard error for an empty or incompatible database, or the open/inspection cause |
+| `member.<member_id>.runtime` | § Member runtime checks | § Member runtime checks | § Member runtime checks | § Member runtime checks |
 | `<agent>.configuration` | The resolved config path (§ Config-dir resolution) | — | — | The config-path validation error, or `HOME is not set` |
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
@@ -583,6 +584,21 @@ The multiplexer rows follow the `fleet create` steps without `--pane` (§ Caller
 | Rows 2, 3 or 5–7 refuse | `ok` | `warn` with the unverified body |
 | Row 4 verifies the pane | `ok` | `ok` |
 | A pane-process command failure, a nested-namespace read error, or a failed context read of the verified pane | `ok` | `error` with the error message |
+
+###### Member runtime checks
+
+When the `database` row is `ok`, doctor adds one `member.<member_id>.runtime` row right after it for each active ordinary member whose run status is not terminal (`exited`, `failed` or `lost`), in member-ID order. A `running` or `degraded` run is probed through the runner's control socket health request; the probes run concurrently, each under a one-second deadline, and the batch overlaps the other checks the way the Hermes batch does, with the rows keeping their check order. `<eligibility>` and `<code>` are the observation's eligibility rendering and diagnostic code (§6.3 Runtime presentation). The first matching row applies:
+
+| Situation | Status | Detail |
+|---|---|---|
+| Run `starting`, `prepared` or `recovering` | `info` | `run=<run_id> status=<status>: not probed` |
+| Probe failed | `error` | `run=<run_id> health probe failed: <cause>; <hint>` |
+| Probe answered without an observation | `info` | `run=<run_id> observation=pending` |
+| `gap_open_since` more than 30 seconds before doctor's wall clock | `error` | `run=<run_id> observation=<eligibility> diagnostic=<code> gap_open_since=<ts>; <hint>` |
+| `degraded` otherwise (a younger gap, no pending gap, or a gap recorded after the native child exited) | `warn` | `run=<run_id> observation=<eligibility> diagnostic=<code>` |
+| Otherwise | `ok` | `run=<run_id> observation=<eligibility>` |
+
+`<hint>` is exactly `inspect with 'cafleet member show <member_id> --json'; if it does not recover, run 'cafleet member delete <member_id>' and create a replacement member`, with ` --database-url URL` appended to each quoted command for a non-default database. An `error` member row makes doctor exit 1 with `Error: doctor found errors`, like every other `error` row.
 
 ###### OpenCode preset checks
 
@@ -841,6 +857,8 @@ Revalidate pending placement and deregister atomically. For a concrete pane, ret
 
 `cafleet member show MEMBER_ID [--json]` reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement object and the appended runtime summary (§6.3 Runtime presentation).
 
+After its registry read, member show probes the ordinary member's runner through its control socket health request under a one-second deadline when the run's status is `running` or `degraded`, and reports the outcome in the four member-show runtime keys (§6.3 Runtime presentation). A failed probe is reported in those keys and leaves the exit status 0.
+
 ##### `member list`
 
 `cafleet member list FLEET_ID [--json]` lists every **active** registry entry of the fleet (root Director and ordinary members) and takes no identity flag; an empty roster prints `0 members.`. Field projection, the `window` column and absent values: §6.3 Member list output; rows and activity: §6.2 Members. Text idle values render as `Ns` / `Nm` / `Nh`. Per-member `description` and `registered_at` are on §6.3 `member show`.
@@ -936,9 +954,29 @@ JSON stamps `captured_at` from the local UTC clock at the capture read boundary 
 
 #### Runtime presentation
 
-Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These are registry reads and make no live-health claim.
+Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These registry fields make no live-health claim; member show's probe keys below do.
 
-Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STATUS` row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE`. `event show` uses the same runtime object and line. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+Member show alone appends four keys to the runtime object, after `child_start_identity`; member create, `member list` and `event show` keep the runtime object above:
+
+| Key | Value |
+|---|---|
+| `observation_probe` | `skipped` (the run's status is neither `running` nor `degraded`), `answered` or `failed` |
+| `observation` | The runner's observation health with ordered keys `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since`; null when skipped, failed, or answered by a runner whose child has not started |
+| `observation_error` | The probe failure's message when `failed`, otherwise null |
+| `diagnostics` | The run's latest 5 `member_runner_diagnostics` rows (§6.9 Storage pressure and durability boundary), newest `last_at` then `diagnostic_id` first, each ordered `source,message,first_at,last_at,count` |
+
+`visibility` is `visible`, `obscured`, `not_visible` or `unknown`. `eligibility` is the string `composer_empty` or `hold:<reason>`, where `<reason>` is `candidate`, `interaction`, `unknown`, `observer_unavailable` or `gap`; doctor member rows use the same rendering. `degraded` is a boolean, and `diagnostic` is the observation failure code, `sink_unavailable` while the event writer is degraded, or null. `writer_diagnostic` is the event writer's sanitized failure text, non-null only when `degraded`, and `gap_open_since` is the RFC 3339 start of a pending observation gap, non-null only with `hold:gap` and `degraded`. A gap recorded after the native child exits has no pending start, so it reports `hold:gap`, `degraded` and a null `gap_open_since`. `pending_count` and `gap_count` are the runner's uncommitted-transition and observation-gap counters.
+
+Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STATUS` row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE`. Member show's line appends ` observation=STATE`, followed by ` degraded` when the observation is degraded:
+
+| Probe outcome | `STATE` |
+|---|---|
+| `answered` with an observation | The eligibility rendering |
+| `answered` without one | `pending` |
+| `failed` | `unavailable` |
+| `skipped` | `-` |
+
+For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
@@ -3003,11 +3041,11 @@ One shutdown clock starts at normal native-child exit, runner failure or termina
 | 3 s | Nonblocking outer-display flushing ends; discard only undelivered display-tail bytes, recording their count and a truncation diagnostic. |
 | 4 s | Event-worker SQLite attempts end, including transaction completion and retry delays, with no additional grace budget. Record any uncommitted transitions as an unsaved in-memory gap. |
 
-Run every runner SQLite attempt under a bounded database budget from the remaining absolute work/shutdown deadline: each attempt is bounded by its own deadline, and after each attempt the connection's default busy timeout and handlers are in effect again.
+Run every runner SQLite attempt under a bounded database budget from the remaining absolute step/shutdown deadline (§ Storage pressure and durability boundary): each attempt is bounded by its own deadline, and after each attempt the connection's default busy timeout and handlers are in effect again.
 
 Restore terminal settings and release ownership after stopping/joining the writer, regardless of EOF, display or database completion. Retain actual child code/signal separately from `cleanup_state=complete|incomplete` and bounded diagnostic reasons for truncated output, pending events or unconfirmed descendants. When cleanup/restoration is complete, return the native status (`128 + signal` for a signal exit). With incomplete cleanup, preserve a native nonzero return; use runner exit `1` if the native status was zero or unavailable, and report its distinct recorded native status. Hard-kill or restoration failure remains an explicit host-recovery condition.
 
-Maintain liveness counters only in process and expose them through `health`; persist `last_health_at` on lifecycle transitions and explicit input/recovery checks, not as a per-second heartbeat. An old recorded timestamp is historical evidence, not a staleness threshold. `member show` remains a registry read, returns the recorded fields and requires neither a socket nor a multiplexer. Input dispatch requires a fresh matching health/ownership check. A failed probe holds input but closes no interaction, changes no terminal status and allocates no event sequence.
+Maintain liveness counters only in process and expose them through `health`; persist `last_health_at` on lifecycle transitions and explicit input/recovery checks, not as a per-second heartbeat. An old recorded timestamp is historical evidence, not a staleness threshold. `member show` returns the recorded fields without a multiplexer and adds a bounded live health probe whose failure it reports without failing (§6.3 `member show`). Input dispatch requires a fresh matching health/ownership check. A failed probe holds input but closes no interaction, changes no terminal status and allocates no event sequence.
 
 The creator precreates `owner.lock`, records its device/inode and runtime-directory identity, and records the current owner PID/start identity. Every ownership transfer advances `owner_epoch` with a CAS, including creator-to-runner transfer after the runner verifies/acquires that inode; the runner's `prepared` reply reports its new epoch for subsequent control frames. The runner holds the ownership lock through every writer/input thread and bounded shutdown. Validate the open descriptor's identity against both registry and current pathname; reopening a replacement lock is not acquisition of the original lock. A deleted directory/lock or changed inode requires the distinct missing-path recovery branch below.
 
@@ -3152,6 +3190,7 @@ The §8 DDL fixes the runtime tables' exact columns, types, enums, nullability, 
 | `member_interactions` | `evidence_json` and `evidence_digest` are the opening event's evidence. |
 | `member_runtime_events` | `payload_json` is the final event payload, and unique `(run_id, event_seq)` supports idempotent retries. |
 | `member_input_operations` | `ready` certifies a zero-byte attempt, and a ready row with deferred metadata is a runner-queued ordinary input; `stop_cause` is a value from § Stop cause. Settled rows are retained as replay-rejection records for the lifetime of the database file. |
+| `member_runner_diagnostics` | One row per run, source and sanitized message, with its repeat `count` and first/last times; each run keeps its newest 256 rows (§ Storage pressure and durability boundary). |
 
 Readers return existing records and their associated message bytes unchanged on replay. `cleanup_state` begins `incomplete` and becomes complete only after successful shutdown cleanup, so a live/crashed run makes no prior completion claim.
 
@@ -3188,7 +3227,7 @@ Runtime event kinds are the §8 `member_runtime_events.kind` values. The event p
 }
 ```
 
-`INSTRUCTION` is the permission-request instruction (§ Request-bound permission responses). Event keys are ordered `event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for applicable lifecycle/result events. Delivery results append `input_id,message_id,delivery,stage`; stalled delivery appends `input_id,message_id,waiting_since`; all events finish with required `director_action`. Permission/question actions order `kind,instruction,inspect_argv`; delivery actions follow § Input delivery result event and § Input delivery stalled event. Other events carry null action.
+`INSTRUCTION` is the permission-request instruction (§ Request-bound permission responses). Event keys are ordered `event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for applicable lifecycle/result events. Delivery results append `input_id,message_id,delivery,stage`; stalled delivery appends `input_id,message_id,blocked_by_input_id,waiting_since`; all events finish with required `director_action`. Permission/question actions order `kind,instruction,inspect_argv`; delivery actions follow § Input delivery result event and § Input delivery stalled event. Other events carry null action.
 
 The evidence object, in events and in stored interaction evidence, has ordered keys `backend,native_version,rule_id,screen_seq,evidence_digest`; it carries no screen text. `evidence_digest` is the SHA-256 of the canonical evidence object without that key. Semantic fingerprints for live episode comparison stay in memory, never in logs or database.
 
@@ -3199,6 +3238,23 @@ Persist a transition, its event and a normal `input_required` inbox message to t
 An observed transition carries nullable `episode_seq`, kind, original observation time and immutable evidence. Its commit transaction allocates `event_seq` and allocates or resolves interaction/event/message IDs and produces the final public payload. Idempotence compares these original transition fields, excluding generated IDs and commit timestamps.
 
 The runner writes events and inbox messages through its own database transactions and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence or listener restart. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may commit its recovery events as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`, retaining the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
+
+The live runner fills every `event_seq` it materializes; persistence never leaves a slot empty, because a later transition requires the next sequence value. Two delivery records commit as silent archived rows (`notification_state=archived`, `message_id=null`, no inbox message) at their own `event_seq`, with the normal payload built from the record so an idempotent retry compares equal. Both apply only when historical ownership supplies no archive reason, and `duplicate_delivery` takes precedence over `head_not_ready`:
+
+| `archive_reason` | Record |
+|---|---|
+| `head_not_ready` | An unpublished stalled-head record whose head, a queued ordinary input of the run, is no longer `ready` when persisted |
+| `duplicate_delivery` | An `input_delivery_result` or `input_delivery_stalled` record of the same kind as a persisted row that names the same waiting input, preview or blocker (§ Input delivery stalled event) |
+
+Every other stalled-head violation, such as another run's input or a head without deferred metadata, and a delivery-field failure on a duplicate fail the transition permanently and take the rejection path (§ Storage pressure and durability boundary).
+
+**Rejection event.** A transition the runner can never persist is replaced at its own `event_seq` by a run-level `runner_degraded` event with null `episode_seq` and classification, `observed_at` the wall-clock time of the rejection, the run's lifecycle evidence (`rule_id` `runner-lifecycle`, the rejected transition's `screen_seq`), null `director_action` and the cause:
+
+```json
+{"kind":"event_rejected","rejected_kind":"interaction_opened","rejected_observed_at":"2026-11-21T12:04:08Z","error":"MESSAGE"}
+```
+
+The cause has exactly the keys `kind,rejected_kind,rejected_observed_at,error`, and `event_rejected` is valid only on `runner_degraded`. `rejected_kind` is a runtime event kind, `rejected_observed_at` is the rejected transition's RFC 3339 observation time, and `error` is the failure text under the runner diagnostic text rule (§ Storage pressure and durability boundary). A rejected `interaction_opened` creates no interaction, so a later `interaction_closed` for that episode is rejected with its own `event_rejected`; the native request stays visible on the member's surface.
 
 `event show` returns the complete durable event with its notification/archive state and current interaction/run state, and `input show` returns a durable programmatic-input receipt (§ CLI presentation contract). Runtime events use the ordinary broker message envelope and poll-time consumption.
 
@@ -3226,14 +3282,15 @@ For prompt and exec, the terminal receipt is the durable source: publication fol
 
 ##### Input delivery stalled event
 
-The runner publishes one `input_delivery_stalled` event when input has waited the stall bound (3 minutes) without a delivery attempt, in two cases:
+The runner publishes one `input_delivery_stalled` event when input has waited the stall bound (3 minutes) without a delivery attempt, in three cases:
 
 | Waiting input | Wait starts | Deduplicated by |
 |---|---|---|
-| A queued prompt or exec head that has started no attempt | When the entry becomes the head; an interaction that blocks the head clears the wait and its closure restarts it | Run plus `input_id` |
+| A queued prompt or exec head that has started no attempt | When the entry becomes the head; an interaction or an uncertain blocker that holds the head clears the wait, and its end restarts it | Run plus `input_id` |
 | The sweep's selected unnotified preview, held because the composer is not verified empty on a verified-composer run | When the sweep first holds that preview on the composer; an interaction that blocks it clears the wait and its closure restarts it | Run plus `message_id` |
+| A queued head or a pending preview held behind the run's lowest-ID `uncertain` prompt or exec (the blocker) | When queue housekeeping first sees that blocker with a waiter; it clears when no waiter remains or the blocker settles | Run plus `blocked_by_input_id` |
 
-Time an open interaction blocks the input never counts: the `interaction_opened` event already notifies the Director with its own action. Queue housekeeping (§ Queue housekeeping) publishes the head event and the sweep (§ Runner pending-preview sweep) publishes the preview event. The event creates no interaction and stores no literal:
+Time an open interaction blocks the input never counts: the `interaction_opened` event already notifies the Director with its own action. Queue housekeeping (§ Queue housekeeping) publishes the head and blocked events and the sweep (§ Runner pending-preview sweep) publishes the preview event. A restarted wait can stall again for the same input, preview or blocker; that repeat commits as a silent `duplicate_delivery` archived row (§ Persistence, notification and read interfaces), so the Director receives one event per key. The event creates no interaction and stores no literal:
 
 | Field | Value |
 |---|---|
@@ -3242,25 +3299,34 @@ Time an open interaction blocks the input never counts: the `interaction_opened`
 | `source` | `runner_lifecycle` |
 | `decision_outcome` | `"unknown"` |
 | `evidence` | Ordered run evidence with null screen-derived fields |
-| `input_id` | The waiting head's input ID; `null` for a preview |
-| `message_id` | The waiting preview's message ID; `null` for a head |
+| `input_id` | The waiting head's input ID; `null` otherwise |
+| `message_id` | The waiting preview's message ID; `null` otherwise |
+| `blocked_by_input_id` | The blocker's input ID; `null` otherwise |
 | `waiting_since` | UTC RFC 3339 start of the wait |
-| `director_action` | `review_stalled_delivery` (below) |
+| `director_action` | `review_stalled_delivery` for a head or preview, `reconcile_uncertain_input` for a blocker (below) |
 
 ```json
-{"input_id": null, "message_id": 5120,
+{"input_id": null, "message_id": 5120, "blocked_by_input_id": null,
  "waiting_since": "2026-11-19T12:04:08Z",
  "director_action": {"kind": "review_stalled_delivery", "instruction": "...",
    "inspect_argv": ["cafleet", "member", "capture", "91", "--json"]}}
 ```
 
-Persistence requires exactly one of `input_id` and `message_id`. A head names a queued ordinary input of the run that is `ready` when first published; a preview names a message addressed to the run's member. `director_action` is `{"kind":"review_stalled_delivery","instruction":INSTRUCTION,"inspect_argv":["cafleet","member","capture","MEMBER_ID","--json"]}`, where `MEMBER_ID` is the run's member, and INSTRUCTION is exactly:
+The runner's stalled record has exactly the keys `kind,input_id,message_id,blocked_by_input_id,waiting_since`, and persistence requires exactly one of the three IDs to be a positive integer and the others null. A head names a queued ordinary input of the run; when it is no longer `ready` at first persistence, the record commits as a silent `head_not_ready` archived row. A preview names a message addressed to the run's member. A blocker names a `prompt` or `exec` input of the run in any state, so a reconciliation racing the publication cannot reject it; re-validation of a published event applies the same rule.
+
+A head or preview event's `director_action` is `{"kind":"review_stalled_delivery","instruction":INSTRUCTION,"inspect_argv":["cafleet","member","capture","MEMBER_ID","--json"]}`, where `MEMBER_ID` is the run's member, and INSTRUCTION is exactly:
 
 ```text
 Capture the member's pane. When the composer holds text, submit or clear it with member press keys the capture establishes, or ask the user to clear or submit it on the member's native surface.
 ```
 
-A verified empty composer resumes delivery on the next queue turn or sweep. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
+A blocker event's `director_action` is `{"kind":"reconcile_uncertain_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKER_ID","--json"]}`, where `BLOCKER_ID` is `blocked_by_input_id`, and INSTRUCTION is exactly:
+
+```text
+Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.
+```
+
+A verified empty composer resumes delivery on the next queue turn or sweep, and a settled blocker resumes queued input and previews. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
 
 #### CLI presentation contract
 
@@ -3268,11 +3334,56 @@ A verified empty composer resumes delivery on the next queue turn or sweep. Ever
 
 #### Storage pressure and durability boundary
 
-An event worker owns SQLite. The parser/control loop submits immutable transitions through a bounded channel of 64 records. The worker commits each transition in its own ownership-checked immediate transaction, which allocates its `event_seq` as the next value after the run's latest committed event; no intermediate file holds it. Retry database contention with bounded exponential delays from 100 ms to two seconds, each clipped to the same absolute database/work/shutdown budget rather than added to the connection's default timeout. Keep terminal transport and socket health service independent.
+An event worker owns SQLite. The parser/control loop submits immutable transitions through a bounded channel of 64 records. The worker commits each transition in its own ownership-checked immediate transaction, which allocates its `event_seq` as the next value after the run's latest committed event; no intermediate file holds it. Each worker step, receiving a transition and then persisting it with its ownership validation and transaction, is bounded by five seconds of real time, equal to the connection's busy timeout, and by the run's shutdown deadline. Lowering the shutdown deadline interrupts an in-flight database statement within 1,000 SQLite VM steps or one 10 ms busy-wait slice, and an expired step fails as a deadline. At shutdown the runner waits for the worker until 50 ms past the shutdown deadline and then joins it, so no transition commits after the writer's unsaved count is taken. Retry transient failures with bounded exponential delays from 100 ms to two seconds rather than adding them to the connection's default timeout. Keep terminal transport and socket health service independent.
 
-A full channel or an exhausted retry changes the runner to `degraded`, holds all programmatic input, emits one local health diagnostic and retains the failed transition plus an explicit observation-gap counter. Stop further semantic classification rather than silently discarding events, continuing manual terminal I/O, and resume with a fresh screen and an explicit gap event after the writer recovers. `runner_degraded` carries the gap interval/count, and events potentially missed during that gap remain unverified.
+Every failed step is classified by its cause alone:
 
-Durability begins at a successful SQLite commit, and notification is claimed only after it. A hard runner crash loses the transitions that had not committed; recovery records the run's loss with `runner_lost`, which identifies that coverage gap. While the database stays unavailable, the control health response and local diagnostic preserve the actual error, and memory stays bounded.
+| Class | Causes | Outcome |
+|---|---|---|
+| Transient | `SQLITE_BUSY`, `SQLITE_LOCKED`, an expired step bound, and the I/O-class codes `IOERR`, `FULL`, `CANTOPEN`, `NOMEM`, `READONLY` and `PROTOCOL` | Retry the same transition after the backoff |
+| Permanent | Every other cause: transition content, a missing referenced row, a constraint or trigger refusal, a sequence-slot conflict, lost live ownership, a corrupt file | Replace the transition with its rejection event (§ Persistence, notification and read interfaces) |
+
+A full channel or a transient failure holds all programmatic input, records the writer's failure text and retains the failed transition at the front, plus an explicit observation-gap counter. Stop further semantic classification rather than silently discarding events, continuing manual terminal I/O, and resume with a fresh screen and an explicit gap event after the writer recovers. `runner_degraded` carries the gap interval/count, and events potentially missed during that gap remain unverified.
+
+A permanent failure is replaced within the same step: the rejection event takes the failed transition's `event_seq` and is persisted at once under a fresh step bound. A committed replacement records no writer failure text and opens no gap, and the worker continues with the next transition. A transient failure of the replacement keeps it at the front under the transient rule. A transition the parser/control loop cannot hand off because its evidence is invalid is replaced the same way before hand-off. When the replacement itself fails permanently, as a sequence-slot conflict, lost live ownership or a corrupt file does, the writer fences:
+
+- it discards its queue, counting the discarded transitions as unsaved;
+- it keeps the failure text `event writer fenced: <cause>`;
+- it accepts no further transitions;
+- the observation gap stays open, so input stays held.
+
+A fenced run recovers only through `member delete` and a replacement member; member show and doctor report the open gap (§6.3 Member runtime checks).
+
+Durability begins at a successful SQLite commit, and notification is claimed only after it. A hard runner crash loses the transitions that had not committed; recovery records the run's loss with `runner_lost`, which identifies that coverage gap. While the database stays unavailable, the control health response, the runner diagnostics and the local diagnostic preserve the actual error, and memory stays bounded.
+
+**Diagnostic text.** Every runner diagnostic text that is stored or transmitted (the `event_rejected` cause's `error`, the health observation's `writer_diagnostic` and `member_runner_diagnostics.message`) has each control character U+0000–U+001F and U+007F replaced with a space, is trimmed and is truncated to at most 512 bytes at a UTF-8 boundary. Each text starts with a fixed non-empty label and is an error text; it carries no input literal, message body or pane text.
+
+**Runner diagnostics.** The live runner stores its diagnostics in `member_runner_diagnostics` (§8), one row per run, source and message, and keeps printing each to its standard error:
+
+| `source` | Recorded diagnostic |
+|---|---|
+| `event_writer` | A writer failure text that differs from the current one, a rejection, a fence, a buffer overflow |
+| `observation` | An observation gap opening, as `observation gap opened: <code>` with the observation failure code |
+| `deferred_input` | `member runtime: deferred input: …` |
+| `queue_housekeeping` | `member runtime: queue housekeeping: …` |
+| `preview_sweep` | `member runtime: preview sweep: …` |
+| `input_result` | `member runtime: input … result is pending storage: …` and `member runtime: input … result is pending recovery: …` |
+| `permission_answer` | `member runtime: permission answer for interaction … is uncertain: …` |
+| `shutdown` | Each `member runtime: …` shutdown outcome diagnostic |
+
+The runner buffers at most 32 entries keyed by source and message, each with its count and first and last times; an overflow drops the oldest entry and adds its count to a dropped counter. The event worker flushes the buffer before each loop iteration, idle iterations included, when the buffer is non-empty or the dropped counter is positive and the next flush time has arrived. Each flush is one ownership-validated immediate transaction bounded by 500 ms of real time and by the shutdown deadline, and runs this write sequence:
+
+1. Upsert each entry: a new row, or for an existing `(run_id, source, message)` row a `last_at` update and the entry's count added to `count`.
+2. When entries were dropped, upsert one `event_writer` row `diagnostic buffer overflow: N entries dropped`.
+3. Delete the run's rows beyond the newest 256 by `last_at`, then `diagnostic_id`.
+
+| Flush outcome | Effect |
+|---|---|
+| Committed | Clears the flushed entries and the dropped counter; the next flush may run at once |
+| Transient failure | Keeps the buffer and retries one second later |
+| Permanent failure | Drops the flushed entries, adds their count to the dropped counter and retries one second later |
+
+A flush never records a writer failure text, so diagnostics cannot open an observation gap. After the event writer finishes, shutdown writes the remaining buffer, the dropped counter and one `shutdown` entry per shutdown outcome diagnostic with the same write sequence, in the transaction that records `cleanup_state` and `cleanup_diagnostics_json`. When that transaction fails, the printed lines are the only copy, and the `cleanup evidence pending` diagnostic reports it. Recovery writes no runner diagnostics.
 
 Member and fleet deletion run recovery on the recorded run after successful runner shutdown and before deregistration when the remaining deadline permits (§6.3 `member delete`); otherwise they retain the namespace, and a later deletion retries. Recovery never starts an agent. A five-second deadline bounds each recovery pass. Start one cleanup clock at entry to the common recovery coordinator, before snapshot, locking and process/health evidence; its two/three/four-second boundaries share that origin and are clipped to the deletion caller's deadline. An incomplete pass retains the `recovering` state for the next pass. A run that is already terminal needs no work: recovery preserves existing status and diagnostics and advances no ownership, even if the recorded current reconciler remains alive.
 
@@ -3433,7 +3544,7 @@ Every path that ends an immediate `prompt` or `exec` attempt after its first chi
 
 ##### Queue housekeeping
 
-Queue housekeeping runs from the runner event loop every housekeeping interval (1 s) while the FIFO is non-empty and ordinary input is not fenced. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization retry, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds target-removal detection latency to about one second, at one read transaction per second per queued member.
+Queue housekeeping runs from the runner event loop every housekeeping interval (1 s) while ordinary input is not fenced. Each pass first runs the blocked-input watch below; the sweep that follows runs only while the FIFO is non-empty. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization retry, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds target-removal detection latency to about one second, at one sweep read transaction per second per queued member, plus the blocked-input watch's read transaction on every pass.
 
 Each sweep:
 
@@ -3447,6 +3558,16 @@ Each sweep:
 
 3. Applies the head's target result: a removed or changed target settles the head `not_submitted/target_inactive` or `target_changed` and removes it.
 4. Runs the stall watchdog (§ Input delivery stalled event).
+
+**Blocked-input watch.** In its own read transaction, separate from the sweep's, the watch reads the run's blocker, the lowest-ID `prompt` or `exec` input in state `uncertain`, and whether a waiter exists: a non-empty FIFO, or a pending preview the sweep would select (§ Runner pending-preview sweep), independent of the sweep's cadence and backoff. A storage failure skips the watch for that pass and keeps its wait unchanged.
+
+| Blocker | Waiter | Effect |
+|---|---|---|
+| None | — | Clears the blocked wait |
+| Present | None | Clears the blocked wait, because the waiting input was delivered, consumed or settled elsewhere |
+| Present | Present | Keeps the wait for that blocker, or starts it now when no wait exists or the wait names another blocker |
+
+A kept wait that has lasted the stall bound publishes one blocked `input_delivery_stalled` event (§ Input delivery stalled event). While a blocked wait exists, the head's stall watch is cleared as it is for an interaction, so the head publishes no `review_stalled_delivery` event; once the blocker settles, the head's watch starts afresh.
 
 A transient storage failure (SQLite busy/locked contention or an expired storage deadline) on the read leaves every entry unchanged. A sweep first retries a pending zero-byte finalization; a cancellation that storage prevents becomes that pending finalization, and the sweep settles nothing further until it commits.
 
@@ -3463,7 +3584,7 @@ Each ordinary member's runner delivers that member's own unnotified pending mess
 | Selection | One short read snapshot confirms that the run's member is an active ordinary member whose recorded run is this run with a concrete placement, then takes the oldest `to_member_id=<member> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
 | Order | Strict oldest first: the sweep types only the selected message and waits for its outcome before it selects again |
 
-Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected. A selected preview held on the composer for the stall bound publishes one `input_delivery_stalled` event (§ Input delivery stalled event). Because the sweep starts a preview only when the FIFO is empty and not stopped and no ordinary attempt is active, a queued prompt or exec always precedes a sweep-selected preview.
+Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected. A selected preview held on the composer for the stall bound publishes one `input_delivery_stalled` event (§ Input delivery stalled event). A pending preview held behind an `uncertain` prompt or exec counts as a waiter for queue housekeeping's blocked-input watch, which publishes the blocked event (§ Queue housekeeping). Because the sweep starts a preview only when the FIFO is empty and not stopped and no ordinary attempt is active, a queued prompt or exec always precedes a sweep-selected preview.
 
 **Delivery state.** A preview's delivery state is `messages.notified_at` plus the runner's in-memory record of a preview typed and awaiting verification; it holds no durable input receipt. On a verified-composer run the sweep types a preview only into a verified empty composer and stamps `notified_at` after confirmed submission; a preview whose submission is not confirmed is uncertain (§ Input delivery result event), stays unnotified and is typed again once the composer is verified empty. On a run without composer verification the sweep types by § Delivery method and interaction priority and stamps `notified_at` after its complete stages; an uncertain preview is stamped first and then published, so it is not typed again.
 
@@ -3665,6 +3786,7 @@ The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.
 | `member_interactions` | Observed interactive episodes and visibility closure |
 | `member_runtime_events` | Sequenced events with atomic Director inbox association or archival |
 | `member_input_operations` | Durable submission receipts, delivery method/deferral metadata, payload digests and settled replay protection |
+| `member_runner_diagnostics` | Deduplicated, bounded runner diagnostics per run |
 | `refinery_schema_history` | Baseline ledger |
 
 Exact baseline DDL; the baseline itself declares the ledger table as its last statement:
@@ -3794,7 +3916,7 @@ CREATE TABLE member_runtime_events (
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
     notification_state TEXT NOT NULL CHECK(notification_state IN ('inbox','archived')),
     message_id INTEGER UNIQUE REFERENCES messages(message_id) ON DELETE RESTRICT,
-    archive_reason TEXT CHECK(archive_reason IS NULL OR archive_reason IN ('member_inactive','fleet_deleted','director_inactive')),
+    archive_reason TEXT CHECK(archive_reason IS NULL OR archive_reason IN ('member_inactive','fleet_deleted','director_inactive','head_not_ready','duplicate_delivery')),
     UNIQUE(run_id, event_seq),
     CHECK((notification_state = 'inbox' AND message_id IS NOT NULL AND archive_reason IS NULL) OR
           (notification_state = 'archived' AND message_id IS NULL AND archive_reason IS NOT NULL))
@@ -3824,6 +3946,18 @@ CREATE TABLE member_input_operations (
     UNIQUE(run_id, operation_key),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
+
+CREATE TABLE member_runner_diagnostics (
+    diagnostic_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
+    source TEXT NOT NULL CHECK(source IN ('event_writer','observation','deferred_input','queue_housekeeping','preview_sweep','input_result','permission_answer','shutdown')),
+    message TEXT NOT NULL CHECK(length(trim(message)) > 0 AND length(CAST(message AS BLOB)) <= 512),
+    first_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    count INTEGER NOT NULL CHECK(count > 0),
+    UNIQUE(run_id, source, message)
+);
+CREATE INDEX idx_member_runner_diagnostics_recent ON member_runner_diagnostics(run_id, last_at);
 
 CREATE TABLE refinery_schema_history (
     version INT4 PRIMARY KEY,
