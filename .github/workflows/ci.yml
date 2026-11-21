@@ -41,3 +41,45 @@ jobs:
         run: mise //:test
         env:
           CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+
+  darwin-zigbuild:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          experimental: true
+      - run: rustup target add aarch64-apple-darwin
+      - run: pipx install cargo-zigbuild
+      - name: Build the darwin release binary with cargo zigbuild
+        run: cargo zigbuild --release --target aarch64-apple-darwin
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cafleet-aarch64-apple-darwin
+          path: target/aarch64-apple-darwin/release/cafleet
+          if-no-files-found: error
+
+  darwin-zigbuild-smoke:
+    needs: darwin-zigbuild
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cafleet-aarch64-apple-darwin
+      - name: Smoke-test the zig-linked darwin binary
+        run: |
+          set -euo pipefail
+          chmod +x ./cafleet
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          database_url="sqlite:///$RUNNER_TEMP/smoke.db"
+          expected="cafleet $(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          codesign --verify --verbose ./cafleet
+          version="$(./cafleet --version)"
+          echo "$version"
+          test "$version" = "$expected"
+          ./cafleet setup --database-url "$database_url"
+          fleets="$(./cafleet fleet list --json --database-url "$database_url")"
+          echo "$fleets"
+          test "$fleets" = "[]"
