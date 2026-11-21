@@ -125,7 +125,7 @@ CREATE TABLE member_runtime_events (
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     event_seq INTEGER NOT NULL CHECK(event_seq > 0),
     interaction_id INTEGER REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
-    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','input_delivery_result','input_delivery_stalled','runner_degraded','runner_lost','runner_exited')),
+    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_closed','input_delivery_result','input_delivery_stalled','runner_degraded','runner_lost','runner_exited')),
     observed_at TEXT NOT NULL,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
     notification_state TEXT NOT NULL CHECK(notification_state IN ('inbox','archived')),
@@ -140,7 +140,7 @@ CREATE TABLE member_input_operations (
     input_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     operation_key TEXT NOT NULL CHECK(length(trim(operation_key)) > 0),
-    kind TEXT NOT NULL CHECK(kind IN ('prompt','exec','permission_response')),
+    kind TEXT NOT NULL CHECK(kind IN ('prompt','exec')),
     payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64 AND payload_digest NOT GLOB '*[^0-9a-f]*'),
     state TEXT NOT NULL CHECK(state IN ('ready','in_progress','accepted','uncertain','settled')),
     created_at TEXT NOT NULL,
@@ -155,37 +155,8 @@ CREATE TABLE member_input_operations (
             AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
         OR (stop_cause IN ('interaction_open','interaction_candidate','submit_unconfirmed',
-                          'deadline_expired','short_write','write_failed','runner_stopped',
-                          'manual_input')
+                          'deadline_expired','short_write','write_failed','runner_stopped')
             AND state IN ('uncertain','settled'))),
     UNIQUE(run_id, operation_key),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
-);
-
-CREATE TABLE member_permission_responses (
-    input_id INTEGER PRIMARY KEY REFERENCES member_input_operations(input_id) ON DELETE RESTRICT,
-    event_id INTEGER NOT NULL REFERENCES member_runtime_events(event_id) ON DELETE RESTRICT,
-    interaction_id INTEGER NOT NULL REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
-    expected_owner_epoch INTEGER NOT NULL CHECK(expected_owner_epoch > 0),
-    request_token TEXT NOT NULL CHECK(length(request_token) = 64 AND request_token NOT GLOB '*[^0-9a-f]*'),
-    decision TEXT CHECK(decision IS NULL OR decision IN ('allow','deny')),
-    choice_id TEXT CHECK(choice_id IS NULL OR (length(choice_id) BETWEEN 1 AND 64
-        AND choice_id NOT GLOB '*[^a-z0-9-]*')),
-    director_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
-    director_mode TEXT NOT NULL CHECK(director_mode IN ('auto','manual','unknown')),
-    decision_source TEXT NOT NULL CHECK(decision_source IN ('director-auto','user')),
-    mode_evidence_ref TEXT NOT NULL CHECK(length(CAST(mode_evidence_ref AS BLOB)) BETWEEN 1 AND 2048),
-    decision_evidence_ref TEXT NOT NULL CHECK(length(CAST(decision_evidence_ref AS BLOB)) BETWEEN 1 AND 2048),
-    answer_rule_id TEXT NOT NULL CHECK(length(trim(answer_rule_id)) > 0),
-    decided_at TEXT NOT NULL CHECK(length(trim(decided_at)) > 0),
-    UNIQUE(interaction_id, input_id),
-    CHECK(decision_source != 'director-auto' OR director_mode = 'auto'),
-    CHECK((decision IS NULL) != (choice_id IS NULL))
-);
-
-CREATE TABLE member_permission_response_claims (
-    interaction_id INTEGER PRIMARY KEY REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
-    input_id INTEGER NOT NULL UNIQUE REFERENCES member_input_operations(input_id) ON DELETE RESTRICT,
-    FOREIGN KEY(interaction_id, input_id)
-        REFERENCES member_permission_responses(interaction_id, input_id) ON DELETE RESTRICT
 );

@@ -1252,13 +1252,12 @@ mod tests {
         )
     }
 
-    fn installed_agents(conn: &Connection) -> Vec<String> {
-        conn.prepare("SELECT coding_agent FROM asset_installs ORDER BY coding_agent")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
+    fn install_skills(skills_dir: &Path) {
+        for (relative, bytes) in crate::assets::SKILLS {
+            let target = skills_dir.join(relative);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, bytes).unwrap();
+        }
     }
 
     fn settings(home: &Path) -> Settings {
@@ -1308,7 +1307,6 @@ mod tests {
         crate::db::classify_selected_schema(&conn, "sqlite:///:memory:")
             .require_current()
             .unwrap();
-        assert_eq!(installed_agents(&conn), ["claude"]);
         assert!(!home.path().join(".hermes").exists());
         assert!(!home.path().join(".config/opencode").exists());
     }
@@ -1330,12 +1328,6 @@ mod tests {
             assert!(
                 !home.path().join(".hermes").exists(),
                 "an unselected hermes is not consulted"
-            );
-            assert_eq!(
-                conn.query_row("SELECT COUNT(*) FROM asset_installs", [], |row| row
-                    .get::<_, i64>(0))
-                    .unwrap(),
-                1
             );
         }
     }
@@ -1418,6 +1410,44 @@ mod tests {
     }
 
     #[test]
+    fn doctor_reports_a_modified_installed_skill() {
+        let home = tempfile::tempdir().unwrap();
+        let conn = crate::db::test_support::migrated_conn(&home);
+        let probe = probe(home.path(), true, None);
+        let skills = home.path().join(".claude/skills");
+        let row = |conn: &Connection| {
+            let checks = checks_for(Some(conn), &SchemaState::Current, &probe, home.path());
+            let row = find(&checks, "claude.skills");
+            (row.status, row.detail.clone())
+        };
+        assert_eq!(
+            row(&conn),
+            (
+                CheckStatus::Warn,
+                format!(
+                    "skills not installed at {}; run 'cafleet setup --coding-agent claude'",
+                    skills.display()
+                )
+            )
+        );
+        install_skills(&skills);
+        assert_eq!(row(&conn), (CheckStatus::Ok, skills.display().to_string()));
+        let (relative, _) = crate::assets::SKILLS[0];
+        let modified = skills.join(relative);
+        std::fs::write(&modified, "modified").unwrap();
+        assert_eq!(
+            row(&conn),
+            (
+                CheckStatus::Error,
+                format!(
+                    "{}: differs from the embedded copy; run 'cafleet setup --coding-agent claude'",
+                    modified.display()
+                )
+            )
+        );
+    }
+
+    #[test]
     fn independent_failures_keep_executable_discovery_and_mark_dependent_checks_unavailable() {
         let home = tempfile::tempdir().unwrap();
         let probe = probe(home.path(), false, Some("OPENCODE_CONFIG_DIR"));
@@ -1433,9 +1463,9 @@ mod tests {
         for name in [
             "opencode.preset.cafleet",
             "opencode.preset",
-            "opencode.installation",
-            "claude.installation",
-            "codex.installation",
+            "opencode.skills",
+            "claude.skills",
+            "codex.skills",
         ] {
             let check = find(&checks, name);
             assert_eq!(check.status, CheckStatus::Info);
@@ -1444,58 +1474,6 @@ mod tests {
         assert_eq!(
             find(&checks, "claude.configuration").status,
             CheckStatus::Ok
-        );
-    }
-
-    #[test]
-    fn healthy_database_distinguishes_absent_recorded_and_failed_install_queries() {
-        let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
-        let probe = probe(home.path(), true, None);
-        let schema = SchemaState::Current;
-        crate::broker::record_asset_install(
-            &mut conn,
-            "claude",
-            &home.path().join(".claude").display().to_string(),
-        )
-        .unwrap();
-        let checks = checks_for(Some(&conn), &schema, &probe, home.path());
-        let claude = find(&checks, "claude.installation");
-        assert_eq!(claude.status, CheckStatus::Ok);
-        assert!(
-            claude.detail.starts_with("recorded at "),
-            "{}",
-            claude.detail
-        );
-        assert_eq!(
-            find(&checks, "codex.installation").status,
-            CheckStatus::Warn
-        );
-        let base = home.path().join(".config/opencode");
-        let configuration = find(&checks, "opencode.configuration");
-        assert_eq!(configuration.status, CheckStatus::Ok);
-        assert_eq!(configuration.detail, base.display().to_string());
-        let installation = find(&checks, "opencode.installation");
-        assert_eq!(installation.status, CheckStatus::Warn);
-        assert_eq!(
-            installation.detail,
-            format!(
-                "no installation recorded at {}; run 'cafleet setup --coding-agent opencode'",
-                base.display()
-            )
-        );
-        conn.execute(
-            "UPDATE asset_installs SET installed_at=X'00' WHERE coding_agent='claude'",
-            [],
-        )
-        .unwrap();
-        assert_eq!(
-            find(
-                &checks_for(Some(&conn), &schema, &probe, home.path()),
-                "claude.installation"
-            )
-            .status,
-            CheckStatus::Error
         );
     }
 
@@ -1538,7 +1516,7 @@ mod tests {
                     "opencode.preset.cafleet",
                     "opencode.preset",
                     "opencode.extension",
-                    "opencode.installation"
+                    "opencode.skills"
                 ],
                 "{context}"
             );
@@ -1763,7 +1741,11 @@ mod tests {
             let home = tempfile::tempdir().unwrap();
             let mut conn = prepare_database(&settings(home.path())).unwrap();
             install_selected(&mut conn, &[], &|_| Ok(None), home.path(), None).unwrap();
-            assert!(installed_agents(&conn).contains(&"hermes".to_owned()));
+            assert!(
+                home.path()
+                    .join(".hermes/skills/cafleet/SKILL.md")
+                    .is_file()
+            );
             assert!(!home.path().join(".hermes/plugins").exists());
         }
 
@@ -1814,7 +1796,6 @@ mod tests {
                 running_cafleet_record()
             );
             assert!(custom.join("skills/cafleet/SKILL.md").is_file());
-            assert_eq!(installed_agents(&conn), ["hermes"]);
         }
 
         #[test]
@@ -1837,7 +1818,6 @@ mod tests {
                     home.path().join(".hermes").display()
                 )
             );
-            assert!(installed_agents(&conn).is_empty());
         }
 
         #[test]
@@ -1919,15 +1899,6 @@ mod tests {
                 )
                 .unwrap();
                 assert_installed_pi_assets(&base);
-                assert_eq!(installed_agents(&conn), ["pi"]);
-                let recorded: String = conn
-                    .query_row(
-                        "SELECT path FROM asset_installs WHERE coding_agent='pi'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert_eq!(recorded, base.display().to_string());
             }
         }
 
@@ -1938,7 +1909,6 @@ mod tests {
             let mut conn = prepare_database(&settings).unwrap();
             install_selected(&mut conn, &[], &|_| Ok(None), home.path(), None).unwrap();
             assert_installed_pi_assets(&pi_base(home.path()));
-            assert!(installed_agents(&conn).contains(&"pi".to_owned()));
         }
 
         #[test]
@@ -1958,7 +1928,6 @@ mod tests {
                 failure.message(),
                 "PI_CODING_AGENT_DIR must be an absolute path (got 'relative')"
             );
-            assert!(installed_agents(&conn).is_empty());
             assert!(!pi_base(home.path()).exists());
         }
 
@@ -1989,7 +1958,7 @@ mod tests {
                     "pi.configuration",
                     "pi.executable",
                     "pi.extension",
-                    "pi.installation"
+                    "pi.skills"
                 ]
             );
         }
@@ -2113,12 +2082,7 @@ mod tests {
         use crate::assets::test_support::Reply;
         use crate::broker::fleets::MemberRunRegistry;
         use crate::broker::fleets::member_run_registry;
-        use crate::broker::fleets::test_support::create_fleet_fixture;
-        use crate::broker::runtime::CleanupState;
-        use crate::broker::runtime::RunRecord;
-        use crate::broker::runtime::RunStatus;
         use crate::broker::runtime::test_support::assert_key_order;
-        use crate::broker::runtime::test_support::register_member_run;
         use crate::cli::setup::tests::*;
         use crate::multiplexer::MuxBackend;
         use crate::multiplexer::caller::CallerMux;
@@ -2181,101 +2145,6 @@ mod tests {
         const NO_MULTIPLEXER: &str = "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; run cafleet inside a tmux or herdr session";
         const PANE_READ_FAILURE: &str = "tmux command failed: server exited unexpectedly";
 
-        #[test]
-        fn a_run_reached_after_the_time_budget_is_not_checked() {
-            let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = crate::db::test_support::migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "doctor-budget");
-            let run = register_member_run(&mut conn, fleet, director, "unprobed");
-            let rows = member_run_registry(&conn).unwrap();
-            assert_eq!(rows.len(), 1);
-            let deadline = Instant::now();
-            let probed = probe_run(conn.path().unwrap(), &rows[0], deadline);
-            assert_eq!(probed.state, MemberState::NotChecked);
-            let check = runtime_check(&probed);
-            assert_eq!(
-                format!("{} {}: {}", check.status.as_str(), check.name, check.detail),
-                format!(
-                    "info member_runtime.{}: member {1} not checked (time limit): runtime diagnosis time budget exhausted — run 'cafleet member show {1}'",
-                    run.run_id, run.member_id
-                )
-            );
-            let summary = state_summary(probed.state, &[&probed]);
-            assert_eq!(
-                format!(
-                    "{} {}: {}",
-                    summary.status.as_str(),
-                    summary.component,
-                    summary.detail
-                ),
-                format!(
-                    "info members: 1 not checked (time limit): {} — run 'cafleet member show ID'",
-                    run.member_id
-                )
-            );
-        }
-
-        #[test]
-        fn recover_hints_name_the_shared_fleet_director_or_keep_the_placeholder() {
-            let row = |member_id, director_member_id| MemberRunRegistry {
-                run_id: member_id,
-                member_id,
-                run_status: RunStatus::Running,
-                cleanup_state: CleanupState::Incomplete,
-                member_status: "active".into(),
-                director_member_id,
-            };
-            fn lost(row: &MemberRunRegistry) -> MemberRun<'_> {
-                MemberRun {
-                    row,
-                    state: MemberState::LostRuntime,
-                    phrases: vec!["owner lock is free".into()],
-                }
-            }
-            let same_fleet = [row(3, 1), row(4, 1)];
-            let same_fleet = [lost(&same_fleet[0]), lost(&same_fleet[1])];
-            assert_eq!(
-                runtime_check(&same_fleet[0]).detail,
-                "member 3 lost runtime: owner lock is free — run 'cafleet member recover 3 --from-member-id 1' or 'cafleet member delete 3'"
-            );
-            assert_eq!(
-                state_summary(MemberState::LostRuntime, &[&same_fleet[0], &same_fleet[1]]).detail,
-                "2 lost runtime: 3, 4 — run 'cafleet member recover ID --from-member-id 1' or 'cafleet member delete ID'"
-            );
-            let spanning = [row(3, 1), row(9, 7)];
-            let runs = [lost(&spanning[0]), lost(&spanning[1])];
-            assert_eq!(
-                state_summary(MemberState::LostRuntime, &[&runs[0], &runs[1]]).detail,
-                "2 lost runtime: 3, 9 — run 'cafleet member recover ID --from-member-id <director-id>' or 'cafleet member delete ID'"
-            );
-        }
-
-        #[test]
-        fn id_ranges_collapse_runs_of_three_or_more_consecutive_ids() {
-            for (ids, expected) in [
-                (&[][..], ""),
-                (&[7, 8], "7, 8"),
-                (&[1, 2, 3], "1-3"),
-                (&[1, 2, 4, 5], "1, 2, 4, 5"),
-                (&[1, 2, 3, 7, 9], "1-3, 7, 9"),
-            ] {
-                assert_eq!(format_id_ranges(ids), expected, "{ids:?}");
-            }
-        }
-
-        #[test]
-        fn id_ranges_require_ascending_de_duplicated_ids() {
-            for ids in [&[3, 3, 4][..], &[9, 1]] {
-                let panic = std::panic::catch_unwind(|| format_id_ranges(ids))
-                    .expect_err("unsorted or duplicated IDs violate the caller contract");
-                assert_eq!(
-                    panic.downcast_ref::<&str>(),
-                    Some(&"callers pass ascending, de-duplicated IDs"),
-                    "{ids:?}"
-                );
-            }
-        }
-
         fn named_row<'a>(rows: &'a [String], name: &str) -> &'a str {
             let matching = rows
                 .iter()
@@ -2290,28 +2159,8 @@ mod tests {
         const CHILD_CONFIG: &str = "CAFLEET_TEST_DOCTOR";
         const CHILD_STDOUT_MARKER: &str = "cafleet-doctor-child-stdout-begins";
         const CHILD_ANCESTOR: i64 = 4242;
-        const REGISTRY_FAILURE: &str = "registry fixture failure";
-        const PHANTOM_RUN: i64 = 999;
-        const PHANTOM_MEMBER: i64 = 42;
 
         type Registry = fn(&Connection) -> Result<Vec<MemberRunRegistry>, CafleetError>;
-
-        fn failing_registry(_: &Connection) -> Result<Vec<MemberRunRegistry>, CafleetError> {
-            Err(CafleetError::App(REGISTRY_FAILURE.into()))
-        }
-
-        fn phantom_registry(conn: &Connection) -> Result<Vec<MemberRunRegistry>, CafleetError> {
-            let mut rows = member_run_registry(conn)?;
-            rows.push(MemberRunRegistry {
-                run_id: PHANTOM_RUN,
-                member_id: PHANTOM_MEMBER,
-                run_status: RunStatus::Running,
-                cleanup_state: CleanupState::Incomplete,
-                member_status: "active".into(),
-                director_member_id: 1,
-            });
-            Ok(rows)
-        }
 
         fn ready_plugins() -> Value {
             serde_json::json!({
@@ -2424,24 +2273,20 @@ mod tests {
                 })
             }
 
-            fn summary_and_rows(&self, code: i32) -> (Vec<String>, Vec<String>) {
+            fn rows(&self, code: i32) -> Vec<String> {
                 let views = self.views();
                 views.assert_exit(code);
-                (views.text, views.verbose)
+                views.text
             }
 
             fn views(&self) -> Views {
                 let report = self.report();
-                let lines = |mode| {
-                    render(&report, mode)
-                        .lines()
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
-                };
                 let views = Views {
                     code: if report.has_errors() { 1 } else { 0 },
-                    text: lines(Mode::Summary),
-                    verbose: lines(Mode::Verbose),
+                    text: render(&report, Mode::Verbose)
+                        .lines()
+                        .map(str::to_owned)
+                        .collect(),
                     json: serde_json::from_str(&render(&report, Mode::Json)).unwrap(),
                 };
                 assert_views_agree(&views);
@@ -2452,22 +2297,17 @@ mod tests {
         struct Views {
             code: i32,
             text: Vec<String>,
-            verbose: Vec<String>,
             json: Value,
         }
 
         impl Views {
-            fn payload(&self) -> Value {
-                self.json.clone()
-            }
-
-            fn verbose_row(&self, prefix: &str) -> &str {
+            fn row(&self, prefix: &str) -> &str {
                 let rows = self
-                    .verbose
+                    .text
                     .iter()
                     .filter(|line| line.starts_with(prefix))
                     .collect::<Vec<_>>();
-                assert_eq!(rows.len(), 1, "{prefix}: {:?}", self.verbose);
+                assert_eq!(rows.len(), 1, "{prefix}: {:?}", self.text);
                 rows[0]
             }
 
@@ -2498,56 +2338,22 @@ mod tests {
         }
 
         fn assert_views_agree(views: &Views) {
-            for line in &views.verbose {
-                let name = row_name(line);
-                assert!(
-                    ["multiplexer", "database", "member_runtime"].contains(&name)
-                        || name.contains('.'),
-                    "--verbose prints only check rows: {line}"
-                );
-            }
             for line in &views.text {
                 let name = row_name(line);
                 assert!(
-                    ["multiplexer", "database", "members"].contains(&name)
-                        || crate::coding_agent::coding_agent(name).is_some(),
-                    "default output prints only summary lines: {line}"
+                    ["multiplexer", "database"].contains(&name)
+                        || (name.contains('.') && !name.starts_with("member_runtime")),
+                    "doctor prints only environment check rows: {line}"
                 );
             }
-            let payload = &views.json;
-            assert_key_order(payload, &["summary", "checks"]);
-            let summary = payload["summary"].as_array().unwrap();
-            for entry in summary {
-                if entry["component"] == "members" {
-                    assert_key_order(
-                        entry,
-                        &["component", "status", "detail", "state", "member_ids"],
-                    );
-                } else {
-                    assert_key_order(entry, &["component", "status", "detail"]);
-                }
-            }
-            assert_eq!(
-                status_lines(summary, "component"),
-                views.text,
-                "summary holds exactly the text summary lines"
-            );
-            let checks = payload["checks"].as_array().unwrap();
+            let checks = views.json.as_array().unwrap();
             for entry in checks {
-                if entry["name"]
-                    .as_str()
-                    .unwrap()
-                    .starts_with("member_runtime")
-                {
-                    assert_key_order(entry, &["name", "status", "detail", "member_id", "state"]);
-                } else {
-                    assert_key_order(entry, &["name", "status", "detail"]);
-                }
+                assert_key_order(entry, &["name", "status", "detail"]);
             }
             assert_eq!(
                 status_lines(checks, "name"),
-                views.verbose,
-                "checks hold exactly the verbose rows"
+                views.text,
+                "the JSON array holds exactly the text rows in check order"
             );
         }
 
@@ -2690,15 +2496,10 @@ mod tests {
             }
         }
 
-        fn summary_lines(stdout: &str) -> Vec<String> {
-            let payload: Value = serde_json::from_str(stdout.trim_end()).unwrap();
-            status_lines(payload["summary"].as_array().unwrap(), "component")
-        }
-
         /// A home where every backend is ready, with its database and the backend stubs.
         fn healthy_home() -> (tempfile::TempDir, PathBuf, Vec<(&'static str, String)>) {
             let home = crate::runtime::test_support::short_tempdir();
-            let mut conn = crate::db::test_support::migrated_conn(&home);
+            let conn = crate::db::test_support::migrated_conn(&home);
             let database = PathBuf::from(conn.path().unwrap());
             let profile = home.path().join("hermes-profile");
             std::fs::create_dir_all(home.path().join("hermes")).unwrap();
@@ -2712,13 +2513,9 @@ mod tests {
             install_opencode_extension(&opencode);
             install_pi_extension(&home.path().join("pi"));
             for agent in CodingAgent::all() {
-                crate::broker::record_asset_install(
-                    &mut conn,
-                    agent.name(),
-                    &home.path().join(agent.name()).display().to_string(),
-                )
-                .unwrap();
+                install_skills(&home.path().join(agent.name()).join("skills"));
             }
+            install_skills(&crate::config::opencode_skills_base(home.path()).join("skills"));
             let hermes = format!(
                 "case \"$*\" in\n\
                  'config path') printf '%s\\n' '{}' ;;\n\
@@ -2735,21 +2532,9 @@ mod tests {
             (home, database, stubs)
         }
 
-        fn ready_backend_lines() -> Vec<String> {
-            vec![
-                format!("ok database: cafleet {}", crate::cli::VERSION),
-                "ok claude: ready".into(),
-                "ok codex: ready".into(),
-                "ok opencode: ready".into(),
-                "ok hermes: ready".into(),
-                "ok pi: ready".into(),
-                "ok members: none running".into(),
-            ]
-        }
-
         fn check_lines(stdout: &str) -> Vec<String> {
             let payload: Value = serde_json::from_str(stdout.trim_end()).unwrap();
-            status_lines(payload["checks"].as_array().unwrap(), "name")
+            status_lines(payload.as_array().unwrap(), "name")
         }
 
         #[test]
@@ -2765,15 +2550,38 @@ mod tests {
             );
             assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
             assert_eq!(outcome.stderr, "");
-            let mut expected = vec!["ok multiplexer: tmux (session main, pane %1)".to_owned()];
-            expected.extend(ready_backend_lines());
-            assert_eq!(summary_lines(&outcome.stdout), expected);
+            let lines = check_lines(&outcome.stdout);
             assert_eq!(
-                check_lines(&outcome.stdout)[..2],
+                lines[..2],
                 [
                     "ok multiplexer: tmux server=cafleet-test".to_owned(),
                     "ok multiplexer.caller_pane: TMUX_PANE=%1 session=main window=@1".to_owned(),
                 ]
+            );
+            assert!(
+                lines.iter().all(|line| line.starts_with("ok ")),
+                "{lines:?}"
+            );
+        }
+
+        #[test]
+        fn doctor_process_prints_the_json_array_rows_as_text_in_check_order() {
+            let (home, database, stubs) = healthy_home();
+            let run = |args: &[&str]| {
+                let outcome =
+                    doctor_process(home.path(), &database, &stubs, args, None, ChildPane::Own);
+                assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
+                outcome.stdout
+            };
+            let json = run(&["doctor", "--json"]);
+            let text = run(&["doctor"]);
+            let payload: Value = serde_json::from_str(json.trim_end()).unwrap();
+            for entry in payload.as_array().unwrap() {
+                assert_key_order(entry, &["name", "status", "detail"]);
+            }
+            assert_eq!(
+                text.lines().map(str::to_owned).collect::<Vec<_>>(),
+                check_lines(&json)
             );
         }
 
@@ -2798,9 +2606,6 @@ mod tests {
                 label: "codex app-server".to_string(),
                 pid: CHILD_ANCESTOR,
             });
-            let mut expected = vec![format!("warn multiplexer: {detail}")];
-            expected.extend(ready_backend_lines());
-            assert_eq!(summary_lines(&outcome.stdout), expected);
             assert_eq!(
                 check_lines(&outcome.stdout)[..2],
                 [
@@ -2815,11 +2620,6 @@ mod tests {
         fn assert_caller_pane_warning(outcome: &Outcome, detail: &str) {
             assert_eq!(outcome.code, Some(0), "{}", outcome.stderr);
             assert_eq!(outcome.stderr, "");
-            let mut expected = vec![format!(
-                "warn multiplexer: tmux (server cafleet-test); {detail}"
-            )];
-            expected.extend(ready_backend_lines());
-            assert_eq!(summary_lines(&outcome.stdout), expected);
             assert_eq!(
                 check_lines(&outcome.stdout)[..2],
                 [
@@ -2881,54 +2681,25 @@ mod tests {
                 home.path(),
                 &database,
                 &[],
-                &["doctor", "--json", "--verbose"],
+                &["doctor", "--json"],
                 None,
                 ChildPane::Own,
             );
             assert_eq!(outcome.code, Some(1));
             assert_eq!(outcome.stderr, "Error: doctor found errors\n");
-            let lines = summary_lines(&outcome.stdout);
-            assert!(lines[1].starts_with("error database: "), "{lines:?}");
+            let lines = check_lines(&outcome.stdout);
+            assert!(
+                named_row(&lines, "database").starts_with("error database: "),
+                "{lines:?}"
+            );
             assert_eq!(
-                lines[5],
-                "info hermes: not installed (hermes is not on PATH)"
+                named_row(&lines, "hermes.executable"),
+                "info hermes.executable: hermes is optional and absent from PATH"
             );
             assert!(!database.exists(), "doctor creates no database");
         }
 
-        fn members_entry<'a>(payload: &'a Value, state: &str) -> &'a Value {
-            payload["summary"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|entry| entry["component"] == "members" && entry["state"] == state)
-                .unwrap_or_else(|| panic!("members entry {state}: {payload}"))
-        }
-
-        fn runtime_entry(payload: &Value, run_id: i64) -> &Value {
-            let name = format!("member_runtime.{run_id}");
-            payload["checks"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|entry| entry["name"] == name.as_str())
-                .unwrap_or_else(|| panic!("{name}: {payload}"))
-        }
-
-        fn multiplexer_line() -> String {
-            "ok multiplexer: tmux (session main, pane %1)".into()
-        }
-
-        fn database_line() -> String {
-            format!("ok database: cafleet {}", crate::cli::VERSION)
-        }
-
-        fn record(conn: &mut Connection, scenario: &Scenario, agent: CodingAgent) {
-            crate::broker::record_asset_install(conn, agent.name(), &scenario.config(agent))
-                .unwrap();
-        }
-
-        fn healthy_backends(scenario: &mut Scenario, conn: &mut Connection) {
+        fn healthy_backends(scenario: &mut Scenario) {
             for name in ["claude", "codex", "opencode", "pi"] {
                 scenario.executable(name);
             }
@@ -2936,27 +2707,12 @@ mod tests {
             scenario.opencode_presets();
             scenario.seed_opencode_extension();
             scenario.seed_pi_extension();
-            for agent in [
-                CodingAgent::Claude,
-                CodingAgent::Opencode,
-                CodingAgent::Hermes,
-                CodingAgent::Pi,
-            ] {
-                record(conn, scenario, agent);
+            for agent in [CodingAgent::Claude, CodingAgent::Hermes, CodingAgent::Pi] {
+                install_skills(&Path::new(&scenario.config(agent)).join("skills"));
             }
-        }
-
-        fn healthy_backend_lines(scenario: &Scenario) -> Vec<String> {
-            vec![
-                "ok claude: ready".into(),
-                format!(
-                    "warn codex: assets not installed at {} — run 'cafleet setup --coding-agent codex'",
-                    scenario.config(CodingAgent::Codex)
-                ),
-                "ok opencode: ready".into(),
-                "ok hermes: ready".into(),
-                "ok pi: ready".into(),
-            ]
+            install_skills(
+                &crate::config::opencode_skills_base(scenario.home.path()).join("skills"),
+            );
         }
 
         mod caller_pane_rows {
@@ -2965,32 +2721,14 @@ mod tests {
             /// The healthy scenario's views with `caller` as the caller reading.
             fn views_with(caller: fn() -> CallerReading) -> Views {
                 let mut scenario = Scenario::new(member_run_registry);
-                let mut conn = scenario.connect();
-                healthy_backends(&mut scenario, &mut conn);
+                scenario.connect();
+                healthy_backends(&mut scenario);
                 scenario.caller = caller;
                 scenario.views()
             }
 
-            fn assert_multiplexer(views: &Views, summary: &str, rows: [&str; 2], code: i32) {
-                let summaries: Vec<&String> = views
-                    .text
-                    .iter()
-                    .filter(|line| row_name(line) == "multiplexer")
-                    .collect();
-                assert_eq!(summaries, [summary], "one folded multiplexer summary line");
-                assert_eq!(views.text[0], summary);
-                assert_eq!(views.verbose[..2], rows);
-                let checks = views.json["checks"].as_array().unwrap();
-                assert_eq!(checks[0]["name"], "multiplexer");
-                assert_eq!(checks[1]["name"], "multiplexer.caller_pane");
-                assert_eq!(
-                    views.json["summary"][0],
-                    json!({
-                        "component": "multiplexer",
-                        "status": summary.split_once(' ').unwrap().0,
-                        "detail": summary.split_once(": ").unwrap().1,
-                    })
-                );
+            fn assert_multiplexer(views: &Views, rows: [&str; 2], code: i32) {
+                assert_eq!(views.text[..2], rows);
                 views.assert_exit(code);
             }
 
@@ -3003,7 +2741,6 @@ mod tests {
                         pid: codex_daemon().pid,
                         message: shared_server_message(&codex_daemon()),
                     }),
-                    &format!("warn multiplexer: {detail}"),
                     [
                         "info multiplexer: not checked: a shared codex app-server server (pid 407596) supplies the caller environment",
                         &format!("warn multiplexer.caller_pane: {detail}"),
@@ -3018,7 +2755,6 @@ mod tests {
                     &views_with(|| {
                         CallerReading::Unavailable(CafleetError::App(NO_MULTIPLEXER.into()))
                     }),
-                    &format!("error multiplexer: {NO_MULTIPLEXER}"),
                     [
                         &format!("error multiplexer: {NO_MULTIPLEXER}"),
                         "info multiplexer.caller_pane: unavailable: the multiplexer is unavailable",
@@ -3038,7 +2774,6 @@ mod tests {
                             detail: unset_message(MuxBackend::Tmux),
                         }),
                     }),
-                    &format!("warn multiplexer: tmux (server {TMUX_SOCKET}); {detail}"),
                     [
                         &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
                         &format!("warn multiplexer.caller_pane: {detail}"),
@@ -3058,7 +2793,6 @@ mod tests {
                             detail: unverified_detail(),
                         }),
                     }),
-                    &format!("warn multiplexer: tmux (server {TMUX_SOCKET}); {detail}"),
                     [
                         &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
                         &format!("warn multiplexer.caller_pane: {detail}"),
@@ -3071,7 +2805,6 @@ mod tests {
             fn a_verified_pane_reports_its_context() {
                 assert_multiplexer(
                     &views_with(verified_caller),
-                    "ok multiplexer: tmux (session main, pane %1)",
                     [
                         &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
                         "ok multiplexer.caller_pane: TMUX_PANE=%1 session=main window=@1",
@@ -3088,7 +2821,6 @@ mod tests {
                         server: TMUX_SOCKET.to_string(),
                         pane: Err(CafleetError::App(PANE_READ_FAILURE.into())),
                     }),
-                    &format!("error multiplexer: {PANE_READ_FAILURE}"),
                     [
                         &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
                         &format!("error multiplexer.caller_pane: {PANE_READ_FAILURE}"),
@@ -3113,7 +2845,6 @@ mod tests {
                 });
                 assert_multiplexer(
                     &views,
-                    "ok multiplexer: herdr (session w4, pane w4:p3N)",
                     [
                         "ok multiplexer: herdr server=default",
                         "ok multiplexer.caller_pane: HERDR_PANE_ID=w4:p3N session=w4 window=w4:t1",
@@ -3126,16 +2857,12 @@ mod tests {
         #[test]
         fn doctor_with_only_warnings_prints_ready_backends_and_exits_zero() {
             let mut scenario = Scenario::new(member_run_registry);
-            let mut conn = scenario.connect();
-            healthy_backends(&mut scenario, &mut conn);
+            scenario.connect();
+            healthy_backends(&mut scenario);
             let views = scenario.views();
-            let mut expected = vec![multiplexer_line(), database_line()];
-            expected.extend(healthy_backend_lines(&scenario));
-            expected.push("ok members: none running".into());
-            assert_eq!(views.text, expected);
             views.assert_exit(0);
             assert_eq!(
-                named_row(&views.verbose, "opencode.extension"),
+                named_row(&views.text, "opencode.extension"),
                 format!(
                     "ok opencode.extension: {}",
                     scenario
@@ -3145,328 +2872,39 @@ mod tests {
                 )
             );
             assert_eq!(
-                named_row(&views.verbose, "hermes.extension"),
+                named_row(&views.text, "hermes.extension"),
                 format!(
                     "ok hermes.extension: {}",
                     scenario.hermes_plugin_dir().display()
                 )
             );
             assert_eq!(
-                named_row(&views.verbose, "hermes.plugin_enabled"),
+                named_row(&views.text, "hermes.plugin_enabled"),
                 "ok hermes.plugin_enabled: cafleet enabled with gateway injection"
             );
             assert_eq!(
-                views.verbose_row("warn codex.installation: "),
+                views.row("warn codex.skills: "),
                 format!(
-                    "warn codex.installation: no installation recorded at {}; run 'cafleet setup --coding-agent codex'",
-                    scenario.config(CodingAgent::Codex)
+                    "warn codex.skills: skills not installed at {}; run 'cafleet setup --coding-agent codex'",
+                    Path::new(&scenario.config(CodingAgent::Codex))
+                        .join("skills")
+                        .display()
                 )
             );
             assert!(
-                !views
-                    .verbose
+                views
+                    .text
                     .iter()
-                    .any(|line| line.contains("member_runtime"))
+                    .all(|line| !line.starts_with("warn ") || line.starts_with("warn codex.")),
+                "{:?}",
+                views.text
             );
-            assert_eq!(
-                views.payload()["summary"]
-                    .as_array()
-                    .unwrap()
-                    .last()
-                    .unwrap(),
-                &serde_json::json!({
-                    "component": "members",
-                    "status": "ok",
-                    "detail": "none running",
-                    "state": "running",
-                    "member_ids": [],
-                })
-            );
-        }
-
-        struct MemberRuns {
-            exited: RunRecord,
-            ended: RunRecord,
-            leftover: RunRecord,
-            interrupted: RunRecord,
-            lost: Vec<RunRecord>,
-            unresponsive: RunRecord,
-        }
-
-        fn member_runs(conn: &mut Connection) -> (MemberRuns, Vec<crate::runtime::RunArtifacts>) {
-            let (fleet, director) = create_fleet_fixture(conn, "doctor-members");
-            let mut run = |name: &str| register_member_run(conn, fleet, director, name);
-            let exited = run("exited");
-            let ended = run("ended");
-            let leftover = run("leftover");
-            let interrupted = run("interrupted");
-            let lost_first = run("lost-first");
-            let unresponsive = run("unresponsive");
-            let lost_rest = [run("lost-a"), run("lost-b"), run("lost-c")];
-            let ids = [
-                director,
-                exited.member_id,
-                ended.member_id,
-                leftover.member_id,
-                interrupted.member_id,
-                lost_first.member_id,
-                unresponsive.member_id,
-                lost_rest[0].member_id,
-                lost_rest[1].member_id,
-                lost_rest[2].member_id,
-            ];
-            assert!(ids.windows(2).all(|pair| pair[1] == pair[0] + 1), "{ids:?}");
-            for (sql, run_id) in [
-                (
-                    "UPDATE member_runs SET status='exited', cleanup_state='complete' WHERE run_id=?1",
-                    exited.run_id,
-                ),
-                (
-                    "UPDATE member_runs SET status='lost', cleanup_state='complete' WHERE run_id=?1",
-                    ended.run_id,
-                ),
-                (
-                    "UPDATE members SET status='deregistered' WHERE member_id=(SELECT member_id FROM member_runs WHERE run_id=?1)",
-                    ended.run_id,
-                ),
-                (
-                    "UPDATE members SET status='deregistered' WHERE member_id=(SELECT member_id FROM member_runs WHERE run_id=?1)",
-                    leftover.run_id,
-                ),
-            ] {
-                conn.execute(sql, [run_id]).unwrap();
-            }
-            let mut lost = vec![lost_first];
-            lost.extend(lost_rest);
-            let mut artifacts = Vec::new();
-            for run in lost.iter().chain(std::iter::once(&unresponsive)) {
-                artifacts.push(crate::runtime::RunArtifacts::create(conn, run.run_id).unwrap());
-            }
-            let refresh =
-                |run: &RunRecord| crate::broker::runtime::get_run(conn, run.run_id).unwrap();
-            let runs = MemberRuns {
-                exited: refresh(&exited),
-                ended: refresh(&ended),
-                leftover: refresh(&leftover),
-                interrupted: refresh(&interrupted),
-                lost: lost.iter().map(refresh).collect(),
-                unresponsive: refresh(&unresponsive),
-            };
-            (runs, artifacts)
         }
 
         #[test]
-        fn doctor_groups_members_by_state_and_joins_backend_problems() {
+        fn doctor_reports_configuration_and_preset_errors_on_their_rows() {
             let mut scenario = Scenario::new(member_run_registry);
-            let mut conn = scenario.connect();
-            for name in ["claude", "codex"] {
-                scenario.executable(name);
-            }
-            install_hermes_plugin(&scenario.hermes_plugin_dir());
-            scenario.hermes_ready();
-            scenario.hermes.put(
-                PLUGINS_KEY,
-                json!({"entries": {"cafleet": {"allow_gateway_injection": true}}}),
-            );
-            record(&mut conn, &scenario, CodingAgent::Claude);
-            let (runs, _artifacts) = member_runs(&mut conn);
-            let director = runs.exited.director_member_id;
-            let _held = crate::runtime::RunLock::acquire(&conn, &runs.unresponsive.owner())
-                .unwrap()
-                .expect("the fixture owns the unresponsive run's lock");
-            let views = scenario.views();
-            let lost_ids = runs
-                .lost
-                .iter()
-                .map(|run| run.member_id.to_string())
-                .collect::<Vec<_>>();
-            assert_eq!(
-                views.text,
-                [
-                    multiplexer_line(),
-                    database_line(),
-                    "ok claude: ready".into(),
-                    format!(
-                        "warn codex: assets not installed at {} — run 'cafleet setup --coding-agent codex'",
-                        scenario.config(CodingAgent::Codex)
-                    ),
-                    "info opencode: not installed (opencode is not on PATH)".into(),
-                    format!(
-                        "error hermes: hermes plugin cafleet is not enabled: plugins.enabled; assets not installed at {} — run 'cafleet setup --coding-agent hermes'",
-                        scenario.config(CodingAgent::Hermes)
-                    ),
-                    "info pi: not installed (pi is not on PATH)".into(),
-                    format!(
-                        "warn members: 1 not responding: {} — run 'cafleet member recover ID --from-member-id {director}'",
-                        runs.unresponsive.member_id
-                    ),
-                    format!(
-                        "warn members: 4 lost runtime: {}, {}-{} — run 'cafleet member recover ID --from-member-id {director}' or 'cafleet member delete ID'",
-                        lost_ids[0], lost_ids[1], lost_ids[3]
-                    ),
-                    format!(
-                        "warn members: 1 interrupted launch: {} — run 'cafleet member recover ID --from-member-id {director}'",
-                        runs.interrupted.member_id
-                    ),
-                    format!(
-                        "warn members: 1 agent exited: {} — run 'cafleet member delete ID'",
-                        runs.exited.member_id
-                    ),
-                    format!(
-                        "warn members: 1 deleted with leftover runtime: {} — run 'cafleet member recover ID --from-member-id {director}'",
-                        runs.leftover.member_id
-                    ),
-                ]
-            );
-            views.assert_exit(1);
-            assert_eq!(
-                views.verbose_row("warn codex.installation: "),
-                format!(
-                    "warn codex.installation: no installation recorded at {}; run 'cafleet setup --coding-agent codex'",
-                    scenario.config(CodingAgent::Codex)
-                )
-            );
-            assert_eq!(
-                views.verbose_row("warn hermes.installation: "),
-                format!(
-                    "warn hermes.installation: no installation recorded at {}; run 'cafleet setup --coding-agent hermes'",
-                    scenario.config(CodingAgent::Hermes)
-                )
-            );
-            let row = |run: &RunRecord| format!("member_runtime.{}: ", run.run_id);
-            let exited = &runs.exited;
-            assert_eq!(
-                views.verbose_row(&format!("warn {}", row(exited))),
-                format!(
-                    "warn {}member {} agent exited: run exited, cleanup complete — run 'cafleet member delete {}'",
-                    row(exited),
-                    exited.member_id,
-                    exited.member_id
-                )
-            );
-            let ended = &runs.ended;
-            assert_eq!(
-                views.verbose_row(&format!("info {}", row(ended))),
-                format!(
-                    "info {}member {} ended: run lost, cleanup complete",
-                    row(ended),
-                    ended.member_id
-                )
-            );
-            let leftover = &runs.leftover;
-            assert_eq!(
-                views.verbose_row(&format!("warn {}", row(leftover))),
-                format!(
-                    "warn {}member {} deleted with leftover runtime: run starting, cleanup incomplete — run 'cafleet member recover {} --from-member-id {director}'",
-                    row(leftover),
-                    leftover.member_id,
-                    leftover.member_id
-                )
-            );
-            let interrupted = &runs.interrupted;
-            let interrupted_row = views.verbose_row(&format!("warn {}", row(interrupted)));
-            assert!(
-                interrupted_row.starts_with(&format!(
-                    "warn {}member {} interrupted launch: runtime files are invalid: ",
-                    row(interrupted),
-                    interrupted.member_id
-                )) && interrupted_row.ends_with(&format!(
-                    " — run 'cafleet member recover {} --from-member-id {director}'",
-                    interrupted.member_id
-                )),
-                "{interrupted_row}"
-            );
-            for lost in &runs.lost {
-                let lost_row = views.verbose_row(&format!("warn {}", row(lost)));
-                assert!(
-                    lost_row.starts_with(&format!(
-                        "warn {}member {} lost runtime: owner lock is free; runtime did not answer the health probe: ",
-                        row(lost),
-                        lost.member_id
-                    )) && lost_row.ends_with(&format!(
-                        " — run 'cafleet member recover {0} --from-member-id {director}' or 'cafleet member delete {0}'",
-                        lost.member_id
-                    )),
-                    "{lost_row}"
-                );
-            }
-            let unresponsive = &runs.unresponsive;
-            let unresponsive_row = views.verbose_row(&format!("warn {}", row(unresponsive)));
-            assert!(
-                unresponsive_row.starts_with(&format!(
-                    "warn {}member {} not responding: owner lock is held; runtime did not answer the health probe: ",
-                    row(unresponsive),
-                    unresponsive.member_id
-                )) && unresponsive_row.ends_with(&format!(
-                    " — run 'cafleet member recover {} --from-member-id {director}'",
-                    unresponsive.member_id
-                )),
-                "{unresponsive_row}"
-            );
-            let runtime_rows = views
-                .verbose
-                .iter()
-                .filter(|line| row_name(line).starts_with("member_runtime."))
-                .map(|line| {
-                    row_name(line)
-                        .trim_start_matches("member_runtime.")
-                        .parse::<i64>()
-                        .unwrap()
-                })
-                .collect::<Vec<_>>();
-            let mut recorded = [exited, ended, leftover, interrupted, unresponsive]
-                .into_iter()
-                .chain(&runs.lost)
-                .map(|run| run.run_id)
-                .collect::<Vec<_>>();
-            recorded.sort_unstable();
-            assert_eq!(
-                runtime_rows, recorded,
-                "one runtime row per recorded run, in run order"
-            );
-            let payload = views.payload();
-            let lost_entry = members_entry(&payload, "lost_runtime");
-            assert_eq!(lost_entry["status"], "warn");
-            assert_eq!(
-                lost_entry["member_ids"],
-                serde_json::json!(
-                    runs.lost
-                        .iter()
-                        .map(|run| run.member_id)
-                        .collect::<Vec<_>>()
-                )
-            );
-            for (state, run) in [
-                ("not_responding", unresponsive),
-                ("interrupted_launch", interrupted),
-                ("agent_exited", exited),
-                ("deleted_with_leftover_runtime", leftover),
-            ] {
-                assert_eq!(
-                    members_entry(&payload, state)["member_ids"],
-                    serde_json::json!([run.member_id]),
-                    "{state}"
-                );
-            }
-            for (run, state, status) in [
-                (exited, "agent_exited", "warn"),
-                (ended, "ended", "info"),
-                (leftover, "deleted_with_leftover_runtime", "warn"),
-                (interrupted, "interrupted_launch", "warn"),
-                (unresponsive, "not_responding", "warn"),
-                (&runs.lost[0], "lost_runtime", "warn"),
-            ] {
-                let entry = runtime_entry(&payload, run.run_id);
-                assert_eq!(entry["member_id"], run.member_id, "{state}");
-                assert_eq!(entry["state"], state);
-                assert_eq!(entry["status"], status, "{state}");
-            }
-        }
-
-        #[test]
-        fn doctor_reports_configuration_and_preset_errors_and_hides_ended_runs() {
-            let mut scenario = Scenario::new(member_run_registry);
-            let mut conn = scenario.connect();
+            let _conn = scenario.connect();
             for name in ["claude", "opencode"] {
                 scenario.executable(name);
             }
@@ -3474,181 +2912,62 @@ mod tests {
                 .environment
                 .push(("CLAUDE_CONFIG_DIR", "relative".into()));
             scenario.seed_opencode_extension();
-            let (fleet, director) = create_fleet_fixture(&mut conn, "doctor-ended");
-            let ended = register_member_run(&mut conn, fleet, director, "ended");
-            conn.execute(
-                "UPDATE member_runs SET status='exited', cleanup_state='complete' WHERE run_id=?1",
-                [ended.run_id],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE members SET status='deregistered' WHERE member_id=?1",
-                [ended.member_id],
-            )
-            .unwrap();
             let views = scenario.views();
-            let agents = scenario.path("opencode").join("agents");
-            assert_eq!(
-                views.text,
-                [
-                    multiplexer_line(),
-                    database_line(),
-                    "error claude: CLAUDE_CONFIG_DIR must be an absolute path (got 'relative')"
-                        .into(),
-                    "info codex: not installed (codex is not on PATH)".into(),
-                    format!(
-                        "error opencode: preset {} is unreadable: No such file or directory (os error 2); preset {} is unreadable: No such file or directory (os error 2); assets not installed at {} — run 'cafleet setup --coding-agent opencode'",
-                        agents.join("cafleet.md").display(),
-                        agents.join("cafleet-ask.md").display(),
-                        scenario.config(CodingAgent::Opencode)
-                    ),
-                    "info hermes: not installed (hermes is not on PATH)".into(),
-                    "info pi: not installed (pi is not on PATH)".into(),
-                    "ok members: none running".into(),
-                ]
-            );
             views.assert_exit(1);
             assert_eq!(
-                views.verbose_row("info member_runtime."),
-                format!(
-                    "info member_runtime.{}: member {} ended: run exited, cleanup complete",
-                    ended.run_id, ended.member_id
-                )
+                named_row(&views.text, "claude.configuration"),
+                "error claude.configuration: CLAUDE_CONFIG_DIR must be an absolute path (got 'relative')"
             );
-            let payload = views.payload();
-            let entry = runtime_entry(&payload, ended.run_id);
-            assert_eq!(entry["state"], "ended");
-            assert_eq!(entry["member_id"], ended.member_id);
+            let agents = scenario.path("opencode").join("agents");
+            for (name, preset) in [
+                ("opencode.preset.cafleet", "cafleet.md"),
+                ("opencode.preset", "cafleet-ask.md"),
+            ] {
+                assert_eq!(
+                    named_row(&views.text, name),
+                    format!(
+                        "error {name}: {}: No such file or directory (os error 2); run 'cafleet setup --coding-agent opencode'",
+                        agents.join(preset).display()
+                    )
+                );
+            }
         }
 
         #[test]
-        fn doctor_without_a_database_marks_installations_and_members_unchecked() {
+        fn doctor_without_a_database_still_compares_the_installed_skills() {
             let mut scenario = Scenario::new(member_run_registry);
             scenario.executable("claude");
+            let skills = Path::new(&scenario.config(CodingAgent::Claude)).join("skills");
+            install_skills(&skills);
             let views = scenario.views();
-            let lines = &views.text;
-            assert_eq!(lines.len(), 8, "{lines:?}");
-            assert_eq!(lines[0], multiplexer_line());
-            assert!(lines[1].starts_with("error database: "), "{}", lines[1]);
-            assert_eq!(
-                lines[2..],
-                [
-                    "info claude: assets unchecked (database unavailable)",
-                    "info codex: not installed (codex is not on PATH)",
-                    "info opencode: not installed (opencode is not on PATH)",
-                    "info hermes: not installed (hermes is not on PATH)",
-                    "info pi: not installed (pi is not on PATH)",
-                    "info members: not checked (database unavailable)",
-                ]
-            );
             views.assert_exit(1);
-            assert!(!scenario.database.exists(), "doctor creates no database");
-            assert_eq!(
-                members_entry(&views.payload(), "not_checked"),
-                &serde_json::json!({
-                    "component": "members",
-                    "status": "info",
-                    "detail": "not checked (database unavailable)",
-                    "state": "not_checked",
-                    "member_ids": [],
-                })
-            );
-        }
-
-        #[test]
-        fn doctor_reports_a_failed_registry_read_and_still_prints_every_other_check() {
-            let mut scenario = Scenario::new(failing_registry);
-            let mut conn = scenario.connect();
-            healthy_backends(&mut scenario, &mut conn);
-            let views = scenario.views();
-            let mut expected = vec![multiplexer_line(), database_line()];
-            expected.extend(healthy_backend_lines(&scenario));
-            expected.push(format!(
-                "error members: could not be checked: {REGISTRY_FAILURE}"
-            ));
-            assert_eq!(views.text, expected);
-            views.assert_exit(1);
-            assert_eq!(
-                views.verbose.last().unwrap(),
-                &format!(
-                    "error member_runtime: member runtimes could not be read: {REGISTRY_FAILURE}"
-                )
-            );
             assert!(
-                views
-                    .verbose
-                    .iter()
-                    .any(|line| line.starts_with("ok hermes.plugin_enabled: "))
-            );
-            let payload = views.payload();
-            assert_eq!(
-                payload["summary"].as_array().unwrap().last().unwrap(),
-                &serde_json::json!({
-                    "component": "members",
-                    "status": "error",
-                    "detail": format!("could not be checked: {REGISTRY_FAILURE}"),
-                    "state": "check_failed",
-                    "member_ids": [],
-                })
+                named_row(&views.text, "database").starts_with("error database: "),
+                "{:?}",
+                views.text
             );
             assert_eq!(
-                payload["checks"].as_array().unwrap().last().unwrap(),
-                &serde_json::json!({
-                    "name": "member_runtime",
-                    "status": "error",
-                    "detail": format!("member runtimes could not be read: {REGISTRY_FAILURE}"),
-                    "member_id": null,
-                    "state": "check_failed",
-                })
+                named_row(&views.text, "claude.skills"),
+                format!("ok claude.skills: {}", skills.display())
             );
-        }
-
-        #[test]
-        fn doctor_reports_a_run_whose_diagnosis_fails_as_could_not_be_checked() {
-            let mut scenario = Scenario::new(phantom_registry);
-            let mut conn = scenario.connect();
-            healthy_backends(&mut scenario, &mut conn);
-            let views = scenario.views();
-            assert_eq!(
-                views.text.last().unwrap(),
-                &format!(
-                    "error members: 1 could not be checked: {PHANTOM_MEMBER} — run 'cafleet doctor --verbose'"
-                )
-            );
-            views.assert_exit(1);
-            let prefix = format!(
-                "error member_runtime.{PHANTOM_RUN}: member {PHANTOM_MEMBER} could not be checked: "
-            );
-            let row = views.verbose_row(&prefix);
-            let cause = row.strip_prefix(&prefix).unwrap();
-            assert!(!cause.is_empty(), "{row}");
-            assert!(!row.contains(" — run "), "{row}");
-            let payload = views.payload();
-            let entry = runtime_entry(&payload, PHANTOM_RUN);
-            assert_eq!(entry["member_id"], PHANTOM_MEMBER);
-            assert_eq!(entry["state"], "check_failed");
-            assert_eq!(entry["status"], "error");
-            assert_eq!(
-                members_entry(&payload, "check_failed")["member_ids"],
-                serde_json::json!([PHANTOM_MEMBER])
-            );
+            assert!(!scenario.database.exists(), "doctor creates no database");
         }
 
         fn healthy_scenario() -> (Scenario, Connection) {
             let mut scenario = Scenario::new(member_run_registry);
-            let mut conn = scenario.connect();
-            healthy_backends(&mut scenario, &mut conn);
+            let conn = scenario.connect();
+            healthy_backends(&mut scenario);
             (scenario, conn)
         }
 
         #[test]
-        fn doctor_reports_an_unreadable_hermes_config_path_on_its_row_and_summary() {
+        fn doctor_reports_an_unreadable_hermes_config_path_on_its_row() {
             let (mut scenario, _conn) = healthy_scenario();
             scenario.hermes.reply(
                 FakeHermes::path_call(),
                 Reply::Fail("no configuration found".into()),
             );
-            let (summary, rows) = scenario.summary_and_rows(1);
+            let rows = scenario.rows(1);
             let row = named_row(&rows, "hermes.extension");
             let detail = row
                 .strip_prefix("error hermes.extension: ")
@@ -3657,11 +2976,6 @@ mod tests {
                 detail
                     .starts_with("cannot read hermes configuration through 'hermes config path': "),
                 "{row}"
-            );
-            assert_eq!(
-                named_row(&summary, "hermes"),
-                format!("error hermes: {detail}"),
-                "an unreadable config path has no setup fix"
             );
             assert_eq!(
                 named_row(&rows, "hermes.plugin_enabled"),
@@ -3677,7 +2991,7 @@ mod tests {
         }
 
         #[test]
-        fn doctor_reports_each_hermes_plugin_enablement_state_on_its_row_and_summary() {
+        fn doctor_reports_each_hermes_plugin_enablement_state_on_its_row() {
             let not_enabled = |keys: &str| format!("hermes plugin cafleet is not enabled: {keys}");
             let both = format!("{ENABLED_KEY}, {INJECTION_KEY}");
             let cases = [
@@ -3721,16 +3035,14 @@ mod tests {
                 } else {
                     1
                 };
-                let (summary, rows) = scenario.summary_and_rows(code);
+                let rows = scenario.rows(code);
                 let row = named_row(&rows, "hermes.plugin_enabled");
-                let hermes = named_row(&summary, "hermes");
                 match expected {
                     Enablement::Ready => {
                         assert_eq!(
                             row,
                             "ok hermes.plugin_enabled: cafleet enabled with gateway injection"
                         );
-                        assert_eq!(hermes, "ok hermes: ready");
                     }
                     Enablement::Disabled => {
                         assert_eq!(
@@ -3738,10 +3050,6 @@ mod tests {
                             format!(
                                 "error hermes.plugin_enabled: hermes plugins.disabled lists cafleet; remove it, then {HERMES_FIX}"
                             )
-                        );
-                        assert_eq!(
-                            hermes, "error hermes: hermes plugins.disabled lists cafleet",
-                            "the operator's disable has no setup fix"
                         );
                     }
                     Enablement::Missing(keys) => {
@@ -3751,10 +3059,6 @@ mod tests {
                                 "error hermes.plugin_enabled: {}; {HERMES_FIX}",
                                 not_enabled(&keys)
                             )
-                        );
-                        assert_eq!(
-                            hermes,
-                            format!("error hermes: {} — {HERMES_FIX}", not_enabled(&keys))
                         );
                     }
                     Enablement::Unreadable => {
@@ -3767,7 +3071,6 @@ mod tests {
                             ),
                             "{row}"
                         );
-                        assert_eq!(hermes, format!("error hermes: {detail}"));
                     }
                 }
                 assert!(named_row(&rows, "hermes.extension").starts_with("ok "));
@@ -3779,7 +3082,7 @@ mod tests {
             let (scenario, _conn) = healthy_scenario();
             let base = scenario.path("hermes");
             std::fs::remove_dir_all(&base).unwrap();
-            let (summary, rows) = scenario.summary_and_rows(0);
+            let rows = scenario.rows(0);
             for name in ["hermes.extension", "hermes.plugin_enabled"] {
                 assert_eq!(
                     named_row(&rows, name),
@@ -3789,13 +3092,6 @@ mod tests {
                     )
                 );
             }
-            assert_eq!(
-                named_row(&summary, "hermes"),
-                format!(
-                    "info hermes: no Hermes home at {} — {HERMES_FIX}",
-                    base.display()
-                )
-            );
             assert!(
                 scenario.hermes.calls().is_empty(),
                 "{:?}",
@@ -3834,76 +3130,38 @@ mod tests {
         }
 
         #[test]
-        fn the_probe_pass_keeps_registry_order_across_more_runs_than_probe_workers() {
-            let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = crate::db::test_support::migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "doctor-probes");
-            let runs = (0..PROBE_WORKERS + 4)
-                .map(|index| register_member_run(&mut conn, fleet, director, &format!("w{index}")))
-                .collect::<Vec<_>>();
-            let rows = member_run_registry(&conn).unwrap();
-            let rows = rows.iter().collect::<Vec<_>>();
-            let probed = probe_runs(
-                conn.path().unwrap(),
-                &rows,
-                Instant::now() + Duration::from_secs(5),
-            );
-            assert_eq!(
-                probed.iter().map(|run| run.row.run_id).collect::<Vec<_>>(),
-                runs.iter().map(|run| run.run_id).collect::<Vec<_>>()
-            );
-            assert!(
-                probed
-                    .iter()
-                    .all(|run| run.state != MemberState::NotChecked),
-                "every run is probed within the pass budget"
-            );
-        }
-
-        #[test]
-        fn doctor_folds_every_hermes_and_opencode_extension_problem_into_the_summary() {
-            let (mut scenario, _conn) = healthy_scenario();
+        fn doctor_reports_each_tampered_hermes_and_opencode_extension_on_its_row() {
+            let (scenario, _conn) = healthy_scenario();
             let file = install_hermes_plugin(&scenario.hermes_plugin_dir())
                 .into_iter()
                 .next()
                 .unwrap();
             std::fs::write(&file, "tampered").unwrap();
-            scenario.hermes.put(
-                PLUGINS_KEY,
-                json!({"entries": {"cafleet": {"allow_gateway_injection": true}}}),
-            );
             let (plugin, _) = scenario.seed_opencode_extension();
             std::fs::write(&plugin, "tampered").unwrap();
-            let (summary, _) = scenario.summary_and_rows(1);
+            let rows = scenario.rows(1);
             assert_eq!(
-                named_row(&summary, "hermes"),
+                named_row(&rows, "hermes.extension"),
                 format!(
-                    "error hermes: extension {} is missing or differs from the embedded copy; hermes plugin cafleet is not enabled: plugins.enabled — {HERMES_FIX}",
+                    "error hermes.extension: {}: differs from the embedded copy; {HERMES_FIX}",
                     file.display()
                 )
             );
             assert_eq!(
-                named_row(&summary, "opencode"),
+                named_row(&rows, "opencode.extension"),
                 format!(
-                    "error opencode: extension {} is missing or differs from the embedded copy — run 'cafleet setup --coding-agent opencode'",
+                    "error opencode.extension: {}: differs from the embedded copy; run 'cafleet setup --coding-agent opencode'",
                     plugin.display()
                 )
             );
         }
 
         #[test]
-        fn doctor_folds_a_tampered_pi_extension_into_the_pi_summary() {
+        fn doctor_reports_a_tampered_pi_extension_on_its_row() {
             let (scenario, _conn) = healthy_scenario();
             let (extension, _) = scenario.seed_pi_extension();
             std::fs::write(&extension, "tampered").unwrap();
-            let (summary, rows) = scenario.summary_and_rows(1);
-            assert_eq!(
-                named_row(&summary, "pi"),
-                format!(
-                    "error pi: extension {} is missing or differs from the embedded copy — run 'cafleet setup --coding-agent pi'",
-                    extension.display()
-                )
-            );
+            let rows = scenario.rows(1);
             assert_eq!(
                 named_row(&rows, "pi.extension"),
                 format!(
@@ -3914,21 +3172,79 @@ mod tests {
         }
 
         #[test]
-        fn doctor_folds_an_unusable_pi_record_and_a_missing_installation_into_one_summary() {
+        fn doctor_reports_an_unusable_pi_record_and_a_missing_installation_on_their_rows() {
             let mut scenario = Scenario::new(member_run_registry);
             let _conn = scenario.connect();
             scenario.executable("pi");
             let (_, record) = scenario.seed_pi_extension();
             std::fs::write(&record, "").unwrap();
-            let (summary, _) = scenario.summary_and_rows(1);
+            let rows = scenario.rows(1);
             assert_eq!(
-                named_row(&summary, "pi"),
+                named_row(&rows, "pi.extension"),
                 format!(
-                    "error pi: extension executable record {} is unusable: the record is empty; assets not installed at {} — run 'cafleet setup --coding-agent pi'",
-                    record.display(),
-                    scenario.config(CodingAgent::Pi)
+                    "error pi.extension: {}: the record is empty; run 'cafleet setup --coding-agent pi'",
+                    record.display()
                 )
             );
+            assert_eq!(
+                named_row(&rows, "pi.skills"),
+                format!(
+                    "warn pi.skills: skills not installed at {}; run 'cafleet setup --coding-agent pi'",
+                    Path::new(&scenario.config(CodingAgent::Pi))
+                        .join("skills")
+                        .display()
+                )
+            );
+        }
+
+        #[test]
+        fn doctor_prints_each_check_as_one_escaped_row_and_one_json_object() {
+            let mut scenario = Scenario::new(member_run_registry);
+            scenario.connect();
+            healthy_backends(&mut scenario);
+            scenario
+                .environment
+                .push(("CLAUDE_CONFIG_DIR", "rel\nat\rive".into()));
+            let views = scenario.views();
+            views.assert_exit(1);
+            let checks = views.json.as_array().unwrap();
+            for (name, status, detail, row) in [
+                (
+                    "multiplexer",
+                    "ok",
+                    format!("tmux server={TMUX_SOCKET}"),
+                    format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
+                ),
+                (
+                    "multiplexer.caller_pane",
+                    "ok",
+                    "TMUX_PANE=%1 session=main window=@1".to_owned(),
+                    "ok multiplexer.caller_pane: TMUX_PANE=%1 session=main window=@1".to_owned(),
+                ),
+                (
+                    "claude.configuration",
+                    "error",
+                    "CLAUDE_CONFIG_DIR must be an absolute path (got 'rel\nat\rive')".to_owned(),
+                    r"error claude.configuration: CLAUDE_CONFIG_DIR must be an absolute path (got 'rel\nat\rive')".to_owned(),
+                ),
+                (
+                    "hermes.plugin_enabled",
+                    "ok",
+                    "cafleet enabled with gateway injection".to_owned(),
+                    "ok hermes.plugin_enabled: cafleet enabled with gateway injection".to_owned(),
+                ),
+            ] {
+                assert_eq!(named_row(&views.text, name), row, "{name}");
+                let entries = checks
+                    .iter()
+                    .filter(|entry| entry["name"] == name)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    entries,
+                    [&json!({"name": name, "status": status, "detail": detail})],
+                    "{name}"
+                );
+            }
         }
 
         #[test]
@@ -3936,9 +3252,8 @@ mod tests {
             let (scenario, _conn) = healthy_scenario();
             let views = scenario.views();
             views.assert_exit(0);
-            assert_eq!(named_row(&views.text, "pi"), "ok pi: ready");
             assert_eq!(
-                named_row(&views.verbose, "pi.extension"),
+                named_row(&views.text, "pi.extension"),
                 format!(
                     "ok pi.extension: {}",
                     scenario.path("pi").join("extensions/cafleet.ts").display()

@@ -57,8 +57,8 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
     json!({"input":{"input_id":row.input_id,"run_id":row.run_id,"operation_key":row.operation_key,
         "kind":row.kind.as_str(),"payload_digest":row.payload_digest,"state":row.state.as_str(),
         "created_at":row.created_at,"updated_at":row.updated_at,
-        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
-        "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
+        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,
+        "delivery":row.delivery().to_json(),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
         "stop_cause":row.stop_cause.map(|cause| cause.as_str())}})
 }
 
@@ -144,20 +144,10 @@ pub(crate) fn deleted_fleet(row: &DeletedFleet) -> Value {
     json!({"fleet_id":row.fleet_id, "deregistered_count":row.deregistered_count, "members":members})
 }
 
-fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -> Value {
-    let metadata = &row.metadata;
-    json!({"input_id":row.input_id,"event_id":metadata.event_id,"interaction_id":metadata.interaction_id,
-        "expected_owner_epoch":metadata.expected_owner_epoch,"request_token":metadata.request_token,
-        "decision":metadata.key.decision(),"choice_id":metadata.key.choice(),"director_member_id":metadata.director_member_id,
-        "director_mode":metadata.director_mode.as_str(),"decision_source":metadata.decision_source.as_str(),
-        "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
-        "answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
-}
-
 pub(crate) fn permission_response_result(row: &crate::runtime::PermissionResponseResult) -> Value {
-    json!({"response":{"status":row.submission.status.as_str(),"input_id":row.submission.input_id,"member_id":row.member_id,
+    json!({"response":{"status":row.submission.status.as_str(),"member_id":row.member_id,
         "run_id":row.run_id,"owner_epoch":row.owner_epoch,"interaction_id":row.interaction_id,"event_id":row.event_id,
-        "decision":row.key.decision(),"choice":row.key.choice(),"decision_source":row.decision_source.as_str(),"stage":row.submission.stage.as_str(),
+        "decision":row.key.decision(),"choice":row.key.choice(),"stage":row.submission.stage.as_str(),
         "output_seq":row.submission.output_seq,"reason":row.submission.reason}})
 }
 
@@ -175,77 +165,6 @@ pub(crate) fn permission_inspection(row: &crate::runtime::PermissionInspection) 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-
-    use crate::broker::runtime::RunStatus;
-    use crate::runtime::RecoveryOutcome;
-    use crate::runtime::RecoveryReport;
-    #[test]
-    fn runner_recovery_presentation_pins_ordered_json_outcomes_and_exact_cleanup_text() {
-        for (outcome, wire, status) in [
-            (RecoveryOutcome::Recovered, "recovered", RunStatus::Lost),
-            (
-                RecoveryOutcome::Recovering,
-                "recovering",
-                RunStatus::Recovering,
-            ),
-            (
-                RecoveryOutcome::LiveOrUnreachable,
-                "live_or_unreachable",
-                RunStatus::Running,
-            ),
-            (
-                RecoveryOutcome::OperatorReconciliationRequired,
-                "operator_reconciliation_required",
-                RunStatus::Starting,
-            ),
-        ] {
-            let diagnostics = vec![
-                json!("bounded diagnostic"),
-                json!({"source":"operator_via_director","evidence_ref":"audit:termination"}),
-            ];
-            let report = RecoveryReport {
-                member_id: 7,
-                run_id: 11,
-                outcome,
-                replayed_count: 2,
-                inbox_count: 4,
-                archived_count: 0,
-                status,
-                cleanup_diagnostics: diagnostics.clone(),
-            };
-            let value = crate::output::json::runtime_recovery(&report);
-            assert_eq!(
-                value
-                    .as_object()
-                    .unwrap()
-                    .keys()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-                vec![
-                    "member_id",
-                    "run_id",
-                    "outcome",
-                    "replayed_count",
-                    "inbox_count",
-                    "archived_count",
-                    "status",
-                    "cleanup_diagnostics"
-                ]
-            );
-            assert_eq!(
-                value,
-                json!({"member_id":7,"run_id":11,"outcome":wire,"replayed_count":2,"inbox_count":4,"archived_count":0,"status":status.as_str(),"cleanup_diagnostics":diagnostics})
-            );
-            assert_eq!(
-                crate::output::format_runtime_recovery(&report),
-                format!(
-                    "Recovery: member=7 run=11 outcome={wire} status={} replayed=2 inbox=4 archived=0\nCleanup: bounded diagnostic\nCleanup: {}",
-                    status.as_str(),
-                    diagnostics[1]
-                )
-            );
-        }
-    }
 
     #[test]
     fn listen_pending_is_exactly_the_event_then_the_given_next_command() {
@@ -518,7 +437,7 @@ mod tests {
             "child_pid",
             "child_start_identity",
         ];
-        const INPUT_KEYS: [&str; 15] = [
+        const INPUT_KEYS: [&str; 14] = [
             "input_id",
             "run_id",
             "operation_key",
@@ -529,7 +448,6 @@ mod tests {
             "updated_at",
             "disposition",
             "evidence_ref",
-            "permission_response",
             "delivery",
             "deferred_at",
             "defer_reason",
@@ -687,7 +605,6 @@ mod tests {
             let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec, None);
             let output = crate::output::json::input_operation(&input);
             assert_key_order(&output["input"], &INPUT_KEYS);
-            assert_eq!(output["input"]["permission_response"], Value::Null);
             assert_eq!(
                 crate::output::format_input_operation(&input),
                 format!(
@@ -706,11 +623,11 @@ mod tests {
                 &mut fixture.conn,
                 &owner,
                 caused.input_id,
-                StopCause::ManualInput,
+                StopCause::ShortWrite,
             )
             .unwrap();
             let output = crate::output::json::input_operation(&caused);
-            assert_eq!(output["input"]["stop_cause"], "manual_input");
+            assert_eq!(output["input"]["stop_cause"], "short_write");
             assert_eq!(
                 crate::output::format_input_operation(&caused),
                 format!(
@@ -729,7 +646,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 crate::output::json::input_operation(&settled)["input"]["stop_cause"],
-                "manual_input",
+                "short_write",
                 "reconciliation keeps the recorded cause"
             );
             let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt, None);

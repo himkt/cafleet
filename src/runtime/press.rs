@@ -151,6 +151,7 @@ mod tests {
         database_url: String,
         placement: Placement,
         member_id: i64,
+        started: Instant,
         until: Instant,
         mode: Mode,
         calls: RefCell<Vec<Vec<String>>>,
@@ -172,13 +173,17 @@ mod tests {
             true
         }
         fn run(&self, _: &[String]) -> Result<String, RunError> {
-            panic!("press probes and write retain absolute deadlines")
+            panic!("press bounds every process by the invocation deadline")
         }
-        fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
-            panic!("press does not renew a relative phase budget")
+        fn run_until(&self, _: &[String], _: Instant) -> Result<String, TimedRunError> {
+            panic!("press runs every process through the shared bounded runner")
         }
-        fn run_until(&self, args: &[String], until: Instant) -> Result<String, TimedRunError> {
-            assert_eq!(until, self.until);
+        fn run_for(&self, args: &[String], timeout: Duration) -> Result<String, RunError> {
+            let until = self.until;
+            assert!(
+                timeout > Duration::ZERO && self.started + timeout <= until,
+                "each process is bounded by the remaining invocation deadline: {timeout:?}"
+            );
             assert!(
                 Instant::now() < until,
                 "no new process is offered after expiry"
@@ -228,15 +233,11 @@ mod tests {
                     assert_eq!(self.writes(), 1, "a started failure is never retried");
                     match self.mode {
                         Mode::Success => Ok(String::new()),
-                        Mode::NotStarted => Err(TimedRunError {
-                            source: RunError::NotStarted("owned prelaunch refusal".into()),
-                            cleanup_diagnostics: vec![],
-                        }),
-                        Mode::StartedFailure => Err(TimedRunError {
-                            source: RunError::Failed {
-                                stderr: "can't find pane: owned started failure".into(),
-                            },
-                            cleanup_diagnostics: vec!["owned cleanup diagnostic".into()],
+                        Mode::NotStarted => {
+                            Err(RunError::NotStarted("owned prelaunch refusal".into()))
+                        }
+                        Mode::StartedFailure => Err(RunError::Failed {
+                            stderr: "can't find pane: owned started failure".into(),
                         }),
                         Mode::ChangePlacement | Mode::ExpireMetadata => {
                             panic!("post-metadata refusal precedes writing")
@@ -267,6 +268,7 @@ mod tests {
             database_url: settings.database_url.clone(),
             placement: member.placement,
             member_id: member.member_id,
+            started: Instant::now(),
             until,
             mode,
             calls: RefCell::default(),
@@ -478,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn press_entry_keeps_prelaunch_and_started_effects_distinct_with_cleanup_before_effect() {
+    fn press_entry_keeps_prelaunch_and_started_effects_distinct() {
         for mode in [Mode::NotStarted, Mode::StartedFailure] {
             let mut fixture = Fixture::new();
             let until = Instant::now() + Duration::from_secs(2);
@@ -508,9 +510,6 @@ mod tests {
                     let primary_position = text
                         .find("owned started failure")
                         .expect("primary backend failure");
-                    let cleanup_position = text
-                        .find("owned cleanup diagnostic")
-                        .expect("cleanup retained");
                     let effect = format!(
                         "key delivery to member {} is uncertain; any prefix may have been handled. Inspect the pane before an explicit retry.",
                         fixture.run.member_id
@@ -518,9 +517,7 @@ mod tests {
                     let effect_position = text
                         .find(&effect)
                         .expect("started effects stay uncertain even for pane-gone stderr");
-                    assert!(
-                        primary_position < cleanup_position && cleanup_position < effect_position
-                    );
+                    assert!(primary_position < effect_position);
                     assert!(text.ends_with(&effect));
                     assert_eq!(text.matches(&effect).count(), 1);
                 }

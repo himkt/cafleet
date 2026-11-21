@@ -644,26 +644,6 @@ mod tests {
     }
 
     #[test]
-    fn install_record_upsert_changes_only_the_selected_agent_and_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&dir);
-        for (agent, path) in [("codex", "/a"), ("codex", "/b"), ("claude", "/a")] {
-            record_asset_install(&mut conn, agent, path).unwrap();
-        }
-        conn.execute("UPDATE asset_installs SET installed_at='old-time'", [])
-            .unwrap();
-        record_asset_install(&mut conn, "codex", "/a").unwrap();
-        let rows = conn.prepare("SELECT coding_agent, path, installed_at FROM asset_installs ORDER BY coding_agent, path")
-            .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
-            .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0], ("claude".into(), "/a".into(), "old-time".into()));
-        assert_eq!((&rows[1].0, &rows[1].1), (&"codex".into(), &"/a".into()));
-        assert!(crate::time::parse_lenient(&rows[1].2).is_some());
-        assert_eq!(rows[2], ("codex".into(), "/b".into(), "old-time".into()));
-    }
-
-    #[test]
     fn member_run_registry_reads_run_and_member_states_in_ascending_run_order() {
         use crate::broker::runtime::CleanupState;
         use crate::broker::runtime::RunStatus;

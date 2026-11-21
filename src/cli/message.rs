@@ -2129,9 +2129,7 @@ mod tests {
         const THREAD: &str = "019a5c3e-7f21-7c11-9d3b-2b6f0c8e4a10";
         const RECORD_PREFIX: &str = "[cafleet listen record] ";
         const QUEUE_BUDGET_MS: &str = "CAFLEET_TEST_CODEX_QUEUE_BUDGET_MS";
-        const RETRY_MS: &str = "CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS";
         const QUEUE_BUDGET: Duration = Duration::from_millis(1000);
-        const RETRY: Duration = Duration::from_millis(100);
         const FULL_QUEUE_REFUSAL: &str = "printf '%s\\n' '⚠ install out of sync' 'Error: queue cannot contain more than 100 submissions (code -32600)' >&2\nexit 1";
 
         /// Appends the stub's argv to the log: fields end with US, invocations with RS.
@@ -2249,7 +2247,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                     )
                     .env("RUST_BACKTRACE", "0")
                     .env(QUEUE_BUDGET_MS, QUEUE_BUDGET.as_millis().to_string())
-                    .env(RETRY_MS, RETRY.as_millis().to_string())
                     .envs(env.iter().copied())
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
@@ -2295,19 +2292,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                             .map(str::to_owned)
                             .collect()
                     })
-                    .collect()
-            }
-
-            /// Gaps between consecutive `codex` invocations, as stamped by [`full_queue_codex`].
-            fn invocation_gaps(&self) -> Vec<Duration> {
-                let stamps = self
-                    .read("codex.log.times")
-                    .lines()
-                    .map(|line| line.parse::<u64>().unwrap())
-                    .collect::<Vec<_>>();
-                stamps
-                    .windows(2)
-                    .map(|pair| Duration::from_nanos(pair[1] - pair[0]))
                     .collect()
             }
 
@@ -2462,19 +2446,12 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             format!("{LOG_ARGV}\nexit 0")
         }
 
-        /// Accepts only the closed notice and answers every record with `record_reply`.
-        fn codex_refusing_records(record_reply: &str) -> String {
-            format!(
-                "{LOG_ARGV}\ncase \"$*\" in\n  *'[cafleet listen closed]'*) exit 0 ;;\nesac\n{record_reply}"
-            )
-        }
-
-        /// Accepts only the closed notice and holds every record until the test creates
-        /// [`RELEASE`], then answers it with `record_reply`.
+        /// Holds every record until the test creates [`RELEASE`], then answers it with
+        /// `record_reply`.
         fn codex_failing_released_records(record_reply: &str) -> String {
-            codex_refusing_records(&format!(
-                "while [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; do sleep 0.05; done\n{record_reply}"
-            ))
+            format!(
+                "{LOG_ARGV}\nwhile [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; do sleep 0.05; done\n{record_reply}"
+            )
         }
 
         const RELEASE: &str = "codex.log.release";
@@ -2492,20 +2469,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 "{}",
                 forwarder.stderr()
             );
-        }
-
-        /// Stamps every invocation, answers the first `refusals` (every one when `None`) with
-        /// Codex's full-queue refusal, and runs `then` for the rest.
-        fn full_queue_codex(refusals: Option<u32>, then: &str) -> String {
-            let refuse = match refusals {
-                Some(refusals) => {
-                    format!("if [ \"$count\" -le {refusals} ]; then\n{FULL_QUEUE_REFUSAL}\nfi")
-                }
-                None => FULL_QUEUE_REFUSAL.to_owned(),
-            };
-            format!(
-                "{LOG_ARGV}\ndate +%s%N >>\"$CAFLEET_TEST_CODEX_LOG.times\"\ncount=$(( $(cat \"$CAFLEET_TEST_CODEX_LOG.count\" 2>/dev/null || echo 0) + 1 ))\nprintf '%s' \"$count\" >\"$CAFLEET_TEST_CODEX_LOG.count\"\n{refuse}\n{then}"
-            )
         }
 
         fn assert_stdout_has_no_forwarded_records(forwarder: &Forwarder, broker: &Broker) {
@@ -2626,7 +2589,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         }
 
         #[test]
-        fn a_codex_queue_past_its_deadline_is_killed_and_the_closed_notice_names_the_deadline() {
+        fn a_codex_queue_past_its_deadline_is_killed_and_ends_forwarding_with_its_diagnostic() {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
             broker.send(worker, director, "slow");
@@ -2634,7 +2597,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             let forwarder = start(
                 &broker,
                 &listen_args(director, None),
-                Some(&codex_refusing_records("exec sleep 30")),
+                Some(&format!("{LOG_ARGV}\nexec sleep 30")),
                 Launch::Session,
             );
             assert_eq!(forwarder.wait_exit(Duration::from_secs(10)), 1);
@@ -2652,188 +2615,53 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 "{}",
                 forwarder.stderr()
             );
-            let forwarded = forwarder.forwarded();
-            assert_eq!(forwarded.len(), 2, "{forwarded:?}");
             assert_eq!(
-                forwarded[1],
-                queued(&format!("[cafleet listen closed] exit 1: {diagnostic}"))
+                forwarder.forwarded(),
+                [queued(&pending_text(&broker, director))],
+                "the timed-out record is the only invocation"
             );
             assert_stdout_has_no_forwarded_records(&forwarder, &broker);
         }
 
         #[test]
-        fn a_failed_closed_notice_keeps_the_original_diagnostic_and_exit_one() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            broker.send(worker, director, "unforwardable");
-            let forwarder = start(
-                &broker,
-                &listen_args(director, None),
-                Some(&format!(
-                    "{LOG_ARGV}\nprintf '%s\\n' 'codex unavailable' >&2\nexit 4"
-                )),
-                Launch::Session,
-            );
-            assert_eq!(forwarder.wait_exit(Duration::from_secs(25)), 1);
-            let stderr = forwarder.stderr();
-            assert!(
-                stderr.contains(&format!(
-                    "failed to forward record to codex thread {THREAD}: "
-                )),
-                "{stderr}"
-            );
-            assert!(
-                stderr.contains(&format!(
-                    "failed to forward the closed notice to codex thread {THREAD}: "
-                )),
-                "{stderr}"
-            );
-            let forwarded = forwarder.forwarded();
-            assert_eq!(
-                forwarded.len(),
-                2,
-                "one record attempt and one notice: {forwarded:?}"
-            );
-            assert!(forwarded[1][4].starts_with("[cafleet listen closed] exit 1: "));
-        }
-
-        #[test]
-        fn a_refused_notice_is_retried_each_second_from_the_current_pending_set_until_accepted() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            for body in ["first", "second"] {
-                broker.send(worker, director, body);
+        fn a_non_zero_codex_queue_exit_ends_forwarding_after_its_one_attempt() {
+            for (reply, cause) in [
+                (
+                    "printf '%s\\n' 'codex unavailable' >&2\nexit 4".to_owned(),
+                    "codex unavailable",
+                ),
+                (
+                    FULL_QUEUE_REFUSAL.to_owned(),
+                    "queue cannot contain more than 100 submissions",
+                ),
+            ] {
+                let mut broker = broker();
+                let (director, worker) = (broker.director, broker.worker);
+                broker.send(worker, director, "unforwardable");
+                let forwarder = start(
+                    &broker,
+                    &listen_args(director, None),
+                    Some(&format!("{LOG_ARGV}\n{reply}")),
+                    Launch::Session,
+                );
+                assert_eq!(forwarder.wait_exit(Duration::from_secs(10)), 1, "{cause}");
+                let stderr = forwarder.stderr();
+                let diagnostic = stderr
+                    .lines()
+                    .find(|line| {
+                        line.contains(&format!(
+                            "failed to forward record to codex thread {THREAD}: "
+                        ))
+                    })
+                    .unwrap_or_else(|| panic!("{cause}: {stderr}"));
+                assert!(diagnostic.contains(cause), "{stderr}");
+                assert_eq!(
+                    forwarder.forwarded(),
+                    [queued(&pending_text(&broker, director))],
+                    "{cause}: one attempt and no closed notice"
+                );
+                assert_stdout_has_no_forwarded_records(&forwarder, &broker);
             }
-            let forwarder = start(
-                &broker,
-                &listen_args(director, Some(5)),
-                Some(&full_queue_codex(Some(2), "exit 0")),
-                Launch::Session,
-            );
-            forwarder.wait_forwarded(1);
-            broker.send(worker, director, "third");
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(15)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            let notice = queued(&pending_text(&broker, director));
-            assert_eq!(
-                forwarder.forwarded(),
-                [
-                    notice.clone(),
-                    notice.clone(),
-                    notice,
-                    queued(&closed_text(director, "timeout")),
-                ],
-                "two refusals, one acceptance, then the closing record"
-            );
-            let gaps = forwarder.invocation_gaps();
-            assert!(
-                gaps[..2].iter().all(|gap| *gap >= Duration::from_secs(1)),
-                "a refused notice waits the listener's one-second idle interval: {gaps:?}"
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(director, broker.fleet),
-                    crate::output::json::listen_closed(director, "timeout"),
-                ]
-            );
-        }
-
-        /// Answers every `pending` notice with Codex's full-queue refusal and accepts the rest.
-        fn codex_refusing_notices() -> String {
-            format!(
-                "{LOG_ARGV}\ncase \"$*\" in\n  *'\"event\":\"pending\"'*)\n{FULL_QUEUE_REFUSAL}\n;;\nesac\nexit 0"
-            )
-        }
-
-        #[test]
-        fn a_refused_notice_whose_ids_are_polled_during_refusals_is_abandoned() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "polled while refused");
-            let forwarder = start(
-                &broker,
-                &listen_args(director, Some(5)),
-                Some(&codex_refusing_notices()),
-                Launch::Session,
-            );
-            forwarder.wait_forwarded(2);
-            assert_eq!(
-                broker::poll_messages(&broker.conn, director)
-                    .unwrap()
-                    .iter()
-                    .map(|consumed| consumed.message_id)
-                    .collect::<Vec<_>>(),
-                [message]
-            );
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(15)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            let notice = queued(&pending_text(&broker, director));
-            assert_eq!(
-                forwarder.forwarded(),
-                [
-                    notice.clone(),
-                    notice,
-                    queued(&closed_text(director, "timeout")),
-                ],
-                "no notice is attempted once the pending set is empty"
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(director, broker.fleet),
-                    crate::output::json::listen_closed(director, "timeout"),
-                ]
-            );
-        }
-
-        #[test]
-        fn the_pinned_session_ending_during_a_full_queue_wait_closes_the_listener_with_session_exited()
-         {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            broker.send(worker, director, "waiting");
-            let mut forwarder = start(
-                &broker,
-                &listen_args(director, None),
-                Some(&full_queue_codex(None, "exit 0")),
-                Launch::Session,
-            );
-            forwarder.wait_forwarded(2);
-            forwarder.end_session();
-            let ended = Instant::now();
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(5)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            assert!(
-                ended.elapsed() < Duration::from_secs(3),
-                "{:?}",
-                ended.elapsed()
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(director, broker.fleet),
-                    crate::output::json::listen_closed(director, "session_exited"),
-                ]
-            );
-            let notice = queued(&pending_text(&broker, director));
-            let forwarded = forwarder.forwarded();
-            assert!(
-                forwarded.iter().all(|invocation| *invocation == notice),
-                "only the refused notice is attempted, with no closed notice: {forwarded:?}"
-            );
         }
 
         #[test]
@@ -2900,155 +2728,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 [queued(&closed_text(worker, "member_inactive"))],
                 "no closed notice goes to the exited session"
             );
-        }
-
-        /// Deregisters `worker` under a running forwarder and waits until its closing record has
-        /// been refused for more than the five-second closing output budget.
-        fn refuse_the_closing_record_past_five_seconds(forwarder: &Forwarder, broker: &mut Broker) {
-            forwarder.wait_ready();
-            assert!(
-                crate::broker::members::test_support::deregister_member(
-                    &mut broker.conn,
-                    broker.worker
-                )
-                .unwrap()
-            );
-            let closed = Instant::now();
-            forwarder.wait_for(
-                "closing-record refusals past 6 s",
-                Duration::from_secs(20),
-                |forwarder| {
-                    closed.elapsed() >= Duration::from_secs(6) && forwarder.forwarded().len() >= 2
-                },
-            );
-            assert_eq!(
-                forwarder.status(),
-                None,
-                "a refused closing record keeps the forwarder alive: {}",
-                forwarder.stderr()
-            );
-        }
-
-        fn assert_only_the_closing_record_was_retried(forwarder: &Forwarder, worker: i64) {
-            let closing = queued(&closed_text(worker, "member_inactive"));
-            let forwarded = forwarder.forwarded();
-            assert!(
-                forwarded.len() >= 10 && forwarded.iter().all(|attempt| *attempt == closing),
-                "{forwarded:?}"
-            );
-            let gaps = forwarder.invocation_gaps();
-            assert!(
-                gaps.iter().all(|gap| *gap >= RETRY),
-                "each closing retry waits the retry interval: {gaps:?}"
-            );
-        }
-
-        #[test]
-        fn a_refused_closing_record_retries_until_the_pinned_session_ends_and_closes_with_session_exited()
-         {
-            let mut broker = broker();
-            let worker = broker.worker;
-            let mut forwarder = start(
-                &broker,
-                &listen_args(worker, None),
-                Some(&full_queue_codex(None, "exit 0")),
-                Launch::Session,
-            );
-            refuse_the_closing_record_past_five_seconds(&forwarder, &mut broker);
-            forwarder.end_session();
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(5)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            assert_closed_with_session_exited(&forwarder, &broker, worker);
-            assert_only_the_closing_record_was_retried(&forwarder, worker);
-        }
-
-        #[test]
-        fn a_closing_record_refused_for_more_than_five_seconds_is_written_to_stdout_after_acceptance()
-         {
-            let mut broker = broker();
-            let worker = broker.worker;
-            let forwarder = start(
-                &broker,
-                &listen_args(worker, None),
-                Some(&format!(
-                    "{LOG_ARGV}\ndate +%s%N >>\"$CAFLEET_TEST_CODEX_LOG.times\"\nif [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; then\n{FULL_QUEUE_REFUSAL}\nfi\nexit 0"
-                )),
-                Launch::Session,
-            );
-            refuse_the_closing_record_past_five_seconds(&forwarder, &mut broker);
-            std::fs::write(forwarder.file(RELEASE), "").unwrap();
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(5)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(worker, broker.fleet),
-                    crate::output::json::listen_closed(worker, "member_inactive"),
-                ]
-            );
-            assert_only_the_closing_record_was_retried(&forwarder, worker);
-        }
-
-        #[test]
-        fn a_non_full_queue_failure_after_a_refusal_fails_without_another_wait() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            broker.send(worker, director, "refused");
-            let wait = Duration::from_secs(3);
-            let forwarder = start_with_env(
-                &broker,
-                &listen_args(director, None),
-                Some(&full_queue_codex(
-                    Some(1),
-                    &format!(
-                        "case \"$*\" in\n  *'[cafleet listen closed]'*) exit 0 ;;\nesac\nprintf '%s\\n' 'thread {THREAD} not found' >&2\nexit 2"
-                    ),
-                )),
-                Launch::Session,
-                &[(RETRY_MS, &wait.as_millis().to_string())],
-            );
-            assert_eq!(forwarder.wait_exit(Duration::from_secs(15)), 1);
-            let stderr = forwarder.stderr();
-            let diagnostic = stderr
-                .lines()
-                .find(|line| {
-                    line.contains(&format!(
-                        "failed to forward record to codex thread {THREAD}: "
-                    ))
-                })
-                .unwrap_or_else(|| panic!("{stderr}"));
-            assert!(
-                diagnostic.contains(&format!("thread {THREAD} not found")),
-                "{stderr}"
-            );
-            let notice = queued(&pending_text(&broker, director));
-            let forwarded = forwarder.forwarded();
-            assert_eq!(forwarded.len(), 3, "{forwarded:?}");
-            assert_eq!(forwarded[..2], [notice.clone(), notice]);
-            assert!(
-                forwarded[2][4].starts_with(&format!(
-                    "[cafleet listen closed] exit 1: failed to forward record to codex thread {THREAD}: "
-                )) && forwarded[2][4].contains(&format!("thread {THREAD} not found")),
-                "{forwarded:?}"
-            );
-            let gaps = forwarder.invocation_gaps();
-            assert!(
-                gaps[0] >= Duration::from_secs(1) && gaps[0] < wait,
-                "a refused notice waits the listener's idle interval, not the closing retry interval: {gaps:?}"
-            );
-            assert!(
-                gaps[1] < Duration::from_secs(1),
-                "only the full-queue refusal waits: {gaps:?}"
-            );
-            assert_stdout_has_no_forwarded_records(&forwarder, &broker);
         }
 
         #[test]

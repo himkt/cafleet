@@ -5,7 +5,6 @@ use crate::broker::MemberStatus;
 pub(crate) use crate::broker::runtime::events::*;
 pub(crate) use crate::broker::runtime::inputs::*;
 use crate::broker::stored_enum;
-use crate::coding_agent::catalog::AnswerKey;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::time::Deadline;
@@ -460,7 +459,7 @@ stored_enum!(test_values InteractionCloseReason, "member_interactions.close_reas
 });
 stored_enum!(RuntimeEventKind,"member_runtime_events.kind", {
     CoverageUnknown => "coverage_unknown", InteractionOpened => "interaction_opened",
-    InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
+    InteractionClosed => "interaction_closed",
     InputDeliveryResult => "input_delivery_result", InputDeliveryStalled => "input_delivery_stalled",
     RunnerDegraded => "runner_degraded",
     RunnerLost => "runner_lost", RunnerExited => "runner_exited"
@@ -475,7 +474,7 @@ stored_enum!(NotificationState, "member_runtime_events.notification_state", { In
 stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", {
     MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
 });
-stored_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", PermissionResponse => "permission_response" });
+stored_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", Answer => "answer" });
 stored_enum!(InputState, "member_input_operations.state", {
     Ready => "ready", InProgress => "in_progress", Accepted => "accepted",
     Uncertain => "uncertain", Settled => "settled"
@@ -484,7 +483,6 @@ stored_enum!(test_values InputDisposition, "member_input_operations.disposition"
     Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain"
 });
 stored_enum!(StopCause, "member_input_operations.stop_cause", {
-    ManualInput => "manual_input",
     InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
     DeadlineExpired => "deadline_expired",
     SubmitUnconfirmed => "submit_unconfirmed", ShortWrite => "short_write",
@@ -495,8 +493,7 @@ impl StopCause {
     pub(crate) fn is_check_stop(self) -> bool {
         matches!(
             self,
-            Self::ManualInput
-                | Self::InteractionCandidate
+            Self::InteractionCandidate
                 | Self::InteractionOpen
                 | Self::DeadlineExpired
                 | Self::SubmitUnconfirmed
@@ -692,7 +689,6 @@ pub(crate) struct InputOperation {
     pub(crate) updated_at: String,
     pub(crate) disposition: Option<InputDisposition>,
     pub(crate) evidence_ref: Option<String>,
-    pub(crate) permission_response: Option<PermissionResponseRecord>,
     pub(crate) delivery_method: Option<DeliveryMethod>,
     pub(crate) delivery_reason: Option<String>,
     pub(crate) deferred_at: Option<String>,
@@ -722,41 +718,8 @@ impl DeliveryProjection {
     }
 }
 
-stored_enum!(values PermissionDecision, "member_permission_responses.decision", { Allow => "allow", Deny => "deny" });
-stored_enum!(values DirectorMode, "member_permission_responses.director_mode", { Auto => "auto", Manual => "manual", Unknown => "unknown" });
-stored_enum!(values DecisionSource,"member_permission_responses.decision_source", { DirectorAuto => "director-auto", User => "user" });
+stored_enum!(values PermissionDecision, "response.decision", { Allow => "allow", Deny => "deny" });
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PermissionResponseMetadata {
-    pub(crate) event_id: i64,
-    pub(crate) interaction_id: i64,
-    pub(crate) expected_owner_epoch: i64,
-    pub(crate) request_token: String,
-    pub(crate) key: AnswerKey,
-    pub(crate) director_member_id: i64,
-    pub(crate) director_mode: DirectorMode,
-    pub(crate) decision_source: DecisionSource,
-    pub(crate) mode_evidence_ref: String,
-    pub(crate) decision_evidence_ref: String,
-    pub(crate) answer_rule_id: String,
-}
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PermissionResponseRecord {
-    pub(crate) input_id: i64,
-    pub(crate) metadata: PermissionResponseMetadata,
-    pub(crate) decided_at: String,
-}
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PermissionResponseClaim {
-    pub(crate) interaction_id: i64,
-    pub(crate) input_id: i64,
-}
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PermissionReceipt {
-    pub(crate) input: InputOperation,
-    pub(crate) response: PermissionResponseRecord,
-    pub(crate) claim: Option<PermissionResponseClaim>,
-}
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PermissionReceiptIdentity {
     pub(crate) database_identity_json: Value,
@@ -770,16 +733,6 @@ impl PermissionReceiptIdentity {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NewPermissionResponse {
-    pub(crate) operation_key: String,
-    pub(crate) metadata: PermissionResponseMetadata,
-}
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PermissionReservation {
-    Retained(PermissionReceipt),
-    Reserved(PermissionReceipt),
-}
 
 impl InputOperation {
     pub(crate) fn same_identity(&self, other: &Self) -> bool {
@@ -789,7 +742,6 @@ impl InputOperation {
             && self.kind == other.kind
             && self.payload_digest == other.payload_digest
             && self.created_at == other.created_at
-            && self.permission_response == other.permission_response
     }
 }
 

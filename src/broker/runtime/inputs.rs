@@ -1,14 +1,8 @@
 use crate::broker::runtime::*;
-use crate::coding_agent::AnswerCapability;
-use crate::coding_agent::catalog::valid_choice_id;
-use crate::runtime::with_database_deadline;
 use crate::time::now_stamp;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use rusqlite::params;
-use std::marker::PhantomData;
-use std::rc::Rc;
-use std::time::Instant;
 
 fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
     Ok(InputOperation {
@@ -22,7 +16,6 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         updated_at: row.get("updated_at")?,
         disposition: row.get("disposition")?,
         evidence_ref: row.get("evidence_ref")?,
-        permission_response: None,
         delivery_method: row.get("delivery_method")?,
         delivery_reason: row.get("delivery_reason")?,
         deferred_at: row.get("deferred_at")?,
@@ -32,30 +25,20 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
 }
 
 impl InputOperation {
-    pub(crate) fn delivery(&self) -> Option<DeliveryProjection> {
+    pub(crate) fn delivery(&self) -> DeliveryProjection {
         delivery_projection(self).expect("validated input receipts project their delivery")
     }
 }
 
 const FALLBACK_REASONS: [&str; 1] = ["submission_plan_unavailable"];
 
-fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjection>, CafleetError> {
+fn delivery_projection(input: &InputOperation) -> Result<DeliveryProjection, CafleetError> {
     let unknown = || {
         invalid(
             "member_input_operations.delivery_method",
             "unknown stored delivery combination",
         )
     };
-    if input.kind == InputKind::PermissionResponse {
-        require(
-            input.delivery_method.is_none()
-                && input.delivery_reason.is_none()
-                && input.deferred_at.is_none(),
-            "member_input_operations.delivery_method",
-            "permission responses carry no ordinary delivery metadata",
-        )?;
-        return Ok(None);
-    }
     let method = input.delivery_method;
     let recorded = || match method {
         Some(DeliveryMethod::Profile) if input.delivery_reason.is_none() => Ok(None),
@@ -107,18 +90,18 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
         },
         (InputState::Settled, None) => return Err(unknown()),
     };
-    Ok(Some(DeliveryProjection {
+    Ok(DeliveryProjection {
         status,
         method,
         reason,
-    }))
+    })
 }
 
 fn validate_input(
     conn: &Connection,
-    mut input: InputOperation,
+    input: InputOperation,
 ) -> Result<InputOperation, CafleetError> {
-    let run = get_run(conn, input.run_id)?;
+    get_run(conn, input.run_id)?;
     require(
         input.stop_cause.is_none()
             || matches!(input.state, InputState::Uncertain | InputState::Settled),
@@ -126,11 +109,10 @@ fn validate_input(
         "a stop cause requires an uncertain or settled input",
     )?;
     require(
-        input.kind != InputKind::Preview,
+        matches!(input.kind, InputKind::Prompt | InputKind::Exec),
         "member_input_operations.kind",
-        "previews are delivered without a durable receipt",
+        "previews and permission answers are delivered without a durable receipt",
     )?;
-    input.permission_response = validate_input_response(conn, &run, &input)?;
     delivery_projection(&input)?;
     Ok(input)
 }
@@ -204,9 +186,7 @@ pub(crate) fn requeue_zero_byte_immediate(
     owned_transaction(conn, owner, |conn, run| {
         let input = owned_input(conn, run, input_id)?;
         require(
-            input.state == InputState::InProgress
-                && input.deferred_at.is_none()
-                && input.kind != InputKind::PermissionResponse,
+            input.state == InputState::InProgress && input.deferred_at.is_none(),
             "member_input_operations.state",
             "only an immediate ordinary attempt returns to the queue",
         )?;
@@ -240,9 +220,7 @@ pub(crate) fn unpublished_delivery_results(
             results.push((input_id, "unknown", input.stop_cause));
             continue;
         }
-        let delivery = input
-            .delivery()
-            .expect("a deferred input is an ordinary input");
+        let delivery = input.delivery();
         let stage = match delivery.status {
             DeliveryStatus::Submitted => "submitted",
             DeliveryStatus::NotSubmitted => "zero_bytes",
@@ -571,543 +549,13 @@ pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), Caf
     Ok(())
 }
 
-#[derive(Debug)]
-pub(crate) struct ZeroByteRetirement<'guard> {
-    owner: RunOwner,
-    input_id: i64,
-    interaction_id: i64,
-    input: InputOperation,
-    rearm: Option<(NewPermissionResponse, AnswerCapability)>,
-    guard: PhantomData<(&'guard mut (), Rc<()>)>,
-}
-impl<'guard> ZeroByteRetirement<'guard> {
-    pub(crate) fn from_live_guard(
-        guard: &'guard crate::runtime::InputGuard<'_>,
-        owner: &RunOwner,
-        input_id: i64,
-        interaction_id: i64,
-    ) -> Result<Self, CafleetError> {
-        let (receipt, capability) = guard.retirement_binding(owner, input_id, interaction_id)?;
-        Ok(Self {
-            owner: owner.clone(),
-            input_id,
-            interaction_id,
-            input: receipt.input.clone(),
-            rearm: capability.map(|cap| {
-                (
-                    NewPermissionResponse {
-                        operation_key: receipt.input.operation_key.clone(),
-                        metadata: receipt.response.metadata.clone(),
-                    },
-                    cap.clone(),
-                )
-            }),
-            guard: PhantomData,
-        })
-    }
-}
-
-fn validate_metadata(metadata: &PermissionResponseMetadata) -> Result<(), CafleetError> {
-    require(
-        metadata.event_id > 0
-            && metadata.interaction_id > 0
-            && metadata.expected_owner_epoch > 0
-            && metadata.director_member_id > 0,
-        "permission_response",
-        "positive identities required",
-    )?;
-    require(
-        metadata.request_token.len() == 64
-            && metadata
-                .request_token
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-        "request_token",
-        "lowercase 64-hex token required",
-    )?;
-    require(
-        metadata.decision_source != DecisionSource::DirectorAuto
-            || metadata.director_mode == DirectorMode::Auto,
-        "decision_source",
-        "director-auto requires auto mode",
-    )?;
-    for (field, value) in [
-        ("mode_evidence_ref", &metadata.mode_evidence_ref),
-        ("decision_evidence_ref", &metadata.decision_evidence_ref),
-    ] {
-        require(
-            !value.trim().is_empty()
-                && value.len() <= 2048
-                && !value.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}'),
-            field,
-            "nonblank reference of 1-2048 UTF-8 bytes without controls required",
-        )?;
-    }
-    if let AnswerKey::Choice(choice) = &metadata.key {
-        require(
-            valid_choice_id(choice),
-            "choice_id",
-            "lowercase hyphenated choice id of 1-64 bytes required",
-        )?;
-    }
-    nonblank(&metadata.answer_rule_id, "answer_rule_id")
-}
-
-pub(crate) fn permission_response_digest(
-    run_id: i64,
-    metadata: &PermissionResponseMetadata,
-) -> Result<String, CafleetError> {
-    require(run_id > 0, "run_id", "positive run required")?;
-    validate_metadata(metadata)?;
-    let object = json!({"run_id":run_id,"owner_epoch":metadata.expected_owner_epoch,
-        "interaction_id":metadata.interaction_id,"event_id":metadata.event_id,"director_member_id":metadata.director_member_id,
-        "request_token":metadata.request_token,"decision":metadata.key.decision(),"choice_id":metadata.key.choice(),
-        "director_mode":metadata.director_mode,
-        "decision_source":metadata.decision_source,"mode_evidence_ref":metadata.mode_evidence_ref,
-        "decision_evidence_ref":metadata.decision_evidence_ref,"answer_rule_id":metadata.answer_rule_id});
-    Ok(crate::digest::sha256_hex(
-        crate::digest::canonical_json(&object).as_bytes(),
-    ))
-}
-
-fn stored_key(
-    decision: Option<PermissionDecision>,
-    choice_id: Option<String>,
-) -> rusqlite::Result<AnswerKey> {
-    match (decision, choice_id) {
-        (Some(decision), None) => Ok(AnswerKey::Decision(decision)),
-        (None, Some(choice)) => Ok(AnswerKey::Choice(choice)),
-        _ => Err(rusqlite::Error::InvalidColumnName(
-            "member_permission_responses requires exactly one of decision and choice_id".into(),
-        )),
-    }
-}
-
-fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseRecord> {
-    Ok(PermissionResponseRecord {
-        input_id: row.get("input_id")?,
-        metadata: PermissionResponseMetadata {
-            event_id: row.get("event_id")?,
-            interaction_id: row.get("interaction_id")?,
-            expected_owner_epoch: row.get("expected_owner_epoch")?,
-            request_token: row.get("request_token")?,
-            key: stored_key(row.get("decision")?, row.get("choice_id")?)?,
-            director_member_id: row.get("director_member_id")?,
-            director_mode: row.get("director_mode")?,
-            decision_source: row.get("decision_source")?,
-            mode_evidence_ref: row.get("mode_evidence_ref")?,
-            decision_evidence_ref: row.get("decision_evidence_ref")?,
-            answer_rule_id: row.get("answer_rule_id")?,
-        },
-        decided_at: row.get("decided_at")?,
-    })
-}
-
-fn zero_byte_state(input: &InputOperation) -> bool {
-    input.state == InputState::Ready
-        || (input.state == InputState::Settled
-            && input.disposition == Some(InputDisposition::NotSubmitted))
-}
-
-fn read_claim(
-    conn: &Connection,
-    input: &InputOperation,
-    metadata: &PermissionResponseMetadata,
-) -> Result<Option<PermissionResponseClaim>, CafleetError> {
-    let mut stmt = conn.prepare("SELECT interaction_id,input_id FROM member_permission_response_claims WHERE interaction_id=?1 OR input_id=?2")?;
-    let claims = stmt
-        .query_map(params![metadata.interaction_id, input.input_id], |row| {
-            Ok(PermissionResponseClaim {
-                interaction_id: row.get(0)?,
-                input_id: row.get(1)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let matching = claims
-        .iter()
-        .find(|claim| {
-            claim.input_id == input.input_id && claim.interaction_id == metadata.interaction_id
-        })
-        .cloned();
-    require(
-        claims.iter().all(|claim| {
-            claim.input_id != input.input_id || claim.interaction_id == metadata.interaction_id
-        }),
-        "permission_claim",
-        "claim belongs to another interaction",
-    )?;
-    require(
-        matching.is_some() || zero_byte_state(input),
-        "permission_claim",
-        "possibly transmitted response requires its own claim",
-    )?;
-    Ok(matching)
-}
-
-pub(super) fn validate_input_response(
-    conn: &Connection,
-    run: &RunRecord,
-    input: &InputOperation,
-) -> Result<Option<PermissionResponseRecord>, CafleetError> {
-    let response = conn
-        .query_row(
-            "SELECT * FROM member_permission_responses WHERE input_id=?1",
-            [input.input_id],
-            map_response,
-        )
-        .optional()?;
-    if input.kind != InputKind::PermissionResponse {
-        require(
-            response.is_none(),
-            "permission_response",
-            "ordinary input has no response audit",
-        )?;
-        return Ok(None);
-    }
-    let response =
-        response.ok_or_else(|| invalid("permission_response", "response audit required"))?;
-    let metadata = &response.metadata;
-    validate_metadata(metadata)?;
-    require(
-        metadata.expected_owner_epoch <= run.owner_epoch,
-        "expected_owner_epoch",
-        "audit epoch exceeds recorded ownership",
-    )?;
-    let timestamp = chrono::DateTime::parse_from_rfc3339(&response.decided_at)
-        .map_err(|_| invalid("decided_at", "UTC RFC3339 timestamp required"))?;
-    require(
-        timestamp.offset().local_minus_utc() == 0,
-        "decided_at",
-        "UTC timestamp required",
-    )?;
-    require(
-        permission_response_digest(input.run_id, metadata)? == input.payload_digest,
-        "payload_digest",
-        "response audit digest mismatch",
-    )?;
-    let event = get_event(conn, metadata.event_id)?;
-    require(
-        permission_event_matches(&event, input.run_id, metadata, false)
-            && event.run.run.director_member_id == metadata.director_member_id
-            && metadata.director_member_id == run.director_member_id,
-        "permission_response",
-        "recorded run/event/interaction/Director association mismatch",
-    )?;
-    read_claim(conn, input, metadata)?;
-    Ok(Some(response))
-}
-
-fn answered_class(key: &AnswerKey) -> InteractionClass {
-    match key {
-        AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
-        AnswerKey::Choice(_) => InteractionClass::Question,
-    }
-}
-
-fn permission_event_matches(
-    event: &RuntimeEventView,
-    run_id: i64,
-    metadata: &PermissionResponseMetadata,
-    require_open: bool,
-) -> bool {
-    event.event.run_id == run_id
-        && event.event.interaction_id == Some(metadata.interaction_id)
-        && event.event.kind == RuntimeEventKind::InteractionOpened
-        && event.event.notification_state == NotificationState::Inbox
-        && event.interaction.as_ref().is_some_and(|interaction| {
-            interaction.classification == answered_class(&metadata.key)
-                && (!require_open || interaction.closed_at.is_none())
-        })
-}
-
-pub(crate) fn get_permission_response(
-    conn: &Connection,
-    input_id: i64,
-) -> Result<PermissionReceipt, CafleetError> {
-    let input = get_input(conn, input_id)?;
-    let response = input
-        .permission_response
-        .clone()
-        .ok_or_else(|| invalid("input_id", "permission response required"))?;
-    let claim = read_claim(conn, &input, &response.metadata)?;
-    Ok(PermissionReceipt {
-        input,
-        response,
-        claim,
-    })
-}
-
-pub(crate) fn lookup_permission_response(
-    conn: &Connection,
-    identity: &PermissionReceiptIdentity,
-    request: &NewPermissionResponse,
-) -> Result<Option<PermissionReceipt>, CafleetError> {
-    nonblank(&request.operation_key, "operation_key")?;
-    require(
-        identity.run_id > 0 && database_identity(conn)? == identity.database_identity_json,
-        "database_identity",
-        "selected database identity mismatch",
-    )?;
-    let run = get_run(conn, identity.run_id)?;
-    require(
-        run.database_identity_json == identity.database_identity_json,
-        "database_identity",
-        "recorded database identity mismatch",
-    )?;
-    let digest = permission_response_digest(identity.run_id, &request.metadata)?;
-    let input = find_input(conn, identity.run_id, &request.operation_key)?;
-    input
-        .map(|input| {
-            require(
-                input.kind == InputKind::PermissionResponse && input.payload_digest == digest,
-                "operation_key",
-                "conflicting retained operation key",
-            )?;
-            get_permission_response(conn, input.input_id)
-        })
-        .transpose()
-}
-
-pub(crate) fn reserve_permission_response(
-    conn: &mut Connection,
-    owner: &RunOwner,
-    request: &NewPermissionResponse,
-    capability: Option<&AnswerCapability>,
-    deadline: Instant,
-) -> Result<PermissionReservation, CafleetError> {
-    with_database_deadline(conn, deadline, |conn| {
-        let identity = PermissionReceiptIdentity {
-            database_identity_json: owner.database_identity_json.clone(),
-            run_id: owner.run_id,
-        };
-        if let Some(receipt) = lookup_permission_response(conn, &identity, request)? {
-            return Ok(PermissionReservation::Retained(receipt));
-        }
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(receipt) = lookup_permission_response(&tx, &identity, request)? {
-            tx.commit()?;
-            return Ok(PermissionReservation::Retained(receipt));
-        }
-        let run = validate_owner(&tx, owner)?;
-        let metadata = &request.metadata;
-        let event = get_event(&tx, metadata.event_id)?;
-        validate_current_capability(&tx, &run, metadata, &event, capability)?;
-        require_capacity(&tx, run.run_id)?;
-        let digest = permission_response_digest(run.run_id, metadata)?;
-        let now = now_stamp();
-        tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now])?;
-        let input_id = tx.last_insert_rowid();
-        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,choice_id,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.key.decision().map(PermissionDecision::as_str),metadata.key.choice(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_rule_id,now])?;
-        tx.execute(
-            "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
-            params![metadata.interaction_id, input_id],
-        )?;
-        let receipt = get_permission_response(&tx, input_id)?;
-        require(
-            Instant::now() < deadline,
-            "deadline",
-            "response reservation deadline expired",
-        )?;
-        tx.commit()?;
-        Ok(PermissionReservation::Reserved(receipt))
-    })
-}
-
-fn validate_proof(
-    owner: &RunOwner,
-    receipt: &PermissionReceipt,
-    proof: &ZeroByteRetirement<'_>,
-) -> Result<(), CafleetError> {
-    require(
-        proof.owner == *owner
-            && proof.input_id == receipt.input.input_id
-            && proof.interaction_id == receipt.response.metadata.interaction_id
-            && receipt.input.run_id == owner.run_id,
-        "retirement",
-        "retirement proof does not match current owner/input/interaction",
-    )?;
-    require(
-        proof.input.same_identity(&receipt.input),
-        "retirement",
-        "retirement immutable receipt changed",
-    )
-}
-
-fn validate_current_capability(
-    conn: &Connection,
-    run: &RunRecord,
-    metadata: &PermissionResponseMetadata,
-    event: &RuntimeEventView,
-    capability: Option<&AnswerCapability>,
-) -> Result<(), CafleetError> {
-    require(
-        run.owner_kind == OwnerKind::Runner
-            && run.status == RunStatus::Running
-            && historical_ownership(conn, run)?.is_none()
-            && metadata.expected_owner_epoch == run.owner_epoch
-            && metadata.director_member_id == run.director_member_id
-            && permission_event_matches(event, run.run_id, metadata, true),
-        "permission_response",
-        "current open runner permission association required",
-    )?;
-    let cap = capability
-        .ok_or_else(|| invalid("answer_capability", "verified answer capability required"))?;
-    require(
-        cap.backend().name() == run.backend
-            && Some(cap.native_version()) == run.native_version.as_deref()
-            && cap.answer_rule_id() == metadata.answer_rule_id
-            && cap.request_rule_id()
-                == event.event.payload_json["evidence"]["rule_id"]
-                    .as_str()
-                    .ok_or_else(|| invalid("rule_id", "event request rule required"))?
-            && cap.key() == &metadata.key,
-        "answer_capability",
-        "answer capability does not match this request",
-    )?;
-    Ok(())
-}
-
-pub(crate) fn rearm_permission_response(
-    conn: &mut Connection,
-    owner: &RunOwner,
-    request: &NewPermissionResponse,
-    proof: &ZeroByteRetirement<'_>,
-    deadline: Instant,
-) -> Result<PermissionReceipt, CafleetError> {
-    let (bound, capability) = proof
-        .rearm
-        .as_ref()
-        .ok_or_else(|| invalid("retirement", "current-plan rearm authority required"))?;
-    require(
-        bound == request,
-        "permission_response",
-        "rearm request changed",
-    )?;
-    require(
-        conn.is_autocommit(),
-        "transaction",
-        "rearm requires its own immediate transaction",
-    )?;
-    with_database_deadline(conn, deadline, |conn| {
-        conn.busy_handler(Some(|_| false))?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = validate_owner(&tx, owner)?;
-        let receipt = get_permission_response(&tx, proof.input_id)?;
-        validate_proof(owner, &receipt, proof)?;
-        require(
-            receipt.input.state == InputState::Ready
-                && receipt.input.operation_key == request.operation_key
-                && receipt.response.metadata == request.metadata,
-            "permission_response",
-            "exact ready response required",
-        )?;
-        let event = get_event(&tx, request.metadata.event_id)?;
-        validate_current_capability(&tx, &run, &request.metadata, &event, Some(capability))?;
-        if receipt.claim.is_none() {
-            tx.execute("INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)", params![request.metadata.interaction_id, receipt.input.input_id])?;
-        }
-        let changed = tx.execute("UPDATE member_input_operations SET state='in_progress',updated_at=?1 WHERE input_id=?2 AND state='ready'", params![now_stamp(), receipt.input.input_id])?;
-        require(changed == 1, "state", "permission rearm lost CAS")?;
-        let rearmed = get_permission_response(&tx, receipt.input.input_id)?;
-        require(
-            Instant::now() < deadline,
-            "deadline",
-            "permission rearm deadline expired",
-        )?;
-        tx.commit()?;
-        Ok(rearmed)
-    })
-}
-
-pub(super) fn release_permission_claim_in_transaction(
-    conn: &Connection,
-    owner: &RunOwner,
-    input_id: i64,
-    proof: &ZeroByteRetirement<'_>,
-    deadline: Instant,
-) -> Result<PermissionReceipt, CafleetError> {
-    let receipt = get_permission_response(conn, input_id)?;
-    validate_proof(owner, &receipt, proof)?;
-    require(
-        zero_byte_state(&receipt.input),
-        "retirement",
-        "serialized zero-byte state required",
-    )?;
-    if receipt.claim.is_some() {
-        let changed = conn.execute(
-            "DELETE FROM member_permission_response_claims WHERE interaction_id=?1 AND input_id=?2",
-            params![proof.interaction_id, input_id],
-        )?;
-        require(changed == 1, "permission_claim", "claim release lost CAS")?;
-    }
-    require(
-        Instant::now() < deadline,
-        "deadline",
-        "claim release deadline expired",
-    )?;
-    get_permission_response(conn, input_id)
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the settlement entry passes its validated owner, run and retirement proof"
-)]
-fn settle_permission_response_in_transaction(
-    conn: &Connection,
-    owner: &RunOwner,
-    run: &RunRecord,
-    expected_input: &InputOperation,
-    disposition: InputDisposition,
-    evidence_ref: &str,
-    proof: Option<&ZeroByteRetirement<'_>>,
-    deadline: Instant,
-) -> Result<PermissionReceipt, CafleetError> {
-    let receipt = get_permission_response(conn, expected_input.input_id)?;
-    require(
-        receipt.input.same_identity(expected_input) && receipt.input.state == expected_input.state,
-        "permission_response",
-        "permission settlement snapshot changed",
-    )?;
-    if let Some(proof) = proof {
-        validate_proof(owner, &receipt, proof)?;
-    }
-    settle_input_in_transaction(
-        conn,
-        run,
-        expected_input.input_id,
-        expected_input.state,
-        disposition,
-        evidence_ref,
-    )?;
-    if disposition == InputDisposition::NotSubmitted
-        && let Some(proof) = proof
-    {
-        return release_permission_claim_in_transaction(
-            conn,
-            owner,
-            expected_input.input_id,
-            proof,
-            deadline,
-        );
-    }
-    require(
-        Instant::now() < deadline,
-        "deadline",
-        "permission settlement deadline expired",
-    )?;
-    get_permission_response(conn, expected_input.input_id)
-}
-
-/// Settles `expected_input` at its current state. A `PermissionResponse` goes through the
-/// permission settlement, which consumes `proof`; every other kind ignores `proof` and `deadline`.
-pub(crate) fn settle_any_input_in_transaction(
+/// Settles `expected_input` at its current state inside the caller's ownership transaction.
+pub(crate) fn settle_owned_input_in_transaction(
     conn: &Connection,
     owner: &RunOwner,
     expected_input: &InputOperation,
     disposition: InputDisposition,
     evidence_ref: &str,
-    proof: Option<&ZeroByteRetirement<'_>>,
-    deadline: Instant,
 ) -> Result<InputOperation, CafleetError> {
     require(
         !conn.is_autocommit(),
@@ -1115,28 +563,14 @@ pub(crate) fn settle_any_input_in_transaction(
         "input settlement requires an active ownership transaction",
     )?;
     let run = validate_owner(conn, owner)?;
-    if expected_input.kind == InputKind::PermissionResponse {
-        settle_permission_response_in_transaction(
-            conn,
-            owner,
-            &run,
-            expected_input,
-            disposition,
-            evidence_ref,
-            proof,
-            deadline,
-        )
-        .map(|receipt| receipt.input)
-    } else {
-        settle_input_in_transaction(
-            conn,
-            &run,
-            expected_input.input_id,
-            expected_input.state,
-            disposition,
-            evidence_ref,
-        )
-    }
+    settle_input_in_transaction(
+        conn,
+        &run,
+        expected_input.input_id,
+        expected_input.state,
+        disposition,
+        evidence_ref,
+    )
 }
 
 #[cfg(test)]
@@ -1352,9 +786,7 @@ mod tests {
             read.delivery_reason.as_deref(),
             Some("submission_plan_unavailable")
         );
-        let delivery = read
-            .delivery()
-            .expect("a settled receipt projects its delivery");
+        let delivery = read.delivery();
         assert_eq!(delivery.status, DeliveryStatus::NotSubmitted);
     }
 
@@ -1452,21 +884,18 @@ mod tests {
                 &mut fixture.conn,
                 &owner,
                 input.input_id,
-                StopCause::ManualInput,
+                StopCause::ShortWrite,
             )
             .unwrap();
             assert_eq!(uncertain.state, InputState::Uncertain);
-            assert_eq!(uncertain.stop_cause, Some(StopCause::ManualInput));
-            assert_eq!(
-                uncertain.delivery().unwrap().status,
-                DeliveryStatus::Uncertain
-            );
+            assert_eq!(uncertain.stop_cause, Some(StopCause::ShortWrite));
+            assert_eq!(uncertain.delivery().status, DeliveryStatus::Uncertain);
             let read = storage::get_input(&fixture.reopen(), input.input_id).unwrap();
             assert_eq!(read, uncertain);
             let found = storage::find_input(&fixture.reopen(), owner.run_id, "prompt:caused")
                 .unwrap()
                 .unwrap();
-            assert_eq!(found.stop_cause, Some(StopCause::ManualInput));
+            assert_eq!(found.stop_cause, Some(StopCause::ShortWrite));
         }
 
         #[test]
@@ -1474,7 +903,6 @@ mod tests {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             for (index, cause) in [
-                StopCause::ManualInput,
                 StopCause::InteractionCandidate,
                 StopCause::InteractionOpen,
                 StopCause::DeadlineExpired,
@@ -1575,7 +1003,7 @@ mod tests {
                     &mut fixture.conn,
                     &owner,
                     input,
-                    StopCause::ManualInput,
+                    StopCause::ShortWrite,
                 )
                 .unwrap_err();
                 assert!(
@@ -1606,7 +1034,7 @@ mod tests {
                     &mut fixture.conn,
                     &owner,
                     input.input_id,
-                    StopCause::ManualInput,
+                    StopCause::ShortWrite,
                 )
                 .is_err(),
                 "a superseded owner records no cause"
@@ -1832,7 +1260,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{assignment}: {error}"));
             let stored = storage::get_input(&fixture.conn, input.input_id)
                 .unwrap_or_else(|error| panic!("{assignment}: {}", error.message()));
-            let projected = stored.delivery().expect("an unsettled or delivered receipt projects");
+            let projected = stored.delivery();
             assert_eq!(projected.to_json(), delivery, "{assignment}");
             assert_eq!(stored.deferred_at.is_none(), !deferred, "{assignment}");
             assert_eq!(stored.defer_reason.is_none(), !deferred, "{assignment}");
@@ -1851,10 +1279,5 @@ mod tests {
             storage::get_input(&fixture.conn, queued_with_method.input_id).is_err(),
             "a queued receipt with a selected method fails validation"
         );
-    }
-
-    #[test]
-    fn zero_byte_retirement_proof_is_neither_send_clone_nor_serialize() {
-        assert_not_impl!(storage::ZeroByteRetirement<'static>: Send, Clone, serde::Serialize);
     }
 }

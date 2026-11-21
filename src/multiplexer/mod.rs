@@ -1191,43 +1191,52 @@ mod tests {
         );
     }
 
-    struct AbsoluteRecorder(RefCell<Vec<Instant>>);
+    struct TimeoutRecorder(RefCell<Vec<Duration>>);
 
-    impl CommandRunner for AbsoluteRecorder {
+    impl CommandRunner for TimeoutRecorder {
         fn binary_exists(&self, _: &str) -> bool {
             true
         }
         fn run(&self, _: &[String]) -> Result<String, RunError> {
-            panic!("absolute execution retains its Instant")
+            panic!("press bounds every process by the invocation deadline")
         }
-        fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
-            panic!("absolute execution retains its Instant")
-        }
-        fn run_until(&self, _: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-            self.0.borrow_mut().push(deadline);
+        fn run_for(&self, _: &[String], timeout: Duration) -> Result<String, RunError> {
+            self.0.borrow_mut().push(timeout);
             Ok(String::new())
+        }
+        fn run_until(&self, _: &[String], _: Instant) -> Result<String, TimedRunError> {
+            panic!("press runs every process through the shared bounded runner")
         }
     }
 
     #[test]
-    fn press_deadline_runner_clips_the_actual_absolute_call_and_refuses_expiry() {
-        let recorder = Rc::new(AbsoluteRecorder(RefCell::default()));
+    fn press_deadline_runner_clips_each_call_to_the_remaining_deadline_and_refuses_expiry() {
+        let recorder = Rc::new(TimeoutRecorder(RefCell::default()));
         let original = Instant::now() + Duration::from_secs(2);
         let bounded = DeadlineRunner::wrap(recorder.clone(), Deadline::until(original));
         assert!(
             bounded
-                .run_until(&argv(&["fixture"]), original + Duration::from_secs(5))
+                .run_for(&argv(&["fixture"]), Duration::from_secs(7))
                 .is_ok()
         );
-        let earlier = original - Duration::from_secs(1);
-        assert!(bounded.run_until(&argv(&["fixture"]), earlier).is_ok());
-        assert_eq!(*recorder.0.borrow(), vec![original, earlier]);
+        assert!(
+            bounded
+                .run_for(&argv(&["fixture"]), Duration::from_millis(500))
+                .is_ok()
+        );
+        let recorded = recorder.0.borrow().clone();
+        assert!(
+            recorded[0] > Duration::from_secs(1) && recorded[0] <= Duration::from_secs(2),
+            "{recorded:?}"
+        );
+        assert_eq!(recorded[1], Duration::from_millis(500));
         let expired = DeadlineRunner::wrap(recorder.clone(), Deadline::until(Instant::now()));
-        let failure = match expired.run_until(&argv(&["fixture"]), original) {
-            Ok(_) => panic!("expired work starts no underlying command"),
-            Err(failure) => failure,
-        };
-        assert!(matches!(failure.source, RunError::NotStarted(_)));
+        assert!(
+            expired
+                .run_for(&argv(&["fixture"]), Duration::from_secs(1))
+                .is_err(),
+            "expired work starts no underlying command"
+        );
         assert_eq!(recorder.0.borrow().len(), 2);
     }
     fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {

@@ -1,8 +1,6 @@
 use crate::broker::runtime as storage;
-use crate::broker::runtime::DecisionSource;
 use crate::broker::runtime::DeliveryProjection;
 use crate::broker::runtime::DeliveryStatus;
-use crate::broker::runtime::DirectorMode;
 use crate::broker::runtime::InputDisposition;
 use crate::broker::runtime::InputKind;
 use crate::broker::runtime::InputState;
@@ -225,11 +223,6 @@ pub(crate) struct PermissionRespondInput {
     pub(crate) request_token: String,
     #[serde(flatten, with = "answer_wire")]
     pub(crate) key: AnswerKey,
-    pub(crate) decision_source: DecisionSource,
-    pub(crate) director_mode: DirectorMode,
-    pub(crate) mode_evidence_ref: String,
-    pub(crate) decision_evidence_ref: String,
-    pub(crate) operation_key: String,
 }
 impl PermissionRespondInput {
     pub(crate) fn inspection(&self) -> PermissionInspectInput {
@@ -240,6 +233,8 @@ impl PermissionRespondInput {
         }
     }
 }
+/// A permission answer's reply. Its `submission` carries the status, stage, output sequence and
+/// reason; a permission answer has no input receipt, so `input_id` and `delivery` are absent.
 #[derive(Deserialize)]
 pub(crate) struct PermissionResponseResult {
     #[serde(flatten)]
@@ -251,7 +246,6 @@ pub(crate) struct PermissionResponseResult {
     pub(crate) event_id: i64,
     #[serde(flatten, with = "answer_wire")]
     pub(crate) key: AnswerKey,
-    pub(crate) decision_source: DecisionSource,
 }
 
 /// The wire's separate `decision` and `choice` fields, exactly one of them non-null.
@@ -639,7 +633,7 @@ impl InputControlRequest {
                 evidence_ref,
                 ..
             }) => {
-                validate_permission_reference(evidence_ref)?;
+                validate_evidence_reference(evidence_ref)?;
                 positive(&[*input_id])
             }
         }
@@ -859,7 +853,10 @@ fn validate_reply(reply: &InputControlReply) -> Result<()> {
         InputControlReply::Submission(submission) => validate_submission(submission),
         InputControlReply::Inspection(inspection) => validate_inspection(inspection),
         InputControlReply::PermissionResponse(response) => {
-            positive_input(&response.submission)?;
+            ensure(
+                response.submission.input_id.is_none() && response.submission.delivery.is_none(),
+                "a permission response carries no input receipt",
+            )?;
             positive(&[
                 response.member_id,
                 response.run_id,
@@ -963,7 +960,6 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
                 && result.run_id == input.expected_run_id
                 && result.owner_epoch == input.expected_owner_epoch
                 && result.key == input.key
-                && result.decision_source == input.decision_source
         }
         (InputControlOperation::Receipt(action), InputControlReply::Receipt(result)) => {
             match (action, result) {
@@ -1765,10 +1761,6 @@ mod tests {
             statuses.map(CheckStatus::as_str),
             ["ok", "info", "warn", "error"]
         );
-        assert_eq!(MemberState::Running.status(), CheckStatus::Ok);
-        assert_eq!(MemberState::CheckFailed.status(), CheckStatus::Error);
-        assert_eq!(MemberState::LostRuntime.status(), CheckStatus::Warn);
-        assert_eq!(MemberState::Ended.status(), CheckStatus::Info);
     }
 
     mod input_frames_tests {
@@ -2852,8 +2844,7 @@ mod tests {
                 }
                 "permission_respond" => {
                     json!({"interaction_id":12,"event_id":11,"director_member_id":run.director_member_id,
-                    "expected_run_id":run.run_id,"expected_owner_epoch":run.owner_epoch,"request_token":"a".repeat(64),"decision":"allow","choice":null,
-                    "decision_source":"director-auto","director_mode":"auto","mode_evidence_ref":"fixture:mode","decision_evidence_ref":"fixture:decision","operation_key":"fixture:response"})
+                    "expected_run_id":run.run_id,"expected_owner_epoch":run.owner_epoch,"request_token":"a".repeat(64),"decision":"allow","choice":null})
                 }
                 "receipt" => match action.expect("receipt fixture specifies its action") {
                     "query" => json!({"action":"query","operation_key":"fixture:query"}),
@@ -2913,8 +2904,8 @@ mod tests {
         }
         fn response(&self) -> Value {
             let run = &self.fixture.run;
-            json!({"status":"accepted","input_id":13,"member_id":run.member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,
-                "interaction_id":12,"event_id":11,"decision":"allow","choice":null,"decision_source":"director-auto","stage":"submitted","output_seq":2,"reason":null})
+            json!({"status":"accepted","member_id":run.member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,
+                "interaction_id":12,"event_id":11,"decision":"allow","choice":null,"stage":"submitted","output_seq":2,"reason":null})
         }
         fn choice_response(&self, choice: &str) -> Value {
             let mut value = self.response();
@@ -3277,15 +3268,9 @@ mod tests {
         decoded(&huge);
         huge["event_id"] = json!(u64::try_from(i64::MAX).unwrap() + 1);
         rejection(&good, &bytes(&huge));
-        for (field, invalid) in [
-            ("decision", "ALLOW"),
-            ("decision_source", "director_auto"),
-            ("director_mode", "AUTO"),
-        ] {
-            let mut bad = good.clone();
-            bad[field] = json!(invalid);
-            rejection(&good, &bytes(&bad));
-        }
+        let mut bad = good.clone();
+        bad["decision"] = json!("ALLOW");
+        rejection(&good, &bytes(&bad));
         for (kind, action, field, invalid) in [
             ("submit_prompt", None, "input_kind", "permission_response"),
             ("receipt", Some("query"), "action", "unknown"),
@@ -3335,39 +3320,12 @@ mod tests {
                 json!(case.fixture.run.owner_epoch + 1),
             ),
             ("director_member_id", json!(case.fixture.run.member_id)),
-            ("director_mode", json!("manual")),
             ("request_token", json!("A".repeat(64))),
             ("request_token", json!("a".repeat(63))),
         ] {
             let mut bad = good.clone();
             bad[field] = invalid;
             rejection(&good, &bytes(&bad));
-        }
-        for field in ["mode_evidence_ref", "decision_evidence_ref"] {
-            let mut edge = good.clone();
-            edge[field] = json!("界".repeat(682) + "ab");
-            decoded(&edge);
-            for byte in (0u8..=31).chain(std::iter::once(127)) {
-                let mut bad = good.clone();
-                bad[field] = json!(format!("fixture:{}ref", char::from(byte)));
-                rejection(&good, &bytes(&bad));
-            }
-            for invalid in [
-                " ".into(),
-                "x".repeat(2049),
-                "a\nb".into(),
-                "界".repeat(683),
-            ] {
-                let mut bad = good.clone();
-                bad[field] = json!(invalid);
-                rejection(&good, &bytes(&bad));
-            }
-        }
-        for mode in ["auto", "manual", "unknown"] {
-            let mut valid = good.clone();
-            valid["decision_source"] = json!("user");
-            valid["director_mode"] = json!(mode);
-            decoded(&valid);
         }
     }
     #[test]
@@ -3395,23 +3353,8 @@ mod tests {
     #[test]
     fn invalid_request_diagnostics_keep_payload_canaries_private() {
         let mut good = Case::new().request("permission_respond", None);
-        let canaries = [
-            "PRIVATE_KEY_7d69".into(),
-            "12bd".repeat(16),
-            "PRIVATE_MODE_981e".into(),
-            "PRIVATE_DECISION_773a".into(),
-        ];
-        for (field, canary) in [
-            "operation_key",
-            "request_token",
-            "mode_evidence_ref",
-            "decision_evidence_ref",
-        ]
-        .into_iter()
-        .zip(&canaries)
-        {
-            good[field] = json!(canary);
-        }
+        let canaries = ["12bd".repeat(16)];
+        good["request_token"] = json!(canaries[0]);
         for field in ["request_token", "decision", "expected_run_id"] {
             let mut bad = good.clone();
             bad[field] = json!("PRIVATE_INVALID_8d14");
@@ -3506,7 +3449,7 @@ mod tests {
             InputControlReply::PermissionResponse(actual) => actual,
             _ => panic!("response result has exact kind"),
         };
-        assert_eq!(actual.submission.input_id, Some(13));
+        assert_eq!(actual.submission.input_id, None);
         assert_eq!(actual.submission.status, SubmissionStatus::Accepted);
         assert_eq!(actual.submission.stage, SubmissionStage::Submitted);
         assert_eq!(actual.submission.output_seq, Some(2));
@@ -3517,7 +3460,6 @@ mod tests {
         assert_eq!(actual.interaction_id, 12);
         assert_eq!(actual.event_id, 11);
         assert_eq!(actual.key, AnswerKey::Decision(PermissionDecision::Allow));
-        assert_eq!(actual.decision_source, DecisionSource::DirectorAuto);
         let mut nested = good.clone();
         nested["result"]["response"]["submission"] = submission("accepted", "submitted", Some(13));
         reject_reply(&good, &bytes(&nested), &request);
@@ -3717,7 +3659,6 @@ mod tests {
             ),
         ] {
             response["status"] = json!("rejected");
-            response["input_id"] = Value::Null;
             response["stage"] = json!("zero_bytes");
             response["output_seq"] = Value::Null;
             response["reason"] = json!(reason);
@@ -4017,11 +3958,9 @@ mod tests {
                 reject_reply(&good, &bytes(&bad), &request);
             }
             if payload == "response" {
-                for (field, value) in [("decision", "deny"), ("decision_source", "user")] {
-                    let mut bad = good.clone();
-                    bad["result"][payload][field] = json!(value);
-                    reject_reply(&good, &bytes(&bad), &request);
-                }
+                let mut bad = good.clone();
+                bad["result"][payload]["decision"] = json!("deny");
+                reject_reply(&good, &bytes(&bad), &request);
             }
         }
         let request = case.request("receipt", Some("query"));
@@ -4093,7 +4032,7 @@ mod tests {
                 assert_eq!(result_keys(&encoded, "request"),"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,supported_choices,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
             }
             if request["kind"] == "permission_respond" {
-                assert_eq!(result_keys(&encoded, "response"),"status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,decision_source,stage,output_seq,reason".split(',').collect::<Vec<_>>());
+                assert_eq!(result_keys(&encoded, "response"),"status,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,stage,output_seq,reason".split(',').collect::<Vec<_>>());
             }
         }
         let expected = json!({"protocol_version":1,"error":"fixture failure"});
@@ -4400,101 +4339,6 @@ mod tests {
                         "launch_nonce",
                     );
                 }
-            }
-        }
-    }
-
-    mod runtime_diagnosis {
-        use crate::runtime::control::*;
-
-        fn observed(
-            descriptor_leftover: bool,
-            lock: OwnerLockProbe,
-            health: HealthProbe,
-        ) -> RuntimeDiagnosis {
-            RuntimeProbes::Observed {
-                descriptor_leftover,
-                lock,
-                health,
-            }
-            .classify()
-        }
-
-        fn refused() -> HealthProbe {
-            HealthProbe::Failed("member runtime: ECONNREFUSED: Connection refused".into())
-        }
-
-        fn lock_failure() -> OwnerLockProbe {
-            OwnerLockProbe::Failed("owner lock identity changed".into())
-        }
-
-        #[test]
-        fn a_leftover_descriptor_is_an_interrupted_launch_before_any_health_outcome() {
-            const REFUSED: &str = "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused";
-            let cases: Vec<(RuntimeDiagnosis, MemberState, &[&str])> = vec![
-                (
-                    RuntimeProbes::InvalidPaths("namespace manifest is missing".into()).classify(),
-                    MemberState::InterruptedLaunch,
-                    &["runtime files are invalid: namespace manifest is missing"],
-                ),
-                (
-                    observed(true, OwnerLockProbe::Held, HealthProbe::Answered),
-                    MemberState::InterruptedLaunch,
-                    &[
-                        "launch descriptor left over",
-                        "owner lock is held",
-                        "runtime answered the health probe",
-                    ],
-                ),
-                (
-                    observed(true, OwnerLockProbe::Free, HealthProbe::Skipped),
-                    MemberState::InterruptedLaunch,
-                    &["launch descriptor left over", "owner lock is free"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Held, HealthProbe::Answered),
-                    MemberState::Running,
-                    &["owner lock is held", "runtime answered the health probe"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Free, HealthProbe::Answered),
-                    MemberState::Running,
-                    &["owner lock is free", "runtime answered the health probe"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Held, refused()),
-                    MemberState::NotResponding,
-                    &["owner lock is held", REFUSED],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Free, refused()),
-                    MemberState::LostRuntime,
-                    &["owner lock is free", REFUSED],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Held, HealthProbe::Skipped),
-                    MemberState::NotChecked,
-                    &["owner lock is held"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Free, HealthProbe::Skipped),
-                    MemberState::NotChecked,
-                    &["owner lock is free"],
-                ),
-                (
-                    observed(false, lock_failure(), HealthProbe::Answered),
-                    MemberState::CheckFailed,
-                    &["owner lock identity changed"],
-                ),
-                (
-                    observed(true, lock_failure(), refused()),
-                    MemberState::CheckFailed,
-                    &["owner lock identity changed"],
-                ),
-            ];
-            for (diagnosis, state, phrases) in cases {
-                assert_eq!(diagnosis.state, state, "{:?}", diagnosis.diagnostics);
-                assert_eq!(diagnosis.diagnostics, phrases);
             }
         }
     }

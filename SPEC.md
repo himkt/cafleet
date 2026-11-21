@@ -994,7 +994,7 @@ The response JSON is `{response}`, with ordered keys:
 status,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,stage,output_seq,reason
 ```
 
-`status` is `accepted`, `held`, `rejected` or `uncertain`. Decision and choice retain their command values; exactly one of them is non-null. `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`: accepted has `submitted`, held/rejected `zero_bytes`, and uncertainty the observed partial/submitted stage or `unknown`. `output_seq` is an unsigned integer, null when no current sequence can be established. `reason` is a nullable bounded explanation; an uncertain reply reports its stop cause (§6.9 Stop cause).
+`status` is `accepted`, `held`, `rejected` or `uncertain`. Decision and choice retain their command values; exactly one of them is non-null. `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`: accepted has `submitted`, held/rejected `zero_bytes`, and uncertainty the observed partial/submitted stage or `unknown`. `output_seq` is an unsigned integer, null when no current sequence can be established. `reason` is a nullable bounded explanation; an uncertain reply reports its stop cause (§6.9 Stop cause), or `manual_input` when keyboard or pointer input, or failed manual-input accounting, revoked the answer's authority after a written stage.
 
 The runner accepts one answer per episode (§6.9 One answer per episode). Nothing about a response is stored: no input receipt, audit or claim, so `input show` and `input reconcile` have no permission rows.
 
@@ -3535,7 +3535,6 @@ An attempt that ends after its first byte without confirmed submission records `
 | `short_write` | A stop leaves a prefix inside a UTF-8 scalar or paste marker, or a permission answer stage writes short |
 | `write_failed` | A PTY error, unrecorded possible I/O, a failed checkpoint, a failed or short close, a positive short submit key, a failed deferred or written immediate attempt (§ Immediate attempt failure bookkeeping), or a failed permission response |
 | `runner_stopped` | Shutdown ended an active attempt that may have written a child byte |
-| `manual_input` | Keyboard or pointer input, or failed manual-input accounting, revokes a permission response's authority after a written stage |
 
 Apply the incomplete-prefix `short_write` override after an interaction stop, and finish any mandatory paste close before outcome recording. Settlement and reconciliation preserve the cause. Other inputs without a stop and in-progress rows left by runner loss have a null `stop_cause`. Input inspection reports it, stopped replies carry it as `reason`, and result events carry it as `cause` (§ Input delivery result event).
 
@@ -3819,8 +3818,7 @@ CREATE TABLE member_input_operations (
             AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
         OR (stop_cause IN ('interaction_open','interaction_candidate','submit_unconfirmed',
-                          'deadline_expired','short_write','write_failed','runner_stopped',
-                          'manual_input')
+                          'deadline_expired','short_write','write_failed','runner_stopped')
             AND state IN ('uncertain','settled'))),
     UNIQUE(run_id, operation_key),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))

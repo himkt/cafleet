@@ -4,7 +4,6 @@ pub(crate) mod hermes;
 
 use crate::broker::runtime::Coverage;
 use crate::broker::runtime::ModeSource;
-pub(crate) use crate::coding_agent::catalog::AnswerCapability;
 pub(crate) use crate::coding_agent::catalog::AnswerPlan;
 pub(crate) use crate::coding_agent::catalog::AnswerStage;
 pub(crate) use crate::coding_agent::catalog::ComposerOperation;

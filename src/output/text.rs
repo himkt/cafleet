@@ -283,7 +283,7 @@ pub(crate) fn format_runtime_event(view: &RuntimeEventView) -> String {
 }
 
 pub(crate) fn format_input_operation(input: &InputOperation) -> String {
-    let mut text = format!(
+    format!(
         "Input: {} run={} kind={} state={} disposition={}",
         input.input_id,
         input.run_id,
@@ -292,29 +292,19 @@ pub(crate) fn format_input_operation(input: &InputOperation) -> String {
         input
             .disposition
             .map_or("-", |disposition| disposition.as_str()),
-    );
-    if let Some(response) = &input.permission_response {
-        let metadata = &response.metadata;
-        text.push_str(&format!("\nPermission decision: interaction={} event={} decision={} choice={} source={} mode={} director={} epoch={}",
-            metadata.interaction_id,metadata.event_id,metadata.key.decision().map_or("-", |decision| decision.as_str()),metadata.key.choice().unwrap_or("-"),metadata.decision_source.as_str(),metadata.director_mode.as_str(),metadata.director_member_id,metadata.expected_owner_epoch));
-    }
-    text
+    )
 }
 
 pub(crate) fn format_permission_response_result(
     row: &crate::runtime::PermissionResponseResult,
 ) -> String {
     let mut text = format!(
-        "Permission response: interaction={} run={} decision={} choice={} source={} status={} input={} stage={} output_seq={}",
+        "Permission response: interaction={} run={} decision={} choice={} status={} stage={} output_seq={}",
         row.interaction_id,
         row.run_id,
         row.key.decision().map_or("-", |decision| decision.as_str()),
         row.key.choice().unwrap_or("-"),
-        row.decision_source.as_str(),
         row.submission.status.as_str(),
-        row.submission
-            .input_id
-            .map_or_else(|| "-".into(), |value| value.to_string()),
         row.submission.stage.as_str(),
         row.submission
             .output_seq

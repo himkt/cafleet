@@ -30,9 +30,6 @@ impl DrainedInput {
     pub(super) fn human_generation(&self) -> u64 {
         self.human_generation
     }
-    pub(super) fn pointer_generation(&self) -> u64 {
-        self.pointer_generation
-    }
     pub(super) fn output_seq(&self) -> u64 {
         self.output_seq
     }
@@ -3667,7 +3664,7 @@ mod tests {
                         .take_input_drain()
                         .expect("a complete pointer report drains");
                     assert_eq!(proof.human_generation(), 0);
-                    assert_eq!(proof.pointer_generation(), report.len() as u64);
+                    assert_eq!(proof.pointer_generation, report.len() as u64);
                     transport.validate_ordinary(&proof, h.until).unwrap();
                     transport.validate_permission(&proof, h.until).unwrap();
                 }
@@ -3746,7 +3743,7 @@ mod tests {
                 let mut proof = transport
                     .take_input_drain()
                     .expect("the actual drain sealed a proof");
-                assert_eq!(proof.pointer_generation(), report.len() as u64);
+                assert_eq!(proof.pointer_generation, report.len() as u64);
                 proof.pointer_generation = 0;
                 transport.validate_ordinary(&proof, h.until).unwrap();
                 assert!(transport.validate_permission(&proof, h.until).is_err());

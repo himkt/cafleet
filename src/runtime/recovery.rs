@@ -938,22 +938,13 @@ mod tests {
             case.refresh();
             case
         }
-        fn recover_missing(case: &mut Case, operator: bool) -> TestResult<RecoveryReport> {
-            let claim = operator.then(|| {
-                claim(
-                    &case.fixture.run,
-                    Some("audit:established-terminal-history"),
-                )
-            });
+        fn recover_missing(case: &mut Case) -> TestResult<RecoveryReport> {
             let mut host = new_host();
-            if operator {
-                host.process = Evidence::Unknown;
-            }
             let result = recover_member_with_host(
                 &mut case.fixture.conn,
                 &case.settings,
                 case.fixture.run.member_id,
-                claim.as_ref(),
+                None,
                 host.deadline,
                 &mut host,
             );
@@ -972,13 +963,11 @@ mod tests {
             status: RunStatus,
             prior: &[TableSnapshot],
             artifact: &ArtifactWitness,
-            operator: bool,
         ) {
             let current = storage::get_run(&case.fixture.conn, before.run_id).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, status);
             assert_eq!(current.status, status);
-            assert_eq!(counts(report), (0, 0, 0));
             assert_eq!(current.owner_epoch, before.owner_epoch + 1);
             assert_eq!(current.owner_kind, OwnerKind::Reconciler);
             let process = ProcessIdentity::current().unwrap();
@@ -1006,22 +995,16 @@ mod tests {
                 .unwrap()
                 .to_string();
             assert!(diagnostics.contains("runtime_path_missing"));
-            assert_eq!(diagnostics.contains("operator_via_director"), operator);
-            if operator {
-                assert!(diagnostics.contains("audit:established-terminal-history"));
-            }
         }
 
-        fn original_history_cases(status: RunStatus, operator: bool) {
+        fn original_history_cases(status: RunStatus) {
             for directory in [false, true] {
                 let mut case = original_terminal(status);
                 let before = case.fixture.run.clone();
                 let prior = retained_history(&case.fixture.conn);
                 let artifact = lose_artifacts(&mut case, directory);
-                let report = recover_missing(&mut case, operator).unwrap();
-                assert_terminal_bookkeeping(
-                    &case, &report, &before, status, &prior, &artifact, operator,
-                );
+                let report = recover_missing(&mut case).unwrap();
+                assert_terminal_bookkeeping(&case, &report, &before, status, &prior, &artifact);
                 assert!(
                     storage::get_run(&case.fixture.conn, before.run_id)
                         .unwrap()
@@ -1034,11 +1017,8 @@ mod tests {
         }
         #[test]
         fn runner_recovery_machine_missing_paths_preserve_original_exited_and_failed_history() {
-            original_history_cases(RunStatus::Exited, false);
-        }
-        #[test]
-        fn runner_recovery_operator_missing_paths_preserve_original_exited_and_failed_history() {
-            original_history_cases(RunStatus::Failed, true);
+            original_history_cases(RunStatus::Exited);
+            original_history_cases(RunStatus::Failed);
         }
 
         #[test]
@@ -1050,7 +1030,7 @@ mod tests {
                 let before = case.fixture.run.clone();
                 let prior = retained_history(&case.fixture.conn);
                 let artifact = lose_artifacts(&mut case, directory);
-                let report = recover_missing(&mut case, false).unwrap();
+                let report = recover_missing(&mut case).unwrap();
                 assert_terminal_bookkeeping(
                     &case,
                     &report,
@@ -1058,7 +1038,6 @@ mod tests {
                     RunStatus::Exited,
                     &prior,
                     &artifact,
-                    false,
                 );
                 assert_eq!(events(&case).len(), 1);
             }
@@ -1087,7 +1066,7 @@ mod tests {
                 };
                 fail_next(&mut case.fixture.conn, trigger);
                 let before = rows(&case.fixture.conn);
-                let result = recover_missing(&mut case, true);
+                let result = recover_missing(&mut case);
                 case.fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
                 assert!(result.is_err(), "{fault}");
                 assert_eq!(rows(&case.fixture.conn), before, "{fault}");
@@ -1099,7 +1078,7 @@ mod tests {
                         .unwrap();
                 }
                 if fault == "commit" {
-                    let report = recover_missing(&mut case, true).unwrap();
+                    let report = recover_missing(&mut case).unwrap();
                     assert_terminal_bookkeeping(
                         &case,
                         &report,
@@ -1107,7 +1086,6 @@ mod tests {
                         RunStatus::Failed,
                         &prior,
                         &artifact,
-                        true,
                     );
                 }
             }
@@ -1129,12 +1107,6 @@ mod tests {
             assert_loss(&case, &report, &original);
             assert!(!host.calls.iter().any(|name| name == "before_replay"));
             assert!(!case.artifacts.paths.owner_lock.exists());
-            let diagnostics = storage::get_run(&case.fixture.conn, original.run_id)
-                .unwrap()
-                .cleanup_diagnostics_json
-                .unwrap()
-                .to_string();
-            assert!(!diagnostics.contains("operator_via_director"));
         }
 
         #[test]
@@ -1255,8 +1227,7 @@ mod tests {
                 let opening = persist_opening(&mut case);
                 end_lifecycle(&mut case, lifecycle);
                 missing_lock(&mut case);
-                let report = case.recover(&mut new_host()).unwrap();
-                assert_eq!(counts(&report), (0, 0, 2));
+                case.recover(&mut new_host()).unwrap();
                 let committed = events(&case);
                 assert_eq!(committed[0].event, opening);
                 assert_eq!(committed.len(), 3);
@@ -1267,92 +1238,6 @@ mod tests {
             }
         }
 
-        #[test]
-        fn runner_recovery_attestation_records_attributed_original_provenance_and_current_terminal_retries()
-         {
-            let mut case = Case::new();
-            persist_opening(&mut case);
-            let original = case.fixture.run.clone();
-            let original_claim = claim(&original, None);
-            missing_lock(&mut case);
-            let earliest = chrono::Utc::now();
-            let mut host = new_host();
-            host.process = Evidence::Unknown;
-            let report = case.recover_with(&mut host, Some(&original_claim)).unwrap();
-            let latest = chrono::Utc::now();
-            assert_loss(&case, &report, &original);
-            let current = storage::get_run(&case.fixture.conn, original.run_id).unwrap();
-            let diagnostics = current.cleanup_diagnostics_json.as_ref().unwrap();
-            let text = diagnostics.to_string();
-            for value in [
-                "owner_termination_attestation",
-                "operator_via_director",
-                original_claim.evidence_ref.as_str(),
-                original.owner_start_identity.as_str(),
-            ] {
-                assert!(text.contains(value), "{text}");
-            }
-            let mut leaves = Vec::new();
-            fn values<'a>(value: &'a Value, leaves: &mut Vec<&'a Value>) {
-                match value {
-                    Value::Object(map) => {
-                        for value in map.values() {
-                            values(value, leaves)
-                        }
-                    }
-                    Value::Array(array) => {
-                        for value in array {
-                            values(value, leaves)
-                        }
-                    }
-                    _ => leaves.push(value),
-                }
-            }
-            values(diagnostics, &mut leaves);
-            for expected in [original.run_id, original.owner_epoch, original.owner_pid] {
-                assert!(leaves.iter().any(|value| value.as_i64() == Some(expected)));
-            }
-            assert!(
-                leaves
-                    .iter()
-                    .filter_map(|value| value.as_str())
-                    .filter_map(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                    .any(|value| value >= earliest && value <= latest)
-            );
-            let committed = rows(&case.fixture.conn);
-            let mut retry = new_host();
-            retry.process = Evidence::Alive;
-            assert!(
-                case.recover_with(&mut retry, Some(&original_claim))
-                    .is_err()
-            );
-            assert_eq!(rows(&case.fixture.conn), committed);
-            let matching = claim(&current, None);
-            let mut retry = new_host();
-            retry.process = Evidence::Alive;
-            let no_work = case.recover_with(&mut retry, Some(&matching)).unwrap();
-            assert_eq!(counts(&no_work), (0, 0, 0));
-            assert_eq!(rows(&case.fixture.conn), committed);
-            bump_epoch(&case.fixture.conn, original.run_id);
-            let changed = rows(&case.fixture.conn);
-            assert!(case.recover_with(&mut new_host(), Some(&matching)).is_err());
-            assert_eq!(rows(&case.fixture.conn), changed);
-            case.refresh();
-            let latest_claim = claim(&case.fixture.run, None);
-            let mut retry = new_host();
-            retry.process = Evidence::Alive;
-            assert_eq!(
-                counts(&case.recover_with(&mut retry, Some(&latest_claim)).unwrap()),
-                (0, 0, 0)
-            );
-            assert_eq!(rows(&case.fixture.conn), changed);
-            assert_eq!(
-                storage::get_run(&case.fixture.conn, original.run_id)
-                    .unwrap()
-                    .cleanup_diagnostics_json,
-                current.cleanup_diagnostics_json
-            );
-        }
         #[test]
         fn runner_recovery_missing_path_faults_rollback_owner_provenance_counters_episode_and_events_together()
          {
@@ -1393,9 +1278,7 @@ mod tests {
                 fail_next(&mut case.fixture.conn, statement);
                 let before = rows(&case.fixture.conn);
                 let mut host = new_host();
-                host.process = Evidence::Unknown;
-                let attestation = claim(&case.fixture.run, None);
-                let result = case.recover_with(&mut host, Some(&attestation));
+                let result = case.recover(&mut host);
                 case.fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
                 assert!(result.is_err(), "{fault}");
                 assert_eq!(rows(&case.fixture.conn), before, "{fault}");
@@ -1404,20 +1287,18 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_attestation_revalidates_epoch_after_obtaining_the_actual_write_lock() {
+        fn runner_recovery_missing_path_revalidates_epoch_after_obtaining_the_actual_write_lock() {
             use std::sync::mpsc;
             let mut case = Case::new();
             persist_opening(&mut case);
             missing_lock(&mut case);
             let original = case.fixture.run.clone();
-            let attestation = claim(&original, None);
             let run_id = original.run_id;
             let path = case.fixture.conn.path().unwrap().to_owned();
             let (start_tx, start_rx) = mpsc::sync_channel(1);
             let (held_tx, held_rx) = mpsc::sync_channel(1);
             let mut start_tx = Some(start_tx);
             let mut host = new_host();
-            host.process = Evidence::Unknown;
             host.action = Some(Box::new(move |boundary, _, deadline| {
                 if boundary == "before_takeover"
                     && let Some(start) = start_tx.take()
@@ -1439,7 +1320,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(80));
                     writer.execute_batch("COMMIT").unwrap();
                 });
-                let result = case.recover_with(&mut host, Some(&attestation));
+                let result = case.recover(&mut host);
                 writer.join().unwrap();
                 assert!(result.is_err());
             });
@@ -1458,60 +1339,19 @@ mod tests {
     mod unpublished_relationships {
         use crate::runtime::recovery::test_support::relationships::*;
         #[test]
-        fn runner_recovery_exceptional_zero_event_takeover_refuses_actual_member_fleet_change_atomically()
+        fn runner_recovery_missing_path_zero_event_takeover_refuses_actual_member_fleet_change_atomically()
          {
-            refusal(Stage::ExceptionalTakeover);
+            refusal(Stage::MissingPathTakeover);
         }
         #[test]
-        fn runner_recovery_valid_historical_exceptional_zero_event_bookkeeping_keeps_history() {
-            historical_control(Stage::ExceptionalTakeover);
+        fn runner_recovery_valid_historical_missing_path_zero_event_bookkeeping_keeps_history() {
+            historical_control(Stage::MissingPathTakeover);
         }
     }
 
     use std::io::Write;
 
     use std::sync::Arc;
-
-    mod replay_history {}
-
-    mod replay {
-        use crate::runtime::recovery::tests::*;
-
-        #[test]
-        fn runner_recovery_counts_only_new_commits_across_prefix_and_identical_duplicate_frames() {
-            let mut case = Case::new();
-            let prefix = opening(&case.fixture.run, 1, 1);
-            persist_opening(&mut case);
-            let second = obscured(&case.fixture.run, 2, 1);
-            let third = obscured(&case.fixture.run, 3, 1);
-            let mut bytes = frame(&prefix);
-            bytes.extend(frame(&second));
-            bytes.extend(frame(&second));
-            bytes.extend(frame(&third));
-            case.replace_owned_bytes(&bytes);
-            let prefix_view = events(&case)[0].clone();
-            let report = case.recover(&mut new_host()).unwrap();
-            assert_eq!(counts(&report), (2, 4, 0));
-            let rows = events(&case);
-            assert_eq!(rows.len(), 5);
-            assert_eq!(rows[0].event, prefix_view.event);
-            assert_eq!(
-                rows.iter().filter(|row| row.event.event_seq == 2).count(),
-                1
-            );
-            assert_eq!(
-                rows.iter()
-                    .filter(|row| row.event.kind == RuntimeEventKind::RunnerLost)
-                    .count(),
-                1
-            );
-            let again = case.recover(&mut new_host()).unwrap();
-            assert_eq!(counts(&again), (0, 0, 0));
-            assert_eq!(events(&case), rows);
-        }
-    }
-
-    mod terminal_tail {}
 
     mod descriptor {
         use crate::runtime::recovery::test_support::descriptor::*;
@@ -1522,7 +1362,6 @@ mod tests {
             let report = case.recover(&mut new_host()).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, RunStatus::Lost);
-            assert_eq!(counts(&report), (0, 1, 0));
             secret_free(&serde_json::to_string(&report.cleanup_diagnostics).unwrap());
             assert!(
                 !case.artifacts.paths.descriptor.exists(),
@@ -1559,7 +1398,6 @@ mod tests {
             }
             let report = case.recover(&mut new_host()).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
-            assert_eq!(counts(&report), (0, 0, 0));
             assert_eq!(events(&case).len(), 1);
             assert!(
                 !case.artifacts.paths.descriptor.exists(),
@@ -1622,7 +1460,8 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_exceptional_database_only_reconciliation_preserves_suspect_descriptor() {
+        fn runner_recovery_missing_path_database_only_reconciliation_preserves_suspect_descriptor()
+        {
             let mut case = described_run();
             let before = identity(&case.artifacts.paths.descriptor);
             missing_lock(&mut case);
@@ -1667,7 +1506,6 @@ mod tests {
             let report = case.recover(&mut retry).unwrap();
             assert_eq!(retry.unlink.as_ref().unwrap().calls, 1);
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
-            assert_eq!(counts(&report), (0, 0, 0));
             assert_eq!(
                 events(&case)
                     .into_iter()
@@ -1725,21 +1563,15 @@ mod tests {
         }
     }
 
-    mod delivery_results {}
-
     mod identity {
         use crate::runtime::recovery::tests::*;
 
         #[test]
-        fn runner_recovery_creator_free_precreated_lock_requires_operator_reconciliation() {
+        fn runner_recovery_creator_free_precreated_lock_is_live_or_unreachable() {
             let mut case = Case::creator();
             let before = rows(&case.fixture.conn);
             let report = case.recover(&mut new_host()).unwrap();
-            assert!(matches!(
-                report.outcome,
-                RecoveryOutcome::OperatorReconciliationRequired
-            ));
-            assert_eq!(counts(&report), (0, 0, 0));
+            assert!(matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable));
             assert_eq!(rows(&case.fixture.conn), before);
         }
 
@@ -1760,7 +1592,6 @@ mod tests {
             let matching = case.fixture.run.clone();
             let mut host = new_host();
             let completion = case.recover_held(&matching, &held, &mut host).unwrap();
-            assert_eq!(counts(&completion.report), (0, 0, 0));
             assert_eq!(completion.run, matching);
             assert_eq!(rows(&case.fixture.conn), before);
         }
@@ -1938,7 +1769,6 @@ mod tests {
             };
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert!(host.clock.as_ref().unwrap().observed.is_some());
-            assert_eq!(counts(&report), (1, 3, 0));
         }
 
         #[test]
@@ -1983,15 +1813,13 @@ mod tests {
             rows(conn)
         }
 
-        fn prepare(exceptional: bool) -> (Case, Option<OwnerTerminationAttestation>) {
+        fn prepare(missing_path: bool) -> Case {
             let mut case = Case::new();
-            let claim =
-                exceptional.then(|| claim(&case.fixture.run, Some("audit:completion-race")));
             case.release();
-            if exceptional {
+            if missing_path {
                 std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap();
             }
-            (case, claim)
+            case
         }
 
         fn assert_completed(
@@ -2003,7 +1831,6 @@ mod tests {
         ) {
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, status);
-            assert_eq!(counts(report), (0, 0, 0));
             assert_eq!(
                 &rows(&case.fixture.conn),
                 expected.lock().unwrap().as_ref().unwrap(),
@@ -2034,9 +1861,9 @@ mod tests {
             assert!(events(case).is_empty());
         }
 
-        fn immediate_completion(exceptional: bool, foreign_owner: bool, status: RunStatus) {
-            let (mut case, claim) = prepare(exceptional);
-            let mut inherited_lock = (foreign_owner && !exceptional).then(|| {
+        fn immediate_completion(missing_path: bool, foreign_owner: bool, status: RunStatus) {
+            let mut case = prepare(missing_path);
+            let mut inherited_lock = (foreign_owner && !missing_path).then(|| {
                 RunLock::acquire(&case.fixture.conn, &case.fixture.run.owner())
                     .unwrap()
                     .unwrap()
@@ -2046,9 +1873,6 @@ mod tests {
             let published = expected.clone();
             let path = case.fixture.conn.path().unwrap().to_owned();
             let mut host = new_host();
-            if exceptional {
-                host.process = Evidence::Unknown;
-            }
             host.action = Some(Box::new(move |boundary, run, _| {
                 if boundary == "after_snapshot" && inherited_lock.is_some() {
                     if initial_snapshot_seen {
@@ -2067,11 +1891,11 @@ mod tests {
                 }
                 Ok(())
             }));
-            let result = recover_released_with_host(&mut case, &mut host, claim.as_ref());
+            let result = recover_released_with_host(&mut case, &mut host);
             if foreign_owner {
                 assert!(
                     result.is_err(),
-                    "a terminal shortcut still validates the fixed owner and attestation"
+                    "a terminal shortcut still validates the fixed owner"
                 );
                 assert_eq!(
                     &rows(&case.fixture.conn),
@@ -2088,18 +1912,18 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_same_owner_completion_before_exceptional_takeover_has_zero_effects() {
+        fn runner_recovery_same_owner_completion_before_missing_path_takeover_has_zero_effects() {
             immediate_completion(true, false, RunStatus::Failed);
         }
 
         #[test]
-        fn runner_recovery_completed_foreign_owner_still_rejects_fixed_snapshot_and_attestation() {
+        fn runner_recovery_completed_foreign_owner_still_rejects_the_fixed_snapshot() {
             immediate_completion(false, true, RunStatus::Lost);
             immediate_completion(true, true, RunStatus::Exited);
         }
 
-        fn completion_behind_write_lock(exceptional: bool, status: RunStatus) {
-            let (mut case, claim) = prepare(exceptional);
+        fn completion_behind_write_lock(missing_path: bool, status: RunStatus) {
+            let mut case = prepare(missing_path);
             let expected: CompletedSnapshot = Arc::new(Mutex::new(None));
             let published = expected.clone();
             let path = case.fixture.conn.path().unwrap().to_owned();
@@ -2131,9 +1955,6 @@ mod tests {
                 }))
                 .unwrap();
             let mut host = new_host();
-            if exceptional {
-                host.process = Evidence::Unknown;
-            }
             let until = host.deadline;
             let mut start = Some(start);
             host.action = Some(Box::new(move |boundary, _, deadline| {
@@ -2162,7 +1983,7 @@ mod tests {
                         .unwrap();
                     conn.execute_batch("COMMIT").unwrap();
                 });
-                let result = case.recover_with(&mut host, claim.as_ref());
+                let result = case.recover(&mut host);
                 writer.join().unwrap();
                 result
             });
@@ -2183,7 +2004,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_exceptional_completion_is_rechecked_after_actual_write_lock_wait() {
+        fn runner_recovery_missing_path_completion_is_rechecked_after_actual_write_lock_wait() {
             completion_behind_write_lock(true, RunStatus::Lost);
         }
     }
@@ -2191,7 +2012,7 @@ mod tests {
     mod missing_paths {
         use crate::runtime::recovery::tests::*;
         #[test]
-        fn runner_recovery_missing_path_unknown_identity_preserves_open_episode_and_requires_operator()
+        fn runner_recovery_missing_path_unknown_identity_preserves_open_episode_as_live_or_unreachable()
          {
             let mut case = Case::new();
             persist_opening(&mut case);
@@ -2200,11 +2021,7 @@ mod tests {
             let mut host = new_host();
             host.process = Evidence::Unknown;
             let report = case.recover(&mut host).unwrap();
-            assert!(matches!(
-                report.outcome,
-                RecoveryOutcome::OperatorReconciliationRequired
-            ));
-            assert_eq!(counts(&report), (0, 0, 0));
+            assert!(matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable));
             assert_eq!(rows(&case.fixture.conn), before);
             assert!(
                 events(&case)[0]
@@ -2221,33 +2038,6 @@ mod tests {
                     .iter()
                     .any(|name| name == "before_replay" || name == "cleanup")
             );
-        }
-
-        #[test]
-        fn runner_recovery_missing_path_rejects_wrong_snapshot_and_blank_operator_evidence_without_effects()
-         {
-            for invalid in ["run", "epoch", "zero_run", "zero_epoch", "reference"] {
-                let mut case = Case::new();
-                persist_opening(&mut case);
-                missing_lock(&mut case);
-                let mut attestation = claim(&case.fixture.run, None);
-                match invalid {
-                    "run" => attestation.expected_run_id += 1,
-                    "epoch" => attestation.expected_owner_epoch += 1,
-                    "zero_run" => attestation.expected_run_id = 0,
-                    "zero_epoch" => attestation.expected_owner_epoch = 0,
-                    "reference" => attestation.evidence_ref = " \t".into(),
-                    _ => unreachable!(),
-                }
-                let before = rows(&case.fixture.conn);
-                let mut host = new_host();
-                host.process = Evidence::Unknown;
-                assert!(
-                    case.recover_with(&mut host, Some(&attestation)).is_err(),
-                    "{invalid}"
-                );
-                assert_eq!(rows(&case.fixture.conn), before, "{invalid}");
-            }
         }
 
         #[test]
@@ -2284,12 +2074,10 @@ mod tests {
             );
         }
         #[test]
-        fn runner_recovery_positive_pid_lock_or_strict_health_independently_rejects_termination_claim()
-         {
+        fn runner_recovery_positive_pid_lock_or_strict_health_independently_keeps_the_owner_live() {
             for witness in ["pid", "lock", "health"] {
                 let mut case = Case::new();
                 persist_opening(&mut case);
-                let attestation = claim(&case.fixture.run, None);
                 if witness != "lock" {
                     missing_lock(&mut case);
                 }
@@ -2305,7 +2093,7 @@ mod tests {
                     &mut case.fixture.conn,
                     &case.settings,
                     case.fixture.run.member_id,
-                    Some(&attestation),
+                    None,
                     host.deadline,
                     &mut host,
                 );
@@ -2533,21 +2321,6 @@ pub(crate) mod test_support {
             }
         }
 
-        pub(crate) fn replace_owned_bytes(&self, bytes: &[u8]) {
-            self.held
-                .as_ref()
-                .expect("owned spool mutation requires its original lock")
-                .validate(&self.fixture.conn, &self.fixture.run.owner())
-                .unwrap();
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&self.artifacts.paths.outbox)
-                .unwrap();
-            file.write_all(bytes).unwrap();
-            file.sync_all().unwrap();
-        }
-
         pub(crate) fn release(&mut self) {
             self.held.take();
         }
@@ -2588,7 +2361,15 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn recover(&mut self, host: &mut Host) -> TestResult<RecoveryReport> {
-            self.recover_with(host, None)
+            self.release();
+            recover_member_with_host(
+                &mut self.fixture.conn,
+                &self.settings,
+                self.fixture.run.member_id,
+                None,
+                host.deadline,
+                host,
+            )
         }
 
         pub(crate) fn recover_held(
@@ -2605,22 +2386,6 @@ pub(crate) mod test_support {
                 None,
                 host.deadline,
                 held,
-                host,
-            )
-        }
-
-        pub(crate) fn recover_with(
-            &mut self,
-            host: &mut Host,
-            claim: Option<&OwnerTerminationAttestation>,
-        ) -> TestResult<RecoveryReport> {
-            self.release();
-            recover_member_with_host(
-                &mut self.fixture.conn,
-                &self.settings,
-                self.fixture.run.member_id,
-                claim,
-                host.deadline,
                 host,
             )
         }
@@ -2913,12 +2678,6 @@ pub(crate) mod test_support {
             cause_json: None,
         }
     }
-    pub(crate) fn obscured(run: &RunRecord, sequence: i64, episode: i64) -> ObservedTransition {
-        ObservedTransition {
-            kind: RuntimeEventKind::InteractionObscured,
-            ..opening(run, sequence, episode)
-        }
-    }
     pub(crate) fn exited(
         run: &RunRecord,
         sequence: i64,
@@ -2937,7 +2696,6 @@ pub(crate) mod test_support {
             cause_json: Some(json!({"kind":"native_exit","exit_code":code,"exit_signal":signal})),
         }
     }
-    pub(crate) use crate::runtime::writer::test_support::frame;
     pub(crate) fn events(case: &Case) -> Vec<RuntimeEventView> {
         let ids = case
             .fixture
@@ -2953,13 +2711,6 @@ pub(crate) mod test_support {
         ids.into_iter()
             .map(|id| storage::get_event(&case.fixture.conn, id).unwrap())
             .collect()
-    }
-    pub(crate) fn counts(report: &RecoveryReport) -> (u64, u64, u64) {
-        (
-            report.replayed_count,
-            report.inbox_count,
-            report.archived_count,
-        )
     }
     pub(crate) fn new_host() -> Host {
         Host::new(Instant::now() + Duration::from_secs(2))
@@ -3046,19 +2797,6 @@ pub(crate) mod test_support {
         std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap();
     }
 
-    pub(crate) fn claim(
-        run: &RunRecord,
-        evidence_ref: Option<&str>,
-    ) -> OwnerTerminationAttestation {
-        OwnerTerminationAttestation {
-            expected_run_id: run.run_id,
-            expected_owner_epoch: run.owner_epoch,
-            evidence_ref: evidence_ref
-                .unwrap_or("audit:owned-fixture-termination")
-                .into(),
-        }
-    }
-
     pub(crate) fn bump_epoch(conn: &Connection, run_id: i64) {
         assert_eq!(
             conn.execute(
@@ -3075,7 +2813,6 @@ pub(crate) mod test_support {
         pub(crate) fn assert_loss(case: &Case, report: &RecoveryReport, original: &RunRecord) {
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, RunStatus::Lost);
-            assert_eq!(counts(report), (0, 2, 0));
             let current = storage::get_run(&case.fixture.conn, original.run_id).unwrap();
             assert_eq!(current.owner_epoch, original.owner_epoch + 1);
             assert_eq!(current.owner_kind, OwnerKind::Reconciler);
@@ -3163,19 +2900,18 @@ pub(crate) mod test_support {
         /// test shares that flock until its exec closes it, which recovery reads as a live owner,
         /// so retry that side-effect-free outcome briefly.
         pub(crate) fn recover_released(case: &mut Case) -> TestResult<RecoveryReport> {
-            recover_released_with_host(case, &mut new_host(), None)
+            recover_released_with_host(case, &mut new_host())
         }
 
         pub(crate) fn recover_released_with_host(
             case: &mut Case,
             host: &mut Host,
-            claim: Option<&OwnerTerminationAttestation>,
         ) -> TestResult<RecoveryReport> {
             let until = host
                 .deadline
                 .min(Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE);
             loop {
-                let result = case.recover_with(host, claim);
+                let result = case.recover(host);
                 let contended = matches!(
                     &result,
                     Ok(report) if matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable)
@@ -3212,13 +2948,13 @@ pub(crate) mod test_support {
         #[derive(Clone, Copy, Debug)]
         pub(crate) enum Stage {
             OrdinaryTakeover,
-            ExceptionalTakeover,
+            MissingPathTakeover,
             Finalization,
         }
         impl Stage {
             pub(crate) fn boundary(self) -> &'static str {
                 match self {
-                    Self::OrdinaryTakeover | Self::ExceptionalTakeover => "before_takeover",
+                    Self::OrdinaryTakeover | Self::MissingPathTakeover => "before_takeover",
                     Self::Finalization => "before_finish",
                 }
             }
@@ -3236,7 +2972,7 @@ pub(crate) mod test_support {
         pub(crate) fn prepare(stage: Stage) -> Case {
             match stage {
                 Stage::OrdinaryTakeover => established_terminal(),
-                Stage::ExceptionalTakeover => {
+                Stage::MissingPathTakeover => {
                     let mut case = established_terminal();
                     missing_lock(&mut case);
                     case
@@ -3439,14 +3175,6 @@ pub(crate) mod test_support {
             assert!(prior.lock().unwrap().is_some());
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, RunStatus::Exited);
-            assert_eq!(
-                counts(&report),
-                if matches!(stage, Stage::Finalization) {
-                    (1, 1, 0)
-                } else {
-                    (0, 0, 0)
-                }
-            );
             let run = storage::get_run(&case.fixture.conn, original.run_id).unwrap();
             assert_eq!(run.owner_epoch, original.owner_epoch + 1);
             assert_eq!(run.owner_kind, OwnerKind::Reconciler);
@@ -3467,7 +3195,7 @@ pub(crate) mod test_support {
                 events(&case)[0].event.notification_state,
                 NotificationState::Inbox
             );
-            if matches!(stage, Stage::ExceptionalTakeover) {
+            if matches!(stage, Stage::MissingPathTakeover) {
                 assert!(
                     !host
                         .calls

@@ -7584,8 +7584,6 @@ pub(crate) struct EpisodeTracker {
     active: Option<Active>,
     candidate: Option<Candidate>,
     boundary: Option<Instant>,
-    obscurity: Option<Instant>,
-    obscured: bool,
     last_output: Option<u64>,
     last_time: Option<Instant>,
     finished: bool,
@@ -7593,7 +7591,6 @@ pub(crate) struct EpisodeTracker {
 }
 const CANDIDATE_SETTLE: Duration = Duration::from_millis(100);
 const BOUNDARY_SETTLE: Duration = Duration::from_millis(250);
-const OBSCURITY_SETTLE: Duration = Duration::from_secs(2);
 
 /// Whether `settle` has passed since `since`; otherwise schedules that instant as a deadline.
 fn settled(
@@ -7625,8 +7622,6 @@ impl EpisodeTracker {
             active: None,
             candidate: None,
             boundary: None,
-            obscurity: None,
-            obscured: false,
             last_output: None,
             last_time: None,
             finished: false,
@@ -7787,8 +7782,6 @@ impl EpisodeTracker {
         }
         self.candidate = None;
         if value.verified_noninteraction {
-            self.obscurity = None;
-            self.obscured = false;
             if self.active.is_some() {
                 let since = *self.boundary.get_or_insert(now);
                 if settled(now, since, BOUNDARY_SETTLE, &mut update.next_deadline) {
@@ -7802,23 +7795,6 @@ impl EpisodeTracker {
             }
         } else {
             self.boundary = None;
-            if let Some(active) = &self.active {
-                let sequence = active.sequence;
-                let class = active.class;
-                let since = *self.obscurity.get_or_insert(now);
-                if !self.obscured
-                    && settled(now, since, OBSCURITY_SETTLE, &mut update.next_deadline)
-                {
-                    update.transitions.push(self.draft(
-                        RuntimeEventKind::InteractionObscured,
-                        Some((sequence, class)),
-                        evidence.clone(),
-                        None,
-                        at,
-                    ));
-                    self.obscured = true;
-                }
-            }
         }
         update.visibility = if self.active.is_some() {
             Visibility::Obscured
@@ -7848,8 +7824,6 @@ impl EpisodeTracker {
     }
     fn clear_boundaries(&mut self) {
         self.boundary = None;
-        self.obscurity = None;
-        self.obscured = false;
     }
     pub(crate) fn finish(&mut self, at: &str) -> Result<EpisodeUpdate> {
         wall_time(at)?;

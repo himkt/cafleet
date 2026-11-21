@@ -791,7 +791,6 @@ mod tests {
             "SELECT * FROM members ORDER BY member_id",
             "SELECT * FROM member_placements ORDER BY member_id",
             "SELECT message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at FROM messages ORDER BY message_id",
-            "SELECT * FROM asset_installs ORDER BY coding_agent, path",
             "SELECT * FROM sqlite_sequence ORDER BY name",
         ].map(|sql| rows(conn, sql)).into()
     }
@@ -812,8 +811,7 @@ mod tests {
                  INSERT INTO messages(message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at) VALUES
                     (7, 1, 2, 'created-7', 'input_required', 'status-7', 'pending unicode 世界', NULL),
                     (8, 1, 2, 'created-8', 'input_required', 'status-8', 'notified', 'notified-8'),
-                    (9, 2, 1, 'created-9', 'completed', 'status-9', 'completed', NULL);
-                 INSERT INTO asset_installs VALUES('claude', '/preserved/config', 'installed');"
+                    (9, 2, 1, 'created-9', 'completed', 'status-9', 'completed', NULL);"
             ).unwrap();
         assert!(schema_matches(&conn).unwrap());
         require_current(&conn).unwrap();
@@ -968,7 +966,7 @@ mod tests {
         for damage in [
             "DROP INDEX idx_messages_to_member_status_ts",
             "DROP INDEX idx_messages_to_member_status_ts; CREATE INDEX idx_messages_to_member_status_ts ON messages(from_member_id, status_timestamp)",
-            "DROP TABLE asset_installs",
+            "DROP TABLE member_placements",
             "DELETE FROM cafleet_database",
         ] {
             let conn = initialized_conn();
@@ -981,9 +979,9 @@ mod tests {
     fn structural_reference_checks_required_keys_types_defaults_and_foreign_keys() {
         for (table, original, replacement) in [
             (
-                "asset_installs",
-                "PRIMARY KEY (coding_agent, path)",
-                "PRIMARY KEY (coding_agent)",
+                "member_placements",
+                "member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members",
+                "member_id INTEGER NOT NULL REFERENCES members",
             ),
             ("members", "name TEXT NOT NULL", "name TEXT"),
             ("messages", "text TEXT NOT NULL", "text INTEGER NOT NULL"),

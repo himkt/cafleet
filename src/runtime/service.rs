@@ -248,7 +248,7 @@ impl RunnerLoop<'_> {
                 run_id: Some(self.run.run_id),
                 interaction_id: Some(input.interaction_id),
                 input_id: None,
-                operation_key: Some(input.operation_key.clone()),
+                operation_key: None,
             }),
             _ => None,
         };
@@ -271,9 +271,7 @@ impl RunnerLoop<'_> {
             .as_mut()
             .ok_or_else(|| error("native input has not started"))?;
         if responds {
-            if let Some(reply) =
-                coordinator.retained_permission_response(self.conn, &request, deadline)?
-            {
+            if let Some(reply) = coordinator.answered_episode_refusal(&request)? {
                 return Ok(Some(reply));
             }
             let admission = self.native.quiesce(coordinator, deadline)?;
@@ -1314,11 +1312,10 @@ impl RunnerLoop<'_> {
         };
         let coordinator = started(&mut self.coordinator);
         let result = match self.native.quiesce(coordinator, deadline) {
-            Err(failure) => Err(CafleetError::from(coordinator.pending_attempt_failed(
-                self.conn,
-                self.native.controller,
-                failure,
-            ))),
+            Err(failure) => coordinator
+                .pending_attempt_failed(self.conn, self.native.controller, failure)
+                .map(Some)
+                .map_err(CafleetError::from),
             Ok(InputDrain::Pending) => Ok(None),
             Ok(InputDrain::Quiescent) => {
                 if self.terminate.load(Ordering::Acquire) {

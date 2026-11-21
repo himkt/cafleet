@@ -75,48 +75,6 @@ impl AnswerCapability {
     pub(crate) fn key(&self) -> &AnswerKey {
         &self.key
     }
-
-    #[cfg(test)]
-    pub(crate) fn fixture(
-        backend: CodingAgent,
-        native_version: &str,
-        request_rule_id: &str,
-        answer_rule_id: &str,
-        decision: PermissionDecision,
-    ) -> std::result::Result<Self, CafleetError> {
-        Self::fixture_key(
-            backend,
-            native_version,
-            request_rule_id,
-            answer_rule_id,
-            AnswerKey::Decision(decision),
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fixture_key(
-        backend: CodingAgent,
-        native_version: &str,
-        request_rule_id: &str,
-        answer_rule_id: &str,
-        key: AnswerKey,
-    ) -> std::result::Result<Self, CafleetError> {
-        if [native_version, request_rule_id, answer_rule_id]
-            .iter()
-            .any(|value| value.trim().is_empty())
-        {
-            return Err(CafleetError::App(
-                "answer capability requires complete profile provenance".into(),
-            ));
-        }
-        Ok(Self {
-            backend,
-            native_version: native_version.into(),
-            request_rule_id: request_rule_id.into(),
-            answer_rule_id: answer_rule_id.into(),
-            key,
-        })
-    }
 }
 
 fn invalid(message: impl Into<String>) -> CafleetError {

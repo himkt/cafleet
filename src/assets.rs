@@ -672,11 +672,6 @@ mod tests {
             .collect()
     }
 
-    fn asset_install_count(conn: &Connection) -> i64 {
-        conn.query_row("SELECT COUNT(*) FROM asset_installs", [], |row| row.get(0))
-            .unwrap()
-    }
-
     #[test]
     fn installation_replaces_owned_symlinks_and_embeds_bytes_at_selected_paths() {
         let home = tempfile::tempdir().unwrap();
@@ -753,14 +748,6 @@ mod tests {
             if *agent == CodingAgent::Opencode {
                 assert!(!custom.join("skills").exists());
             }
-            let installed_at: String = conn
-                .query_row(
-                    "SELECT installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
-                    rusqlite::params![agent.name(), paths.base.display().to_string()],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(crate::time::parse_lenient(&installed_at).is_some());
         }
     }
 
@@ -829,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn opencode_preset_failure_fails_installation_and_records_nothing() {
+    fn opencode_preset_failure_fails_installation() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
         let base = home.path().join("preset-base");
@@ -858,7 +845,6 @@ mod tests {
             "{}",
             failure.message()
         );
-        assert_eq!(asset_install_count(&conn), 0);
         let lines = output_lines(output);
         assert_eq!(lines.len(), 1, "only the completed skills line: {lines:?}");
         assert!(
@@ -877,7 +863,7 @@ mod tests {
     }
 
     #[test]
-    fn opencode_extension_failure_fails_installation_and_records_nothing() {
+    fn opencode_extension_failure_fails_installation() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
         let base = home.path().join("preset-base");
@@ -909,7 +895,6 @@ mod tests {
             "{}",
             failure.message()
         );
-        assert_eq!(asset_install_count(&conn), 0);
         let lines = output_lines(output);
         assert_eq!(
             lines[1..],
@@ -957,14 +942,6 @@ mod tests {
         let fake = FakeHermes::new();
         assert_embedded_extensions(&extension_targets(CodingAgent::Opencode, &base, &fake));
         assert_executable_record(&base.join("plugins/cafleet.executable"));
-        let recorded: Vec<String> = conn
-            .prepare("SELECT path FROM asset_installs WHERE coding_agent='opencode'")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(recorded, [base.display().to_string()]);
     }
 
     mod pi {
@@ -1039,14 +1016,6 @@ mod tests {
                     .1
             );
             assert_executable_record(&base.join("extensions/cafleet.executable"));
-            let recorded: Vec<String> = conn
-                .prepare("SELECT path FROM asset_installs WHERE coding_agent='pi'")
-                .unwrap()
-                .query_map([], |row| row.get(0))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            assert_eq!(recorded, [base.display().to_string()]);
         }
 
         #[test]
@@ -1088,7 +1057,6 @@ mod tests {
                 std::fs::read(base.join("extensions/cafleet.executable")).unwrap(),
                 record
             );
-            assert_eq!(asset_install_count(&conn), 1);
         }
 
         #[test]
@@ -1112,7 +1080,7 @@ mod tests {
         }
 
         #[test]
-        fn pi_extension_failure_fails_installation_and_records_nothing() {
+        fn pi_extension_failure_fails_installation() {
             let home = tempfile::tempdir().unwrap();
             let base = home.path().join("pi agent");
             std::fs::create_dir_all(&base).unwrap();
@@ -1132,7 +1100,6 @@ mod tests {
                 "{}",
                 failure.message()
             );
-            assert_eq!(asset_install_count(&conn), 0);
             assert_eq!(installed.lines.len(), 1, "{:?}", installed.lines);
             assert!(skills_line_matches(&installed.lines[0], &base));
             assert_eq!(
@@ -1151,7 +1118,6 @@ mod tests {
         struct Installed {
             result: Result<(), CafleetError>,
             lines: Vec<String>,
-            rows: i64,
             base: PathBuf,
             skills: PathBuf,
             _home: tempfile::TempDir,
@@ -1173,7 +1139,6 @@ mod tests {
             Installed {
                 result,
                 lines: output_lines(output),
-                rows: asset_install_count(&conn),
                 base,
                 skills,
                 _home: home,
@@ -1252,10 +1217,6 @@ mod tests {
                 Cause::Exact(cause) => assert_eq!(actual, cause),
                 Cause::Contains(cause) => assert!(actual.contains(cause), "{actual}"),
             }
-            assert_eq!(
-                installed.rows, 0,
-                "no asset_installs row for a failed setup"
-            );
         }
 
         fn extension_prefix(target: &Path) -> String {
@@ -1312,7 +1273,6 @@ mod tests {
                 "the plugin follows the active profile, not HERMES_HOME"
             );
             assert_eq!(installed.lines[1], plugin_line(&fake));
-            assert_eq!(installed.rows, 1);
         }
 
         #[test]
@@ -1360,7 +1320,6 @@ mod tests {
                 "{}",
                 failure.message()
             );
-            assert_eq!(installed.rows, 0);
             assert_eq!(installed.lines, [skills_line(&installed)]);
             assert!(
                 after_batch(&fake.calls()).is_empty(),
@@ -1425,7 +1384,6 @@ mod tests {
                 None,
                 "plugins.disabled is read only"
             );
-            assert_eq!(installed.rows, 1);
         }
 
         #[test]
@@ -1479,7 +1437,6 @@ mod tests {
             );
             assert_eq!(fake.value(ENABLED_KEY), Some(json!(["alpha", "cafleet"])));
             assert_eq!(installed.lines[2], already_enabled_line(&fake));
-            assert_eq!(installed.rows, 1);
         }
 
         #[test]
@@ -1670,7 +1627,6 @@ mod tests {
                     "hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".to_owned(),
                 ]
             );
-            assert_eq!(installed.rows, 1);
             assert!(!installed.base.join("plugins").exists());
         }
     }

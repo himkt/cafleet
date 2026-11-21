@@ -418,7 +418,6 @@ Projection: deferred ready → queued with original reason; other ready → held
 | `short_write` | A stopped prefix ends inside a scalar/paste marker, or an answer stage writes short |
 | `write_failed` | PTY/checkpoint error, unrecorded possible I/O, failed/short close, short submit key, failed deferred, written immediate or permission attempt |
 | `runner_stopped` | Shutdown ended an active attempt that may have written a child byte |
-| `manual_input` | Keyboard or pointer input revoked a permission response after a written stage |
 
 Every stop records `uncertain`, and the runner sends no second submit key. Director reconciliation of uncertainty requires nonempty evidence, owner synchronization and no active writer; an unreachable owner preserves uncertainty. Missing live placement fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`; repeating a settled ordinary disposition returns original evidence and a conflicting disposition fails. Settlement writes no input and establishes no native result.
 
@@ -442,7 +441,7 @@ Pass exactly one of `--decision` (permission request) and `--choice` (question, 
 
 The runner accepts one answer per episode and stores nothing about it. Once an answer's first byte is written, a later respond for that episode returns `rejected/zero_bytes` with reason `an answer was already sent for this episode`; a zero-byte refusal leaves the episode answerable.
 
-Result `response` contains `status,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,stage,output_seq,reason`, exactly one of `decision` and `choice` non-null; text adds `choice=CHOICE` after `decision=DECISION`. Status `accepted` means submitted, `held/rejected` zero bytes, `uncertain` partial/submitted/unknown. Sequence/reason may be null; an uncertain reply reports its stop cause. Acceptance establishes key submission independently of native approval/execution.
+Result `response` contains `status,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,stage,output_seq,reason`, exactly one of `decision` and `choice` non-null; text adds `choice=CHOICE` after `decision=DECISION`. Status `accepted` means submitted, `held/rejected` zero bytes, `uncertain` partial/submitted/unknown. Sequence/reason may be null; an uncertain reply reports its stop cause, or `manual_input` when keyboard or pointer input revoked the answer after a written stage. Acceptance establishes key submission independently of native approval/execution.
 
 Accepted exits 0; structured held/rejected/uncertain prints selected response and exits 1: `Error: permission response STATUS for interaction INTERACTION_ID: REASON`. Pre-reply failures retain ordinary categories/context; usage exits 2.
 

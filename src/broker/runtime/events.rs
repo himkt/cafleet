@@ -163,9 +163,9 @@ fn interaction_id_for_episode(
 
 fn source(kind: RuntimeEventKind) -> &'static str {
     match kind {
-        RuntimeEventKind::InteractionOpened
-        | RuntimeEventKind::InteractionObscured
-        | RuntimeEventKind::InteractionClosed => "runner_screen",
+        RuntimeEventKind::InteractionOpened | RuntimeEventKind::InteractionClosed => {
+            "runner_screen"
+        }
         _ => "runner_lifecycle",
     }
 }
@@ -256,9 +256,7 @@ fn result_delivery(
         field,
         "delivery results describe this run's deferred or stopped ordinary inputs",
     )?;
-    let mut delivery = input
-        .delivery()
-        .ok_or_else(|| invalid(field, "delivery results describe ordinary inputs"))?;
+    let mut delivery = input.delivery();
     if input.deferred_at.is_none() && input.stop_cause.is_some() {
         delivery.status = DeliveryStatus::Uncertain;
     }
@@ -483,9 +481,7 @@ pub(crate) fn validate_transition(
     }
     let interactive = matches!(
         transition.kind,
-        RuntimeEventKind::InteractionOpened
-            | RuntimeEventKind::InteractionObscured
-            | RuntimeEventKind::InteractionClosed
+        RuntimeEventKind::InteractionOpened | RuntimeEventKind::InteractionClosed
     );
     require(
         !interactive || transition.episode_seq.is_some(),
@@ -759,9 +755,7 @@ fn stalled_delivery(
         (Some(input_id), None) => {
             let input = get_input(conn, input_id)?;
             require(
-                input.run_id == run.run_id
-                    && input.kind != InputKind::PermissionResponse
-                    && input.deferred_at.is_some(),
+                input.run_id == run.run_id && input.deferred_at.is_some(),
                 "input_id",
                 "a stalled head is a queued ordinary input of this run",
             )?;
@@ -2573,20 +2567,20 @@ mod tests {
         #[test]
         fn input_delivery_result_reader_accepts_the_receipt_cause_on_an_uncertain_result() {
             let mut fixture = Fixture::new();
-            let (event, _, payload) = uncertain_result(&mut fixture, Some("manual_input"));
+            let (event, _, payload) = uncertain_result(&mut fixture, Some("short_write"));
             let view = storage::get_event(&fixture.conn, event.event_id)
                 .unwrap_or_else(|error| panic!("{}", error.message()));
             assert_eq!(view.event.payload_json, payload);
             assert_eq!(
                 view.event.payload_json["cause"],
-                json!({"kind":"manual_input"})
+                json!({"kind":"short_write"})
             );
             assert_eq!(
                 crate::broker::runtime::events::original(&view)
                     .unwrap()
                     .cause_json,
                 Some(
-                    json!({"kind":"input_delivery_result","input_id":payload["input_id"],"stage":"unknown","cause":{"kind":"manual_input"}})
+                    json!({"kind":"input_delivery_result","input_id":payload["input_id"],"stage":"unknown","cause":{"kind":"short_write"}})
                 )
             );
         }
@@ -2610,7 +2604,7 @@ mod tests {
         #[test]
         fn input_delivery_result_reader_rejects_a_cause_that_disagrees_with_the_receipt() {
             let mut fixture = Fixture::new();
-            let (event, _, payload) = uncertain_result(&mut fixture, Some("manual_input"));
+            let (event, _, payload) = uncertain_result(&mut fixture, Some("short_write"));
             let mut mismatched = payload.clone();
             mismatched["cause"] = json!({"kind":"write_failed"});
             let mut missing = payload.clone();

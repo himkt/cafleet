@@ -1161,16 +1161,4 @@ pub(crate) mod test_support {
             cause_json: Some(serde_json::json!({"kind":"coverage_unknown"})),
         }
     }
-
-    /// An outbox frame (length, SHA-256 of the body, body) built without the production encoder.
-    pub(crate) fn outbox_frame(body: &[u8]) -> Vec<u8> {
-        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(body));
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    pub(crate) fn frame(transition: &ObservedTransition) -> Vec<u8> {
-        outbox_frame(&serde_json::to_vec(transition).unwrap())
-    }
 }

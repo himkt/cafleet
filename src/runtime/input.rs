@@ -22,6 +22,7 @@ use crate::time::Deadline;
 use rusqlite::Connection;
 use rusqlite::TransactionBehavior;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::io;
 use std::io::ErrorKind;
 use std::sync::Arc;
@@ -44,9 +45,7 @@ const PASTE_OPEN: &[u8] = b"\x1b[200~";
 const PASTE_CLOSE: &[u8] = b"\x1b[201~";
 const FALLBACK_ESCAPE: u8 = 0x1b;
 const FALLBACK_ENTER: u8 = 0x0d;
-/// The in-memory key of the single receipt-free sweep preview attempt; durable input IDs are
-/// positive, so it never names a stored receipt.
-const SWEEP_PREVIEW_ID: i64 = 0;
+const ANSWER_ALREADY_SENT: &str = "an answer was already sent for this episode";
 
 #[cfg(test)]
 pub(crate) enum InputBoundary {
@@ -56,9 +55,80 @@ pub(crate) enum InputBoundary {
     TerminalState,
 }
 
+/// Names a retained attempt: a durable prompt or exec receipt, or one of the two receipt-free
+/// attempts the runner holds only in memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum AttemptKey {
+    Receipt(i64),
+    SweepPreview,
+    Answer,
+}
+
+impl AttemptKey {
+    fn receipt(self) -> Option<i64> {
+        match self {
+            Self::Receipt(id) => Some(id),
+            Self::SweepPreview | Self::Answer => None,
+        }
+    }
+    fn receipt_id(self) -> i64 {
+        self.receipt()
+            .expect("only a durable receipt attempt reaches its stored row")
+    }
+}
+
+/// The progress record of a retained attempt: the stored row of a receipt, or the in-memory
+/// state of a receipt-free attempt.
+#[derive(Clone, Debug, PartialEq)]
+enum AttemptRecord {
+    Receipt(storage::InputOperation),
+    ReceiptFree(ReceiptFreeRecord),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ReceiptFreeRecord {
+    state: storage::InputState,
+    delivery_method: Option<storage::DeliveryMethod>,
+    delivery_reason: Option<String>,
+    stop_cause: Option<storage::StopCause>,
+}
+
+impl AttemptRecord {
+    fn state(&self) -> storage::InputState {
+        match self {
+            Self::Receipt(operation) => operation.state,
+            Self::ReceiptFree(record) => record.state,
+        }
+    }
+    fn delivery_method(&self) -> Option<storage::DeliveryMethod> {
+        match self {
+            Self::Receipt(operation) => operation.delivery_method,
+            Self::ReceiptFree(record) => record.delivery_method,
+        }
+    }
+    fn delivery_reason(&self) -> Option<&str> {
+        match self {
+            Self::Receipt(operation) => operation.delivery_reason.as_deref(),
+            Self::ReceiptFree(record) => record.delivery_reason.as_deref(),
+        }
+    }
+    fn stop_cause(&self) -> Option<storage::StopCause> {
+        match self {
+            Self::Receipt(operation) => operation.stop_cause,
+            Self::ReceiptFree(record) => record.stop_cause,
+        }
+    }
+    fn receipt(&self) -> &storage::InputOperation {
+        match self {
+            Self::Receipt(operation) => operation,
+            Self::ReceiptFree(_) => unreachable!("a receipt-free attempt has no stored row"),
+        }
+    }
+}
+
 pub(crate) struct InputCheckpoint {
     #[cfg(test)]
-    pub(crate) input_id: i64,
+    pub(crate) attempt: AttemptKey,
     pub(crate) stage: SubmissionStage,
     pub(crate) written_bytes: u64,
     pub(crate) output_seq: u64,
@@ -92,7 +162,9 @@ pub(crate) struct InputCoordinator {
     pointer_generation: u64,
     manual_accounting_failed: bool,
     placement: Placement,
-    operations: BTreeMap<i64, RetainedInput>,
+    operations: BTreeMap<AttemptKey, RetainedInput>,
+    /// Interactions whose episode has had an answer byte written; each accepts no further answer.
+    answered_interactions: BTreeSet<i64>,
     pending: Option<PendingInput>,
     current_request: Option<(CurrentRequest, String)>,
     input_fenced: bool,
@@ -302,7 +374,7 @@ enum InputPhase {
 }
 
 struct PermissionSelection {
-    request: storage::NewPermissionResponse,
+    request: PermissionRespondInput,
     binding: CurrentRequest,
     continuation: Option<ObservedContinuation>,
     gap_count: u64,
@@ -332,8 +404,7 @@ enum RetainedSelection {
 
 enum PendingReservation {
     Unreserved,
-    HistoricalReady(Box<storage::PermissionReceipt>),
-    Installed(i64),
+    Installed(AttemptKey),
 }
 
 enum PendingDelivery {
@@ -444,6 +515,18 @@ fn stalled_record(
     })
 }
 
+/// The in-progress in-memory record of a receipt-free attempt with its selected delivery.
+fn receipt_free_record(
+    selection: Option<(storage::DeliveryMethod, Option<&str>)>,
+) -> AttemptRecord {
+    AttemptRecord::ReceiptFree(ReceiptFreeRecord {
+        state: storage::InputState::InProgress,
+        delivery_method: selection.map(|(method, _)| method),
+        delivery_reason: selection.and_then(|(_, reason)| reason.map(str::to_owned)),
+        stop_cause: None,
+    })
+}
+
 fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
     let size = prefix
         .len()
@@ -462,26 +545,16 @@ fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
 }
 
 impl PendingInput {
-    /// The durable input this attempt targets: a historical Ready receipt or its installed
-    /// reservation.
-    fn input_id(&self) -> Option<i64> {
-        match &self.reservation {
-            PendingReservation::Unreserved => None,
-            PendingReservation::HistoricalReady(ready) => Some(ready.input.input_id),
-            PendingReservation::Installed(id) => Some(*id),
-        }
-    }
-    fn installed_input_id(&self) -> Option<i64> {
+    /// The installed receipt or in-memory record this attempt targets.
+    fn attempt(&self) -> Option<AttemptKey> {
         match self.reservation {
-            PendingReservation::Installed(id) => Some(id),
-            PendingReservation::Unreserved | PendingReservation::HistoricalReady(_) => None,
+            PendingReservation::Unreserved => None,
+            PendingReservation::Installed(key) => Some(key),
         }
     }
-    fn ready(&self) -> Option<&storage::PermissionReceipt> {
-        match &self.reservation {
-            PendingReservation::HistoricalReady(ready) => Some(&**ready),
-            PendingReservation::Unreserved | PendingReservation::Installed(_) => None,
-        }
+    /// The durable receipt this attempt targets, absent for a receipt-free attempt.
+    fn receipt_id(&self) -> Option<i64> {
+        self.attempt().and_then(AttemptKey::receipt)
     }
     fn permission(&self) -> Option<&Arc<PermissionSelection>> {
         match &self.delivery {
@@ -510,7 +583,7 @@ impl PendingInput {
 }
 
 struct RetainedInput {
-    operation: storage::InputOperation,
+    operation: AttemptRecord,
     bytes: Arc<[u8]>,
     selection: RetainedSelection,
     stage: SubmissionStage,
@@ -535,72 +608,21 @@ enum GuardPermit {
     ResultRecorded,
 }
 
-struct ReceiptGuardBinding {
-    owner: storage::RunOwner,
-    receipt: storage::PermissionReceipt,
-    zero_known: bool,
-    rearm: Option<Arc<PermissionSelection>>,
-}
-
 pub(crate) struct InputGuard<'a> {
     retained: Option<&'a mut RetainedInput>,
     proof: Option<DrainedInput>,
-    binding: Option<ReceiptGuardBinding>,
     deadline: Instant,
     permit: GuardPermit,
     exclusion: std::marker::PhantomData<(&'a mut InputCoordinator, std::rc::Rc<()>)>,
 }
 
 impl InputGuard<'_> {
-    pub(crate) fn zero_byte_retirement(
-        &self,
-        owner: &storage::RunOwner,
-        input_id: i64,
-        interaction_id: i64,
-    ) -> Result<storage::ZeroByteRetirement<'_>> {
-        storage::ZeroByteRetirement::from_live_guard(self, owner, input_id, interaction_id)
-    }
-
-    pub(crate) fn retirement_binding(
-        &self,
-        owner: &storage::RunOwner,
-        input_id: i64,
-        interaction_id: i64,
-    ) -> Result<(
-        &storage::PermissionReceipt,
-        Option<&crate::coding_agent::AnswerCapability>,
-    )> {
-        check_deadline(Instant::now(), self.deadline)?;
-        let binding = self
-            .binding
-            .as_ref()
-            .ok_or_else(|| error("native writer has no receipt-exclusion proof"))?;
-        ensure(
-            binding.owner == *owner
-                && binding.receipt.input.input_id == input_id
-                && binding.receipt.response.metadata.interaction_id == interaction_id
-                && binding.zero_known,
-            "matching actual zero-byte exclusion required",
-        )?;
-        Ok((
-            &binding.receipt,
-            binding
-                .rearm
-                .as_ref()
-                .map(|selection| selection.plan.capability()),
-        ))
-    }
-
     pub(super) fn begin_write(
         &mut self,
         transport: &Transport,
         bytes: &[u8],
         deadline: Instant,
     ) -> Result<Instant> {
-        ensure(
-            self.binding.is_none(),
-            "receipt exclusion grants no native-write permit",
-        )?;
         let retained = self
             .retained
             .as_mut()
@@ -617,7 +639,7 @@ impl InputGuard<'_> {
             "input bytes do not match the selected stage",
         )?;
         ensure(
-            retained.operation.state == storage::InputState::InProgress && retained.leased,
+            retained.operation.state() == storage::InputState::InProgress && retained.leased,
             "input write requires its retained reservation",
         )?;
         match &retained.selection {
@@ -1013,9 +1035,9 @@ impl InputCoordinator {
                 })?;
                 let retained = self
                     .operations
-                    .get_mut(&id)
+                    .get_mut(&AttemptKey::Receipt(id))
                     .expect("a deferred attempt retains its receipt");
-                retained.operation = operation;
+                retained.operation = AttemptRecord::Receipt(operation);
                 retained.attempt_available = false;
             }
             settled.push(id);
@@ -1086,7 +1108,7 @@ impl InputCoordinator {
         let bound = &selection.binding;
         if let Some(continuation) = &selection.continuation {
             return ensure(
-                token == &selection.request.metadata.request_token
+                token == &selection.request.request_token
                     && self.manual_generation == bound.manual_generation
                     && self.pointer_generation == bound.pointer_generation
                     && observation.gap_count() == selection.gap_count
@@ -1099,14 +1121,13 @@ impl InputCoordinator {
             .current_request()
             .ok_or_else(|| error("current permission request unavailable"))?;
         ensure(
-            token == &selection.request.metadata.request_token
+            token == &selection.request.request_token
                 && current.same_request(bound)
                 && self.manual_generation == bound.manual_generation
                 && self.pointer_generation == bound.pointer_generation
                 && observation.request_generation() == bound.observed.request_generation
                 && observed.request_generation == bound.observed.request_generation
-                && observed.classification
-                    == answered_classification(&selection.request.metadata.key)
+                && observed.classification == answered_classification(&selection.request.key)
                 && observed.same_request(&bound.observed),
             "permission request token or current plan binding changed",
         )?;
@@ -1134,12 +1155,12 @@ impl InputCoordinator {
         let Some(selection) = pending.permission().cloned() else {
             return Ok(StageGateProgress::Ready);
         };
-        let id = pending
-            .input_id()
+        let key = pending
+            .attempt()
             .ok_or_else(|| error("permission reservation absent"))?;
         let RetainedSelection::Permission { next_stage, .. } = &self
             .operations
-            .get(&id)
+            .get(&key)
             .ok_or_else(|| error("retained permission selection absent"))?
             .selection
         else {
@@ -1273,7 +1294,7 @@ impl InputCoordinator {
         }
         let retained = self
             .operations
-            .get_mut(&id)
+            .get_mut(&key)
             .expect("validated retained permission selection");
         let RetainedSelection::Permission { selection, .. } = &mut retained.selection else {
             unreachable!("validated permission selection");
@@ -1291,87 +1312,64 @@ impl InputCoordinator {
         conn: &Connection,
         selection: &PermissionSelection,
     ) -> Result<()> {
-        let metadata = &selection.request.metadata;
-        let view = inspection_association(
-            conn,
-            &self.run,
-            &PermissionInspectInput {
-                interaction_id: metadata.interaction_id,
-                event_id: metadata.event_id,
-                director_member_id: metadata.director_member_id,
-            },
-        )?;
-        let interaction = view.interaction.expect("validated permission interaction");
+        let request = &selection.request;
+        let view = inspection_association(conn, &self.run, &request.inspection())?;
+        let interaction = view
+            .interaction
+            .as_ref()
+            .expect("validated permission interaction");
         ensure(
             interaction.episode_seq == selection.binding.observed.episode_seq
                 && view.event.message_id == Some(selection.binding.message_id)
-                && metadata.expected_owner_epoch == self.run.owner_epoch,
+                && request.expected_owner_epoch == self.run.owner_epoch,
             "permission response current association changed",
+        )?;
+        let capability = selection.plan.capability();
+        ensure(
+            capability.backend().name() == self.run.backend
+                && Some(capability.native_version()) == self.run.native_version.as_deref()
+                && view.event.payload_json["evidence"]["rule_id"].as_str()
+                    == Some(capability.request_rule_id())
+                && capability.key() == &request.key,
+            "answer capability does not match this request",
         )
     }
 
-    fn permission_history(
+    fn validate_respond_identity(
         &self,
-        conn: &mut Connection,
         request: &InputControlRequest,
         input: &PermissionRespondInput,
-        deadline: Instant,
-        known_id: &mut Option<i64>,
-    ) -> Result<Option<storage::PermissionReceipt>> {
-        check_deadline(Instant::now(), deadline)?;
+    ) -> Result<()> {
         crate::runtime::input_client::validate_respond(input)?;
         let mut expected = ControlIdentity::from_run(&self.run);
         expected.owner_epoch = input.expected_owner_epoch;
         ensure(
             request.identity == expected && input.expected_run_id == self.run.run_id,
             "permission response fixed identity mismatch",
-        )?;
-        with_database_deadline(conn, deadline, |conn| {
-            let tx = conn.transaction()?;
-            ensure(
-                storage::database_identity(&tx)? == self.run.database_identity_json,
-                "input database identity changed",
-            )?;
-            let retained =
-                crate::runtime::input_client::response_lookup(&tx, &self.run, input, known_id)?;
-            if let Some(receipt) = &retained {
-                *known_id = Some(receipt.input.input_id);
-            }
-            check_deadline(Instant::now(), deadline)?;
-            tx.commit()?;
-            Ok(retained)
-        })
+        )
     }
 
-    fn retained_projection(
-        &self,
-        history: &Option<storage::PermissionReceipt>,
-    ) -> Result<Option<InputControlReply>> {
-        match history {
-            Some(receipt) if receipt.input.state != storage::InputState::Ready => {
-                crate::runtime::input_client::projection(&self.run, receipt.clone())
-                    .map(|result| Some(InputControlReply::PermissionResponse(result)))
-            }
-            _ => Ok(None),
-        }
+    fn answered_refusal(&self, input: &PermissionRespondInput) -> Option<InputControlReply> {
+        self.answered_interactions
+            .contains(&input.interaction_id)
+            .then(|| {
+                InputControlReply::PermissionResponse(
+                    self.rejected_response(input, ANSWER_ALREADY_SENT),
+                )
+            })
     }
 
-    pub(super) fn retained_permission_response(
+    /// Refuses, with zero bytes, an answer for an episode that already has an answer byte written.
+    pub(super) fn answered_episode_refusal(
         &self,
-        conn: &mut Connection,
         request: &InputControlRequest,
-        deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
         let InputControlOperation::PermissionRespond(input) = &request.operation else {
-            unreachable!("retained permission lookup receives a response operation");
+            unreachable!("the answered-episode check receives a response operation");
         };
-        let mut known_id = None;
-        let result = (|| {
-            let deadline = bounded_by_inherited(conn, deadline);
-            let history = self.permission_history(conn, request, input, deadline, &mut known_id)?;
-            self.retained_projection(&history)
-        })();
-        result.map_err(|source| self.response_failure(source, input, known_id))
+        self.validate_respond_identity(request, input)
+            .map(|()| self.answered_refusal(input))
+            .map_err(|source| self.response_failure(source, input))
     }
 
     fn permission_received(
@@ -1384,12 +1382,11 @@ impl InputCoordinator {
         let InputControlOperation::PermissionRespond(input) = &request.operation else {
             unreachable!("permission response route selects its semantic operation");
         };
-        let mut known_id = None;
         let result = (|| {
             let deadline = bounded_by_inherited(conn, deadline);
-            let history =
-                self.permission_history(conn, &request, input, deadline, &mut known_id)?;
-            if let Some(reply) = self.retained_projection(&history)? {
+            check_deadline(Instant::now(), deadline)?;
+            self.validate_respond_identity(&request, input)?;
+            if let Some(reply) = self.answered_refusal(input) {
                 return Ok(Some(reply));
             }
             request.identity.validate(&self.run)?;
@@ -1430,36 +1427,13 @@ impl InputCoordinator {
                     ))),
                 };
             };
-            let plan = matched.plan().clone();
-            let cap = plan.capability();
             let selection = Arc::new(PermissionSelection {
-                request: storage::NewPermissionResponse {
-                    operation_key: input.operation_key.clone(),
-                    metadata: storage::PermissionResponseMetadata {
-                        event_id: input.event_id,
-                        interaction_id: input.interaction_id,
-                        expected_owner_epoch: input.expected_owner_epoch,
-                        request_token: input.request_token.clone(),
-                        key: input.key.clone(),
-                        director_member_id: input.director_member_id,
-                        director_mode: input.director_mode,
-                        decision_source: input.decision_source,
-                        mode_evidence_ref: input.mode_evidence_ref.clone(),
-                        decision_evidence_ref: input.decision_evidence_ref.clone(),
-                        answer_rule_id: cap.answer_rule_id().into(),
-                    },
-                },
+                request: input.clone(),
                 binding: binding.clone(),
                 continuation: None,
                 gap_count: observation.gap_count(),
-                plan,
+                plan: matched.plan().clone(),
             });
-            if let Some(receipt) = &history {
-                ensure(
-                    receipt.response.metadata == selection.request.metadata,
-                    "ready permission metadata changed",
-                )?;
-            }
             self.validate_permission_binding(&selection, observation)?;
             with_database_deadline(conn, deadline, |conn| {
                 let tx = conn.transaction()?;
@@ -1470,31 +1444,27 @@ impl InputCoordinator {
             })?;
             if self.pending.is_some() {
                 return Ok(Some(InputControlReply::PermissionResponse(
-                    self.permission_result(
-                        &selection.request.metadata,
-                        SubmissionResult::held("another programmatic input is pending"),
+                    self.zero_byte_response(
+                        input,
+                        SubmissionStatus::Held,
+                        "another programmatic input is pending",
                     ),
                 )));
             }
             ensure(
-                history
-                    .as_ref()
-                    .is_some_and(|r| self.operations.contains_key(&r.input.input_id))
-                    || self.operations.len() < RECEIPT_CACHE_CAPACITY,
+                self.operations.len() < RECEIPT_CACHE_CAPACITY,
                 "input receipt cache is at capacity",
             )?;
             let bytes = Arc::from(selected_answer_stage(&selection.plan, 0)?.bytes());
-            let digest =
-                storage::permission_response_digest(self.run.run_id, &selection.request.metadata)?;
+            let answer = crate::digest::canonical_json(
+                &serde_json::to_value(input).expect("a permission answer serializes"),
+            );
             self.pending = Some(PendingInput {
-                reservation: match history {
-                    Some(ready) => PendingReservation::HistoricalReady(Box::new(ready)),
-                    None => PendingReservation::Unreserved,
-                },
+                reservation: PendingReservation::Unreserved,
                 request: storage::NewInput {
-                    operation_key: input.operation_key.clone(),
-                    kind: storage::InputKind::PermissionResponse,
-                    payload_digest: digest,
+                    operation_key: format!("answer:{}:{}", self.run.run_id, input.interaction_id),
+                    kind: storage::InputKind::Answer,
+                    payload_digest: crate::digest::sha256_hex(answer.as_bytes()),
                     message_id: None,
                 },
                 bytes,
@@ -1504,23 +1474,22 @@ impl InputCoordinator {
             });
             Ok(None)
         })();
-        result.map_err(|source| self.response_failure(source, input, known_id))
+        result.map_err(|source| self.response_failure(source, input))
     }
 
-    fn permission_result(
+    fn permission_reply(
         &self,
-        metadata: &storage::PermissionResponseMetadata,
+        input: &PermissionRespondInput,
         submission: SubmissionResult,
     ) -> PermissionResponseResult {
         PermissionResponseResult {
             submission,
             member_id: self.run.member_id,
             run_id: self.run.run_id,
-            owner_epoch: metadata.expected_owner_epoch,
-            interaction_id: metadata.interaction_id,
-            event_id: metadata.event_id,
-            key: metadata.key.clone(),
-            decision_source: metadata.decision_source,
+            owner_epoch: input.expected_owner_epoch,
+            interaction_id: input.interaction_id,
+            event_id: input.event_id,
+            key: input.key.clone(),
         }
     }
 
@@ -1529,23 +1498,26 @@ impl InputCoordinator {
         input: &PermissionRespondInput,
         reason: impl Into<String>,
     ) -> PermissionResponseResult {
-        PermissionResponseResult {
-            submission: SubmissionResult {
-                status: SubmissionStatus::Rejected,
+        self.zero_byte_response(input, SubmissionStatus::Rejected, reason)
+    }
+
+    fn zero_byte_response(
+        &self,
+        input: &PermissionRespondInput,
+        status: SubmissionStatus,
+        reason: impl Into<String>,
+    ) -> PermissionResponseResult {
+        self.permission_reply(
+            input,
+            SubmissionResult {
+                status,
                 input_id: None,
                 stage: SubmissionStage::ZeroBytes,
                 output_seq: None,
                 reason: Some(reason.into()),
                 delivery: None,
             },
-            member_id: self.run.member_id,
-            run_id: self.run.run_id,
-            owner_epoch: input.expected_owner_epoch,
-            interaction_id: input.interaction_id,
-            event_id: input.event_id,
-            key: input.key.clone(),
-            decision_source: input.decision_source,
-        }
+        )
     }
 
     fn run_failure(
@@ -1568,30 +1540,32 @@ impl InputCoordinator {
         &self,
         source: CafleetError,
         input: &PermissionRespondInput,
-        input_id: Option<i64>,
     ) -> InputFailure {
-        self.run_failure(
-            source,
-            Some(input.interaction_id),
-            input_id,
-            Some(input.operation_key.clone()),
-        )
+        self.run_failure(source, Some(input.interaction_id), None, None)
     }
 
+    /// The pending attempt's failure context; a permission answer has no receipt, so it names
+    /// only its interaction.
     fn input_context(&self) -> InputContext {
-        InputContext {
-            run_id: Some(self.run.run_id),
-            interaction_id: self.pending.as_ref().and_then(|pending| {
-                pending
-                    .permission()
-                    .as_ref()
-                    .map(|selection| selection.request.metadata.interaction_id)
-            }),
-            input_id: self.pending.as_ref().and_then(|pending| pending.input_id()),
-            operation_key: self
-                .pending
-                .as_ref()
-                .map(|pending| pending.request.operation_key.clone()),
+        let Some(pending) = self.pending.as_ref() else {
+            return InputContext {
+                run_id: Some(self.run.run_id),
+                ..InputContext::default()
+            };
+        };
+        match pending.permission() {
+            Some(selection) => InputContext {
+                run_id: Some(self.run.run_id),
+                interaction_id: Some(selection.request.interaction_id),
+                input_id: None,
+                operation_key: None,
+            },
+            None => InputContext {
+                run_id: Some(self.run.run_id),
+                interaction_id: None,
+                input_id: pending.receipt_id(),
+                operation_key: Some(pending.request.operation_key.clone()),
+            },
         }
     }
 
@@ -1640,110 +1614,14 @@ impl InputCoordinator {
         self.lock.validate(conn, &current.owner())
     }
 
-    fn receipt_guard_snapshot(
-        &self,
-        conn: &Connection,
-        expected: &storage::PermissionReceipt,
-        deadline: Instant,
-    ) -> Result<ReceiptGuardBinding> {
-        check_deadline(Instant::now(), deadline)?;
-        self.validate_receipt_owner(conn)?;
-        let receipt = storage::get_permission_response(conn, expected.input.input_id)?;
-        ensure(receipt == *expected, "permission receipt snapshot changed")?;
-        self.validate_receipt_cache(&receipt.input)?;
-        let zero_known = if let Some(retained) = self.operations.get(&receipt.input.input_id) {
-            ensure(
-                !retained.leased && !retained.attempt_available,
-                "receipt requires an unleased consumed attempt",
-            )?;
-            retained.stage == SubmissionStage::ZeroBytes && retained.written_bytes == 0
-        } else {
-            receipt.input.state == storage::InputState::Ready
-        };
-        Ok(ReceiptGuardBinding {
-            owner: self.run.owner(),
-            receipt,
-            zero_known,
-            rearm: None,
-        })
-    }
-
-    fn acquire_receipt_guard<'a>(
-        &'a mut self,
-        conn: &Connection,
-        expected: &storage::PermissionReceipt,
-        deadline: Instant,
-    ) -> Result<InputGuard<'a>> {
-        ensure(
-            !conn.is_autocommit(),
-            "receipt exclusion requires its ownership transaction",
-        )?;
-        ensure(
-            self.pending.is_none(),
-            "receipt exclusion requires no active writer",
-        )?;
-        let deadline = bounded_by_inherited(conn, deadline);
-        let binding = self.receipt_guard_snapshot(conn, expected, deadline)?;
-        Ok(InputGuard {
-            retained: None,
-            proof: None,
-            binding: Some(binding),
-            deadline,
-            permit: GuardPermit::Rejected,
-            exclusion: std::marker::PhantomData,
-        })
-    }
-
-    fn acquire_rearm_guard<'a>(
-        &'a mut self,
-        conn: &Connection,
-        expected: &storage::PermissionReceipt,
-        selection: &Arc<PermissionSelection>,
-        live: (&mut Transport, &ObservationController),
-        deadline: Instant,
-    ) -> Result<Option<InputGuard<'a>>> {
-        let (transport, observation) = live;
-        self.validate_permission_binding(selection, observation)?;
-        self.validate_live(conn)?;
-        self.validate_permission_association(conn, selection)?;
-        ensure(
-            self.pending.as_ref().is_some_and(|p| {
-                p.phase == InputPhase::AwaitReservation
-                    && p.input_id() == Some(expected.input.input_id)
-            }) && expected.input.state == storage::InputState::Ready
-                && expected.response.metadata == selection.request.metadata,
-            "exact pending ready rearm required",
-        )?;
-        let mut binding = self.receipt_guard_snapshot(conn, expected, deadline)?;
-        ensure(binding.zero_known, "ready rearm requires actual zero bytes")?;
-        let Some(proof) = transport.take_input_drain() else {
-            return Ok(None);
-        };
-        transport.validate_permission(&proof, deadline)?;
-        ensure(
-            proof.pointer_generation() == self.pointer_generation,
-            "permission pointer generation changed",
-        )?;
-        self.current_drain_seq(&proof, "permission manual generation changed")?;
-        binding.rearm = Some(selection.clone());
-        Ok(Some(InputGuard {
-            retained: None,
-            proof: Some(proof),
-            binding: Some(binding),
-            deadline,
-            permit: GuardPermit::Rejected,
-            exclusion: std::marker::PhantomData,
-        }))
-    }
-
     fn validate_receipt_cache(&self, input: &storage::InputOperation) -> Result<()> {
         ensure(
             input.run_id == self.run.run_id,
             "receipt for this run required",
         )?;
-        if let Some(retained) = self.operations.get(&input.input_id) {
+        if let Some(retained) = self.operations.get(&AttemptKey::Receipt(input.input_id)) {
             ensure(
-                retained.operation.same_identity(input),
+                retained.operation.receipt().same_identity(input),
                 "receipt cache identity changed",
             )?;
         }
@@ -1753,8 +1631,13 @@ impl InputCoordinator {
     fn receipt_projection(&self, operation: &storage::InputOperation) -> Result<SubmissionResult> {
         self.validate_receipt_cache(operation)?;
         let mut result = self.result(operation);
-        if self.operations.contains_key(&operation.input_id) {
-            result.stage = self.retained_checkpoint(operation.input_id)?.stage;
+        if self
+            .operations
+            .contains_key(&AttemptKey::Receipt(operation.input_id))
+        {
+            result.stage = self
+                .retained_checkpoint(AttemptKey::Receipt(operation.input_id))?
+                .stage;
         } else if operation.state == storage::InputState::Settled
             && operation.disposition != Some(storage::InputDisposition::Submitted)
         {
@@ -1794,10 +1677,10 @@ impl InputCoordinator {
                         })
                     } else {
                         ensure(
-                            !self
-                                .operations
-                                .values()
-                                .any(|retained| retained.operation.operation_key == *key),
+                            !self.operations.iter().any(|(attempt, retained)| {
+                                matches!(attempt, AttemptKey::Receipt(_))
+                                    && retained.operation.receipt().operation_key == *key
+                            }),
                             "retained input has no durable reservation",
                         )?;
                         InputControlReply::Receipt(ReceiptReply::Missing)
@@ -1829,7 +1712,7 @@ impl InputCoordinator {
                         self.pending.is_none(),
                         "reconciliation requires no active input writer",
                     )?;
-                    if let Some(retained) = self.operations.get(id) {
+                    if let Some(retained) = self.operations.get(&AttemptKey::Receipt(*id)) {
                         ensure(
                             !retained.leased && !retained.attempt_available,
                             "reconciliation requires an unleased consumed attempt",
@@ -1843,43 +1726,20 @@ impl InputCoordinator {
                         )?;
                         input
                     } else {
-                        let owner = self.run.owner();
-                        let permission = if input.kind == storage::InputKind::PermissionResponse {
-                            let receipt = storage::get_permission_response(&tx, *id)?;
-                            let guard = self.acquire_receipt_guard(&tx, &receipt, deadline)?;
-                            Some((guard, receipt.response.metadata.interaction_id))
-                        } else {
-                            None
-                        };
-                        let proof = match &permission {
-                            Some((guard, interaction_id))
-                                if *disposition == storage::InputDisposition::NotSubmitted
-                                    && guard
-                                        .binding
-                                        .as_ref()
-                                        .expect("receipt guard has its binding")
-                                        .zero_known =>
-                            {
-                                Some(guard.zero_byte_retirement(&owner, *id, *interaction_id)?)
-                            }
-                            _ => None,
-                        };
-                        storage::settle_any_input_in_transaction(
+                        storage::settle_owned_input_in_transaction(
                             &tx,
-                            &owner,
+                            &self.run.owner(),
                             &input,
                             *disposition,
                             evidence_ref,
-                            proof.as_ref(),
-                            deadline,
                         )?
                     };
                     check_deadline(Instant::now(), deadline)?;
                     tx.commit()?;
                     Ok(settled)
                 })?;
-                if let Some(retained) = self.operations.get_mut(id) {
-                    retained.operation = settled;
+                if let Some(retained) = self.operations.get_mut(&AttemptKey::Receipt(*id)) {
+                    retained.operation = AttemptRecord::Receipt(settled.clone());
                 }
                 self.queue.retain(|queued| queued.input_id != *id);
                 check_deadline(Instant::now(), deadline)?;
@@ -1921,7 +1781,7 @@ impl InputCoordinator {
                     self.pending.is_none(),
                     "retirement requires no active input writer",
                 )?;
-                if let Some(retained) = self.operations.get(&input_id) {
+                if let Some(retained) = self.operations.get(&AttemptKey::Receipt(input_id)) {
                     ensure(
                         !retained.leased && !retained.attempt_available,
                         "retirement requires an unleased consumed attempt",
@@ -1931,7 +1791,7 @@ impl InputCoordinator {
                 tx.commit().map_err(crate::error::CafleetError::from)
             })?;
             check_deadline(Instant::now(), deadline)?;
-            self.operations.remove(&input_id);
+            self.operations.remove(&AttemptKey::Receipt(input_id));
             Ok(InputControlReply::Receipt(ReceiptReply::Retired {
                 input_id,
             }))
@@ -1984,10 +1844,13 @@ impl InputCoordinator {
                     Some("input requires live proven-zero revalidation".into()),
                 )
             });
-        let retained = self.operations.get(&operation.input_id).map(|_| {
-            self.retained_checkpoint(operation.input_id)
-                .expect("present input cache supplies its checkpoint")
-        });
+        let retained = self
+            .operations
+            .get(&AttemptKey::Receipt(operation.input_id))
+            .map(|_| {
+                self.retained_checkpoint(AttemptKey::Receipt(operation.input_id))
+                    .expect("present input cache supplies its checkpoint")
+            });
         if matches!(
             operation.state,
             InputState::InProgress | InputState::Uncertain
@@ -2002,7 +1865,49 @@ impl InputCoordinator {
             stage,
             output_seq: retained.map(|point| point.output_seq),
             reason,
-            delivery: operation.delivery(),
+            delivery: Some(operation.delivery()),
+        }
+    }
+
+    /// The submission result of an attempt's record. A receipt-free sweep preview reports its
+    /// state with no input identity or delivery projection.
+    fn attempt_result(&self, key: AttemptKey, record: &AttemptRecord) -> SubmissionResult {
+        use storage::InputState;
+        let record = match record {
+            AttemptRecord::Receipt(operation) => return self.result(operation),
+            AttemptRecord::ReceiptFree(record) => record,
+        };
+        let checkpoint = self.operations.contains_key(&key).then(|| {
+            self.retained_checkpoint(key)
+                .expect("present attempt supplies its checkpoint")
+        });
+        let (status, mut stage, reason) = match record.state {
+            InputState::Accepted => (SubmissionStatus::Accepted, SubmissionStage::Submitted, None),
+            InputState::InProgress | InputState::Uncertain => (
+                SubmissionStatus::Uncertain,
+                SubmissionStage::Unknown,
+                record.stop_cause.map(|cause| cause.as_str().to_owned()),
+            ),
+            InputState::Ready => (
+                SubmissionStatus::Held,
+                SubmissionStage::ZeroBytes,
+                Some("input requires live proven-zero revalidation".into()),
+            ),
+            InputState::Settled => unreachable!("a receipt-free attempt is never settled"),
+        };
+        if matches!(record.state, InputState::InProgress | InputState::Uncertain)
+            && let Some(point) = checkpoint.as_ref()
+            && point.stage != SubmissionStage::ZeroBytes
+        {
+            stage = point.stage;
+        }
+        SubmissionResult {
+            status,
+            input_id: None,
+            stage,
+            output_seq: checkpoint.map(|point| point.output_seq),
+            reason,
+            delivery: None,
         }
     }
 
@@ -2438,18 +2343,17 @@ impl InputCoordinator {
                 .is_some_and(|pending| pending.deferred().is_some())
     }
 
-    /// The attempt's current receipt: the stored row for prompt and exec, and the in-memory
-    /// record of the sweep preview, which has no durable receipt.
-    fn current_input(&self, conn: &Connection, id: i64) -> Result<storage::InputOperation> {
-        if id == SWEEP_PREVIEW_ID {
-            Ok(self
+    /// The attempt's current record: the stored row for prompt and exec, and the in-memory
+    /// record of the sweep preview or the permission answer, which have no durable receipt.
+    fn current_input(&self, conn: &Connection, key: AttemptKey) -> Result<AttemptRecord> {
+        match key {
+            AttemptKey::Receipt(id) => storage::get_input(conn, id).map(AttemptRecord::Receipt),
+            AttemptKey::SweepPreview | AttemptKey::Answer => Ok(self
                 .operations
-                .get(&id)
-                .expect("the sweep preview retains its in-memory receipt")
+                .get(&key)
+                .expect("a receipt-free attempt retains its in-memory record")
                 .operation
-                .clone())
-        } else {
-            storage::get_input(conn, id)
+                .clone()),
         }
     }
 
@@ -2464,22 +2368,29 @@ impl InputCoordinator {
     fn record_state(
         &self,
         conn: &mut Connection,
-        id: i64,
+        key: AttemptKey,
         expected: storage::InputState,
         next: storage::InputState,
-    ) -> Result<storage::InputOperation> {
-        if id != SWEEP_PREVIEW_ID {
-            return storage::record_input_state(conn, &self.run.owner(), id, expected, next);
+    ) -> Result<AttemptRecord> {
+        if let AttemptKey::Receipt(id) = key {
+            return storage::record_input_state(conn, &self.run.owner(), id, expected, next)
+                .map(AttemptRecord::Receipt);
         }
-        let mut operation = self.current_input(conn, id)?;
-        ensure(operation.state == expected, "sweep preview state changed")?;
+        ensure(
+            key == AttemptKey::SweepPreview,
+            "only a sweep preview records an in-memory state",
+        )?;
+        let AttemptRecord::ReceiptFree(mut record) = self.current_input(conn, key)? else {
+            unreachable!("a sweep preview keeps an in-memory record");
+        };
+        ensure(record.state == expected, "sweep preview state changed")?;
         match next {
             storage::InputState::Accepted => {
                 storage::stamp_preview(conn, &self.run.owner(), self.sweep_preview_message())?;
             }
             storage::InputState::Ready => {
-                operation.delivery_method = None;
-                operation.delivery_reason = None;
+                record.delivery_method = None;
+                record.delivery_reason = None;
             }
             _ => {
                 return Err(error(
@@ -2487,8 +2398,8 @@ impl InputCoordinator {
                 ));
             }
         }
-        operation.state = next;
-        Ok(operation)
+        record.state = next;
+        Ok(AttemptRecord::ReceiptFree(record))
     }
 
     /// Records an in-progress attempt as uncertain. An uncertain sweep preview stays unnotified on
@@ -2496,23 +2407,30 @@ impl InputCoordinator {
     fn record_uncertain(
         &self,
         conn: &mut Connection,
-        id: i64,
+        key: AttemptKey,
         cause: storage::StopCause,
-    ) -> Result<storage::InputOperation> {
-        if id != SWEEP_PREVIEW_ID {
-            return storage::record_input_uncertain(conn, &self.run.owner(), id, cause);
+    ) -> Result<AttemptRecord> {
+        if let AttemptKey::Receipt(id) = key {
+            return storage::record_input_uncertain(conn, &self.run.owner(), id, cause)
+                .map(AttemptRecord::Receipt);
         }
-        let mut operation = self.current_input(conn, id)?;
         ensure(
-            operation.state == storage::InputState::InProgress,
+            key == AttemptKey::SweepPreview,
+            "only a sweep preview records an in-memory uncertainty",
+        )?;
+        let AttemptRecord::ReceiptFree(mut record) = self.current_input(conn, key)? else {
+            unreachable!("a sweep preview keeps an in-memory record");
+        };
+        ensure(
+            record.state == storage::InputState::InProgress,
             "sweep preview state changed",
         )?;
         if !self.verified_composer(ComposerOperation::Prompt) {
             storage::stamp_preview(conn, &self.run.owner(), self.sweep_preview_message())?;
         }
-        operation.state = storage::InputState::Uncertain;
-        operation.stop_cause = Some(cause);
-        Ok(operation)
+        record.state = storage::InputState::Uncertain;
+        record.stop_cause = Some(cause);
+        Ok(AttemptRecord::ReceiptFree(record))
     }
 
     /// Publishes a stopped attempt's result; a sweep preview publishes only an uncertain result,
@@ -2520,19 +2438,23 @@ impl InputCoordinator {
     fn publish_outcome(
         &self,
         observation: &ObservationController,
-        id: i64,
+        key: AttemptKey,
         stage: SubmissionStage,
         stop_cause: Option<storage::StopCause>,
     ) {
-        if id != SWEEP_PREVIEW_ID {
+        if let AttemptKey::Receipt(id) = key {
             Self::publish_result(observation, id, stage, stop_cause);
             return;
         }
+        assert!(
+            key == AttemptKey::SweepPreview,
+            "a permission answer publishes no delivery result"
+        );
         if let Some(cause) = stop_cause {
             let method = self
                 .operations
-                .get(&id)
-                .and_then(|retained| retained.operation.delivery_method)
+                .get(&key)
+                .and_then(|retained| retained.operation.delivery_method())
                 .expect("a stopped sweep preview recorded its method");
             observation.publish_delivery_result(storage::preview_delivery_result_cause(
                 self.sweep_preview_message(),
@@ -2589,8 +2511,8 @@ impl InputCoordinator {
                 return Err(cause);
             }
         };
-        if let Some(retained) = self.operations.get_mut(&input_id) {
-            retained.operation = operation;
+        if let Some(retained) = self.operations.get_mut(&AttemptKey::Receipt(input_id)) {
+            retained.operation = AttemptRecord::Receipt(operation);
             retained.attempt_available = false;
         }
         Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes, None);
@@ -2949,10 +2871,11 @@ impl InputCoordinator {
             Err(cause) => return Err(cause),
         };
         let head = self.queue.pop_front().expect("queued head remains");
+        let key = AttemptKey::Receipt(input_id);
         self.operations.insert(
-            input_id,
+            key,
             RetainedInput {
-                operation,
+                operation: AttemptRecord::Receipt(operation),
                 bytes: stages[0].clone(),
                 selection: RetainedSelection::Composer {
                     method,
@@ -2969,7 +2892,7 @@ impl InputCoordinator {
             },
         );
         self.pending = Some(PendingInput {
-            reservation: PendingReservation::Installed(input_id),
+            reservation: PendingReservation::Installed(key),
             request: head.request.clone(),
             bytes: stages[0].clone(),
             delivery: PendingDelivery::Composer(Box::new(ComposerDelivery {
@@ -2994,7 +2917,7 @@ impl InputCoordinator {
             phase: InputPhase::AwaitBeforeWrite,
         });
         self.checkpoint(
-            input_id,
+            key,
             #[cfg(test)]
             InputBoundary::Reserved,
             attempt_deadline,
@@ -3018,11 +2941,11 @@ impl InputCoordinator {
             return Ok(false);
         }
         let id = pending
-            .input_id()
+            .receipt_id()
             .expect("a deferred attempt has its receipt");
         let zero_bytes = self
             .operations
-            .get(&id)
+            .get(&AttemptKey::Receipt(id))
             .is_some_and(|retained| retained.stage == SubmissionStage::ZeroBytes)
             && composer.written_stages == 0;
         if !zero_bytes {
@@ -3070,7 +2993,7 @@ impl InputCoordinator {
             .expect("deferred composer delivery");
         let deferred = composer.deferred.expect("deferred attempt");
         if requeue {
-            self.operations.remove(&id);
+            self.operations.remove(&AttemptKey::Receipt(id));
             let mut queued = deferred.queued;
             queued.attempt_deadline = None;
             queued.head_since = None;
@@ -3083,7 +3006,7 @@ impl InputCoordinator {
                 storage::InputState::InProgress,
                 deferred.obstacle,
             )?;
-            self.operations.remove(&id);
+            self.operations.remove(&AttemptKey::Receipt(id));
         }
         Ok(true)
     }
@@ -3103,9 +3026,9 @@ impl InputCoordinator {
             return Ok(None);
         };
         let zero_bytes = composer.written_stages == 0
-            && pending.input_id().is_none_or(|id| {
+            && pending.attempt().is_none_or(|key| {
                 self.operations
-                    .get(&id)
+                    .get(&key)
                     .is_some_and(|retained| retained.stage == SubmissionStage::ZeroBytes)
             });
         if composer.deferred.is_some() || pending.permission().is_some() || !zero_bytes {
@@ -3125,19 +3048,19 @@ impl InputCoordinator {
         };
         let pending = self.pending.take().expect("immediate pending input");
         if pending.request.kind == storage::InputKind::Preview {
-            self.operations.remove(&SWEEP_PREVIEW_ID);
+            self.operations.remove(&AttemptKey::SweepPreview);
             return Ok(Some(InputControlReply::Submission(SubmissionResult::held(
                 defer_reason,
             ))));
         }
-        let input_id = pending.input_id();
+        let input_id = pending.receipt_id();
         let composer = pending
             .delivery
             .into_composer()
             .expect("immediate composer delivery");
         let operation = match input_id {
             Some(id) => {
-                self.operations.remove(&id);
+                self.operations.remove(&AttemptKey::Receipt(id));
                 with_database_deadline(conn, deadline, |conn| {
                     storage::requeue_zero_byte_immediate(conn, &self.run.owner(), id, defer_reason)
                 })?
@@ -3183,20 +3106,20 @@ impl InputCoordinator {
     ) -> Result<()> {
         let stage = self
             .operations
-            .get(&operation.input_id)
+            .get(&AttemptKey::Receipt(operation.input_id))
             .map_or(SubmissionStage::Unknown, |retained| retained.stage);
         Self::publish_result(observation, operation.input_id, stage, operation.stop_cause);
         Ok(())
     }
 
-    fn retained_checkpoint(&self, input_id: i64) -> Result<InputCheckpoint> {
+    fn retained_checkpoint(&self, attempt: AttemptKey) -> Result<InputCheckpoint> {
         let retained = self
             .operations
-            .get(&input_id)
+            .get(&attempt)
             .ok_or_else(|| error("retained input operation is absent"))?;
         Ok(InputCheckpoint {
             #[cfg(test)]
-            input_id,
+            attempt,
             stage: retained.stage,
             written_bytes: retained.written_bytes,
             output_seq: retained.output_seq,
@@ -3205,12 +3128,12 @@ impl InputCoordinator {
 
     fn checkpoint(
         &mut self,
-        input_id: i64,
+        attempt: AttemptKey,
         #[cfg(test)] boundary: InputBoundary,
 
         deadline: Instant,
     ) -> Result<()> {
-        let _checkpoint = self.retained_checkpoint(input_id)?;
+        let _checkpoint = self.retained_checkpoint(attempt)?;
         #[cfg(test)]
         let result = (|| -> Result<()> {
             #[cfg(test)]
@@ -3339,35 +3262,29 @@ impl InputCoordinator {
             conn.busy_handler(Some(|_| false))?;
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             self.validate_live(&tx)?;
-            let id = operation
-                .input_id()
+            let key = operation
+                .attempt()
                 .ok_or_else(|| error("input reservation is absent"))?;
             let retained = self
                 .operations
-                .get(&id)
+                .get(&key)
                 .ok_or_else(|| error("retained input reservation is absent"))?;
-            let current = self.current_input(&tx, id)?;
+            let current = self.current_input(&tx, key)?;
             ensure(
-                current == retained.operation
-                    && current.state == storage::InputState::InProgress
-                    && current.run_id == self.run.run_id
-                    && current.operation_key == operation.request.operation_key
-                    && current.payload_digest == operation.request.payload_digest
-                    && current.kind == operation.request.kind,
+                current == retained.operation && current.state() == storage::InputState::InProgress,
                 "input reservation changed before write",
             )?;
+            if let AttemptRecord::Receipt(stored) = &current {
+                ensure(
+                    stored.run_id == self.run.run_id
+                        && stored.operation_key == operation.request.operation_key
+                        && stored.payload_digest == operation.request.payload_digest
+                        && stored.kind == operation.request.kind,
+                    "input reservation changed before write",
+                )?;
+            }
             if let Some(selection) = &operation.permission() {
                 self.validate_permission_association(&tx, selection)?;
-                let receipt = storage::get_permission_response(&tx, id)?;
-                ensure(
-                    receipt.input == current
-                        && receipt.response.metadata == selection.request.metadata
-                        && receipt.claim.as_ref().is_some_and(|claim| {
-                            claim.input_id == id
-                                && claim.interaction_id == selection.binding.interaction_id
-                        }),
-                    "permission audit or claim changed before write",
-                )?;
             }
             check_deadline(Instant::now(), effective)?;
             tx.rollback().map_err(crate::error::CafleetError::from)
@@ -3441,7 +3358,7 @@ impl InputCoordinator {
                     .operations
                     .get(
                         &pending
-                            .input_id()
+                            .attempt()
                             .ok_or_else(|| error("permission reservation absent"))?,
                     )
                     .ok_or_else(|| error("retained permission selection absent"))?;
@@ -3465,7 +3382,7 @@ impl InputCoordinator {
             }
             let output_seq = self.current_drain_seq(&proof, "input manual generation changed")?;
             let id = pending
-                .input_id()
+                .attempt()
                 .ok_or_else(|| error("armed input has no reservation"))?;
             let retained = self
                 .operations
@@ -3495,7 +3412,6 @@ impl InputCoordinator {
         Ok(Some(InputGuard {
             retained: Some(retained),
             proof: Some(proof),
-            binding: None,
             deadline,
             permit: GuardPermit::Fresh,
             exclusion: std::marker::PhantomData,
@@ -3597,38 +3513,43 @@ impl InputCoordinator {
                 ),
             }
         })();
-        result.map_err(|source| {
-            let source = match self
-                .pending
-                .as_mut()
-                .and_then(PendingInput::composer_mut)
-                .and_then(|composer| composer.stop_failure.take())
-            {
-                Some(primary) => primary.with_diagnostic(source.message()),
-                None => source,
+        let source = match result {
+            Ok(reply) => return Ok(reply),
+            Err(source) => source,
+        };
+        let source = match self
+            .pending
+            .as_mut()
+            .and_then(PendingInput::composer_mut)
+            .and_then(|composer| composer.stop_failure.take())
+        {
+            Some(primary) => primary.with_diagnostic(source.message()),
+            None => source,
+        };
+        if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer_mut()) {
+            composer.pane = None;
+        }
+        self.retire_failed_deferred(conn, observation);
+        let source = if terminal_bookkeeping {
+            source
+        } else {
+            let source = match self.answer_failure(source) {
+                Ok(reply) => return Ok(Some(reply)),
+                Err(source) => source,
             };
-            if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer_mut()) {
-                composer.pane = None;
-            }
-            self.retire_failed_deferred(conn, observation);
-            let source = if terminal_bookkeeping {
-                source
-            } else {
-                let source = self.retain_permission_failure(conn, deadline, source);
-                self.record_immediate_write_failure(conn, observation, deadline, source)
-            };
-            if self.pending.is_some() {
-                self.failure(source)
-            } else {
-                context.failure(source)
-            }
+            self.record_immediate_write_failure(conn, observation, deadline, source)
+        };
+        Err(if self.pending.is_some() {
+            self.failure(source)
+        } else {
+            context.failure(source)
         })
     }
 
-    fn reserved_input_id(&self) -> Result<i64> {
+    fn reserved_attempt(&self) -> Result<AttemptKey> {
         self.pending
             .as_ref()
-            .and_then(|pending| pending.input_id())
+            .and_then(|pending| pending.attempt())
             .ok_or_else(|| error("input writer has no reservation"))
     }
 
@@ -3649,7 +3570,7 @@ impl InputCoordinator {
             composer.literal.clone(),
             pending.request.clone(),
             pending.deadline,
-            pending.input_id(),
+            pending.attempt(),
             composer.deferred.is_some(),
         );
         let choice = self.select_delivery(
@@ -3682,7 +3603,7 @@ impl InputCoordinator {
                         self.cancel_deferred(
                             conn,
                             observation,
-                            id,
+                            id.receipt_id(),
                             storage::InputState::InProgress,
                             "plain_limit_exceeded",
                         )?;
@@ -3704,8 +3625,8 @@ impl InputCoordinator {
                         .expect("a zero-byte input retains its receipt");
                     retained.operation = operation;
                     retained.attempt_available = false;
-                    rejection.input_id = Some(id);
-                    rejection.delivery = retained.operation.delivery();
+                    rejection.input_id = Some(id.receipt_id());
+                    rejection.delivery = Some(retained.operation.receipt().delivery());
                 }
                 self.pending = None;
                 return Ok(Some(rejection));
@@ -3721,37 +3642,42 @@ impl InputCoordinator {
                     && !retained.leased,
                 "zero-byte selection requires its recorded writer exclusion",
             )?;
-            if id == SWEEP_PREVIEW_ID {
-                let retained = self
+            if let AttemptRecord::ReceiptFree(_) = &retained.operation {
+                let AttemptRecord::ReceiptFree(record) = &mut self
                     .operations
                     .get_mut(&id)
-                    .expect("zero-byte receipt remains");
-                retained.operation.delivery_method = Some(method);
-                retained.operation.delivery_reason = reason.map(str::to_owned);
-            } else if retained.operation.delivery_method != Some(method)
-                || retained.operation.delivery_reason.as_deref() != reason
+                    .expect("zero-byte receipt remains")
+                    .operation
+                else {
+                    unreachable!("the matched receipt-free record remains");
+                };
+                record.delivery_method = Some(method);
+                record.delivery_reason = reason.map(str::to_owned);
+            } else if retained.operation.delivery_method() != Some(method)
+                || retained.operation.delivery_reason() != reason
             {
-                let expected = retained.operation.clone();
+                let expected = retained.operation.receipt().clone();
+                let input_id = id.receipt_id();
                 let operation = with_database_deadline(conn, deadline, |conn| {
                     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     self.validate_live(&tx)?;
                     ensure(
-                        storage::get_input(&tx, id)? == expected,
+                        storage::get_input(&tx, input_id)? == expected,
                         "zero-byte selection receipt changed",
                     )?;
-                    let count = tx.execute("UPDATE member_input_operations SET delivery_method=?1,delivery_reason=?2,updated_at=?3 WHERE input_id=?4 AND state='in_progress'", rusqlite::params![method.as_str(),reason,crate::time::now_stamp(),id])?;
+                    let count = tx.execute("UPDATE member_input_operations SET delivery_method=?1,delivery_reason=?2,updated_at=?3 WHERE input_id=?4 AND state='in_progress'", rusqlite::params![method.as_str(),reason,crate::time::now_stamp(),input_id])?;
                     ensure(
                         count == 1,
                         "zero-byte selection requires its in-progress receipt",
                     )?;
-                    let operation = storage::get_input(&tx, id)?;
+                    let operation = storage::get_input(&tx, input_id)?;
                     tx.commit()?;
                     Ok(operation)
                 })?;
                 self.operations
                     .get_mut(&id)
                     .expect("zero-byte receipt remains")
-                    .operation = operation;
+                    .operation = AttemptRecord::Receipt(operation);
             }
             let retained = self
                 .operations
@@ -3785,125 +3711,60 @@ impl InputCoordinator {
         observation: &ObservationController,
         effective: Instant,
     ) -> Result<Option<InputControlReply>> {
-        let ready = self
-            .pending
-            .as_ref()
-            .and_then(|p| p.ready().cloned().zip(p.permission().cloned()));
-        let (operation, output_seq) = if let Some((ready, selection)) = ready {
-            let owner = self.run.owner();
-            let Some(guard) = with_database_deadline(conn, effective, |conn| {
-                self.acquire_rearm_guard(
-                    conn,
-                    &ready,
-                    &selection,
-                    (transport, observation),
-                    effective,
+        let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
+            return Ok(None);
+        };
+        let pending = self.pending.as_ref().expect("retained pending input");
+        let (id, operation) = match &pending.delivery {
+            PendingDelivery::Permission(selection) => {
+                with_database_deadline(conn, effective, |conn| {
+                    let tx = conn.transaction()?;
+                    self.validate_live(&tx)?;
+                    self.validate_permission_association(&tx, selection)?;
+                    check_deadline(Instant::now(), effective)?;
+                    tx.commit().map_err(crate::error::CafleetError::from)
+                })?;
+                (AttemptKey::Answer, receipt_free_record(None))
+            }
+            PendingDelivery::Composer(composer)
+                if pending.request.kind == storage::InputKind::Preview =>
+            {
+                (
+                    AttemptKey::SweepPreview,
+                    receipt_free_record(Some((composer.method, composer.reason))),
                 )
-            })?
-            else {
-                return Ok(None);
-            };
-            let output_seq = guard
-                .proof
-                .as_ref()
-                .expect("rearm guard retains its drain")
-                .output_seq();
-            let proof = guard.zero_byte_retirement(
-                &owner,
-                ready.input.input_id,
-                ready.response.metadata.interaction_id,
-            )?;
-            let rearmed = storage::rearm_permission_response(
-                conn,
-                &owner,
-                &selection.request,
-                &proof,
-                effective,
-            )?;
-            (rearmed.input, output_seq)
-        } else {
-            let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
-                return Ok(None);
-            };
-            let pending = self.pending.as_ref().expect("retained pending input");
-            let operation = match &pending.delivery {
-                PendingDelivery::Permission(selection) => {
-                    let reservation = with_database_deadline(conn, effective, |conn| {
-                        self.validate_live(conn)?;
-                        self.validate_permission_association(conn, selection)?;
-                        storage::reserve_permission_response(
-                            conn,
-                            &self.run.owner(),
-                            &selection.request,
-                            Some(selection.plan.capability()),
-                            effective,
-                        )
-                    })?;
-                    match reservation {
-                        storage::PermissionReservation::Reserved(receipt) => receipt.input,
-                        storage::PermissionReservation::Retained(receipt) => {
-                            let reply = InputControlReply::PermissionResponse(
-                                crate::runtime::input_client::projection(&self.run, receipt)?,
-                            );
-                            self.pending = None;
-                            return Ok(Some(reply));
-                        }
+            }
+            PendingDelivery::Composer(composer) => {
+                let reservation = storage::NewReservation {
+                    selection: Some((composer.method, composer.reason)),
+                    defer_reason: None,
+                };
+                let reservation = with_database_deadline(conn, effective, |conn| {
+                    self.validate_live(conn)?;
+                    storage::reserve_input_with_provenance(
+                        conn,
+                        &self.run.owner(),
+                        &pending.request,
+                        reservation,
+                    )
+                })?;
+                match reservation {
+                    storage::InputReservation::Inserted(operation) => (
+                        AttemptKey::Receipt(operation.input_id),
+                        AttemptRecord::Receipt(operation),
+                    ),
+                    storage::InputReservation::Existing(operation) => {
+                        let reply = InputControlReply::Submission(self.result(&operation));
+                        self.pending = None;
+                        return Ok(Some(reply));
                     }
                 }
-                PendingDelivery::Composer(composer)
-                    if pending.request.kind == storage::InputKind::Preview =>
-                {
-                    let now = crate::time::now_stamp();
-                    storage::InputOperation {
-                        input_id: SWEEP_PREVIEW_ID,
-                        run_id: self.run.run_id,
-                        operation_key: pending.request.operation_key.clone(),
-                        kind: storage::InputKind::Preview,
-                        payload_digest: pending.request.payload_digest.clone(),
-                        state: storage::InputState::InProgress,
-                        created_at: now.clone(),
-                        updated_at: now,
-                        disposition: None,
-                        evidence_ref: None,
-                        permission_response: None,
-                        delivery_method: Some(composer.method),
-                        delivery_reason: composer.reason.map(str::to_owned),
-                        deferred_at: None,
-                        defer_reason: None,
-                        stop_cause: None,
-                    }
-                }
-                PendingDelivery::Composer(composer) => {
-                    let reservation = storage::NewReservation {
-                        selection: Some((composer.method, composer.reason)),
-                        defer_reason: None,
-                    };
-                    let reservation = with_database_deadline(conn, effective, |conn| {
-                        self.validate_live(conn)?;
-                        storage::reserve_input_with_provenance(
-                            conn,
-                            &self.run.owner(),
-                            &pending.request,
-                            reservation,
-                        )
-                    })?;
-                    match reservation {
-                        storage::InputReservation::Inserted(operation) => operation,
-                        storage::InputReservation::Existing(operation) => {
-                            let reply = InputControlReply::Submission(self.result(&operation));
-                            self.pending = None;
-                            return Ok(Some(reply));
-                        }
-                    }
-                }
-            };
-            (operation, output_seq)
+            }
         };
         ensure(
-            operation.state == storage::InputState::InProgress,
+            operation.state() == storage::InputState::InProgress,
             "ordinary input reservation is not writable",
         )?;
-        let id = operation.input_id;
         let pending = self.pending.as_ref().expect("reserved pending input");
         self.operations.insert(
             id,
@@ -3944,7 +3805,7 @@ impl InputCoordinator {
 
     fn composer_interruption(
         &self,
-        id: i64,
+        id: AttemptKey,
         observation: &ObservationController,
     ) -> Result<Option<storage::StopCause>> {
         let pending = self.pending.as_ref().expect("pending write remains");
@@ -3988,7 +3849,7 @@ impl InputCoordinator {
         effective: Instant,
         terminal_bookkeeping: &mut bool,
     ) -> Result<Option<InputControlReply>> {
-        let id = self.reserved_input_id()?;
+        let id = self.reserved_attempt()?;
         if let StageGateProgress::Waiting = self.advance_stage_gate(observation)? {
             return Ok(None);
         }
@@ -4029,7 +3890,7 @@ impl InputCoordinator {
     fn interrupt_composer(
         &mut self,
         conn: &mut Connection,
-        id: i64,
+        id: AttemptKey,
         observation: &ObservationController,
         effective: Instant,
         cause: storage::StopCause,
@@ -4045,7 +3906,7 @@ impl InputCoordinator {
         self.stop_composer_stages(conn, id, observation, effective, stop)
     }
 
-    fn prepare_paste_close(&mut self, id: i64, stop: ComposerStop) -> Result<()> {
+    fn prepare_paste_close(&mut self, id: AttemptKey, stop: ComposerStop) -> Result<()> {
         let pending = self.pending.as_mut().expect("stopped composer remains");
         pending.composer_mut().expect("ordinary composer").stop = Some(stop);
         pending.bytes = Arc::from(PASTE_CLOSE);
@@ -4063,7 +3924,7 @@ impl InputCoordinator {
     fn finish_composer_stop(
         &mut self,
         conn: &mut Connection,
-        id: i64,
+        id: AttemptKey,
         observation: &ObservationController,
         effective: Instant,
         stop: ComposerStop,
@@ -4085,7 +3946,11 @@ impl InputCoordinator {
         }
     }
 
-    fn composer_stop(&self, id: i64, cause: storage::StopCause) -> Result<(ComposerStop, bool)> {
+    fn composer_stop(
+        &self,
+        id: AttemptKey,
+        cause: storage::StopCause,
+    ) -> Result<(ComposerStop, bool)> {
         let retained = self
             .operations
             .get(&id)
@@ -4142,7 +4007,7 @@ impl InputCoordinator {
         effective: Instant,
         terminal_bookkeeping: &mut bool,
     ) -> Result<Option<InputControlReply>> {
-        let id = self.reserved_input_id()?;
+        let id = self.reserved_attempt()?;
         if let Some(cause) = self.composer_interruption(id, observation)? {
             *terminal_bookkeeping = true;
             return self.interrupt_composer(conn, id, observation, effective, cause);
@@ -4173,6 +4038,7 @@ impl InputCoordinator {
             GuardPermit::IoPossible | GuardPermit::ResultRecorded
         );
         drop(guard);
+        self.note_answer_written(id);
         let after = if attempted {
             self.checkpoint(
                 id,
@@ -4320,6 +4186,14 @@ impl InputCoordinator {
             return self.finish_composer_stop(conn, id, observation, effective, stop);
         }
         *terminal_bookkeeping = true;
+        if let Some(selection) = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::permission)
+            .cloned()
+        {
+            return self.finish_answer(&selection, id, write, effective);
+        }
         let persisted = with_database_deadline(conn, effective, |conn| {
             self.validate_live(conn)?;
             let next = match stage {
@@ -4352,37 +4226,181 @@ impl InputCoordinator {
         )?;
         let pending = self.pending.as_ref().expect("completed input retained");
         if pending.deferred().is_some() {
-            self.finish_deferred(observation, &operation)?;
+            self.finish_deferred(observation, operation.receipt())?;
             self.pending = None;
             return Ok(None);
         }
-        let reply = match &pending.permission() {
-            Some(selection) => InputControlReply::PermissionResponse(
-                self.permission_result(&selection.request.metadata, self.result(&operation)),
-            ),
-            None => InputControlReply::Submission(self.result(&operation)),
-        };
+        let reply = InputControlReply::Submission(self.attempt_result(id, &operation));
         self.pending = None;
         Ok(Some(reply))
+    }
+
+    /// Records that the pending answer's episode accepts no further answer once a write may have
+    /// sent one of its bytes.
+    fn note_answer_written(&mut self, id: AttemptKey) {
+        let (Some(selection), Some(retained)) = (
+            self.pending.as_ref().and_then(PendingInput::permission),
+            self.operations.get(&id),
+        ) else {
+            return;
+        };
+        if retained.stage != SubmissionStage::ZeroBytes || retained.written_bytes > 0 {
+            self.answered_interactions
+                .insert(selection.request.interaction_id);
+        }
+    }
+
+    /// Why a written answer lost its authority: positive manual input or failed manual-input
+    /// accounting since the answer was bound, then a positive short stage write, and otherwise a
+    /// failed write.
+    fn answer_stop_reason(
+        &self,
+        selection: &PermissionSelection,
+        short_write: bool,
+    ) -> &'static str {
+        let binding = &selection.binding;
+        if self.manual_accounting_failed
+            || self.manual_generation != binding.manual_generation
+            || self.pointer_generation != binding.pointer_generation
+        {
+            "manual_input"
+        } else if short_write {
+            storage::StopCause::ShortWrite.as_str()
+        } else {
+            storage::StopCause::WriteFailed.as_str()
+        }
+    }
+
+    fn answer_reply(
+        &self,
+        selection: &PermissionSelection,
+        id: AttemptKey,
+        status: SubmissionStatus,
+        reason: Option<&str>,
+    ) -> Result<InputControlReply> {
+        let point = self.retained_checkpoint(id)?;
+        Ok(InputControlReply::PermissionResponse(
+            self.permission_reply(
+                &selection.request,
+                SubmissionResult {
+                    status,
+                    input_id: None,
+                    stage: point.stage,
+                    output_seq: Some(point.output_seq),
+                    reason: reason.map(str::to_owned),
+                    delivery: None,
+                },
+            ),
+        ))
+    }
+
+    fn end_answer(&mut self) {
+        self.pending = None;
+        self.operations.remove(&AttemptKey::Answer);
+    }
+
+    /// Replies to an answer whose stages ended: `accepted` once its final stage is completely
+    /// written and `uncertain` after any other written byte. A failure before any byte stays an
+    /// error and leaves the episode answerable.
+    fn finish_answer(
+        &mut self,
+        selection: &PermissionSelection,
+        id: AttemptKey,
+        write: Result<ProgrammaticWrite>,
+        effective: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        self.pending.as_mut().expect("completed answer").phase = InputPhase::Blocked;
+        let stage = self.retained_checkpoint(id)?.stage;
+        let reply = match (write, stage) {
+            (Ok(_), SubmissionStage::Submitted) => {
+                self.answer_reply(selection, id, SubmissionStatus::Accepted, None)?
+            }
+            (Ok(_), SubmissionStage::ZeroBytes) => {
+                unreachable!("a completed answer write records its written bytes")
+            }
+            (Err(cause), SubmissionStage::ZeroBytes) => return Err(cause),
+            (write, _) => {
+                let short_write = matches!(write, Ok(ProgrammaticWrite::Partial { .. }));
+                if let Err(cause) = write {
+                    self.log_answer_failure(selection, &cause);
+                }
+                let reason = self.answer_stop_reason(selection, short_write);
+                self.answer_reply(selection, id, SubmissionStatus::Uncertain, Some(reason))?
+            }
+        };
+        self.checkpoint(
+            id,
+            #[cfg(test)]
+            InputBoundary::TerminalState,
+            effective,
+        )?;
+        self.end_answer();
+        Ok(Some(reply))
+    }
+
+    fn log_answer_failure(&self, selection: &PermissionSelection, cause: &CafleetError) {
+        eprintln!(
+            "member runtime: permission answer for interaction {} is uncertain: {}",
+            selection.request.interaction_id,
+            cause.message()
+        );
+    }
+
+    /// Turns a failure of the pending answer after a written byte into its `uncertain` reply; any
+    /// other failure is returned unchanged.
+    fn answer_failure(
+        &mut self,
+        source: CafleetError,
+    ) -> std::result::Result<InputControlReply, CafleetError> {
+        let Some(pending) = self.pending.as_mut() else {
+            return Err(source);
+        };
+        let Some(selection) = pending.permission().cloned() else {
+            return Err(source);
+        };
+        pending.phase = InputPhase::Blocked;
+        let Some(id) = pending.attempt() else {
+            return Err(source);
+        };
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("pending answer record retained");
+        assert!(!retained.leased, "failed attempt has released its guard");
+        retained.attempt_available = false;
+        if retained.stage == SubmissionStage::ZeroBytes && retained.written_bytes == 0 {
+            return Err(source);
+        }
+        self.log_answer_failure(&selection, &source);
+        let reason = self.answer_stop_reason(&selection, false);
+        let reply = self
+            .answer_reply(&selection, id, SubmissionStatus::Uncertain, Some(reason))
+            .map_err(|bookkeeping| source.with_diagnostic(bookkeeping.message()))?;
+        self.end_answer();
+        Ok(reply)
     }
 
     /// The started deferred attempt's input and whether it may have written a child byte.
     fn active_deferred(&self) -> Option<(i64, SubmissionStage, bool)> {
         let pending = self.pending.as_ref()?;
         pending.deferred()?;
-        let id = pending
-            .input_id()
+        let key = pending
+            .attempt()
             .expect("a deferred attempt has its receipt");
         let stage = self
             .operations
-            .get(&id)
+            .get(&key)
             .expect("a deferred attempt retains its receipt")
             .stage;
         let written = pending
             .composer()
             .as_ref()
             .is_some_and(|composer| composer.written_stages > 0);
-        Some((id, stage, stage != SubmissionStage::ZeroBytes || written))
+        Some((
+            key.receipt_id(),
+            stage,
+            stage != SubmissionStage::ZeroBytes || written,
+        ))
     }
 
     /// Records a still-`in_progress` deferred receipt as uncertain after a possible write and
@@ -4404,9 +4422,9 @@ impl InputCoordinator {
         };
         let retained = self
             .operations
-            .get_mut(&id)
+            .get_mut(&AttemptKey::Receipt(id))
             .expect("a deferred attempt retains its receipt");
-        retained.operation = operation.clone();
+        retained.operation = AttemptRecord::Receipt(operation.clone());
         retained.attempt_available = false;
         Ok(operation)
     }
@@ -4453,7 +4471,7 @@ impl InputCoordinator {
     fn stop_composer_stages(
         &mut self,
         conn: &mut Connection,
-        id: i64,
+        id: AttemptKey,
         observation: &ObservationController,
         effective: Instant,
         stop: ComposerStop,
@@ -4487,8 +4505,8 @@ impl InputCoordinator {
             InputBoundary::TerminalState,
             bookkeeping,
         )?;
-        self.publish_outcome(observation, id, stage, operation.stop_cause);
-        let reply = self.result(&operation);
+        self.publish_outcome(observation, id, stage, operation.stop_cause());
+        let reply = self.attempt_result(id, &operation);
         self.pending = None;
         Ok((!deferred).then_some(InputControlReply::Submission(reply)))
     }
@@ -4501,7 +4519,7 @@ impl InputCoordinator {
         observation: &ObservationController,
         effective: Instant,
     ) -> Result<Option<InputControlReply>> {
-        let id = self.reserved_input_id()?;
+        let id = self.reserved_attempt()?;
         if !self.hold_composer_pane()? {
             return Ok(None);
         }
@@ -4523,7 +4541,6 @@ impl InputCoordinator {
         let mut guard = InputGuard {
             retained: Some(retained),
             proof: None,
-            binding: None,
             deadline: effective,
             permit: GuardPermit::Fresh,
             exclusion: std::marker::PhantomData,
@@ -4584,7 +4601,7 @@ impl InputCoordinator {
         observation: &ObservationController,
         effective: Instant,
     ) -> Result<Option<InputControlReply>> {
-        let id = self.reserved_input_id()?;
+        let id = self.reserved_attempt()?;
         let verification = self
             .pending
             .as_ref()
@@ -4622,11 +4639,11 @@ impl InputCoordinator {
                 .as_ref()
                 .is_some_and(|pending| pending.deferred().is_some());
             if deferred {
-                self.finish_deferred(observation, &operation)?;
+                self.finish_deferred(observation, operation.receipt())?;
                 self.pending = None;
                 return Ok(None);
             }
-            let reply = self.result(&operation);
+            let reply = self.attempt_result(id, &operation);
             self.pending = None;
             return Ok(Some(InputControlReply::Submission(reply)));
         }
@@ -4640,84 +4657,22 @@ impl InputCoordinator {
         Ok(None)
     }
 
-    fn retain_permission_failure(
-        &mut self,
-        conn: &mut Connection,
-        deadline: Instant,
-        source: CafleetError,
-    ) -> CafleetError {
-        let Some(pending) = self.pending.as_mut() else {
-            return source;
-        };
-        if pending.permission().is_none() {
-            return source;
-        }
-        let binding = &pending
-            .permission()
-            .expect("a permission selection remains")
-            .binding;
-        let stop_cause = if self.manual_accounting_failed
-            || self.manual_generation != binding.manual_generation
-            || self.pointer_generation != binding.pointer_generation
-        {
-            storage::StopCause::ManualInput
-        } else {
-            storage::StopCause::WriteFailed
-        };
-        pending.phase = InputPhase::Blocked;
-        let Some(id) = pending.installed_input_id() else {
-            return source;
-        };
-        let retained = self
-            .operations
-            .get_mut(&id)
-            .expect("pending permission receipt retained");
-        assert!(!retained.leased, "failed attempt has released its guard");
-        retained.attempt_available = false;
-        if retained.operation.state != storage::InputState::InProgress {
-            return source;
-        }
-        let zero_bytes = retained.stage == SubmissionStage::ZeroBytes;
-        let Ok(effective) = self.effective_deadline(conn, deadline) else {
-            return source;
-        };
-        let persisted = with_database_deadline(conn, effective, |conn| {
-            self.validate_live_run(conn)?;
-            if zero_bytes {
-                storage::record_input_state(
-                    conn,
-                    &self.run.owner(),
-                    id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Ready,
-                )
-            } else {
-                storage::record_input_uncertain(conn, &self.run.owner(), id, stop_cause)
-            }
-        });
-        match persisted {
-            Ok(operation) => {
-                self.operations
-                    .get_mut(&id)
-                    .expect("failed receipt retained")
-                    .operation = operation;
-                source
-            }
-            Err(bookkeeping) => source.with_diagnostic(bookkeeping.message()),
-        }
-    }
-
-    /// Records the in-flight immediate attempt whose completion failed before the runner replies,
-    /// as `uncertain/write_failed` once it has written a byte, and returns the client failure.
+    /// Ends the in-flight immediate attempt whose completion failed before the runner replies: a
+    /// written answer replies `uncertain`, a written prompt or exec records
+    /// `uncertain/write_failed`, and every other failure returns to the client.
     pub(crate) fn pending_attempt_failed(
         &mut self,
         conn: &mut Connection,
         observation: &ObservationController,
         failure: InputFailure,
-    ) -> InputFailure {
+    ) -> std::result::Result<InputControlReply, InputFailure> {
         let InputFailure { source, context } = failure;
+        let source = match self.answer_failure(source) {
+            Ok(reply) => return Ok(reply),
+            Err(source) => source,
+        };
         let source = self.record_immediate_write_failure(conn, observation, Instant::now(), source);
-        InputFailure { source, context }
+        Err(InputFailure { source, context })
     }
 
     fn record_immediate_write_failure(
@@ -4737,7 +4692,7 @@ impl InputCoordinator {
             return source;
         }
         let written_stages = composer.written_stages;
-        let Some(id) = pending.installed_input_id() else {
+        let Some(id) = pending.attempt() else {
             return source;
         };
         let retained = self
@@ -4747,7 +4702,7 @@ impl InputCoordinator {
         let written = retained.stage != SubmissionStage::ZeroBytes
             || retained.written_bytes > 0
             || written_stages > 0;
-        if !written || retained.operation.state != storage::InputState::InProgress {
+        if !written || retained.operation.state() != storage::InputState::InProgress {
             return source;
         }
         pending.phase = InputPhase::Blocked;
@@ -4786,11 +4741,7 @@ impl InputCoordinator {
         if self.active_deferred().is_some() {
             return;
         }
-        if let Some(id) = self
-            .pending
-            .as_ref()
-            .and_then(PendingInput::installed_input_id)
-        {
+        if let Some(id) = self.pending.as_ref().and_then(PendingInput::attempt) {
             let retained = self
                 .operations
                 .get_mut(&id)
@@ -4801,7 +4752,8 @@ impl InputCoordinator {
             );
             retained.attempt_available = false;
         }
-        self.operations.remove(&SWEEP_PREVIEW_ID);
+        self.operations.remove(&AttemptKey::SweepPreview);
+        self.operations.remove(&AttemptKey::Answer);
         self.pending = None;
     }
 
@@ -4855,6 +4807,7 @@ impl InputCoordinator {
         Ok(Self {
             placement,
             operations: BTreeMap::new(),
+            answered_interactions: BTreeSet::new(),
             pending: None,
             run,
             backend,
@@ -5311,7 +5264,7 @@ mod tests {
 
             #[derive(Clone, Copy)]
             struct ObservedCheckpoint {
-                input_id: i64,
+                attempt: AttemptKey,
                 stage: SubmissionStage,
                 written_bytes: u64,
                 output_seq: u64,
@@ -5336,7 +5289,7 @@ mod tests {
                         let mut observed = self.observed.lock().unwrap();
                         assert!(observed.is_none(), "one actual reservation checkpoint");
                         *observed = Some(ObservedCheckpoint {
-                            input_id: state.input_id,
+                            attempt: state.attempt,
                             stage: state.stage,
                             written_bytes: state.written_bytes,
                             output_seq: state.output_seq,
@@ -5385,7 +5338,7 @@ mod tests {
                         })
                         .expect("the real reservation reaches the configured checkpoint");
                     let ObservedCheckpoint {
-                        input_id: id,
+                        attempt,
                         stage,
                         written_bytes: written,
                         output_seq,
@@ -5397,6 +5350,7 @@ mod tests {
                         .as_ref()
                         .copied()
                         .expect("the hook received the actual reserved input");
+                    let id = attempt.receipt_id();
                     assert_eq!(actual_deadline, deadline);
                     assert!(Instant::now() >= deadline);
                     if fail {
@@ -5407,19 +5361,19 @@ mod tests {
                         assert!(matches!(&failure.source, CafleetError::DeadlineExceeded));
                     }
                     assert_eq!(failure.context.run_id, Some(h.fixture.run.run_id));
-                    assert_eq!(failure.context.input_id, Some(id));
+                    assert_eq!(failure.context.input_id, attempt.receipt());
                     assert_eq!(failure.context.operation_key.as_deref(), Some(key));
                     assert_eq!(stage, SubmissionStage::ZeroBytes);
                     assert_eq!(written, 0);
-                    let retained = h.coordinator.retained_checkpoint(id).unwrap();
+                    let retained = h.coordinator.retained_checkpoint(attempt).unwrap();
                     assert_eq!(
                         (
-                            retained.input_id,
+                            retained.attempt,
                             retained.stage,
                             retained.written_bytes,
                             retained.output_seq,
                         ),
-                        (id, stage, written, output_seq)
+                        (attempt, stage, written, output_seq)
                     );
                     let blocked = h.pending_snapshot();
                     assert_eq!(
@@ -5490,7 +5444,10 @@ mod tests {
                     storage::get_input(&h.fixture.conn, id).unwrap().state,
                     storage::InputState::Accepted
                 ));
-                let retained = h.coordinator.retained_checkpoint(id).unwrap();
+                let retained = h
+                    .coordinator
+                    .retained_checkpoint(AttemptKey::Receipt(id))
+                    .unwrap();
                 assert!(matches!(retained.stage, SubmissionStage::Submitted));
                 assert_eq!(
                     retained.written_bytes,
@@ -5522,14 +5479,19 @@ mod tests {
                     storage::get_input(&host.fixture.conn, id).unwrap().state,
                     storage::InputState::Accepted
                 );
-                let checkpoint = host.coordinator.retained_checkpoint(id).unwrap();
+                let checkpoint = host
+                    .coordinator
+                    .retained_checkpoint(AttemptKey::Receipt(id))
+                    .unwrap();
                 assert_eq!(checkpoint.written_bytes, encoded().len() as u64);
                 assert!(host.hooks.count("after") > 1);
                 let points = host.hooks.points.lock().unwrap();
                 let after = points
                     .iter()
                     .rev()
-                    .find(|point| point.boundary == "after" && point.id == Some(id))
+                    .find(|point| {
+                        point.boundary == "after" && point.id == Some(AttemptKey::Receipt(id))
+                    })
                     .expect("the completed short writes retain their final checkpoint");
                 assert_eq!(after.count, checkpoint.written_bytes);
                 assert!(after.seq <= checkpoint.output_seq);
@@ -5686,7 +5648,10 @@ mod tests {
                 ));
                 assert!(h.pty.offers.is_empty());
                 drop(guard);
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
+                let point = h
+                    .coordinator
+                    .retained_checkpoint(AttemptKey::Receipt(id))
+                    .unwrap();
                 assert!(matches!(point.stage, SubmissionStage::ZeroBytes));
                 assert_eq!(point.written_bytes, 0);
                 assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), before);
@@ -5744,7 +5709,10 @@ mod tests {
                             );
                         }
                         drop(guard);
-                        let point = h.coordinator.retained_checkpoint(id).unwrap();
+                        let point = h
+                            .coordinator
+                            .retained_checkpoint(AttemptKey::Receipt(id))
+                            .unwrap();
                         if possible {
                             assert!(matches!(point.stage, SubmissionStage::Unknown));
                         } else {
@@ -6424,11 +6392,15 @@ mod tests {
                                 .pending
                                 .as_ref()
                                 .unwrap()
-                                .input_id()
+                                .receipt_id()
                                 .unwrap();
                             let before = row(host, id);
                             assert_eq!(before.state, storage::InputState::InProgress);
-                            let retained = host.coordinator.operations.get(&id).unwrap();
+                            let retained = host
+                                .coordinator
+                                .operations
+                                .get(&AttemptKey::Receipt(id))
+                                .unwrap();
                             assert_eq!(retained.stage, SubmissionStage::ZeroBytes);
                             assert_eq!(retained.written_bytes, 0);
                             assert!(!retained.leased);
@@ -6446,7 +6418,7 @@ mod tests {
                             assert_eq!(after.payload_digest, before.payload_digest);
                             assert_eq!(after.kind, kind);
                             assert_eq!(after.disposition, None);
-                            assert_eq!(reply.delivery, after.delivery());
+                            assert_eq!(reply.delivery, Some(after.delivery()));
                             let size = LITERAL.len()
                                 + if kind == storage::InputKind::Exec {
                                     2
@@ -6717,7 +6689,7 @@ mod tests {
                                 .pending
                                 .as_ref()
                                 .unwrap()
-                                .input_id()
+                                .receipt_id()
                                 .unwrap();
                             host.pty.short = None;
                             host.pty.fail_next = Some(std::io::ErrorKind::BrokenPipe);
@@ -6756,7 +6728,7 @@ mod tests {
                             .pending
                             .as_ref()
                             .unwrap()
-                            .input_id()
+                            .receipt_id()
                             .unwrap();
                         let hooks = Arc::new(FailAfterWrite {
                             inner: host.hooks.clone(),
@@ -9221,7 +9193,10 @@ mod tests {
                     assert!(matches!(result, Err(CafleetError::DeadlineExceeded)));
                     assert!(h.pty.offers.is_empty());
                     drop(guard);
-                    let point = h.coordinator.retained_checkpoint(id).unwrap();
+                    let point = h
+                        .coordinator
+                        .retained_checkpoint(AttemptKey::Receipt(id))
+                        .unwrap();
                     assert!(matches!(point.stage, SubmissionStage::ZeroBytes));
                     assert_eq!(point.written_bytes, 0);
                     assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), before);
@@ -9375,7 +9350,7 @@ mod tests {
             #[derive(Clone, Debug)]
             pub(in crate::runtime::input) struct Point {
                 pub(crate) boundary: &'static str,
-                pub(crate) id: Option<i64>,
+                pub(crate) id: Option<AttemptKey>,
                 pub(crate) count: u64,
                 pub(crate) seq: u64,
             }
@@ -9393,7 +9368,7 @@ mod tests {
                         .filter(|p| p.boundary == boundary)
                         .count()
                 }
-                pub(crate) fn input_id(&self) -> i64 {
+                pub(crate) fn attempt(&self) -> AttemptKey {
                     self.points
                         .lock()
                         .unwrap()
@@ -9401,15 +9376,18 @@ mod tests {
                         .find(|p| p.boundary == "reserved")
                         .expect("real Reserved checkpoint")
                         .id
-                        .expect("actual durable input ID")
+                        .expect("a reserved checkpoint names its attempt")
                 }
-                pub(crate) fn reserved_input_ids(&self) -> Vec<i64> {
+                pub(crate) fn input_id(&self) -> i64 {
+                    self.attempt().receipt_id()
+                }
+                pub(crate) fn reserved_attempts(&self) -> Vec<AttemptKey> {
                     self.points
                         .lock()
                         .unwrap()
                         .iter()
                         .filter(|p| p.boundary == "reserved")
-                        .map(|p| p.id.expect("actual durable input ID"))
+                        .map(|p| p.id.expect("a reserved checkpoint names its attempt"))
                         .collect()
                 }
             }
@@ -9429,7 +9407,7 @@ mod tests {
                     };
                     self.points.lock().unwrap().push(Point {
                         boundary,
-                        id: Some(state.input_id),
+                        id: Some(state.attempt),
                         count: state.written_bytes,
                         seq: state.output_seq,
                     });
@@ -9490,9 +9468,11 @@ mod tests {
                     if belongs_to_program || bytes == b"\x1b[201~" {
                         let conn = crate::db::connect(&self.database_url).unwrap();
                         assert!(
-                            self.hooks.reserved_input_ids().into_iter().any(|id| {
-                                storage::get_input(&conn, id).unwrap().state
-                                    == storage::InputState::InProgress
+                            self.hooks.reserved_attempts().into_iter().any(|attempt| {
+                                attempt.receipt().is_none_or(|id| {
+                                    storage::get_input(&conn, id).unwrap().state
+                                        == storage::InputState::InProgress
+                                })
                             }),
                             "a programmatic stage writes only for an in-progress reservation"
                         );
@@ -9714,7 +9694,7 @@ mod tests {
                         pending.bytes.to_vec(),
                         pending.deadline,
                         pending.phase,
-                        pending.input_id(),
+                        pending.receipt_id(),
                     )
                 }
 
@@ -10448,18 +10428,13 @@ mod tests {
             );
             token.clone()
         }
-        pub(super) fn counts(h: &Host) -> [i64; 3] {
-            [
-                "member_input_operations",
-                "member_permission_responses",
-                "member_permission_response_claims",
-            ]
-            .map(|table| {
-                h.fixture
-                    .conn
-                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
-                    .unwrap()
-            })
+        pub(super) fn input_rows(h: &Host) -> i64 {
+            h.fixture
+                .conn
+                .query_row("SELECT COUNT(*) FROM member_input_operations", [], |r| {
+                    r.get(0)
+                })
+                .unwrap()
         }
         #[test]
         fn permission_inspection_matches_durable_current_request_and_preserves_the_armed_writer() {
@@ -10468,8 +10443,11 @@ mod tests {
                 let ids = stable_form(h);
                 let pending = h.pending_snapshot();
                 let row = storage::get_input(&h.fixture.conn, input_id).unwrap();
-                let retained = h.coordinator.retained_checkpoint(input_id).unwrap();
-                let before = counts(h);
+                let retained = h
+                    .coordinator
+                    .retained_checkpoint(AttemptKey::Receipt(input_id))
+                    .unwrap();
+                let before = input_rows(h);
                 let hooks = h.hooks.points.lock().unwrap().len();
                 let value = inspect(h, ids);
                 assert_eq!(
@@ -10543,12 +10521,15 @@ mod tests {
                 assert_eq!(calls.load(Ordering::SeqCst), 1);
                 assert!(pending == h.pending_snapshot());
                 assert_eq!(storage::get_input(&h.fixture.conn, input_id).unwrap(), row);
-                let after = h.coordinator.retained_checkpoint(input_id).unwrap();
+                let after = h
+                    .coordinator
+                    .retained_checkpoint(AttemptKey::Receipt(input_id))
+                    .unwrap();
                 assert_eq!(
                     (after.stage, after.written_bytes, after.output_seq),
                     (retained.stage, retained.written_bytes, retained.output_seq)
                 );
-                assert_eq!(counts(h), before);
+                assert_eq!(input_rows(h), before);
                 assert_eq!(h.hooks.points.lock().unwrap().len(), hooks);
                 assert!(h.pty.offers.is_empty());
                 let (evidence,body,notified):(String,String,Option<String>) = h.fixture.conn.query_row("SELECT i.evidence_json,m.text,m.notified_at FROM member_interactions i JOIN messages m ON m.message_id=?1 WHERE i.interaction_id=?2",rusqlite::params![ids.2,ids.1],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
@@ -10656,14 +10637,14 @@ mod tests {
             with_inspection(|h, calls, _| {
                 let ids = stable_form(h);
                 let original = token(&inspect(h, ids));
-                let before = counts(h);
+                let before = input_rows(h);
                 h.drain();
                 assert!(inspect_request(h, request(h, ids), Instant::now()).is_err());
                 h.fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",rusqlite::params![crate::time::now_stamp(),ids.1]).unwrap();
                 h.drain();
                 assert!(inspect_request(h, request(h, ids), h.until).is_err());
                 assert_eq!(calls.load(Ordering::SeqCst), 1);
-                assert_eq!(counts(h), before);
+                assert_eq!(input_rows(h), before);
                 assert!(h.pty.offers.is_empty());
                 assert!(!original.is_empty());
             });
@@ -10689,7 +10670,7 @@ mod tests {
                 fail.store(false, Ordering::SeqCst);
                 let value = inspect(h, ids);
                 assert_eq!(token(&value), "02".repeat(32));
-                assert_eq!(counts(h), [0, 0, 0]);
+                assert_eq!(input_rows(h), 0);
                 assert!(h.pty.offers.is_empty());
             });
         }
@@ -10750,8 +10731,6 @@ mod tests {
         }
     }
     mod permission_response_contracts {
-        use crate::broker::runtime::DecisionSource;
-        use crate::broker::runtime::DirectorMode;
         use crate::broker::runtime::PermissionDecision;
         use crate::coding_agent::catalog::AnswerKey;
         use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
@@ -10762,8 +10741,8 @@ mod tests {
         use crate::runtime::TerminalSize;
         use crate::runtime::input::tests::ordinary_prompt::support::Host;
         use crate::runtime::input::tests::ordinary_prompt::support::Pty;
-        use crate::runtime::input::tests::permission_inspection_contracts::counts;
         use crate::runtime::input::tests::permission_inspection_contracts::form;
+        use crate::runtime::input::tests::permission_inspection_contracts::input_rows;
         use crate::runtime::input::tests::permission_inspection_contracts::inspect;
         use crate::runtime::input::tests::permission_inspection_contracts::inspect_request;
         use crate::runtime::input::tests::permission_inspection_contracts::native_fixture_bytes;
@@ -10782,15 +10761,13 @@ mod tests {
         fn command(
             h: &Host,
             inspection: &PermissionInspection,
-            key: &str,
             decision: PermissionDecision,
         ) -> PermissionRespondInput {
-            keyed_command(h, inspection, key, AnswerKey::Decision(decision))
+            keyed_command(h, inspection, AnswerKey::Decision(decision))
         }
         fn keyed_command(
             h: &Host,
             inspection: &PermissionInspection,
-            key: &str,
             answer: AnswerKey,
         ) -> PermissionRespondInput {
             PermissionRespondInput {
@@ -10805,11 +10782,6 @@ mod tests {
                     .expect("actual inspected token")
                     .clone(),
                 key: answer,
-                decision_source: DecisionSource::DirectorAuto,
-                director_mode: DirectorMode::Auto,
-                mode_evidence_ref: "fixture:response-mode".into(),
-                decision_evidence_ref: "fixture:response-decision".into(),
-                operation_key: key.into(),
             }
         }
         fn response(reply: InputControlReply) -> PermissionResponseResult {
@@ -10818,7 +10790,7 @@ mod tests {
             };
             value
         }
-        fn arm_stage(h: &mut Host, before: usize) -> i64 {
+        fn arm_stage(h: &mut Host, before: usize) -> AttemptKey {
             let offers = h.pty.offers.len();
             for _ in 0..16 {
                 h.drain();
@@ -10832,59 +10804,11 @@ mod tests {
                     "fresh guard acquisition precedes its syscall"
                 );
                 if h.hooks.count("before") == before {
-                    return h.hooks.input_id();
+                    return h.hooks.attempt();
                 }
             }
             panic!("real selected stage reaches Armed within its finite turn budget");
         }
-        fn audit(
-            h: &Host,
-            id: i64,
-            input: &PermissionRespondInput,
-            rule: &str,
-        ) -> storage::PermissionReceipt {
-            let receipt = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-            assert_eq!(receipt.input.kind, storage::InputKind::PermissionResponse);
-            assert_eq!(receipt.input.operation_key, input.operation_key);
-            let m = &receipt.response.metadata;
-            assert_eq!(
-                (
-                    m.event_id,
-                    m.interaction_id,
-                    m.expected_owner_epoch,
-                    m.director_member_id
-                ),
-                (
-                    input.event_id,
-                    input.interaction_id,
-                    input.expected_owner_epoch,
-                    input.director_member_id
-                )
-            );
-            assert_eq!(
-                (&m.request_token, &m.key, m.decision_source, m.director_mode),
-                (
-                    &input.request_token,
-                    &input.key,
-                    input.decision_source,
-                    input.director_mode
-                )
-            );
-            assert_eq!(
-                (&m.mode_evidence_ref, &m.decision_evidence_ref),
-                (&input.mode_evidence_ref, &input.decision_evidence_ref)
-            );
-            assert_eq!(m.answer_rule_id, rule);
-            assert_eq!(
-                receipt
-                    .claim
-                    .as_ref()
-                    .map(|c| (c.interaction_id, c.input_id)),
-                Some((input.interaction_id, id))
-            );
-            receipt
-        }
-
         const UNAVAILABLE: &str = "current executable permission request unavailable";
 
         fn blocked_reason(h: &mut Host, ids: (i64, i64, i64, i64)) -> String {
@@ -10925,8 +10849,7 @@ mod tests {
                 with_inspection(|h, calls, _| {
                     let ids = stable_form(h);
                     let inspected = inspect(h, ids);
-                    let input =
-                        command(h, &inspected, "response:blocked", PermissionDecision::Allow);
+                    let input = command(h, &inspected, PermissionDecision::Allow);
                     let minted = calls.load(Ordering::SeqCst);
                     block(h);
                     h.drain();
@@ -10942,7 +10865,7 @@ mod tests {
                         minted,
                         "{case}: a blocked inspection draws no request token"
                     );
-                    assert_eq!(counts(h), [0, 0, 0]);
+                    assert_eq!(input_rows(h), 0);
                     assert!(h.pty.program.is_empty());
                     reasons.push(reason);
                 });
@@ -10955,7 +10878,7 @@ mod tests {
             with_inspection(|h, _, _| {
                 let ids = stable_form(h);
                 let inspected = inspect(h, ids);
-                let input = command(h, &inspected, "response:redraw", PermissionDecision::Allow);
+                let input = command(h, &inspected, PermissionDecision::Allow);
                 let output_seq = h.transport.snapshot().screen_seq;
                 let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
                 lock.execute_batch("BEGIN IMMEDIATE").unwrap();
@@ -11000,7 +10923,7 @@ mod tests {
                     "the settled request accepts its original token"
                 );
                 arm_stage(h, 1);
-                assert_eq!(counts(h), [1, 1, 1]);
+                assert_eq!(input_rows(h), 0, "an answer stores no input row");
             });
         }
 
@@ -11175,12 +11098,7 @@ mod tests {
                         "blink write {index} keeps the token"
                     );
                 }
-                let input = command(
-                    h,
-                    &inspected,
-                    "response:claude-blink",
-                    PermissionDecision::Allow,
-                );
+                let input = command(h, &inspected, PermissionDecision::Allow);
                 assert!(
                     h.respond(&input).unwrap().is_none(),
                     "respond is admitted on the quiesced frame after every blink"
@@ -11210,17 +11128,12 @@ mod tests {
                     "a transit frame with a changed form row invalidates the request"
                 );
                 assert_ne!(inspect(h, ids).request_token, inspected.request_token);
-                let input = command(
-                    h,
-                    &inspected,
-                    "response:claude-rewritten-row",
-                    PermissionDecision::Allow,
-                );
+                let input = command(h, &inspected, PermissionDecision::Allow);
                 assert!(
                     h.respond(&input).is_err(),
                     "the revoked token refuses respond"
                 );
-                assert_eq!(counts(h), [0, 0, 0]);
+                assert_eq!(input_rows(h), 0);
                 assert!(h.pty.program.is_empty());
             });
         }
@@ -11230,12 +11143,7 @@ mod tests {
             with_inspection(|h, _, _| {
                 let ids = stable_form(h);
                 let inspected = inspect(h, ids);
-                let input = command(
-                    h,
-                    &inspected,
-                    "response:pending-admission",
-                    PermissionDecision::Allow,
-                );
+                let input = command(h, &inspected, PermissionDecision::Allow);
                 neutral_output_flood(h);
                 assert!(matches!(h.quiesce_once(), InputDrain::Pending));
                 let failure = h
@@ -11258,7 +11166,7 @@ mod tests {
                     ),
                     (Some(h.fixture.run.run_id), Some(ids.1), None)
                 );
-                assert_eq!(counts(h), [0, 0, 0]);
+                assert_eq!(input_rows(h), 0);
                 assert!(h.pty.offers.is_empty());
                 let settled = inspect(h, ids);
                 assert_eq!(
@@ -11278,37 +11186,28 @@ mod tests {
                 with_inspection(|host, _, _| {
                     let ids = stable_detailed_form(host, "opened");
                     let inspection = inspect(host, ids);
-                    let input = command(
-                        host,
-                        &inspection,
-                        "response:pointer-revoked",
-                        PermissionDecision::Allow,
-                    );
+                    let input = command(host, &inspection, PermissionDecision::Allow);
                     let keyboard = host.transport.human_generation();
                     host.type_human(pointer);
                     host.drain();
                     assert_eq!(host.transport.human_generation(), keyboard);
                     assert_eq!(host.transport.pointer_generation(), pointer.len() as u64);
                     assert!(host.respond(&input).is_err());
-                    assert_eq!(counts(host), [0, 0, 0]);
+                    assert_eq!(input_rows(host), 0);
                     assert!(host.pty.program.is_empty());
                 });
             }
         }
 
-        fn admitted(
-            h: &mut Host,
-            key: &str,
-        ) -> ((i64, i64, i64, i64), PermissionRespondInput, i64) {
+        fn admitted(h: &mut Host) -> ((i64, i64, i64, i64), PermissionRespondInput, AttemptKey) {
             let ids = stable_form(h);
             let current = inspect(h, ids);
-            let input = command(h, &current, key, PermissionDecision::Allow);
+            let input = command(h, &current, PermissionDecision::Allow);
             assert!(h.respond(&input).unwrap().is_none());
             let id = arm_stage(h, 1);
-            audit(h, id, &input, "inspection-allow-plan");
             (ids, input, id)
         }
-        fn first_stage(h: &mut Host, id: i64) {
+        fn first_stage(h: &mut Host, id: AttemptKey) {
             h.drain();
             assert!(h.advance().is_none());
             let point = h.coordinator.retained_checkpoint(id).unwrap();
@@ -11316,39 +11215,7 @@ mod tests {
                 (point.stage, point.written_bytes),
                 (SubmissionStage::Partial, 1)
             );
-            assert_eq!(
-                storage::get_input(&h.fixture.conn, id).unwrap().state,
-                storage::InputState::InProgress
-            );
             assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-        }
-
-        fn refuses_zero_proof(h: &mut Host, row: &storage::PermissionReceipt) {
-            let tx = h
-                .fixture
-                .conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .unwrap();
-            let guard = h
-                .coordinator
-                .acquire_receipt_guard(&tx, row, h.until)
-                .unwrap();
-            assert!(
-                guard
-                    .zero_byte_retirement(
-                        &h.fixture.run.owner(),
-                        row.input.input_id,
-                        row.response.metadata.interaction_id
-                    )
-                    .is_err(),
-                "actual retained uncertainty supplies exclusion but no zero-byte proof"
-            );
-            drop(guard);
-            tx.rollback().unwrap();
-            assert_eq!(
-                storage::get_permission_response(&h.fixture.conn, row.input.input_id).unwrap(),
-                *row
-            );
         }
 
         struct StageIo<'a> {
@@ -11399,7 +11266,7 @@ mod tests {
         #[test]
         fn permission_response_later_pending_preserves_partial_and_retries_only_untouched_stage() {
             with_inspection(|h, _, _| {
-                let (_, input, id) = admitted(h, "response:later-pending");
+                let (_, _, id) = admitted(h);
                 first_stage(h, id);
                 let original = h.coordinator.pending.as_ref().unwrap().deadline;
                 for (index, kind) in [io::ErrorKind::WouldBlock, io::ErrorKind::Interrupted]
@@ -11414,10 +11281,6 @@ mod tests {
                         (SubmissionStage::Partial, 1)
                     );
                     assert_eq!(h.coordinator.pending.as_ref().unwrap().deadline, original);
-                    assert_eq!(
-                        audit(h, id, &input, "inspection-allow-plan").input.state,
-                        storage::InputState::InProgress
-                    );
                     let offers = h.pty.offers.len();
                     assert!(h.try_advance().unwrap().is_none());
                     assert_eq!(
@@ -11433,8 +11296,6 @@ mod tests {
                     (result.submission.status, result.submission.stage),
                     (SubmissionStatus::Accepted, SubmissionStage::Submitted)
                 );
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(point.written_bytes, 2);
                 assert_eq!(
                     h.pty.offers,
                     vec![
@@ -11454,62 +11315,43 @@ mod tests {
                     .map(|p| p.count)
                     .collect::<Vec<_>>();
                 assert_eq!(after, vec![1, 1, 1, 2]);
-                assert_eq!(
-                    audit(h, id, &input, "inspection-allow-plan").input.state,
-                    storage::InputState::Accepted
-                );
             });
         }
 
         #[test]
-        fn permission_response_failure_after_its_first_stage_records_write_failed() {
+        fn permission_response_failure_after_its_first_stage_keeps_its_one_written_byte() {
             with_inspection(|h, _, _| {
-                let (_, input, id) = admitted(h, "response:failed-after-stage");
+                let (_, _, id) = admitted(h);
                 first_stage(h, id);
                 form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-other");
-                let Err(failure) = h.try_advance() else {
-                    panic!("a changed focus fails the positive attempt");
-                };
-                assert_eq!(failure.context.input_id, Some(id));
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (SubmissionStage::Partial, 1)
+                let result = response(
+                    h.try_advance()
+                        .unwrap()
+                        .expect("a changed focus ends the answer uncertain"),
                 );
-                let receipt = audit(h, id, &input, "inspection-allow-plan");
-                assert_eq!(receipt.input.state, storage::InputState::Uncertain);
                 assert_eq!(
-                    receipt.input.stop_cause,
-                    Some(storage::StopCause::WriteFailed)
+                    (result.submission.status, result.submission.stage),
+                    (SubmissionStatus::Uncertain, SubmissionStage::Partial)
                 );
                 assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
             });
         }
 
         #[test]
-        fn permission_response_failed_later_stage_write_records_write_failed() {
+        fn permission_response_failed_later_stage_write_reports_write_failed() {
             with_inspection(|h, _, _| {
-                let (_, input, id) = admitted(h, "response:failed-later-write");
+                let (_, _, id) = admitted(h);
                 first_stage(h, id);
                 arm_stage(h, 2);
                 h.pty.failure = Some(io::ErrorKind::BrokenPipe);
                 h.drain();
-                let Err(failure) = h.try_advance() else {
-                    panic!("an actual PTY write failure surfaces");
-                };
-                assert!(
-                    failure
-                        .source
-                        .message()
-                        .contains("injected PTY write failure"),
-                    "{failure:?}"
+                let result = response(
+                    h.try_advance()
+                        .unwrap()
+                        .expect("an actual PTY write failure ends the answer uncertain"),
                 );
-                let receipt = audit(h, id, &input, "inspection-allow-plan");
-                assert_eq!(receipt.input.state, storage::InputState::Uncertain);
-                assert_eq!(
-                    receipt.input.stop_cause,
-                    Some(storage::StopCause::WriteFailed)
-                );
+                assert_eq!(result.submission.status, SubmissionStatus::Uncertain);
+                assert_eq!(result.submission.reason.as_deref(), Some("write_failed"));
             });
         }
 
@@ -11520,7 +11362,7 @@ mod tests {
             definition["profiles"][0]["capabilities"]["answers"][0]["stages"][1]["bytes_hex"] =
                 serde_json::json!("6f6b");
             with_definition(definition, b"ok".to_vec(), |h, _, _| {
-                let (_, input, id) = admitted(h, "response:short-later-stage");
+                let (_, _, id) = admitted(h);
                 first_stage(h, id);
                 arm_stage(h, 2);
                 h.pty.short = Some(1);
@@ -11532,74 +11374,11 @@ mod tests {
                         result.submission.stage,
                         result.submission.input_id
                     ),
-                    (
-                        SubmissionStatus::Uncertain,
-                        SubmissionStage::Partial,
-                        Some(id)
-                    )
-                );
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (SubmissionStage::Partial, 2)
+                    (SubmissionStatus::Uncertain, SubmissionStage::Partial, None)
                 );
                 assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"ok".to_vec()]);
-                assert_eq!(
-                    audit(h, id, &input, "inspection-allow-plan").input.state,
-                    storage::InputState::Uncertain
-                );
                 assert!(h.try_advance().unwrap().is_none());
                 assert_eq!(h.pty.offers.len(), 2);
-                let row = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                refuses_zero_proof(h, &row);
-            });
-        }
-
-        #[test]
-        fn permission_response_unrecorded_possible_later_io_and_abandonment_preserve_prior_evidence()
-         {
-            with_inspection(|h, _, _| {
-                let (_, input, id) = admitted(h, "response:abandoned-later-io");
-                first_stage(h, id);
-                arm_stage(h, 2);
-                h.drain();
-                let row = audit(h, id, &input, "inspection-allow-plan");
-                let mut guard = h
-                    .coordinator
-                    .acquire_write_guard(
-                        &mut h.fixture.conn,
-                        &mut h.transport,
-                        &h.controller,
-                        h.until,
-                    )
-                    .unwrap()
-                    .expect("genuine later-stage guard");
-                guard.begin_write(&h.transport, b"\r", h.until).unwrap();
-                guard.mark_io_possible();
-                drop(guard);
-                h.coordinator.finish_pending_attempt();
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (SubmissionStage::Partial, 1)
-                );
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    row
-                );
-                refuses_zero_proof(h, &row);
-                assert!(h.coordinator.pending.is_none());
-                assert!(h.try_advance().unwrap().is_none());
-                let repeated = response(
-                    h.respond(&input)
-                        .unwrap()
-                        .expect("durable InProgress returns uncertainty"),
-                );
-                assert_eq!(
-                    (repeated.submission.input_id, repeated.submission.status),
-                    (Some(id), SubmissionStatus::Uncertain)
-                );
-                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
             });
         }
 
@@ -11674,7 +11453,7 @@ mod tests {
                     assert!(value.missing_evidence.is_empty());
                     let token = value.request_token.expect("a tested question token");
                     assert_eq!(token.len(), 64);
-                    assert_eq!(counts(h), [0, 0, 0]);
+                    assert_eq!(input_rows(h), 0);
                     assert!(h.pty.offers.is_empty());
                 });
             }
@@ -11752,14 +11531,13 @@ mod tests {
             }
 
             #[test]
-            fn an_ungated_choice_writes_its_stage_and_records_the_choice_audit() {
+            fn an_ungated_choice_writes_its_stage_and_reports_the_choice() {
                 with_question(b"3", |h| {
                     let ids = question(h, &["accept"]);
                     let inspected = inspect(h, ids);
-                    let input =
-                        keyed_command(h, &inspected, "response:question-later", choice("later"));
+                    let input = keyed_command(h, &inspected, choice("later"));
                     assert!(h.respond(&input).unwrap().is_none());
-                    let id = arm_stage(h, 1);
+                    arm_stage(h, 1);
                     h.drain();
                     let result = response(h.advance().expect("the single choice stage completes"));
                     assert_eq!(
@@ -11768,20 +11546,13 @@ mod tests {
                             result.submission.stage,
                             result.submission.input_id
                         ),
-                        (
-                            SubmissionStatus::Accepted,
-                            SubmissionStage::Submitted,
-                            Some(id)
-                        )
+                        (SubmissionStatus::Accepted, SubmissionStage::Submitted, None)
                     );
                     assert_eq!(result.key, choice("later"));
                     assert_eq!(
                         h.pty.offers,
                         crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"3"])
                     );
-                    let receipt = audit(h, id, &input, QUESTION_LATER_PLAN);
-                    assert_eq!(receipt.input.state, storage::InputState::Accepted);
-                    assert_eq!(receipt.response.metadata.key, choice("later"));
                 });
             }
 
@@ -11790,16 +11561,14 @@ mod tests {
                 with_question(b"3", |h| {
                     let ids = question(h, &["accept"]);
                     let inspected = inspect(h, ids);
-                    let first =
-                        keyed_command(h, &inspected, "response:first-answer", choice("later"));
+                    let first = keyed_command(h, &inspected, choice("later"));
                     assert!(h.respond(&first).unwrap().is_none());
                     arm_stage(h, 1);
                     h.drain();
                     let answered = response(h.advance().expect("the first answer completes"));
                     assert_eq!(answered.submission.status, SubmissionStatus::Accepted);
                     let offers = h.pty.offers.clone();
-                    let second =
-                        keyed_command(h, &inspected, "response:second-answer", choice("later"));
+                    let second = keyed_command(h, &inspected, choice("later"));
                     let mut replies = Vec::new();
                     match h.respond(&second) {
                         Err(_) => {}
@@ -11833,14 +11602,9 @@ mod tests {
                 with_question(b"\x0e\r", |h| {
                     let ids = question(h, &["accept"]);
                     let inspected = inspect(h, ids);
-                    let input = keyed_command(
-                        h,
-                        &inspected,
-                        "response:question-decline",
-                        choice("decline"),
-                    );
+                    let input = keyed_command(h, &inspected, choice("decline"));
                     assert!(h.respond(&input).unwrap().is_none());
-                    let id = arm_stage(h, 1);
+                    arm_stage(h, 1);
                     h.drain();
                     assert!(
                         h.advance().is_none(),
@@ -11864,15 +11628,11 @@ mod tests {
                             b"\x0e", b"\r"
                         ])
                     );
-                    assert_eq!(
-                        audit(h, id, &input, QUESTION_DECLINE_PLAN).input.state,
-                        storage::InputState::Accepted
-                    );
                 });
             }
 
             fn rejected(h: &mut Host, input: &PermissionRespondInput, reason: &str) {
-                let before = counts(h);
+                let before = input_rows(h);
                 let result = response(
                     h.respond(input)
                         .unwrap()
@@ -11888,7 +11648,7 @@ mod tests {
                 );
                 assert_eq!(result.submission.reason.as_deref(), Some(reason));
                 assert_eq!(result.key, input.key);
-                assert_eq!(counts(h), before, "a rejection reserves nothing");
+                assert_eq!(input_rows(h), before, "a rejection reserves nothing");
                 assert!(h.pty.offers.is_empty(), "a rejection writes no byte");
             }
 
@@ -11902,12 +11662,7 @@ mod tests {
                     let ids = settled_ids(h);
                     let inspected = inspect(h, ids);
                     assert!(inspected.supported_choices.is_empty());
-                    let input = keyed_command(
-                        h,
-                        &inspected,
-                        "response:choice-on-permission",
-                        choice("decline"),
-                    );
+                    let input = keyed_command(h, &inspected, choice("decline"));
                     rejected(
                         h,
                         &input,
@@ -11922,8 +11677,7 @@ mod tests {
                     let ids = question(h, &["accept"]);
                     let inspected = inspect(h, ids);
                     for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                        let input =
-                            command(h, &inspected, "response:decision-on-question", decision);
+                        let input = command(h, &inspected, decision);
                         rejected(
                             h,
                             &input,
@@ -11939,8 +11693,7 @@ mod tests {
                     let ids = question(h, &["accept"]);
                     let inspected = inspect(h, ids);
                     for id in ["accept", "missing"] {
-                        let input =
-                            keyed_command(h, &inspected, "response:untested-choice", choice(id));
+                        let input = keyed_command(h, &inspected, choice(id));
                         rejected(
                             h,
                             &input,
@@ -11978,17 +11731,16 @@ mod tests {
             fn admit(
                 h: &mut Host,
                 ids: (i64, i64, i64, i64),
-                key: &str,
                 decision: PermissionDecision,
                 deadline: Instant,
             ) -> PermissionRespondInput {
                 let inspected = inspect(h, ids);
-                let input = command(h, &inspected, key, decision);
+                let input = command(h, &inspected, decision);
                 assert!(h.respond_until(&input, deadline).unwrap().is_none());
                 input
             }
 
-            fn write_stage(h: &mut Host, before: usize) -> i64 {
+            fn write_stage(h: &mut Host, before: usize) -> AttemptKey {
                 let id = arm_stage(h, before);
                 h.drain();
                 assert!(
@@ -12012,18 +11764,14 @@ mod tests {
                 }
             }
 
-            fn assert_uncertain(h: &Host, id: i64, outcome: Outcome) {
+            fn assert_uncertain(outcome: Outcome) {
                 match outcome {
-                    Err(failure) => assert_eq!(failure.context.input_id, Some(id)),
+                    Err(failure) => assert_eq!(failure.context.input_id, None),
                     Ok(Some(result)) => {
                         assert_eq!(result.submission.status, SubmissionStatus::Uncertain)
                     }
                     Ok(None) => panic!("the response ends instead of waiting"),
                 }
-                assert_eq!(
-                    storage::get_input(&h.fixture.conn, id).unwrap().state,
-                    storage::InputState::Uncertain
-                );
             }
 
             fn opened(h: &Host) -> i64 {
@@ -12066,11 +11814,10 @@ mod tests {
             // Writes deny stages one and two on the synthetic form, leaving the response open.
             fn deny_through_stage_two(
                 h: &mut Host,
-                key: &str,
                 deadline: Instant,
-            ) -> (PermissionRespondInput, i64) {
+            ) -> (PermissionRespondInput, AttemptKey) {
                 let ids = gated_form(h, "allow");
-                let input = admit(h, ids, key, PermissionDecision::Deny, deadline);
+                let input = admit(h, ids, PermissionDecision::Deny, deadline);
                 let id = write_stage(h, 1);
                 h.show(gated_fixture_form(OPERATION, "deny"));
                 write_stage(h, 2);
@@ -12085,14 +11832,8 @@ mod tests {
             fn gated_allow_writes_its_stage_on_the_matching_focus() {
                 with_gated(|h, _| {
                     let ids = gated_form(h, "allow");
-                    let input = admit(
-                        h,
-                        ids,
-                        "response:gated-allow",
-                        PermissionDecision::Allow,
-                        h.until,
-                    );
-                    let id = arm_stage(h, 1);
+                    admit(h, ids, PermissionDecision::Allow, h.until);
+                    arm_stage(h, 1);
                     h.drain();
                     let result = response(h.advance().expect("the single gated stage completes"));
                     assert_eq!(
@@ -12103,10 +11844,6 @@ mod tests {
                         h.pty.offers,
                         crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"\r"])
                     );
-                    assert_eq!(
-                        audit(h, id, &input, "synthetic-gated-allow").input.state,
-                        storage::InputState::Accepted
-                    );
                 });
             }
 
@@ -12114,23 +11851,13 @@ mod tests {
             fn gated_deny_rebinds_each_expected_transition_without_a_new_token() {
                 with_gated(|h, calls| {
                     let ids = gated_form(h, "allow");
-                    let input = admit(
-                        h,
-                        ids,
-                        "response:gated-deny",
-                        PermissionDecision::Deny,
-                        h.until,
-                    );
+                    admit(h, ids, PermissionDecision::Deny, h.until);
                     let minted = calls.load(Ordering::SeqCst);
                     let id = write_stage(h, 1);
                     let point = h.coordinator.retained_checkpoint(id).unwrap();
                     assert_eq!(
                         (point.stage, point.written_bytes),
                         (SubmissionStage::Partial, 1)
-                    );
-                    assert_eq!(
-                        storage::get_input(&h.fixture.conn, id).unwrap().state,
-                        storage::InputState::InProgress
                     );
                     h.show(gated_fixture_form(OPERATION, "deny"));
                     write_stage(h, 2);
@@ -12158,19 +11885,11 @@ mod tests {
                         ])
                     );
                     assert_eq!(
-                        h.coordinator.retained_checkpoint(id).unwrap().written_bytes,
-                        3
-                    );
-                    assert_eq!(
                         calls.load(Ordering::SeqCst),
                         minted,
                         "rebinding between stages mints no request token"
                     );
                     assert_eq!(opened(h), 1, "every stage stays in the original episode");
-                    assert_eq!(
-                        audit(h, id, &input, "synthetic-gated-deny").input.state,
-                        storage::InputState::Accepted
-                    );
                 });
             }
 
@@ -12180,12 +11899,7 @@ mod tests {
                     let ids = gated_form(h, "deny");
                     let deadline = soon(600);
                     let inspected = inspect(h, ids);
-                    let input = command(
-                        h,
-                        &inspected,
-                        "response:gated-unmet",
-                        PermissionDecision::Allow,
-                    );
+                    let input = command(h, &inspected, PermissionDecision::Allow);
                     let outcome = match h.respond_until(&input, deadline) {
                         Ok(None) => settle(h, deadline + Duration::from_millis(400)),
                         Ok(Some(reply)) => Ok(Some(response(reply))),
@@ -12196,15 +11910,7 @@ mod tests {
                     if let Ok(Some(result)) = &outcome {
                         assert_ne!(result.submission.status, SubmissionStatus::Accepted);
                     }
-                    if h.hooks.count("reserved") > 0 {
-                        assert_eq!(
-                            storage::get_input(&h.fixture.conn, h.hooks.input_id())
-                                .unwrap()
-                                .state,
-                            storage::InputState::Ready,
-                            "a response that wrote no byte stays ready"
-                        );
-                    }
+                    assert_eq!(input_rows(h), 0, "an answer stores no input row");
                 });
             }
 
@@ -12213,14 +11919,8 @@ mod tests {
                 with_gated(|h, _| {
                     let ids = gated_form(h, "allow");
                     let deadline = soon(900);
-                    admit(
-                        h,
-                        ids,
-                        "response:gated-wait",
-                        PermissionDecision::Deny,
-                        deadline,
-                    );
-                    let id = write_stage(h, 1);
+                    admit(h, ids, PermissionDecision::Deny, deadline);
+                    write_stage(h, 1);
                     let waiting = settle(h, deadline - Duration::from_millis(150));
                     assert!(
                         matches!(waiting, Ok(None)),
@@ -12235,12 +11935,8 @@ mod tests {
                         1,
                         "no later stage reaches BeforeWrite"
                     );
-                    assert_eq!(
-                        storage::get_input(&h.fixture.conn, id).unwrap().state,
-                        storage::InputState::InProgress
-                    );
                     let ended = settle(h, deadline + Duration::from_millis(500));
-                    assert_uncertain(h, id, ended);
+                    assert_uncertain(ended);
                     assert_eq!(
                         h.pty.offers,
                         crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"])
@@ -12264,17 +11960,11 @@ mod tests {
                     with_gated(|h, _| {
                         let ids = gated_form(h, "allow");
                         let deadline = soon(3000);
-                        admit(
-                            h,
-                            ids,
-                            "response:gated-change",
-                            PermissionDecision::Deny,
-                            deadline,
-                        );
-                        let id = write_stage(h, 1);
+                        admit(h, ids, PermissionDecision::Deny, deadline);
+                        write_stage(h, 1);
                         h.show(screen);
                         let outcome = settle(h, deadline);
-                        assert_uncertain(h, id, outcome);
+                        assert_uncertain(outcome);
                         assert_eq!(
                             h.pty.offers,
                             crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"]),
@@ -12318,12 +12008,12 @@ mod tests {
                 for (case, disturb) in cases {
                     with_gated(|h, _| {
                         let deadline = soon(2500);
-                        let (_, id) =
-                            deny_through_stage_two(h, "response:gated-succession", deadline);
+
+                        deny_through_stage_two(h, deadline);
                         disturb(h);
                         h.show(gated_reason_dialog(None));
                         let outcome = settle(h, deadline);
-                        assert_uncertain(h, id, outcome);
+                        assert_uncertain(outcome);
                         assert_eq!(
                             h.pty
                                 .offers
@@ -12341,10 +12031,10 @@ mod tests {
             fn gated_continuation_with_a_reason_never_satisfies_the_screen_gate() {
                 with_gated(|h, _| {
                     let deadline = soon(1500);
-                    let (_, id) = deny_through_stage_two(h, "response:gated-reason", deadline);
+                    deny_through_stage_two(h, deadline);
                     h.show(gated_reason_dialog(Some("typed reason")));
                     let outcome = settle(h, deadline + Duration::from_millis(500));
-                    assert_uncertain(h, id, outcome);
+                    assert_uncertain(outcome);
                     assert_eq!(
                         h.pty.offers,
                         crate::runtime::input::tests::ordinary_prompt::support::offers(&[
@@ -12378,8 +12068,7 @@ mod tests {
                 with_gated(|h, _| {
                     let ids = gated_form(h, "allow");
                     let first = inspect(h, ids);
-                    let stale =
-                        command(h, &first, "response:gated-stale", PermissionDecision::Deny);
+                    let stale = command(h, &first, PermissionDecision::Deny);
                     let generation = h.controller.request_generation();
                     let moved = gated_form(h, "deny");
                     assert_eq!(moved, ids, "a focus move keeps the episode");
@@ -12415,12 +12104,7 @@ mod tests {
                         inspected.supported_decisions,
                         [PermissionDecision::Allow, PermissionDecision::Deny]
                     );
-                    let input = command(
-                        h,
-                        &inspected,
-                        "response:opencode-allow",
-                        PermissionDecision::Allow,
-                    );
+                    let input = command(h, &inspected, PermissionDecision::Allow);
                     assert!(h.respond(&input).unwrap().is_none());
                     arm_stage(h, 1);
                     h.drain();
@@ -12443,12 +12127,7 @@ mod tests {
                     ));
                     let ids = settled_ids(h);
                     let inspected = inspect(h, ids);
-                    let input = command(
-                        h,
-                        &inspected,
-                        "response:opencode-deny",
-                        PermissionDecision::Deny,
-                    );
+                    let input = command(h, &inspected, PermissionDecision::Deny);
                     assert!(h.respond(&input).unwrap().is_none());
                     let minted = calls.load(Ordering::SeqCst);
                     write_stage(h, 1);
@@ -12505,14 +12184,8 @@ mod tests {
                     ));
                     let ids = settled_ids(h);
                     let deadline = soon(3000);
-                    let input = admit(
-                        h,
-                        ids,
-                        "response:opencode-always",
-                        PermissionDecision::Deny,
-                        deadline,
-                    );
-                    let id = write_stage(h, 1);
+                    admit(h, ids, PermissionDecision::Deny, deadline);
+                    write_stage(h, 1);
                     h.show(opencode_screen(
                         &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-focus-always-1",
@@ -12522,17 +12195,10 @@ mod tests {
                         ),
                     ));
                     let outcome = settle(h, deadline);
-                    assert_uncertain(h, id, outcome);
+                    assert_uncertain(outcome);
                     assert_eq!(
                         h.pty.offers,
                         crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"])
-                    );
-                    assert_eq!(
-                        storage::get_permission_response(&h.fixture.conn, id)
-                            .unwrap()
-                            .input
-                            .operation_key,
-                        input.operation_key
                     );
                 });
             }
@@ -12571,14 +12237,8 @@ mod tests {
                     ));
                     let ids = settled_ids(h);
                     let deadline = soon(3000);
-                    admit(
-                        h,
-                        ids,
-                        "response:opencode-resize",
-                        PermissionDecision::Deny,
-                        deadline,
-                    );
-                    let id = write_stage(h, 1);
+                    admit(h, ids, PermissionDecision::Deny, deadline);
+                    write_stage(h, 1);
                     let generation = h.controller.request_generation();
                     h.transport
                         .resize(
@@ -12593,7 +12253,7 @@ mod tests {
                         53,
                     ));
                     let outcome = settle(h, deadline);
-                    assert_uncertain(h, id, outcome);
+                    assert_uncertain(outcome);
                     assert_eq!(
                         h.pty.offers,
                         crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"]),
@@ -12643,7 +12303,7 @@ mod tests {
             let real = h
                 .coordinator
                 .operations
-                .get(&template)
+                .get(&AttemptKey::Receipt(template))
                 .expect("real completed template");
             let RetainedSelection::Composer {
                 method,
@@ -12658,13 +12318,13 @@ mod tests {
             let fillers = (0..count)
                 .map(|index| {
                     let input_id = 1_000_000 + i64::try_from(index).unwrap();
-                    let mut operation = real.operation.clone();
+                    let mut operation = real.operation.receipt().clone();
                     operation.input_id = input_id;
                     operation.operation_key = format!("prompt:prefilled:{index}");
                     (
-                        input_id,
+                        AttemptKey::Receipt(input_id),
                         RetainedInput {
-                            operation,
+                            operation: AttemptRecord::Receipt(operation),
                             bytes: real.bytes.clone(),
                             selection: RetainedSelection::Composer {
                                 method: *method,
@@ -13106,7 +12766,11 @@ mod tests {
                     h.receipt(ReceiptAction::Retire { input_id: id }).unwrap(),
                     id,
                 );
-                assert!(!h.coordinator.operations.contains_key(&id));
+                assert!(
+                    !h.coordinator
+                        .operations
+                        .contains_key(&AttemptKey::Receipt(id))
+                );
                 let InputControlReply::Receipt(ReceiptReply::Present {
                     input_id,
                     submission,
@@ -13153,10 +12817,10 @@ mod tests {
             let retained = h
                 .coordinator
                 .operations
-                .get(&id)
+                .get(&AttemptKey::Receipt(id))
                 .expect("actual retained reservation");
             (
-                retained.operation.clone(),
+                retained.operation.receipt().clone(),
                 retained.stage,
                 retained.written_bytes,
                 retained.output_seq,

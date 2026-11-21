@@ -228,8 +228,6 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
         }
         Command::Permission(command) => {
             let deadline = crate::time::Deadline::new();
-            runtime::permission_preflight(&command)
-                .map_err(|source| runtime::permission_error(&command, source))?;
             let mut conn = invocation_connection(&settings.database_url, deadline)
                 .map_err(|source| runtime::permission_error(&command, source))?;
             require_director(&conn, director.as_ref())?;
@@ -883,7 +881,7 @@ mod tests {
     }
 
     #[test]
-    fn help_describes_every_argument_of_the_runtime_read_input_press_and_recover_commands() {
+    fn help_describes_every_argument_of_the_runtime_read_input_and_press_commands() {
         use clap::CommandFactory;
         let command = CliArgs::command();
         for path in [
@@ -891,7 +889,6 @@ mod tests {
             &["input", "show"],
             &["input", "reconcile"],
             &["member", "press"],
-            &["member", "recover"],
         ] {
             let mut selected = &command;
             for name in path {
@@ -951,30 +948,15 @@ mod tests {
             );
         }
         let respond = subcommand_help(&["permission", "respond"]);
-        for (argument, values) in [
-            (
-                "decision",
-                crate::broker::runtime::PermissionDecision::VALUES,
-            ),
-            (
-                "decision_source",
-                crate::broker::runtime::DecisionSource::VALUES,
-            ),
-            (
-                "director_mode",
-                crate::broker::runtime::DirectorMode::VALUES,
-            ),
-        ] {
-            assert_eq!(
-                possible_values(&["permission", "respond"], argument),
-                values,
-                "{argument}"
-            );
-            assert!(
-                respond.contains(&format!("[possible values: {}]", values.join(", "))),
-                "{argument} help lists {values:?}: {respond}"
-            );
-        }
+        let values = crate::broker::runtime::PermissionDecision::VALUES;
+        assert_eq!(
+            possible_values(&["permission", "respond"], "decision"),
+            values
+        );
+        assert!(
+            respond.contains(&format!("[possible values: {}]", values.join(", "))),
+            "decision help lists {values:?}: {respond}"
+        );
     }
 
     #[test]
@@ -1130,10 +1112,6 @@ mod tests {
                     ]),
                 ),
                 (
-                    "member recover",
-                    owned(&["member", "recover", subject, "--from-member-id", caller]),
-                ),
-                (
                     "permission respond",
                     owned(&[
                         "permission",
@@ -1151,16 +1129,6 @@ mod tests {
                         REQUEST_TOKEN,
                         "--decision",
                         "allow",
-                        "--decision-source",
-                        "user",
-                        "--director-mode",
-                        "manual",
-                        "--mode-evidence-ref",
-                        "mode",
-                        "--decision-evidence-ref",
-                        "decision",
-                        "--operation-key",
-                        "key",
                     ]),
                 ),
                 (
@@ -1353,34 +1321,6 @@ mod tests {
                         "{name}"
                     );
                 }
-            }
-        }
-
-        #[test]
-        fn require_director_guards_member_recover_of_a_deregistered_member() {
-            let subjects = Subjects::new();
-            subjects
-                .fixture
-                .conn
-                .execute(
-                    "UPDATE members SET status='deregistered' WHERE member_id=?1",
-                    [subjects.fixture.member],
-                )
-                .unwrap();
-            let recover = |caller: i64| {
-                subjects
-                    .commands(caller)
-                    .into_iter()
-                    .find(|(name, _)| *name == "member recover")
-                    .expect("member recover is Director-only")
-                    .1
-            };
-            subjects.check(&recover(subjects.fixture.director)).unwrap();
-            for caller in [subjects.fixture.member, 999_999] {
-                assert_eq!(
-                    subjects.check(&recover(caller)).unwrap_err().to_string(),
-                    guard_message("member recover", caller, subjects.fixture.fleet)
-                );
             }
         }
 

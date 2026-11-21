@@ -4,8 +4,6 @@ use crate::cli::emit;
 use crate::cli::nonblank;
 use crate::coding_agent::catalog::AnswerKey;
 use crate::error::CafleetError;
-use crate::runtime::validate_operation_key;
-use crate::runtime::validate_permission_reference;
 use crate::runtime::validate_request_token;
 use clap::Subcommand;
 use clap::builder::PossibleValuesParser;
@@ -188,21 +186,6 @@ pub(crate) enum PermissionCommand {
         /// The tested choice that answers a question.
         #[arg(long, value_parser = choice_id)]
         choice: Option<String>,
-        /// Who made the decision.
-        #[arg(long, value_parser = stored_enum::<runtime::DecisionSource>(runtime::DecisionSource::VALUES))]
-        decision_source: runtime::DecisionSource,
-        /// The Director session's effective approval mode.
-        #[arg(long, value_parser = stored_enum::<runtime::DirectorMode>(runtime::DirectorMode::VALUES))]
-        director_mode: runtime::DirectorMode,
-        /// Evidence reference for the Director mode.
-        #[arg(long, value_parser = checked(validate_permission_reference))]
-        mode_evidence_ref: String,
-        /// Evidence reference for the decision.
-        #[arg(long, value_parser = checked(validate_permission_reference))]
-        decision_evidence_ref: String,
-        /// Idempotency key of this response.
-        #[arg(long, value_parser = checked(validate_operation_key))]
-        operation_key: String,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -251,11 +234,6 @@ pub(crate) fn permission(
             request_token,
             decision,
             choice,
-            decision_source,
-            director_mode,
-            mode_evidence_ref,
-            decision_evidence_ref,
-            operation_key,
             json,
         } => {
             let key = match (decision, choice) {
@@ -274,11 +252,6 @@ pub(crate) fn permission(
                     expected_owner_epoch,
                     request_token,
                     key,
-                    decision_source,
-                    director_mode,
-                    mode_evidence_ref,
-                    decision_evidence_ref,
-                    operation_key,
                 },
                 deadline,
                 &mut crate::runtime::input_client::NativeInputHost,
@@ -296,51 +269,31 @@ pub(crate) fn permission(
                 .submission
                 .reason
                 .as_deref()
-                .expect("a nonaccepted historical projection supplies its reason");
-            let mut message = format!(
+                .expect("a nonaccepted permission response supplies its reason");
+            Err(CafleetError::App(format!(
                 "permission response {} for interaction {}: {}",
                 response.submission.status.as_str(),
                 interaction_id,
                 reason
-            );
-            if let Some(input_id) = response.submission.input_id {
-                message.push_str(&format!(" (input_id={input_id})"));
-            }
-            Err(CafleetError::App(message))
+            )))
         }
     }
 }
 
-pub(crate) fn permission_preflight(command: &PermissionCommand) -> Result<(), CafleetError> {
-    if let PermissionCommand::Respond {
-        decision_source,
-        director_mode,
-        ..
-    } = command
-    {
-        crate::runtime::validate_permission_attribution(*decision_source, *director_mode)?;
-    }
-    Ok(())
-}
 pub(crate) fn permission_error(command: &PermissionCommand, source: CafleetError) -> CafleetError {
-    let (run_id, interaction_id, operation_key) = match command {
-        PermissionCommand::Inspect { interaction_id, .. } => (None, Some(*interaction_id), None),
+    let (run_id, interaction_id) = match command {
+        PermissionCommand::Inspect { interaction_id, .. } => (None, Some(*interaction_id)),
         PermissionCommand::Respond {
             expected_run_id,
             interaction_id,
-            operation_key,
             ..
-        } => (
-            Some(*expected_run_id),
-            Some(*interaction_id),
-            Some(operation_key.clone()),
-        ),
+        } => (Some(*expected_run_id), Some(*interaction_id)),
     };
     crate::runtime::InputContext {
         run_id,
         interaction_id,
         input_id: None,
-        operation_key,
+        operation_key: None,
     }
     .failure(source)
     .into()
@@ -353,7 +306,6 @@ mod tests {
     use crate::cli::runtime::*;
     use crate::cli::test_support::assert_usage_rejected;
     use crate::cli::test_support::usage_error;
-    use crate::coding_agent::catalog::AnswerKey;
     use crate::config::Settings;
     use crate::pane_lock::PaneLock;
     use crate::time::Deadline;
@@ -472,57 +424,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn uncertain_permission_respond_reply_reports_the_recorded_write_failed_reason() {
-        use crate::runtime::input_client::test_support::Case;
-        use crate::runtime::input_client::test_support::Retained;
-        let mut case = Case::new(Retained::Uncertain);
-        let input = case.command();
-        let (decision, choice) = match &input.key {
-            AnswerKey::Decision(decision) => (Some(*decision), None),
-            AnswerKey::Choice(choice) => (None, Some(choice.clone())),
-        };
-        let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        assert_eq!(
-            receipt.input.stop_cause,
-            Some(storage::StopCause::WriteFailed)
-        );
-        let error = permission(
-            &mut case.fixture.conn,
-            &case.settings,
-            PermissionCommand::Respond {
-                interaction_id: input.interaction_id,
-                event_id: input.event_id,
-                director_member_id: input.director_member_id,
-                expected_run_id: input.expected_run_id,
-                expected_owner_epoch: input.expected_owner_epoch,
-                request_token: input.request_token.clone(),
-                decision,
-                choice,
-                decision_source: input.decision_source,
-                director_mode: input.director_mode,
-                mode_evidence_ref: input.mode_evidence_ref.clone(),
-                decision_evidence_ref: input.decision_evidence_ref.clone(),
-                operation_key: input.operation_key.clone(),
-                json: true,
-            },
-            Deadline::until(Instant::now() + Duration::from_secs(1)),
-        )
-        .unwrap_err();
-        assert_eq!(
-            error.message(),
-            format!(
-                "permission response uncertain for interaction {}: write_failed (input_id={})",
-                input.interaction_id, case.input_id
-            )
-        );
-        assert_eq!(
-            storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
-            receipt,
-            "a repeated reply leaves the receipt unchanged"
-        );
-    }
-
     mod permission_entry {
         use crate::cli::runtime::tests::*;
 
@@ -559,16 +460,6 @@ mod tests {
                 &"a".repeat(64),
                 "--decision",
                 "allow",
-                "--decision-source",
-                "director-auto",
-                "--director-mode",
-                "auto",
-                "--mode-evidence-ref",
-                "fixture:mode",
-                "--decision-evidence-ref",
-                "fixture:decision",
-                "--operation-key",
-                "fixture:response-1",
             ]
             .into_iter()
             .map(String::from)
@@ -622,21 +513,11 @@ mod tests {
         }
 
         #[test]
-        fn permission_respond_accepts_each_semantic_decision_and_valid_source_mode_pair() {
+        fn permission_respond_accepts_each_semantic_decision() {
             for decision in storage::PermissionDecision::VALUES {
-                let mut pairs = vec![("director-auto", "auto")];
-                pairs.extend(
-                    storage::DirectorMode::VALUES
-                        .iter()
-                        .map(|mode| ("user", *mode)),
-                );
-                for (source, mode) in pairs {
-                    let mut args = respond();
-                    set(&mut args, "--decision", decision);
-                    set(&mut args, "--decision-source", source);
-                    set(&mut args, "--director-mode", mode);
-                    accepted(&args);
-                }
+                let mut args = respond();
+                set(&mut args, "--decision", decision);
+                accepted(&args);
             }
         }
 
@@ -710,14 +591,9 @@ mod tests {
         #[test]
         fn permission_respond_validates_each_checked_flag() {
             rejected(&respond_choice("Decline"));
-            for (field, value) in [
-                ("--request-token", "A".repeat(64)),
-                ("--mode-evidence-ref", " ".into()),
-                ("--decision-evidence-ref", "fixture:\u{7}:reference".into()),
-                ("--operation-key", " ".into()),
-            ] {
+            for token in ["A".repeat(64), "a".repeat(63)] {
                 let mut args = respond();
-                set(&mut args, field, &value);
+                set(&mut args, "--request-token", &token);
                 rejected(&args);
             }
         }
@@ -750,11 +626,6 @@ mod tests {
                     "--expected-run-id",
                     "--expected-owner-epoch",
                     "--request-token",
-                    "--decision-source",
-                    "--director-mode",
-                    "--mode-evidence-ref",
-                    "--decision-evidence-ref",
-                    "--operation-key",
                 ],
             );
         }
