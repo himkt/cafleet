@@ -9896,6 +9896,100 @@ mod tests {
             assert_eq!(event_at(&fixture, 65).event, closed.event);
             assert_eq!(event_at(&fixture, 66).event, opened.event);
         }
+
+        struct GapRecoveryCase {
+            name: &'static str,
+            queues_delivery: bool,
+        }
+
+        const GAP_RECOVERY_CASES: &[GapRecoveryCase] = &[
+            GapRecoveryCase {
+                name: "no queued delivery",
+                queues_delivery: false,
+            },
+            GapRecoveryCase {
+                name: "delivery queued during the gap",
+                queues_delivery: true,
+            },
+        ];
+
+        const IDLE_COMPOSER: &[u8] = b"\x1b[0m\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
+
+        #[test]
+        fn controller_gap_recovery_reobserves_the_unchanged_screen_after_publishing_a_delivery() {
+            for case in GAP_RECOVERY_CASES {
+                let name = case.name;
+                let mut fixture = WriterFixture::new();
+                configure(&mut fixture);
+                fixture
+                    .fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET coverage='unknown' WHERE run_id=?1",
+                        [fixture.fixture.run.run_id],
+                    )
+                    .unwrap();
+                fixture.fixture.run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                let catalog =
+                    crate::coding_agent::catalog::test_support::composer_catalog(None, None);
+                let hooks = Arc::new(Hooks::default());
+                hooks.pause(WriterBoundary::Persist);
+                let mut writer = start(&fixture, hooks.clone());
+                let release = Release(hooks.clone());
+                let clock = fixture_clock();
+                let (mut controller, _child, mut terminal) =
+                    started_controller(&mut fixture, &writer, &clock, &catalog);
+                wait_until_within(Duration::from_secs(20), || {
+                    writer.status().diagnostic.is_some()
+                });
+                terminal
+                    .feed_observed(IDLE_COMPOSER, &mut controller.observer(&writer, &clock))
+                    .unwrap();
+                clock.set_elapsed(Duration::from_millis(100));
+                let status = controller
+                    .poll(&terminal.snapshot(), &writer, &clock)
+                    .unwrap();
+                assert!(
+                    matches!(status.eligibility, InputEligibility::Hold(GateReason::Gap)),
+                    "{name}: a degraded writer holds input behind a gap: {:?}",
+                    status.eligibility
+                );
+                if case.queues_delivery {
+                    let preview = crate::broker::messaging::insert_message_validated(
+                        &fixture.fixture.conn,
+                        fixture.fixture.run.director_member_id,
+                        fixture.fixture.run.member_id,
+                        "preview",
+                    )
+                    .unwrap();
+                    controller.publish_delivery_result(storage::preview_delivery_result_cause(
+                        preview.message_id,
+                        storage::DeliveryMethod::Profile,
+                        "partial",
+                        storage::StopCause::ShortWrite,
+                    ));
+                }
+                drop(release);
+                wait_until_within(Duration::from_secs(20), || {
+                    let state = writer.status();
+                    state.diagnostic.is_none() && state.pending_count == 0
+                });
+                let mut status = controller.status();
+                for millis in [200, 300, 400] {
+                    clock.set_elapsed(Duration::from_millis(millis));
+                    status = controller
+                        .poll(&terminal.snapshot(), &writer, &clock)
+                        .unwrap();
+                }
+                assert!(
+                    matches!(status.eligibility, InputEligibility::ComposerEmpty),
+                    "{name}: the unchanged idle screen is re-observed after the gap closes: {:?}",
+                    status.eligibility
+                );
+                writer.finish(deadline());
+            }
+        }
     }
 
     mod bundled_claude_auto_tracker {

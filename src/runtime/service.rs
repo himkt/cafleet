@@ -5847,7 +5847,7 @@ mod tests {
                     Step::Message("retried preview FORM_MID_WRITE"),
                     Step::Run(Duration::from_secs(3)),
                 ],
-                events: &["input_delivery_result"],
+                events: &["input_delivery_result", "interaction_opened"],
             };
             let mut runner = UNCERTAIN.run();
             let body = "retried preview FORM_MID_WRITE";
