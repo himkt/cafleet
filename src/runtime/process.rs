@@ -1014,8 +1014,9 @@ mod tests {
             assert_eq!(
                 session.try_wait().unwrap(),
                 None,
-                "a live setuid-root group member keeps the ownership refresh readable"
+                "a live native leader keeps the session running"
             );
+            session.refresh_owned().unwrap();
             let helper = ProcessIdentity::read(pid)
                 .unwrap()
                 .expect("the prompting setuid helper is live");

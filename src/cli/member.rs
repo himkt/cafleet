@@ -3052,16 +3052,27 @@ mod tests {
                 .unwrap()
                 .expect("the test holds the fleet layout");
             let started = Instant::now();
-            let error = delete_with_layout_wait(
+            let deadline = Deadline::until(started + Duration::from_secs(5));
+            let mut locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
+            let runner = Rc::new(CloseRunner {
+                calls: Cell::new(0),
+                failure: None,
+                check: Box::new(|| {}),
+            });
+            let mux = TmuxMultiplexer::for_server(runner.clone(), CLOSE_SOCKET).bounded(deadline);
+            let error = close_member_within(
                 &mut conn,
                 &settings,
                 worker,
-                false,
-                Deadline::until(started + Duration::from_secs(5)),
+                &mut locked,
+                &*mux,
+                deadline,
                 Duration::from_millis(300),
             )
             .unwrap_err();
             let waited = started.elapsed();
+            drop(locked);
+            assert_eq!(runner.calls.get(), 0, "a busy layout closes no pane");
             assert!(waited >= Duration::from_millis(300), "{waited:?}");
             assert!(waited < Duration::from_secs(3), "{waited:?}");
             assert_eq!(

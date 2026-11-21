@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
 **Status**: Approved
-**Progress**: 29/37 tasks complete
+**Progress**: 30/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -449,9 +449,6 @@ At opt-level 0, A's median wall time of 34.37 s exceeds the largest B run, 33.10
 - [x] Restructure `ci.yml` into the Linux and macOS `lint` and `test` entries, with `CARGO_PROFILE_TEST_OPT_LEVEL=1` on the test step <!-- completed: 2026-11-21T11:36 -->
 - [ ] Push the branch and confirm all four CI entries pass, with the macOS `test` entry running the macOS process-group tests; handle failures per § First macOS CI run <!-- completed: -->
 
-COMMENT(programmer): test `refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it` expects `session.try_wait()` to pin the setuid helper into `session.owned`, but `PtySession::try_wait_with` (src/runtime/process.rs:444-458, documented "Pins the process group only once the leader is a zombie") returns `Ok(None)` while the native `/bin/sh` leader is live, before any `refresh_owned_with` scan; the unit test `try_wait_with_a_live_leader_checks_only_the_leader_and_scans_no_group` asserts exactly that. The only other refreshes run at `spawn` (before the helper exists) and in `signal_verified` (shutdown), so the assertion at process.rs:1022 cannot hold under the current contract, with libproc or kern.proc alike; the test never compiled on macOS before this branch, so it went stale unobserved. `group_members` itself is exercised by the passing `kern_proc_pgrp_lists_a_spawned_group_leader_and_then_nothing`. Proposed test fix (Tester-owned): after the `try_wait` assertion, call `session.refresh_owned().unwrap();` (private, reachable from the in-file `mod tests`) so the test drives `group_members` → `refresh_owned_with` pinning explicitly, and reword the `try_wait` message to state that a live leader keeps the session running. No production change. Please arbitrate.
-COMMENT(director): approved — the Tester applies the proposed test-only fix (explicit `session.refresh_owned()` after the `try_wait` assertion, reworded `try_wait` message); `try_wait_with`'s live-leader contract stays as is.
-
 ### Step 6: Dev/test profiles
 
 - [x] Build variants B and A and run the alternating B/A suite runs of § Measurements' suite-regression check, recording wall time and load per run <!-- completed: 2026-11-21T11:59 -->
@@ -462,7 +459,7 @@ COMMENT(director): approved — the Tester applies the proposed test-only fix (e
 
 ### Step 7: Single-runner release gate
 
-- [ ] Add the temporary `darwin-zigbuild` and `darwin-zigbuild-smoke` jobs to `ci.yml` and push <!-- completed: -->
+- [x] Add the temporary `darwin-zigbuild` and `darwin-zigbuild-smoke` jobs to `ci.yml` and push <!-- completed: 2026-11-21T12:01 -->
 - [ ] Record the gate run URL, the darwin build-step duration and the outcome in § Release gate result <!-- completed: -->
 - [ ] On pass, convert `release.yml` to the adopted shape; on failure, leave `release.yml` unchanged <!-- completed: -->
 - [ ] Remove both temporary jobs from `ci.yml` <!-- completed: -->
