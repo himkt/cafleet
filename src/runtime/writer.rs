@@ -366,7 +366,7 @@ mod tests {
         fn writer_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::on_virtual_time());
+            let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
@@ -394,7 +394,7 @@ mod tests {
         fn writer_worker_database_failure_retains_the_same_transition_for_retry() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::on_virtual_time());
+            let hooks = Arc::new(Hooks::default());
             hooks.fail_once(WriterBoundary::Persist);
             let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let _release = Release(hooks.clone());
@@ -419,7 +419,7 @@ mod tests {
         fn writer_commits_each_submitted_transition_directly_with_its_event_sequence() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
             for sequence in 1..=3 {
                 assert!(writer.try_submit(transition(&fixture, sequence)).is_ok());
             }
@@ -450,7 +450,7 @@ mod tests {
                 message: "injected event failure",
             }
             .arm(&mut fixture.fixture.conn);
-            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
             assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
             yield_until(|| writer.status().diagnostic.is_some());
             let status = writer.status();
@@ -470,7 +470,7 @@ mod tests {
         fn writer_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::on_virtual_time());
+            let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
             let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
@@ -496,6 +496,130 @@ mod tests {
         }
     }
 
+    mod step_bound {
+        use crate::runtime::writer::tests::*;
+
+        fn lock_holder(fixture: &WriterFixture) -> rusqlite::Connection {
+            let holder = crate::db::connect(&format!(
+                "sqlite:///{}",
+                fixture.fixture.conn.path().unwrap()
+            ))
+            .unwrap();
+            holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+            holder
+        }
+
+        #[test]
+        fn writer_virtual_clock_jump_while_the_worker_idles_never_expires_a_step() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(Hooks::default());
+            hooks.pause(WriterBoundary::Receive);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let release = Release(hooks.clone());
+            hooks.wait(WriterBoundary::Receive, 1);
+            clock.advance(Duration::from_secs(10));
+            drop(release);
+            let calls = hooks.state.lock().unwrap().calls[index(WriterBoundary::Receive)];
+            hooks.wait(WriterBoundary::Receive, calls + 2);
+            let idle = writer.status();
+            assert_eq!(idle.diagnostic, None, "{idle:?}");
+            assert_eq!(idle.gap_count, 0, "{idle:?}");
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_eq!(writer.status().diagnostic, None);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
+        }
+
+        #[test]
+        fn writer_persist_waits_beyond_100_ms_under_a_held_lock_without_failing() {
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start(&fixture, hooks.clone());
+            let holder = lock_holder(&fixture);
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            hooks.wait(WriterBoundary::Persist, 1);
+            std::thread::sleep(Duration::from_millis(300));
+            let held = writer.status();
+            assert_eq!(held.diagnostic, None, "{held:?}");
+            assert_eq!(held.gap_count, 0, "{held:?}");
+            assert_eq!(held.pending_count, 1, "{held:?}");
+            holder.execute_batch("ROLLBACK").unwrap();
+            wait_until_within(Duration::from_secs(5), || {
+                committed(&fixture) == 1 && writer.status().pending_count == 0
+            });
+            let persisted = writer.status();
+            assert_eq!(persisted.diagnostic, None, "{persisted:?}");
+            assert_eq!(persisted.gap_count, 0, "{persisted:?}");
+            assert_eq!(writer.finish(deadline()), (0, 0));
+        }
+
+        enum InFlight {
+            PausedPersistHook,
+            HeldDatabaseLock,
+        }
+
+        struct FinishCase {
+            name: &'static str,
+            in_flight: InFlight,
+        }
+
+        const FINISH_CASES: &[FinishCase] = &[
+            FinishCase {
+                name: "paused persist hook",
+                in_flight: InFlight::PausedPersistHook,
+            },
+            FinishCase {
+                name: "held database lock",
+                in_flight: InFlight::HeldDatabaseLock,
+            },
+        ];
+
+        #[test]
+        fn writer_finish_joins_an_in_flight_step_at_the_shutdown_deadline() {
+            const SHUTDOWN_AFTER: Duration = Duration::from_millis(200);
+            for case in FINISH_CASES {
+                let name = case.name;
+                let fixture = WriterFixture::new();
+                let hooks = Arc::new(Hooks::default());
+                let holder = match case.in_flight {
+                    InFlight::PausedPersistHook => {
+                        hooks.pause(WriterBoundary::Persist);
+                        None
+                    }
+                    InFlight::HeldDatabaseLock => Some(lock_holder(&fixture)),
+                };
+                let release = Release(hooks.clone());
+                let mut writer = start(&fixture, hooks.clone());
+                assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+                hooks.wait(WriterBoundary::Persist, 1);
+                std::thread::sleep(Duration::from_millis(50));
+                let started = Instant::now();
+                let (pending, _) = writer.finish(started + SHUTDOWN_AFTER);
+                let elapsed = started.elapsed();
+                assert!(
+                    writer.joined(),
+                    "{name}: finish joins the worker once its step aborts"
+                );
+                assert!(
+                    elapsed < Duration::from_secs(1),
+                    "{name}: the in-flight step ends at the shutdown deadline, not the 5 s step bound: {elapsed:?}"
+                );
+                assert_eq!(pending, 1, "{name}: the unsaved transition stays counted");
+                drop(release);
+                if let Some(holder) = holder {
+                    holder.execute_batch("ROLLBACK").unwrap();
+                }
+                std::thread::sleep(Duration::from_millis(50));
+                assert_eq!(
+                    committed(&fixture),
+                    0,
+                    "{name}: nothing commits after finish returns"
+                );
+            }
+        }
+    }
+
     #[test]
     fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
@@ -515,12 +639,12 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::error::Result;
-    use crate::runtime::writer::{WriterBoundary, WriterHooks};
+    use crate::runtime::writer::{StepBound, WriterBoundary, WriterHooks};
     use std::sync::Arc;
     use std::time::Instant;
     struct DefaultWriterHooks;
     impl WriterHooks for DefaultWriterHooks {
-        fn before(&self, _: WriterBoundary, _: Instant) -> Result<()> {
+        fn before(&self, _: WriterBoundary, _: &StepBound) -> Result<()> {
             Ok(())
         }
     }
@@ -554,17 +678,8 @@ pub(crate) mod test_support {
     pub(crate) struct Hooks {
         pub(crate) state: Mutex<HookState>,
         pub(crate) changed: Condvar,
-        work_slice: Option<Duration>,
     }
     impl Hooks {
-        /// Hooks for a worker on a virtual clock: a work slice longer than any test, so a pause
-        /// measured in real time never outlives the worker's virtual work deadline.
-        pub(crate) fn on_virtual_time() -> Self {
-            Self {
-                work_slice: Some(Duration::from_secs(3600)),
-                ..Self::default()
-            }
-        }
         pub(crate) fn pause(&self, boundary: WriterBoundary) {
             self.state.lock().unwrap().paused[index(boundary)] = true;
         }
@@ -595,11 +710,9 @@ pub(crate) mod test_support {
             }
         }
     }
+    const PAUSE_SLICE: Duration = Duration::from_millis(10);
     impl WriterHooks for Hooks {
-        fn work_slice(&self) -> Duration {
-            self.work_slice.unwrap_or(WORK_SLICE)
-        }
-        fn before(&self, boundary: WriterBoundary, until: Instant) -> Result<()> {
+        fn before(&self, boundary: WriterBoundary, bound: &StepBound) -> Result<()> {
             let slot = index(boundary);
             let mut state = self.state.lock().unwrap();
             state.ordinal = state.ordinal.checked_add(1).unwrap();
@@ -608,11 +721,10 @@ pub(crate) mod test_support {
             state.first[slot].get_or_insert(ordinal);
             self.changed.notify_all();
             while state.paused[slot] {
-                let remaining = until.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
+                if bound.check().is_err() {
                     return Err(CafleetError::DeadlineExceeded);
                 }
-                state = self.changed.wait_timeout(state, remaining).unwrap().0;
+                state = self.changed.wait_timeout(state, PAUSE_SLICE).unwrap().0;
             }
             if state.failures[slot] > 0 {
                 state.failures[slot] -= 1;

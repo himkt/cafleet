@@ -2098,5 +2098,108 @@ mod tests {
             assert!(started.elapsed() >= Duration::from_millis(180));
             assert!(started.elapsed() < Duration::from_millis(700));
         }
+
+        enum SharedDeadlineWait {
+            LongStatement,
+            BusyWait,
+        }
+
+        struct SharedDeadlineCase {
+            name: &'static str,
+            wait: SharedDeadlineWait,
+        }
+
+        const SHARED_DEADLINE_CASES: &[SharedDeadlineCase] = &[
+            SharedDeadlineCase {
+                name: "long statement",
+                wait: SharedDeadlineWait::LongStatement,
+            },
+            SharedDeadlineCase {
+                name: "busy wait",
+                wait: SharedDeadlineWait::BusyWait,
+            },
+        ];
+
+        #[test]
+        fn shared_deadline_lowered_mid_scope_aborts_the_running_wait() {
+            const SLOW_SUM: &str = "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter";
+            const LOWER_AFTER: Duration = Duration::from_millis(100);
+            for case in SHARED_DEADLINE_CASES {
+                let name = case.name;
+                let directory = tempfile::tempdir().unwrap();
+                let url = format!("sqlite:///{}", directory.path().join("shared.db").display());
+                let mut conn = connect(&url).unwrap();
+                conn.execute_batch("CREATE TABLE probe(value INTEGER)")
+                    .unwrap();
+                let holder = connect(&url).unwrap();
+                if matches!(case.wait, SharedDeadlineWait::BusyWait) {
+                    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+                }
+                let shared: SharedDeadline = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let lowering = {
+                    let shared = shared.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(LOWER_AFTER);
+                        *shared.lock().unwrap() = Some(Instant::now());
+                    })
+                };
+                let started = Instant::now();
+                let result = with_shared_database_deadline(
+                    &mut conn,
+                    started + Duration::from_secs(30),
+                    &shared,
+                    |conn| match case.wait {
+                        SharedDeadlineWait::LongStatement => conn
+                            .query_row(SLOW_SUM, [], |row| row.get::<_, i64>(0))
+                            .map(|_| ())
+                            .map_err(CafleetError::from),
+                        SharedDeadlineWait::BusyWait => conn
+                            .execute("INSERT INTO probe VALUES(1)", [])
+                            .map(|_| ())
+                            .map_err(CafleetError::from),
+                    },
+                );
+                let elapsed = started.elapsed();
+                lowering.join().unwrap();
+                assert!(
+                    result.is_err(),
+                    "{name}: the lowered shared deadline aborts the wait"
+                );
+                assert!(
+                    elapsed >= LOWER_AFTER - Duration::from_millis(10),
+                    "{name}: the wait runs until the shared deadline is lowered: {elapsed:?}"
+                );
+                assert!(
+                    elapsed < Duration::from_secs(2),
+                    "{name}: the abort follows the lowered shared deadline, not the 30 s frame: {elapsed:?}"
+                );
+                if matches!(case.wait, SharedDeadlineWait::BusyWait) {
+                    holder.execute_batch("ROLLBACK").unwrap();
+                }
+                conn.execute("INSERT INTO probe VALUES(2)", [])
+                    .unwrap_or_else(|cause| panic!("{name}: the connection is reusable: {cause}"));
+            }
+        }
+
+        #[test]
+        fn shared_deadline_left_unset_bounds_the_scope_by_its_own_deadline_only() {
+            let mut conn = Connection::open_in_memory().unwrap();
+            let shared: SharedDeadline = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let value = with_shared_database_deadline(
+                &mut conn,
+                Instant::now() + Duration::from_secs(5),
+                &shared,
+                |conn| {
+                    conn.query_row(
+                        "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(CafleetError::from)
+                },
+            )
+            .unwrap();
+            assert_eq!(value, 50005000);
+        }
     }
 }

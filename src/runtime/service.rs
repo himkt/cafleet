@@ -3101,31 +3101,14 @@ pub(crate) mod test_support {
             );
         }
 
-        /// `synthetic` with a writer slice no scheduler delay exhausts, for a test that asserts
-        /// the exact event sequence and so cannot tolerate a storage-pressure gap.
-        pub(crate) fn synthetic_with_unhurried_writer(
-            fixture: &mut crate::runtime::test_support::Fixture,
-            spec: &mut crate::runtime::SpawnSpec,
-        ) {
-            synthetic(fixture, spec);
-            let path = fixture._dir.path().join("observation-services.json");
-            let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-            config["writer_work_slice_ms"] = json!(30_000);
-            std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
-        }
-
         pub(crate) struct Hooks {
             pub(crate) directory: std::path::PathBuf,
-            pub(crate) work_slice: Duration,
         }
         impl WriterHooks for Hooks {
-            fn work_slice(&self) -> Duration {
-                self.work_slice
-            }
             fn before(
                 &self,
                 boundary: WriterBoundary,
-                deadline: Instant,
+                bound: &crate::runtime::writer::StepBound,
             ) -> Result<(), CafleetError> {
                 if matches!(boundary, WriterBoundary::Persist)
                     && self.directory.join("fail-persist").exists()
@@ -3144,7 +3127,7 @@ pub(crate) mod test_support {
                         Err(cause) => return Err(io_error(cause)),
                     }
                     while self.directory.join("block-persist").exists() {
-                        if Instant::now() >= deadline {
+                        if bound.check().is_err() {
                             return Err(CafleetError::DeadlineExceeded);
                         }
                         std::thread::sleep(Duration::from_millis(2));
@@ -3167,13 +3150,6 @@ pub(crate) mod test_support {
                 clock: Arc::new(crate::time::SystemClock),
                 writer_hooks: Arc::new(Hooks {
                     directory: config.parent().unwrap().to_path_buf(),
-                    work_slice: match value.get("writer_work_slice_ms") {
-                        None => crate::runtime::writer::WORK_SLICE,
-                        Some(ms) => Duration::from_millis(
-                            ms.as_u64()
-                                .expect("writer_work_slice_ms is a millisecond count"),
-                        ),
-                    },
                 }),
                 capture: None,
                 observation_hooks: crate::runtime::service::test_support::injected_failures::hooks(
@@ -3663,15 +3639,15 @@ pub(crate) mod test_support {
             }
         }
 
-        /// A writer work slice longer than any scenario, so event batches never split on time.
         struct ScenarioWriterHooks;
 
         impl WriterHooks for ScenarioWriterHooks {
-            fn before(&self, _: WriterBoundary, _: Instant) -> Result<()> {
+            fn before(
+                &self,
+                _: WriterBoundary,
+                _: &crate::runtime::writer::StepBound,
+            ) -> Result<()> {
                 Ok(())
-            }
-            fn work_slice(&self) -> Duration {
-                Duration::from_secs(3600)
             }
         }
 

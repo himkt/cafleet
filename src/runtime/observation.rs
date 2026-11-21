@@ -8785,7 +8785,7 @@ mod tests {
         fn service_shutdown_uses_the_active_controller_to_close_before_truthful_exit() {
             let mut fixture = ServiceFixture::configured(
                 false,
-                crate::runtime::service::test_support::observation_services::synthetic_with_unhurried_writer,
+                crate::runtime::service::test_support::observation_services::synthetic,
             );
             fixture.start_running();
             quiet(&mut fixture, "form-shutdown");

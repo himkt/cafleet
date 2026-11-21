@@ -9700,20 +9700,15 @@ mod tests {
                 pub(crate) native_version: &'a str,
             }
 
-            /// Keeps exact input-event sequences independent of storage scheduling delays.
             struct InputFixtureWriterHooks;
 
             impl crate::runtime::writer::WriterHooks for InputFixtureWriterHooks {
                 fn before(
                     &self,
                     _: crate::runtime::writer::WriterBoundary,
-                    _: Instant,
+                    _: &crate::runtime::writer::StepBound,
                 ) -> Result<()> {
                     Ok(())
-                }
-
-                fn work_slice(&self) -> Duration {
-                    Duration::from_secs(30)
                 }
             }
 
