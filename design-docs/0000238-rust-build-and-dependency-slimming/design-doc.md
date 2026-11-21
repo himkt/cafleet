@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
 **Status**: Approved
-**Progress**: 0/37 tasks complete
+**Progress**: 7/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -353,6 +353,23 @@ Record every run, its load and the selected opt-level.
 
 Record the results in this section as a table with metric, before, after and load columns. Add a § Release gate result subsection for the gate outcome.
 
+#### Results
+
+Before-values were measured on 2026-11-21 in a detached worktree at `27ea540f` (cafleet 0.35.4, Rust 1.100.0, 8 CPUs), with the Tester building in parallel. Load is the `/proc/loadavg` 1-minute value before each run. Cargo 1.100 places the test executable under `<target>/debug/build/cafleet/<hash>/out/cafleet-<hash>`, not `target/debug/deps/`.
+
+| Metric | Before | After | Load (before) |
+|---|---|---|---|
+| Crate counts as is (Linux normal / Linux normal+build / darwin normal+build) | 122 / 130 / 139 | — | — |
+| Crate counts pruned (expected after-value) | 75 / 83 / 82 | — | — |
+| Cold test build (median of 125, 112, 96 s) | 112 s | — | 9.60, 7.43, 9.82 |
+| Incremental test build (median of 5.72, 5.60, 6.27 s) | 5.72 s | — | 8.98, 8.57, 8.01 |
+| Test binary size | 207,265,056 B (198 MiB) | — | — |
+| Local suite wall time, `mise //:test` on 8 threads (median of 62.1, 33.7, 42.8 s; harness-reported 54.3, 32.1, 41.1 s) | 42.8 s | — | 7.05, 5.46, 6.33 |
+| CI ubuntu `test` job, last `main` run before the change: run 44897372541 (https://github.com/himkt/cafleet/actions/runs/44897372541) at `8f0a6d6b` | 215 s job; 163 s `mise //:test` step | — | — |
+| CI macOS `test` job | — | — | — |
+
+The first suite run includes an incremental rebuild of about 6 s after the incremental-build measurement restored `now_stamp`.
+
 ### Documentation updates
 
 | Target | Change |
@@ -373,16 +390,16 @@ Record the results in this section as a table with metric, before, after and loa
 
 ### Step 1: Record baseline measurements
 
-- [ ] Record the as-is and pruned crate counts from § Dependency-graph gates in § Measurements <!-- completed: -->
-- [ ] Measure cold test build, incremental test build, test binary size and local suite wall time (3 runs each, with load) on the unchanged tree, and record them <!-- completed: -->
-- [ ] Record the ubuntu `test` job duration of the latest `main` CI run <!-- completed: -->
+- [x] Record the as-is and pruned crate counts from § Dependency-graph gates in § Measurements <!-- completed: 2026-11-21T11:26 -->
+- [x] Measure cold test build, incremental test build, test binary size and local suite wall time (3 runs each, with load) on the unchanged tree, and record them <!-- completed: 2026-11-21T11:26 -->
+- [x] Record the ubuntu `test` job duration of the latest `main` CI run <!-- completed: 2026-11-21T11:26 -->
 
 ### Step 2: Update documentation
 
-- [ ] `SPEC.md` §8: add the ledger DDL to the exact baseline DDL, and replace the initialization paragraph per § Documentation updates <!-- completed: -->
-- [ ] `docs/docs/contributing.md`: update the Rust safety paragraph and the validation paragraph <!-- completed: -->
-- [ ] `CLAUDE.md`: replace "refinery schema baseline" with "SQL schema baseline" <!-- completed: -->
-- [ ] Confirm that `README.md`, `assets/skills/`, `.claude/rules/` and `docs/docs/concepts/storage.md` need no change <!-- completed: -->
+- [x] `SPEC.md` §8: add the ledger DDL to the exact baseline DDL, and replace the initialization paragraph per § Documentation updates <!-- completed: 2026-11-21T11:27 -->
+- [x] `docs/docs/contributing.md`: update the Rust safety paragraph and the validation paragraph <!-- completed: 2026-11-21T11:27 -->
+- [x] `CLAUDE.md`: replace "refinery schema baseline" with "SQL schema baseline" <!-- completed: 2026-11-21T11:27 -->
+- [x] Confirm that `README.md`, `assets/skills/`, `.claude/rules/` and `docs/docs/concepts/storage.md` need no change <!-- completed: 2026-11-21T11:27 -->
 
 ### Step 3: Hand-written baseline ledger
 
