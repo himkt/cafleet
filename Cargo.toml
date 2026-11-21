@@ -15,7 +15,6 @@ filedescriptor = "0.8"
 vt100 = "0.18.1"
 rustix = { version = "1", features = ["termios", "time"] }
 signal-hook = "0.4"
-refinery = { version = "0.10", features = ["rusqlite"] }
 regex = "1"
 rusqlite = { version = "0.41", features = ["bundled", "hooks"] }
 semver = "1"

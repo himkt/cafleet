@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
 **Status**: Approved
-**Progress**: 7/37 tasks complete
+**Progress**: 14/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -403,13 +403,13 @@ The first suite run includes an incremental rebuild of about 6 s after the incre
 
 ### Step 3: Hand-written baseline ledger
 
-- [ ] Append the `refinery_schema_history` DDL to `assets/migrations/V1__baseline.sql` <!-- completed: -->
-- [ ] Add the `ledger_state` helper and use it in `classify_schema` <!-- completed: -->
-- [ ] Rewrite `initialize` per § `initialize` algorithm, including the `database_url` parameter and the `is_empty_file` helper, and delete `baseline()` <!-- completed: -->
-- [ ] Pass the connected database URL at every `initialize` call site <!-- completed: -->
-- [ ] Extend `baseline_initialization_records_the_identity_ledger_version_and_shape` and add `initialization_refuses_every_other_file` and `concurrent_initialization_of_one_fresh_file_applies_the_baseline_once` <!-- completed: -->
-- [ ] Remove `refinery` from `Cargo.toml`; `cargo check` drops its packages from `Cargo.lock` <!-- completed: -->
-- [ ] `mise //:test` and `mise //:lint` pass <!-- completed: -->
+- [x] Append the `refinery_schema_history` DDL to `assets/migrations/V1__baseline.sql` <!-- completed: 2026-11-21T11:32 -->
+- [x] Add the `ledger_state` helper and use it in `classify_schema` <!-- completed: 2026-11-21T11:32 -->
+- [x] Rewrite `initialize` per § `initialize` algorithm, including the `database_url` parameter and the `is_empty_file` helper, and delete `baseline()` <!-- completed: 2026-11-21T11:32 -->
+- [x] Pass the connected database URL at every `initialize` call site <!-- completed: 2026-11-21T11:32 -->
+- [x] Extend `baseline_initialization_records_the_identity_ledger_version_and_shape` and add `initialization_refuses_every_other_file` and `concurrent_initialization_of_one_fresh_file_applies_the_baseline_once` <!-- completed: 2026-11-21T11:32 -->
+- [x] Remove `refinery` from `Cargo.toml`; `cargo check` drops its packages from `Cargo.lock` <!-- completed: 2026-11-21T11:32 -->
+- [x] `mise //:test` and `mise //:lint` pass <!-- completed: 2026-11-21T11:32 -->
 
 ### Step 4: Remove `libproc` and trim `chrono` features
 

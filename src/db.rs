@@ -2,19 +2,11 @@ use crate::error::CafleetError;
 use crate::time::Deadline;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
+use rusqlite::TransactionBehavior;
 use std::time::Duration;
 use std::time::Instant;
 
 const BASELINE_SQL: &str = include_str!("../assets/migrations/V1__baseline.sql");
-
-fn baseline() -> refinery::Migration {
-    let sql = format!(
-        "{BASELINE_SQL}\nINSERT INTO cafleet_database(singleton_id, cafleet_version) VALUES(1, '{}');\n",
-        crate::cli::VERSION
-    );
-    refinery::Migration::unapplied("V1__baseline", &sql)
-        .expect("the embedded baseline has a valid migration name")
-}
 
 /// The file path a `sqlite:///<path>` database URL names.
 pub(crate) fn database_path(database_url: &str) -> Result<&str, CafleetError> {
@@ -66,12 +58,34 @@ fn connect_with_flags(
     Ok(conn)
 }
 
-pub(crate) fn initialize(conn: &mut Connection) -> Result<(), CafleetError> {
-    refinery::Runner::new(&[baseline()])
-        .set_grouped(true)
-        .run(conn)
-        .map_err(|e| CafleetError::App(format!("database initialization failed: {e}")))?;
-    Ok(())
+pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<(), CafleetError> {
+    let failed =
+        |e: rusqlite::Error| CafleetError::App(format!("database initialization failed: {e}"));
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(failed)?;
+    match ledger_state(&tx)? {
+        LedgerState::Baseline => return Ok(()),
+        LedgerState::Absent if is_empty_file(&tx)? => {}
+        LedgerState::Absent | LedgerState::Other => {
+            return Err(incompatible_format(database_path(database_url)?));
+        }
+    }
+    tx.execute_batch(BASELINE_SQL).map_err(failed)?;
+    tx.execute(
+        "INSERT INTO refinery_schema_history(version, name, applied_on, checksum) VALUES(1, 'baseline', ?1, ?2)",
+        rusqlite::params![
+            crate::time::now_stamp(),
+            crate::digest::sha256_hex(BASELINE_SQL.as_bytes())
+        ],
+    )
+    .map_err(failed)?;
+    tx.execute(
+        "INSERT INTO cafleet_database(singleton_id, cafleet_version) VALUES(1, ?1)",
+        [crate::cli::VERSION],
+    )
+    .map_err(failed)?;
+    tx.commit().map_err(failed)
 }
 
 pub(crate) const APPLICATION_ID: i64 = 1128351289;
@@ -188,7 +202,7 @@ fn read_schema(conn: &Connection) -> Result<Vec<SchemaTable>, CafleetError> {
 
 fn reference_schema() -> Result<Vec<SchemaTable>, CafleetError> {
     let mut expected = Connection::open_in_memory()?;
-    initialize(&mut expected)?;
+    initialize(&mut expected, "sqlite:///:memory:")?;
     read_schema(&expected)
 }
 
@@ -227,13 +241,19 @@ impl SchemaState {
     }
 }
 
-fn ledger_is_baseline(conn: &Connection) -> Result<bool, CafleetError> {
+enum LedgerState {
+    Absent,
+    Baseline,
+    Other,
+}
+
+fn ledger_state(conn: &Connection) -> Result<LedgerState, CafleetError> {
     let ledger_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='refinery_schema_history')",
         [], |row| row.get(0),
     )?;
     if !ledger_exists {
-        return Ok(false);
+        return Ok(LedgerState::Absent);
     }
     let mut statement =
         conn.prepare("SELECT version, name FROM refinery_schema_history ORDER BY version")?;
@@ -242,7 +262,21 @@ fn ledger_is_baseline(conn: &Connection) -> Result<bool, CafleetError> {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows == [(1, "baseline".to_owned())])
+    if rows == [(1, "baseline".to_owned())] {
+        Ok(LedgerState::Baseline)
+    } else {
+        Ok(LedgerState::Other)
+    }
+}
+
+fn is_empty_file(conn: &Connection) -> Result<bool, CafleetError> {
+    let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+    let populated: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(identity == 0 && !populated)
 }
 
 fn records_running_version(conn: &Connection) -> Result<bool, CafleetError> {
@@ -270,17 +304,12 @@ enum Classification {
 }
 
 fn classify_schema(conn: &Connection) -> Result<Classification, CafleetError> {
-    let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
-    let populated: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
-        [],
-        |row| row.get(0),
-    )?;
-    if identity == 0 && !populated {
+    if is_empty_file(conn)? {
         return Ok(Classification::Missing);
     }
+    let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
     if identity != crate::db::APPLICATION_ID
-        || !ledger_is_baseline(conn)?
+        || !matches!(ledger_state(conn)?, LedgerState::Baseline)
         || !schema_matches(conn)?
         || !records_running_version(conn)?
     {

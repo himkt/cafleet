@@ -152,3 +152,10 @@ CREATE TABLE member_input_operations (
     UNIQUE(run_id, operation_key),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
+
+CREATE TABLE refinery_schema_history (
+    version INT4 PRIMARY KEY,
+    name VARCHAR(255),
+    applied_on VARCHAR(255),
+    checksum VARCHAR(255)
+);
