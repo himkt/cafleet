@@ -65,13 +65,12 @@ A Director-led team evaluated a Go rewrite on 2026-11-21, at repository HEAD `4e
 | Replacing `portable-pty`, `filedescriptor` or `chrono` with hand-written code (needs a second `unsafe_code` exception) | no |
 | Splitting the crate into a workspace | no |
 | Finishing design 0000222 (deterministic test timing) | no |
-| The opt-level-0 timing flake `a_flush_is_refused_while_an_immediate_attempt_is_in_flight` | no |
 
 ### Hand-written baseline ledger
 
 #### Ledger DDL
 
-Append the ledger table to `assets/migrations/V1__baseline.sql` and to the `SPEC.md` §8 exact baseline DDL block, after `member_permission_response_claims`. The table keeps `refinery`'s exact name and 4-column shape:
+Append the ledger table to `assets/migrations/V1__baseline.sql`, after `member_input_operations`. `SPEC.md` §8 already lists `refinery_schema_history` and ends its exact baseline DDL with a one-line form of this table; rewrite that statement in the form below so the SPEC block and the embedded file match. The table keeps `refinery`'s exact name and 4-column shape:
 
 ```sql
 CREATE TABLE refinery_schema_history (
@@ -99,7 +98,7 @@ Nothing reads `applied_on` or `checksum`. They record when and from which baseli
 
 The signature becomes `pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<(), CafleetError>`. The URL supplies the incompatible-format path through `crate::db::database_path`, so `initialize` and `classify_selected_schema` report the same `PATH` for the same file, including relative URLs. Every caller passes the URL it connected with. `reference_schema()` and the in-memory test connections pass `"sqlite:///:memory:"`, the form the existing `require_current` test helper already uses.
 
-1. Open `conn.transaction_with_behavior(TransactionBehavior::Immediate)`. The write lock serializes concurrent initializers, and `busy_timeout=5000` from `connect` bounds the wait.
+1. Open `conn.transaction_with_behavior(TransactionBehavior::Immediate)`. The write lock serializes concurrent initializers, and the connection's busy timeout bounds the wait: `busy_timeout=5000` from `connect`, or the scoped budget when the caller runs `initialize` inside `with_database_deadline`.
 2. Read the file state inside the transaction, so the check and the writes share the write lock:
 
    | State | Condition | Result |
@@ -154,9 +153,10 @@ pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<()
 | `baseline_initialization_records_the_identity_ledger_version_and_shape` (extended) | The ledger row is `(1, 'baseline', applied_on, checksum)`. `applied_on` parses with `crate::time::parse_lenient`, and `checksum == crate::digest::sha256_hex(BASELINE_SQL.as_bytes())`. |
 | `repeated_initialization_preserves_all_application_rows` (unchanged) | Re-initialization is a no-op for application rows and the ledger. |
 | `failed_baseline_initialization_rolls_back_identity_tables_and_ledger` (unchanged) | A failed initialization leaves no identity, table, ledger or version row. |
-| New: `initialization_refuses_a_ledger_beyond_the_baseline` | After a `(2, …)` row is inserted, `initialize` fails with the incompatible-format message, and the ledger rows and application rows are unchanged. |
-| New: `initialization_refuses_a_populated_file_without_a_ledger` | A temp file holding one unrelated table and no ledger makes `initialize` fail with the incompatible-format message naming the URL's path, and the file bytes are unchanged. |
+| New: `initialization_refuses_every_other_file` (table-driven over a named case array) | Each case prepares a temp file in the **Other** state: an initialized file with an added `(2, …)` ledger row, an initialized file with its ledger row deleted, and a file holding one unrelated table and no ledger. For every case, `initialize` fails with the incompatible-format message naming the URL's path, and the file bytes are unchanged. Each assertion message names the case. |
 | New: `concurrent_initialization_of_one_fresh_file_applies_the_baseline_once` | Two threads, each with its own `connect`ed connection to one fresh temp file, call `initialize` behind a `std::sync::Barrier`. Both return `Ok`, the ledger holds one row, `cafleet_database` holds one row and `require_current` passes. |
+
+`initialization_refuses_every_other_file` shares the temp-file preparation and byte-snapshot comparison with `assert_incompatible_and_untouched`: extract them into one helper inside `mod tests` that both use. The existing `a_ledger_row_beyond_the_baseline_is_incompatible` keeps covering `classify_schema`; the new test covers `initialize`.
 
 ### macOS process group without `libproc`
 
@@ -331,7 +331,9 @@ Step 1 records each count twice: as is, and with `--prune refinery --prune libpr
 
 Timings vary up to 2× with host load, so each timing is the median of 3 runs on the same host. Record `/proc/loadavg` beside each timing. Only the crate-count gates and the suite-regression check below decide acceptance; the timings are recorded, not gated.
 
-| Metric | Command or source | Evaluation reference |
+The evaluation reference column was measured at `4e8418f8`, before design 0000237 removed about 34k lines and reworked the tests; design 0000237 recorded a 37.6 s local suite wall time at `21ea7be8`. Step 1 measures the current before-values.
+
+| Metric | Command or source | Evaluation reference (`4e8418f8`) |
 |---|---|---|
 | Crate counts | § Dependency-graph gates | 122 / 130 / 139 |
 | Cold test build | `cargo test --bin cafleet --no-run` with a fresh `CARGO_TARGET_DIR` | 87–229 s |
@@ -355,7 +357,7 @@ Record the results in this section as a table with metric, before, after and loa
 
 | Target | Change |
 |---|---|
-| `SPEC.md` §8 | Add the ledger DDL to the exact baseline DDL. Replace the paragraph "The binary appends `INSERT INTO cafleet_database…` … applies both in one transaction" with the outcome of § `initialize` algorithm: one `BEGIN IMMEDIATE` transaction, and the empty, baseline and other file states with their results. State the ledger row values. |
+| `SPEC.md` §8 | Rewrite the existing one-line `refinery_schema_history` statement to match `V1__baseline.sql`, and change "ending with the ledger table that initialization creates beside it" to state that the baseline itself declares the ledger. Replace the paragraph "Initialization applies the baseline and inserts the `cafleet_database` row for the running version in one transaction, …" with the outcome of § `initialize` algorithm: one `BEGIN IMMEDIATE` transaction, and the empty, baseline and other file states with their results. Replace "`applied_on` and `checksum` are non-normative" with the normative row values in implementation-neutral terms: `applied_on` is the canonical storage timestamp of initialization and `checksum` is the lowercase SHA-256 hex of the embedded baseline file; diagnosis still compares only `version`, `name` and the column shape. |
 | `docs/docs/contributing.md` Rust safety paragraph | The single unsafe exception becomes the macOS `kern.proc` sysctl helper serving `KERN_PROC_PID` and `KERN_PROC_PGRP` into size-checked `kinfo_proc` buffers, still item-scoped with its safety invariants inline |
 | `docs/docs/contributing.md` validation paragraph | Add: CI runs `mise //:test` on Linux and macOS with `CARGO_PROFILE_TEST_OPT_LEVEL=1`; local runs keep opt-level 0 for faster incremental rebuilds |
 | `CLAUDE.md` | "an embedded refinery schema baseline" becomes "an embedded SQL schema baseline" |
@@ -388,7 +390,7 @@ Record the results in this section as a table with metric, before, after and loa
 - [ ] Add the `ledger_state` helper and use it in `classify_schema` <!-- completed: -->
 - [ ] Rewrite `initialize` per § `initialize` algorithm, including the `database_url` parameter and the `is_empty_file` helper, and delete `baseline()` <!-- completed: -->
 - [ ] Pass the connected database URL at every `initialize` call site <!-- completed: -->
-- [ ] Extend `baseline_initialization_records_the_identity_ledger_version_and_shape` and add the three new ledger tests <!-- completed: -->
+- [ ] Extend `baseline_initialization_records_the_identity_ledger_version_and_shape` and add `initialization_refuses_every_other_file` and `concurrent_initialization_of_one_fresh_file_applies_the_baseline_once` <!-- completed: -->
 - [ ] Remove `refinery` from `Cargo.toml`; `cargo check` drops its packages from `Cargo.lock` <!-- completed: -->
 - [ ] `mise //:test` and `mise //:lint` pass <!-- completed: -->
 
@@ -439,3 +441,4 @@ Implementers leave the installed `cafleet` untouched, because the executing flee
 | Date | Changes |
 |------|---------|
 | 2026-11-21 | Initial draft |
+| 2026-11-21 | Reconcile with design 0000237: ledger DDL anchor, existing SPEC §8 ledger statement and paragraphs, table-driven refusal test, scoped busy budget, dropped removed flake from scope, annotated evaluation references |
