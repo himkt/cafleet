@@ -177,10 +177,10 @@ Minimum-version delivery acceptance covers every bundled backend on each registe
 | Complete profile reuse | Detection, annotations, both composer operations and each available semantic answer resolve the same profile and retain actual run/capture identities |
 | Native operation plans | Prompt preview and direct prompt create a native user turn; native exec runs a harmless marker command and exposes its result, with literal-to-submit timing recorded |
 | Fallback operation | Missing plan and failed-probe cases show the rule-5 fallback sequence of [SPEC Delivery method and interaction priority](https://github.com/himkt/cafleet/blob/main/SPEC.md#delivery-method-and-interaction-priority) and explicit fallback results |
-| Busy composer | A busy composer with an executable plan follows rule 4 (`composer_busy` with zero bytes, profile drain, `idle_timeout` after 3 minutes) without any earlier Escape; a working member with an empty composer row receives profile delivery |
-| Interaction deferral | Permission and question remain open with no Escape/literal bytes; answering on the original native surface yields closure and exactly one queued delivery without another send |
+| Busy composer | A busy composer with an executable plan follows rule 4 (`composer_busy` with zero bytes and profile drain once empty, previews pending) without any Escape; a working member with an empty composer row receives profile delivery |
+| Interaction deferral | Permission and question remain open with no Escape/literal bytes; answering on the original native surface yields closure, the queued prompt first and then the pending preview, without another send |
 | Adversarial transition | Candidate/obscured/superseding interaction, keyboard/pointer input during chunks/settles, observer/owner loss and partial stages follow the complete-prefix stop outcomes |
-| Durable retry | A queued canonical preview drains by fallback and retains one ID/digest after composer changes and repeated queries; duplicate keys, conflicting digests, concurrent sender/drain, lost replies and stamp failures avoid duplicate dispatch |
+| Durable retry | A queued prompt or exec drains by fallback and retains one ID/digest after composer changes and repeated queries; duplicate keys, conflicting digests, lost replies and storage failures avoid duplicate dispatch |
 | Deferred failure and liveness | After closure with a busy pane lock and no further output/commands, the runner timer either delivers when the lock frees or publishes not submitted at the deadline; temporary storage/observer failure and terminal-commit recovery preserve FIFO/result visibility |
 | Schema and reporting | Fresh-baseline initialization, canonical digest validation, referential integrity, sequence preservation, self-send/no-pane output and durable reason/state projection for ordinary/history/permission-response receipts |
 
@@ -189,11 +189,11 @@ Composer-submit acceptance uses the installed evidence versions on both tmux and
 | Case | Required result |
 |---|---|
 | Pointer at 0.3 s | Hover, wheel and click during the settle submit normally; pointer between literal chunks stops continuation and closes an open paste; permission tokens/stages are revoked |
-| Keyboard `x` at 0.3 s | Verified-composer stop is `left_in_composer/manual_input`; later previews queue, and automatic re-delivery waits for verified empty |
+| Keyboard `x` at 0.3 s | The stop records `uncertain/manual_input`; a stopped preview is typed again only once the composer is verified empty |
 | Plain threshold | Codex previews of 1007 and 1037 bytes and Hermes previews of 2027 and 2057 characters submit using measured framing or pointer rendering |
 | Positive short writes | Japanese previews of 7987 and 12085 bytes continue chunks and submit within 5 s |
-| Ineffective submit key | Post-submit verification ends as `left_in_composer/submit_unconfirmed`, stage `submitted` |
-| Held composer | Re-delivery and heads behind uncertain bytes stay queued past `idle_timeout`; consumption cancels it on the next queue turn and a 3-minute held-composer wait emits one stalled event |
+| Ineffective submit key | Post-submit verification ends as `uncertain/submit_unconfirmed`, stage `submitted` |
+| FIFO stop | After an uncertain prompt or exec, neither a queued exec nor a sweep preview writes a byte until `input reconcile` settles it, on runs with and without composer verification |
 | Hermes deletion | Drafts of 2057 characters and 8192 scalars clear and work settlement completes; the larger draft clears within 10 s |
 
 Unit coverage replays each unsubmitted-literal fixture through post-submit verification and obtains `submit_unconfirmed`, and exercises complete-prefix stops, close-stage failures, latest-attempt decisions, schema constraints and projection/recovery actions. Measurements establish submitted native input separately from model consumption, permission decisions and command completion.

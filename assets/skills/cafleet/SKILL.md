@@ -81,9 +81,9 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <target-memb
 
 Supply one positional body or `--file PATH`, using file input for long/multiline text. Text output truncates bodies at a fixed 200 codepoints; `--json` returns them complete.
 
-Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a pointer to the recipient's `message poll` command; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/queue/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input, and its sends report `notification_sent: false` without a pane diagnostic or multiplexer requirement.
+A send stores the message and returns; an ordinary recipient's own runner types its preview later. Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a pointer to the recipient's `message poll` command; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input.
 
-Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; the recipient's runner retries pending ordinary-member notifications on its own. Recipients record deferred actions when their poll consumes the message. Fan out one send per recipient and report each failed recipient; [send outcomes](reference/cli.md#message-send) owns exact diagnostics.
+Retain the committed message ID. Send each body once; the recipient's runner delivers and retries the preview on its own. Recipients record deferred actions when their poll consumes the message. Fan out one send per recipient and report each failed recipient; [send outcomes](reference/cli.md#message-send) owns exact diagnostics.
 
 ## Poll
 

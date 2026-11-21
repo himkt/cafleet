@@ -131,7 +131,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
-| `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
+| `message send` | Persist a point-to-point message for the recipient's runner to preview | Sender/recipient flags | yes |
 | `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
 | `message listen` | Notify pending messages through stdout | `MEMBER_ID` | JSONL only |
 | `message show` | Read one message | `MESSAGE_ID` | yes |
@@ -168,7 +168,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `fleet list` | `FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT` columns | Fleet records |
 | `fleet show` | Fleet row with `deleted_at:` | Fleet including nullable `deleted_at` |
 | `fleet delete` | `Deleted fleet ID. Deregistered N members.` plus one line per ordinary member | `{fleet_id, deregistered_count, members}` |
-| `message send` | `Message sent.` then envelope, delivery line and any input line | `{message, notification_sent, input_id, delivery}` |
+| `message send` | `Message sent.` then envelope | `{message}` |
 | `message poll` | Envelopes, or `No messages found.` | Full record array |
 | `message show` | Envelope | `{message}` |
 | `message listen` | — | Tagged `ready`, `pending`, `closed` JSONL records; no `--json` flag |
@@ -769,45 +769,9 @@ A registry-query failure still prints every other check and exits 1 with `Error:
 
 `cafleet message send --from-member-id ID --to-member-id ID (TEXT | --file PATH) [--json]`
 
-Resolve the complete text body, including a `--file -` stdin wait, before starting the five-second persistence/notification budget. Persist one point-to-point delivery, then evaluate delivery for it by recipient, first match wins:
+Resolve the complete text body, including a `--file -` stdin wait, before starting the five-second persistence budget. Persist one point-to-point delivery and return; the send writes no pane input and waits for no delivery. An ordinary member's runner types the pending message at its next preview sweep (§6.5 Push notifications; §6.9 Runner pending-preview sweep), and the recipient's poll reads it whether or not a preview reached its pane. A self-send is committed with its notification stamp set, so no runner types it; a message to a root Director reaches it through its own reception (§6.5 Push notifications).
 
-| Recipient | Delivery evaluation | `delivery` | `input_id` |
-|---|---|---|---|
-| The sender itself (equal sender and recipient IDs), even an ordinary member with a healthy wrapped pane | Persists only in the broker | `{"status":"not_applicable","method":null,"reason":"self_send"}` | `null` |
-| Another sender's root Director | §6.5 Push notifications, with no pane-delivery diagnostic and no multiplexer requirement | `{"status":"not_applicable","method":null,"reason":"director_stdout"}` | `null` |
-| An ordinary member | Drain its pending messages oldest-first into its concrete pane within the remaining budget, the new message included | The projection of this invocation's evaluation of the new message | The receipt's ID when allocated |
-
-§6.5 Push notifications specifies the line, the drain and under-lock revalidation. A committed send exits 0 with its stdout record; a queued, held or unavailable ordinary-member notification leaves `notification_sent=false`. `notification_sent` is `true` exactly when this invocation submitted the newly committed message, including after draining an older one. When another invocation delivered it, `notification_sent` stays `false` with no stderr diagnostic; the recipient still received the line. An exhausted attempt preserves any committed sent prefix and reports the failure with its current receipt context. The recipient's runner retries messages still pending: a preview it accepted into its queue retries itself (§6.9 Runner-owned deferred delivery), and its pending-preview sweep retries every other unnotified pending message (§6.9 Runner pending-preview sweep), as does the next send to that recipient.
-
-JSON is ordered `message,notification_sent,input_id,delivery`. `input_id` is the nullable durable input ID of the new message's preview receipt, and `delivery` is the shared delivery projection (§6.9 Delivery reporting) for the new message, even when the invocation also retries an older one. Text output appends the delivery and input lines of §6.3 Runtime presentation after the envelope.
-
-###### Delivery outcome
-
-A notification failure prints `Message NEW_ID was persisted. ` followed by its diagnostic on stderr; stdout and exit 0 are unchanged. Every per-attempt failure uses this diagnostic:
-
-```text
-message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; member MEMBER_ID's runner retries it.
-```
-
-For each attempted message left in the composer or held by its own in-progress, uncertain or abandoned receipt, print one scoped diagnostic after that same persisted prefix. `INPUT_ID` identifies this invocation's attempt N and `NEXT_ID` its atomic re-delivery successor; the new message's JSON still projects N, not its successor. Submitted and queued messages produce none.
-
-| Outcome | Diagnostic |
-|---|---|
-| Left stage `partial` | `message MESSAGE_ID was partly typed into member MEMBER_ID's composer and not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Held by its own in-progress receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is in progress; inspect it with cafleet input show INPUT_ID --json.` |
-| Left stage `literal_complete` | `message MESSAGE_ID was typed into member MEMBER_ID's composer but not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Left stage `submitted` | `message MESSAGE_ID was typed into member MEMBER_ID's composer and its submit key sent, but the submission was not confirmed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Left stage `escape_only` | `message MESSAGE_ID was not typed: Escape was sent to member MEMBER_ID but the input was not typed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Held by its own uncertain receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is uncertain (STOP_CAUSE); inspect it with cafleet input show INPUT_ID --json and reconcile it with cafleet input reconcile.` |
-| Held after `abandoned_uncertain` | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID was abandoned as uncertain; send its content again as a new message if it is still needed.` |
-
-| Failure | `CAUSE` |
-|---|---|
-| The pane input lock stays busy through the lock wait (§6.5 Pane input lock) | `pane input remained busy` |
-| Runner lock, transport or submission failure | The runner error text with known run/input context |
-| Database busy or deadline exceeded during the under-lock snapshot or notification stamp | The storage error text; names the current candidate, or the candidate from placement revalidation when selection has not completed |
-
-Other failures, including corrupt, incompatible or unreadable storage and a termination-span start failure, retain their causes after the persisted prefix. Storage failure before commit exits 1 with its cause.
+JSON is `{message}`. Storage failure before commit exits 1 with its cause.
 
 ##### `message poll`
 
@@ -1050,7 +1014,7 @@ A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queu
 
 Pre-write error, including a held runner reply: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
 
-A stopped complete prefix on a verified-composer run exits 1 as `left_in_composer`, with its recorded cause, method and input ID (§6.3 Error Messages). Prompt input requires a deliberate retry. Oversized input without safe framing is refused before reservation or bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` and publishes its result (§6.9 Measured submission plans and settle intervals). Insufficient immediate-attempt budget accepts a zero-byte queue entry with reason `delivery_budget_exhausted`.
+A prompt whose staged write stops or whose submission is not confirmed records `uncertain` and exits 1 with its recorded cause, method and input ID (§6.3 Runtime presentation). Prompt input requires a deliberate retry. Oversized input without safe framing is refused before reservation or bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` and publishes its result (§6.9 Measured submission plans and settle intervals). Insufficient immediate-attempt budget accepts a zero-byte queue entry with reason `delivery_budget_exhausted`.
 
 ##### `member exec`
 
@@ -1074,7 +1038,7 @@ Ordered JSON is:
 | Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
-An exec stopped at a complete prefix on a verified-composer run exits 1 as `left_in_composer` (§6.3 Error Messages) and requires a deliberate retry. An immediate oversized command with no safe framing is refused with zero bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` with a result event. Insufficient immediate budget queues with reason `delivery_budget_exhausted` (§6.9 Measured submission plans and settle intervals).
+An exec whose staged write stops or whose submission is not confirmed records `uncertain`, exits 1 and requires a deliberate retry. An immediate oversized command with no safe framing is refused with zero bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` with a result event. Insufficient immediate budget queues with reason `delivery_budget_exhausted` (§6.9 Measured submission plans and settle intervals).
 
 The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. A wrapped operation durably records its operation key, payload digest and submission state; the receipt contains no command text. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
 
@@ -1131,17 +1095,17 @@ JSON stamps `captured_at` from the local UTC clock at the capture read boundary 
 
 #### Runtime presentation
 
-Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record (§6.9 Effective policy record) or null. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. A settled `left_in_composer` input is absent from this list; its queued successor is present. These are registry reads and make no live-health claim.
+Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record (§6.9 Effective policy record) or null. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These are registry reads and make no live-health claim.
 
-Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STATUS` row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. Prompt/exec/send JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable` or `idle_timeout`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input`, `redelivery` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain or left-in-composer error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STATUS` row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
 `cafleet event show EVENT_ID [--json]` returns ordered `event,notification_state,message_id,archive_reason,run,interaction`. `input_delivery_result` and `input_delivery_stalled` expose their complete receipt/recovery fields (§6.9 Input delivery result event; §6.9 Input delivery stalled event). The event is the complete versioned runtime payload (§6.9 Persistence, notification and read interfaces), run is the current runtime summary, and nullable interaction contains the stored interaction fields in the interaction field order below. Text is `Event: EVENT_ID run=RUN_ID seq=EVENT_SEQ kind=KIND notification=STATE message=MESSAGE_ID` followed by the runtime summary line and `Interaction: INTERACTION_ID classification=CLASS closed_at=TIMESTAMP close_reason=REASON` when linked.
 
-`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,stop_cause,left_stage`. The nullable audit object and additional text line follow the permission contract (§6.3 Permission-response audit output). `delivery` is the ordered `status,method,reason` projection of the stored receipt (§6.9 Delivery reporting), or null for a permission response; `deferred_at` and `defer_reason` are null together unless the runner queued the input. `stop_cause` is the cause the runner recorded when the input stopped as `uncertain` or `left_in_composer` (§6.9 Stop cause), retained through settlement, or null when no cause was recorded. `left_stage` is null except for a left-in-composer disposition and otherwise names its durable written stage (§6.9 Stop cause). Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`.
+`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,stop_cause`. The nullable audit object and additional text line follow the permission contract (§6.3 Permission-response audit output). `delivery` is the ordered `status,method,reason` projection of the stored receipt (§6.9 Delivery reporting), or null for a permission response; `deferred_at` and `defer_reason` are null together unless the runner queued the input. `stop_cause` is the cause the runner recorded when the input stopped as `uncertain` (§6.9 Stop cause), retained through settlement, or null when no cause was recorded. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION`.
 
-Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the receipt contract (§6.9 Durable input receipts and settlement). The runner settles `left_in_composer` itself and atomically queues preview re-delivery; it needs no reconciliation. Require a nonempty evidence reference. A settled ordinary receipt with the same disposition returns its original row and evidence reference before live work; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. Owner synchronization and CAS settlement follow §6.9 Durable input receipts and settlement; uncertainty persists while the owner is unreachable or an active writer cannot be ruled out.
+Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the receipt contract (§6.9 Durable input receipts and settlement). Require a nonempty evidence reference. A settled ordinary receipt with the same disposition returns its original row and evidence reference before live work; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. Owner synchronization and CAS settlement follow §6.9 Durable input receipts and settlement; uncertainty persists while the owner is unreachable or an active writer cannot be ruled out.
 
 All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
 
@@ -1272,11 +1236,6 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
 | `input reconcile` | The pinned input has no recorded placement (deregistered member or deleted fleet), so no live runner can synchronize the receipt; the receipt stays uncertain (§6.9 Durable input receipts and settlement) | `Error: receipt reconciliation requires the member's live runner; the input stays uncertain` | 1 |
 | (runner queue housekeeping) | A queued receipt is no longer `ready`; the runner fences ordinary input (§6.9 Queue housekeeping) | `queued input INPUT_ID changed to STATE outside the runner queue` | — |
-| Preview delivery | A latest `left_in_composer` attempt has no atomic re-delivery successor | `Error: preview input INPUT_ID was left in the composer without a re-delivery attempt` | 1 |
-| `member prompt` | Complete text left in the composer | `Error: prompt delivery to member ID was not submitted: STOP_CAUSE (method=METHOD); the typed text stays in the member's composer. Inspect the pane before retrying.` | 1 |
-| `member exec` | Complete text left in the composer | `Error: native command delivery to member ID was not submitted: STOP_CAUSE (method=METHOD); the typed text stays in the member's composer. Inspect the pane before retrying.` | 1 |
-| `member prompt` | Only fallback Escape was written | `Error: prompt delivery to member ID was not submitted: STOP_CAUSE (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying.` | 1 |
-| `member exec` | Only fallback Escape was written | `Error: native command delivery to member ID was not submitted: STOP_CAUSE (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying.` | 1 |
 | `member prompt` / `member exec` | Above the plain-input limit and profile framing is `plain`; CAUSE in the command's pre-write error | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the BACKEND profile has no bracketed-paste delivery` | 1 |
 | `member prompt` / `member exec` | Above the plain-input limit and profile framing is `bracketed_paste`, but mode 2004 is off; CAUSE in the pre-write error | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the native CLI has not enabled bracketed paste` | 1 |
 | `fleet create` | No tmux server, the pane is not on the chosen server, a malformed `--pane`, or without `--pane` a shared-server caller or an unset or unverifiable env pane; before any write | §6.3 `fleet create` | 1 |
@@ -1349,7 +1308,7 @@ The ordered public record is:
 
 #### Rendered shape
 
-§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records it consumed; show wraps one record as `message`; send adds `notification_sent`; listen carries message IDs, not the full record, in tagged `pending` notices, with separate `ready`/`closed` lifecycle records, and leaves consumption to the poll the notice prompts. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
+§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records it consumed; show wraps one record as `message`; send wraps the stored record as `message`; listen carries message IDs, not the full record, in tagged `pending` notices, with separate `ready`/`closed` lifecycle records, and leaves consumption to the poll the notice prompts. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
 
 ##### Text-mode projection
 
@@ -1471,7 +1430,6 @@ No database statement runs while a writer waits for the lock.
 
 | Writer | Lock still busy when the wait ends |
 |---|---|
-| `message send` delivery | The §6.3 Delivery outcome diagnostic with `CAUSE` `pane input remained busy` |
 | `member prompt`, `member exec` | Exit 1 with the runner input failure and recorded runtime context (§6.3 Runtime presentation) |
 | `member press` | Exit 1 with the primary and zero-dispatch diagnostics (§6.3 `member press`) |
 
@@ -1483,7 +1441,6 @@ Interrupting a host turn, including through Escape-first delivery fallback, can 
 
 | Command | Span |
 |---|---|
-| `message send` | From lock acquisition through the last `notified_at` stamp |
 | `member prompt`, `member exec` | From the runner request through its reply |
 | `member press` | Begin before acquiring the lock; retain it through the writing process and bounded cleanup, releasing the lock before restoring signals |
 | `member create` | From fleet layout lock acquisition (§ Fleet window layout) through `started` or the end of its compensation |
@@ -1495,7 +1452,6 @@ Every span is bounded by its own deadline, so a deferred signal waits at most on
 
 | Killed command | State left | Discovery and recovery |
 |---|---|---|
-| `message send` between first keystroke and stamp | `notified_at` stays NULL; the line may or may not have reached the pane | The recipient's runner sweep (§6.9 Runner pending-preview sweep) or the next send retries it; a duplicate line is possible |
 | `member prompt` / `member exec` after typing began | Partial or complete input | `member capture`; re-dispatch only after inspecting the pane |
 | `member press` after its writing process starts | Any prefix, including empty or complete, may have been handled | Inspect the pane before an explicitly authorized new action |
 | `member create` | A pane without a registry row, or a row whose placement stays pending; the OS releases the fleet layout lock, and a consumed overflow ordinal stays consumed | `member list` and `member capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
@@ -1546,7 +1502,7 @@ A started write with an ambiguous result retains uncertainty; failure after subm
 
 #### Push notifications
 
-Active ordinary recipients with concrete panes receive previews through their recorded transport. The root Director receives through native `message listen` (§6.3) or manual broker reads, with zero automatic pane input. Self-sends persist without pane input. §6.3 `message send` owns `notification_sent`, exact output and errors; §6.9 Runner pending-preview sweep owns the retry of previews still pending after the send.
+Active ordinary recipients with concrete panes receive previews from their own runner: `message send` only stores the message (§6.3 `message send`), and the recipient's runner types each pending message at its next preview sweep (§6.9 Runner pending-preview sweep). The root Director receives through native `message listen` (§6.3) or manual broker reads, with zero automatic pane input. Self-sends persist without pane input. A member with no live runner keeps its messages pending.
 
 Profile delivery submits unchanged the canonical wrapped preview, this exact line ending with the resume clause:
 
@@ -1562,30 +1518,13 @@ Delivery fallback (§6.9 Delivery method and interaction priority), whose submis
 
 Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, where N counts stored text and `RECIPIENT_ID` is the message's `to_member_id`. The pointer is identical for every database and never carries `--database-url`. A preview above its selected profile's measured plain-input limit uses bracketed paste when declared and enabled, otherwise this same pointer form (§6.9 Measured submission plans and settle intervals). This limit is independent of the 200-codepoint text-output limit (§6.4 Text-mode projection). The runner renders the form from the selected delivery method before its first byte.
 
-One synchronous drain uses a five-second attempt budget and the runtime pane-lock protocol, committing short read snapshots before socket I/O.
-
-1. Read recipient/message eligibility, excluding the root Director before preview selection or pane locking. An inactive/ineligible recipient, fleet mismatch or no pending row ends the attempt. Pending placement holds the recipient.
-2. Query the message's latest durable attempt before live eligibility, using `preview:<run_id>:<message_id>:<attempt>` and §6.9 Durable input receipts and settlement. Apply its latest-attempt table, including per-message holds and automatic N+1 after not-submitted settlement; accepted history settles without typing. Capture one expiration from the original deadline for every submitting, queueing, settling or retiring path.
-3. Revalidate activity, member kind, fleet, concrete placement, message status and notification stamp before runner submission; the runtime input protocol acquires and revalidates the shared pane lock for actual stages. Changed placement holds delivery.
-4. A new input attempt requires a fresh pinned run identity/epoch and socket health; retained accepted history proceeds to settlement.
-5. Select the oldest unattempted pending message by `(created_at,message_id)` and revalidate the recipient/placement. Each invocation attempts it at most once; query its durable receipt before current input eligibility.
-6. A new attempt sends the canonical base preview to the runner, which reserves the receipt, then submits it immediately, queues it with zero bytes or holds it (§6.9 Delivery method and interaction priority). An immediate submission commits its durable in-progress row and selected method before child bytes, then records accepted, uncertain or left-in-composer outcome under §6.9 Stop cause. Reuse the captured expiration for submission and any later retirement.
-7. Settle accepted delivery in one transaction that stamps `notified_at` or verifies consumption and marks the receipt settled/submitted. The serialized service verifies that same durable settled/submitted receipt and excludes every active pending writer before removing an unleased cache entry with no available attempt permit. Retirement uses the remaining original expiration and sends zero native bytes. Failure after possible input preserves the actual receipt state and notification stamp for reconciliation.
-8. Continue at step 5 while the budget and input state permit. The runner evaluates each new attempt afresh; a request queued behind an earlier queued input receives the same queued result.
-
-A retirement failure after settlement preserves the committed sent prefix and `notification_sent=true`. Report `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining known run/input/key context and the original cause. This warning uses the attempt error shape; durable settlement remains authoritative and grants no submission replay.
-
-The lock owner retains the lock through final submission/settlement. Wrapped delivery follows the durable input contract (§6.9 Input arbitration and the original native answer); only absent receipts or certified ready/zero-byte state permit a new eligible attempt.
-
-The notification diagnostic (§6.3 Delivery outcome) applies to failed input attempts and database contention, retaining actual causes and the committed message. Mandatory finalization uses the later of the original deadline and one second after finalization begins, while the transport stays within its original deadline. Other fatal storage errors retain their cause; a send preserves its committed result.
+The runner stamps `notified_at` once a preview is submitted: confirmed by post-submit verification on a verified-composer run, or with every stage written on a run without composer verification, where an uncertain preview is also stamped before its result is published (§6.9 Runner pending-preview sweep).
 
 Delivery leaves `status_state` unchanged: an inline or pointer preview stays `input_required` until its recipient polls, and the consuming poll identifies consumption independently of input delivery.
 
 ##### Held delivery
 
-The runner queues a wrapped preview with zero bytes and a durable ready receipt, or selects delivery fallback, under the ordered rules of §6.9 Delivery method and interaction priority, and retries a queued preview itself (§6.9 Runner-owned deferred delivery). Wrapped delivery stays held, with no queue acceptance or write, for a degraded/recovering/lost observer, unavailable ownership or storage, uncertain reachability or this message's own uncertain receipt, pending placement or a placement change under the lock. On a verified-composer run, a held message's uncertain/abandoned receipt permits draining later messages; other holds end the drain (§6.9 Durable input receipts and settlement). Queued and held delivery leave `notified_at` unset, report no successful notification, create no new permission event and grant no native answer.
-
-A message stays pending while the lock stays busy (contention waits within the attempt budget), the pane is not yet placed, the budget runs out or an attempt fails; the recipient's runner sweep (§6.9 Runner pending-preview sweep) retries it with no caller command, as does the next send to that ordinary recipient. Transport and stamp failures after persistence remain diagnostics alongside a successful send result; no notification outcome erases a committed delivery.
+A preview stays pending, with `notified_at` unset, while the recipient's composer is not verified empty on a verified-composer run, an interaction is open, the runner's FIFO holds prompt or exec input or is stopped, the observer is degraded, ownership or storage is unavailable, the pane is not yet placed or the pane input lock is busy; the runner's sweep retries it with no caller command. Pending delivery creates no permission event and grants no native answer.
 
 ##### Accepted trade-offs
 
@@ -1601,9 +1540,10 @@ These trade-offs apply to delivery fallback, which leads with Escape. A single E
 
 Verified-composer delivery additionally accepts these trade-offs (§6.9 Durable input receipts and settlement):
 
-- Re-delivery can duplicate a line after a human or Director Enter submitted the retained literal; recipients deduplicate by message ID.
-- While the held composer is set, every queue head waits for a verified empty composer, exempt from `idle_timeout`; later previews, prompts and execs remain queued until clearing or submission verifies empty.
-- A composer rule that never verifies empty after clearing keeps heads waiting. `input_delivery_stalled` signals the Director after 3 minutes; recovery inspects the whole literal and presses Enter when appropriate, sends other keys the capture shows are needed, or asks the user to clear or submit the composer, and reconciles uncertain input from that evidence. A composer that never verifies empty after clearing is a profile defect reported for correction.
+- A preview whose submission is uncertain is typed again once the composer is verified empty, so a recipient can see it twice, for example after a human or Director Enter submitted the typed line; recipients deduplicate by message ID.
+- A human draft blocks previews until it is cleared or submitted.
+- After a prompt or exec records `uncertain`, no preview and no queued input reaches the member until `input reconcile` settles it (§6.9 Runner-owned deferred delivery).
+- A composer rule that never verifies empty after clearing keeps previews and queued input waiting. `input_delivery_stalled` signals the Director after 3 minutes; recovery inspects the whole literal and presses Enter when appropriate, sends other keys the capture shows are needed, or asks the user to clear or submit the composer, and reconciles uncertain input from that evidence. A composer that never verifies empty after clearing is a profile defect reported for correction.
 - A human key during the post-submit verification window can make the composer nonempty, producing `submit_unconfirmed` and duplicate delivery.
 
 #### Multiplexer context
@@ -3178,9 +3118,9 @@ A verified-composer run is one whose recorded backend and native version select 
 1. Revalidate run, placement, observer and interaction state, then durably reserve the input before any child byte.
 2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to the pre-write wait without settling; each further chunk needs a fresh write authorization after fresh ordinary draining and keyboard/pointer/interaction/observer/accounting checks.
 3. Start the 500 ms settle only after the last literal chunk, including any closing paste marker. Service child output, outer input and control traffic throughout it.
-4. Revalidate identity, interaction state and keyboard generation; pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget stops as `left_in_composer/deadline_expired`, stage `literal_complete`.
+4. Revalidate identity, interaction state and keyboard generation; pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget stops as `uncertain/deadline_expired`, stage `literal_complete`.
 5. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
-6. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `left_in_composer/submit_unconfirmed`, stage `submitted`.
+6. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `uncertain/submit_unconfirmed`, stage `submitted`.
 
 Keyboard input during verification reaches the child; a resulting nonempty composer can cause `submit_unconfirmed` and duplicate preview delivery (§6.5 Accepted trade-offs). A run without composer verification records `accepted` after the complete submit key, records every staged stop as `uncertain`, automatically re-delivers nothing and keeps the FIFO stopped until reconciliation. Pointer classification, chunk continuation and zero-byte selection still apply.
 
@@ -3554,20 +3494,7 @@ The `director_action.instruction` is: "Verify this event. Automatic review is un
 
 ##### Input delivery result event
 
-The runner emits one `input_delivery_result` event to the run's Director for a deferred input's first submitted, not-submitted, uncertain or left-in-composer result, and for every immediate stopped staged write (`uncertain` or `left_in_composer`), except a retried preview result (below). It creates no interaction row and carries no literal payload. Immediate submitted results remain in command output and receipts only.
-
-A *retried preview result* is a preview receipt settled `not_submitted` whose message stays pending for a runner sweep (§ Runner pending-preview sweep) or is already consumed. Durable receipt fields alone define the set, so a send-originated preview, a re-delivery successor and a sweep attempt are treated alike. One predicate over kind plus delivery status and reason defines it, and both live publication and the shutdown/recovery scan for unpublished results apply it:
-
-| Receipt | Delivery | Reason | `input_delivery_result` |
-|---|---|---|---|
-| `kind=preview` | `not_submitted` | `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted` | None; the sweep retries the still-pending message |
-| `kind=preview` | `not_submitted` | `runner_stopped`, `runner_lost` | None; the next run's sweep retries the still-pending message |
-| `kind=preview` | `not_submitted` | `message_consumed` | None; the member's poll already consumed the message |
-| `kind=preview` | `not_submitted` | `target_inactive`, `target_changed` | Published |
-| Any kind | `left_in_composer`, `uncertain`, or submitted after deferral | — | Published |
-| `prompt`, `exec` | `not_submitted` (any reason) | — | Published |
-
-`input show` reports every receipt, including those whose result is not published.
+The runner emits one `input_delivery_result` event to the run's Director for a deferred prompt or exec input's first submitted, not-submitted or uncertain result, for every immediate prompt or exec stopped staged write (`uncertain`), and for an uncertain preview (below). It creates no interaction row and carries no literal payload. Immediate submitted results remain in command output and receipts only, and `input show` reports every receipt.
 
 | Field | Value |
 |---|---|
@@ -3576,22 +3503,16 @@ A *retried preview result* is a preview receipt settled `not_submitted` whose me
 | `source` | `runner_lifecycle` |
 | `decision_outcome` | `"unknown"` |
 | `evidence` | The run's ordered evidence object with null screen-derived fields |
-| `cause` | `{"kind":STOP_CAUSE}` whenever the receipt records `stop_cause` (§ Stop cause), absent otherwise; live and recovery publishers derive it from the durable receipt |
-| `input_id` | The stopped or deferred input's ID |
-| `message_id` | The preview's message ID, or null for explicit prompt/exec input |
-| `delivery` | The ordered `status,method,reason` projection of the stored receipt (§ Delivery reporting) |
+| `cause` | `{"kind":STOP_CAUSE}` whenever a stop cause is recorded (§ Stop cause), absent otherwise; for prompt and exec, live and recovery publishers derive it from the durable receipt |
+| `input_id` | The prompt or exec input's ID, or null for a preview |
+| `message_id` | The preview's message ID, or null for prompt and exec input |
+| `delivery` | The ordered `status,method,reason` projection of the stored receipt (§ Delivery reporting); for a preview, `{"status":"uncertain","method":METHOD,"reason":null}` |
 | `stage` | `zero_bytes`, `escape_only`, `partial`, `literal_complete`, `submitted` or `unknown` |
-| `director_action` | `review_left_input` below for a qualifying whole literal; null otherwise |
+| `director_action` | `null` |
 
-The terminal receipt and any preview notification stamp are the durable source: publication follows commit, recovery publishes missing first results, and run/input identity deduplicates through shutdown and recovery. Shutdown publishes pending results before `runner_exited`; event listen/poll injects no Director-pane input.
+For prompt and exec, the terminal receipt is the durable source: publication follows commit, recovery publishes missing first results, and run/input identity deduplicates through shutdown and recovery. Shutdown publishes pending results before `runner_exited`; event listen/poll injects no Director-pane input.
 
-Only `left_in_composer` with stage `literal_complete` or `submitted` and cause `observer_unavailable`, `deadline_expired` or `submit_unconfirmed` carries this durable-receipt-derived action:
-
-```json
-{"kind":"review_left_input","instruction":"Capture the member's pane and confirm with member show that no interaction is current. When its composer holds exactly this input's whole text, submit it with press_argv; otherwise ask the user to clear or submit the composer on the member's native surface.","press_argv":["cafleet","member","press","MEMBER_ID","--from-member-id","DIRECTOR_ID","Enter"]}
-```
-
-Build argv from validated stored identities and append `--database-url URL` for a non-default database. Interaction stops, manual/accounting stops, partial and Escape-only stages have null action because Enter could answer a form, interrupt a human or submit truncated text.
+**Uncertain preview.** A sweep preview attempt that stops, or whose submission is not confirmed, is uncertain. The runner keeps its stage and cause in memory and publishes one event with `input_id` null, `message_id` the message, `delivery` `{"status":"uncertain","method":METHOD,"reason":null}`, `stage` the written stage, `cause` the stop cause and `director_action` null, deduplicated by run plus `message_id`. On a verified-composer run the message stays unnotified and the sweep types it again once the composer is verified empty; on a run without composer verification the runner stamps `notified_at` first and then publishes the event, so the preview is not typed again. The live runner is the event's only publisher: recovery publishes no preview result, so an event lost to a runner crash between stamp and publication is covered by the run's `runner_lost` event, and the message itself stays in the recipient's inbox for `message poll`, since a preview only notifies. An uncertain preview never stops the FIFO; the FIFO stop (§ Runner-owned deferred delivery) covers only prompt and exec.
 
 ##### Input delivery stalled event
 
@@ -3605,15 +3526,14 @@ Queue housekeeping (§ Queue housekeeping) publishes one `input_delivery_stalled
 | `decision_outcome` | `"unknown"` |
 | `evidence` | Ordered run evidence with null screen-derived fields |
 | `input_id` | Waiting head input ID |
-| `message_id` | Head preview message ID, or null for prompt/exec |
 | `blocking_input_id` | The receipt the cause names, or null (cause table below) |
 | `waiting_since` | UTC RFC 3339 `head_since` of the waiting head |
 | `delivery` | Head receipt's ordered `status,method,reason` projection, status `queued` |
 | `cause` | `{"kind":KIND,"detail":DETAIL}`, after `delivery` |
-| `director_action` | `review_stalled_input` for cause `held_composer`, `review_stalled_queue` for every other cause (below) |
+| `director_action` | `review_stalled_queue` (below) |
 
 ```json
-{"input_id": 4805, "message_id": 6723, "blocking_input_id": 4804,
+{"input_id": 4805, "blocking_input_id": 4804,
  "waiting_since": "2026-11-19T12:04:08Z",
  "delivery": {"status": "queued", "method": null, "reason": "earlier_input"},
  "cause": {"kind": "unresolved_input", "detail": null}}
@@ -3624,8 +3544,7 @@ Housekeeping derives the cause at publication time from the first row that holds
 | `cause.kind` | Source | Holds when | `blocking_input_id` | `detail` |
 |---|---|---|---|---|
 | `immediate_attempt` | live | A client-owned immediate attempt or a preview sweep attempt is in flight | Its receipt when reserved, else `null` | `null` |
-| `pending_finalization` | live | A pending zero-byte finalization or notification-stamp retry is set | That receipt | `null` |
-| `held_composer` | live | The held composer is set | The held blocker | `null` |
+| `pending_finalization` | live | A pending zero-byte finalization is set | That receipt | `null` |
 | `unresolved_input` | live | Another ordinary receipt of the run is `in_progress` | That receipt, lowest ID | `null` |
 | `drain_pending` | live | The latest queue turn's input drain was *pending* | `null` | The drain blocker string, e.g. `terminal reply pending` |
 | `pane_input_busy` | recorded | Obstacle `pane_input_busy`, e.g. a `member press` holding the lock | `null` | `null` |
@@ -3639,26 +3558,19 @@ Housekeeping derives the cause at publication time from the first row that holds
 
 | `cause.kind` | `blocking_input_id` rule |
 |---|---|
-| `held_composer` | Non-null, differs from the head, and is an ordinary receipt with a recorded method that is `in_progress` or `uncertain`, settled `left_in_composer` past `escape_only`, or settled otherwise with a nonblank evidence reference |
 | `pending_finalization`, `unresolved_input` | Non-null; a receipt of the same run, differing from the head |
 | `immediate_attempt` | Null, or a receipt of the same run differing from the head |
 | Every other kind | Null |
 
 The outbox reconstruction carries the `cause` object together with `input_id`, `blocking_input_id` and `waiting_since`.
 
-For `held_composer`, `director_action` is `{"kind":"review_stalled_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKING_INPUT_ID","--json"],"press_argv":PRESS_ARGV}`, and INSTRUCTION is exactly:
-
-```text
-Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.
-```
-
-For every other cause, `director_action` is `{"kind":"review_stalled_queue","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","INPUT_ID","--json"]}`, where `INPUT_ID` is the waiting head, and INSTRUCTION is exactly:
+For every cause, `director_action` is `{"kind":"review_stalled_queue","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","INPUT_ID","--json"]}`, where `INPUT_ID` is the waiting head, and INSTRUCTION is exactly:
 
 ```text
 Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.
 ```
 
-A verified empty composer resumes the FIFO and the waiting head delivers on the next queue turn; when the member's poll already consumed the head's message, housekeeping instead cancels it as `not_submitted/message_consumed`. PRESS_ARGV is the `review_left_input` argv only when the blocker qualifies for that action, otherwise null. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later head can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication.
+A verified empty composer resumes the FIFO and the waiting head delivers on the next queue turn. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later head can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication.
 
 ##### Effective policy record
 
@@ -3743,9 +3655,9 @@ Durability begins at a successful SQLite commit; a spooled record is recoverable
 
 #### Input arbitration and the original native answer
 
-For a runner-managed member, every CAFleet-generated preview, `member prompt` and `member exec` goes through the pinned runner control socket instead of multiplexer pane input. The client validates and submits without holding the outer pane input lock while awaiting the runner. The runner owns that lock for wrapped writes: it acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and holds it across an active staged write, so explicit press, deletion and other programmatic writers serialize; it releases the lock while a request is only queued. Its own terminal-state loop serializes the final check and child writes.
+For a runner-managed member, every `member prompt` and `member exec` goes through the pinned runner control socket instead of multiplexer pane input, and the runner's own sweep types previews (§ Runner pending-preview sweep). The client validates and submits without holding the outer pane input lock while awaiting the runner. The runner owns that lock for wrapped writes: it acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and holds it across an active staged write, so explicit press, deletion and other programmatic writers serialize; it releases the lock while a request is only queued. Its own terminal-state loop serializes the final check and child writes.
 
-Control frames are length-prefixed JSON with protocol version, run/nonce/owner epoch, operation key, kind and literal payload. A four-byte unsigned big-endian prefix encodes the serialized UTF-8 JSON body length; the inclusive 65536-byte (64 KiB) body limit excludes that prefix, and an oversized declared length fails immediately after the header is read. Requests and replies require the top-level integer `protocol_version: 1`; missing or unsupported versions and truncated frames fail explicitly. § Input control frames and deadlines lists the complete set of request kinds and `receipt` actions. Submission replies distinguish `accepted`, `queued`, `held`, `rejected`, `uncertain` and `left_in_composer`, carrying a nullable input ID, output-sequence evidence, byte/submission stage and the delivery projection; the ID is null for a zero-byte attempt with no durable row, and `queued` preserves zero-byte stage evidence. Conflicting reuse of an operation key with another payload digest fails; store no literal prompt/command in the receipt table.
+Control frames are length-prefixed JSON with protocol version, run/nonce/owner epoch, operation key, kind and literal payload. A four-byte unsigned big-endian prefix encodes the serialized UTF-8 JSON body length; the inclusive 65536-byte (64 KiB) body limit excludes that prefix, and an oversized declared length fails immediately after the header is read. Requests and replies require the top-level integer `protocol_version: 1`; missing or unsupported versions and truncated frames fail explicitly. § Input control frames and deadlines lists the complete set of request kinds and `receipt` actions. Submission replies distinguish `accepted`, `queued`, `held`, `rejected` and `uncertain`, carrying a nullable input ID, output-sequence evidence, byte/submission stage and the delivery projection; the ID is null for a zero-byte attempt with no durable row, and `queued` preserves zero-byte stage evidence. Conflicting reuse of an operation key with another payload digest fails; store no literal prompt/command in the receipt table.
 
 ##### Input control frames and deadlines
 
@@ -3753,15 +3665,15 @@ New input, permission and receipt requests require top-level `protocol_version,k
 
 | Kind | Additional exact fields |
 |---|---|
-| `submit_prompt` | `operation_key,input_kind,message_id,literal`; input_kind is preview or prompt. |
-| `submit_exec` | `operation_key,input_kind,message_id,literal`; input_kind is exec. |
+| `submit_prompt` | `operation_key,input_kind,literal`; input_kind is prompt. |
+| `submit_exec` | `operation_key,input_kind,literal`; input_kind is exec. |
 | `permission_inspect` | `interaction_id,event_id,director_member_id`. |
 | `permission_respond` | `interaction_id,event_id,director_member_id,expected_run_id,expected_owner_epoch,request_token,decision,decision_source,director_mode,mode_evidence_ref,decision_evidence_ref,operation_key`. |
 | `receipt`, action `query` | `action,operation_key`. |
 | `receipt`, action `retire` | `action,input_id`. |
 | `receipt`, action `reconcile` | `action,input_id,expected_state,disposition,evidence_ref`. |
 
-Preview requires a positive message ID; prompt/exec require null `message_id`. `literal` is the unchanged message/prompt/command text; the exec plan supplies its own `! ` prefix. Require nonblank operation keys, validate the ordinary single-line/control-character contract and enforce matching outer kind/input_kind. Permission IDs/expected epoch must agree with identity and the stored association. Reconcile is the Director-owned input coordinator's private action; its enum values match the durable state/disposition domains. Reject unknown, duplicate, missing or wrongly typed fields before effects. Lifecycle requests carry `protocol_version`, `kind` and `identity` and no `expires_at_mono_ns`: the handshake's `prepare` adds `remaining_ms` and `start` adds `pane_id`, and `health` and `shutdown` add nothing.
+`literal` is the unchanged prompt/command text; the exec plan supplies its own `! ` prefix. Require nonblank operation keys, validate the ordinary single-line/control-character contract and enforce matching outer kind/input_kind. Permission IDs/expected epoch must agree with identity and the stored association. Reconcile is the Director-owned input coordinator's private action; its enum values match the durable state/disposition domains. Reject unknown, duplicate, missing or wrongly typed fields before effects. Lifecycle requests carry `protocol_version`, `kind` and `identity` and no `expires_at_mono_ns`: the handshake's `prepare` adds `remaining_ms` and `start` adds `pane_id`, and `health` and `shutdown` add nothing.
 
 Replies retain exactly `protocol_version` plus one of `result` or textual `error`. Input results have exactly `kind` plus the following field: submission/`submission`, inspection/`request`, permission_response/`response`, or receipt/`receipt`. Submission contains exactly `status,input_id,stage,output_seq,reason,delivery`, where `delivery` is the ordered `status,method,reason` projection (§ Delivery reporting); permission response and inspection carry the complete ordered public objects fixed by the CLI contract. A receipt object has exactly `status,input_id,submission`: missing has null ID/submission; present has a positive ID and submission object; retired or settled has a positive ID and null submission. Result kind must match the requested operation. Clients validate and reload durable input/audit rows from their supplied database connection; socket receipt metadata never replaces durable identity.
 
@@ -3794,34 +3706,17 @@ Only a successful final check installs an opaque, single-use proof bound to its 
 
 ##### Durable input receipts and settlement
 
-Preview keys are exactly `preview:<run_id>:<message_id>:<attempt>`, independent of CLI invocation or connection. `preview_attempt` starts at 1, and each message's attempts share the canonical payload digest under distinct keys. Every sender, sweep and runner decision reads the latest attempt in the current run before live eligibility and applies the first matching row:
-
-| Latest attempt | Verified-composer run | Other run |
-|---|---|---|
-| Absent | Start attempt 1 | Start attempt 1 |
-| `ready` with deferred metadata | Skip this queued message for this invocation | Same |
-| `ready` without deferred metadata | Reuse its key and attempt; reevaluate zero-byte eligibility | Same |
-| `in_progress` or `uncertain` | Per-message hold; diagnose and continue with later pending messages | End the member's drain |
-| `accepted` or `settled/submitted` | Stamp or verify consumption and settle without typing | Same |
-| `settled/not_submitted` | Start attempt N+1 automatically | Same |
-| `settled/abandoned_uncertain` | Per-message hold; retries ended | End the member's drain |
-| `settled/left_in_composer` | Fail if it is latest: the runner must have atomically created its successor (§6.3 Error Messages) | Invalid on this run |
-
-Only the table's per-message holds, and the runner's uncertain/left-in-composer reply for this invocation on a verified-composer run, enter the drain's skip set. Other held/rejected runner results, unavailable pane/observer/ownership/storage, placement/run changes and all holds on other runs end the drain. A held/rejected zero-byte attempt creates no side-effect receipt; a reserved row returns to `ready` only after positively recording zero bytes. Conflicting key/digest reuse fails.
+A held/rejected zero-byte attempt creates no side-effect receipt; a reserved row returns to `ready` only after positively recording zero bytes. Conflicting key/digest reuse fails.
 
 An ordinary `receipt query` reads the durable operation for its fixed run/key and reports its durable status with the last real retained stage and output sequence. `missing` requires an absent durable row and absent matching cache entry. A durable row remains `present` after cache retirement; a cache entry without its durable reservation is an identity error. Validate the retained immutable input identity before using its stage. The receipt projection table in § Delivery reporting maps each durable receipt to its `submission.status` and its stage without a cache entry. With a matching retained entry, return its actual stage and output sequence alongside that durable status; otherwise the output sequence is null. Query preserves pending writers, clients, permits, receipts and native bytes. Its results describe observations: new write authority and zero-byte retirement proof still require their separate validated authorizations. A settled `not_submitted` or `abandoned_uncertain` disposition alone supplies no observed byte stage; its absent-cache result remains `unknown` and leaves the original transmission uncertainty intact.
 
-Before the first child byte, commit `in_progress` to `member_input_operations` under the current ownership epoch and bounded database budget. A failed commit permits zero child bytes. After writing, persist `accepted`, `uncertain` or `settled/left_in_composer` before promising that outcome; when that persistence fails, the runner records the row `uncertain/write_failed` (§ Immediate attempt failure bookkeeping) and returns uncertainty, and the row stays in progress only when that record also fails. The live runner may reconcile retained stage evidence into the same row. On a verified-composer run, recorded writes forming a complete prefix permit the runner to settle a stopped ordinary input as `left_in_composer` with `stop_cause` and `left_stage` in the transaction that clears its in-memory write authority (§ Stop cause); permission responses retain uncertainty.
+Before the first child byte, commit `in_progress` to `member_input_operations` under the current ownership epoch and bounded database budget. A failed commit permits zero child bytes. After writing, persist `accepted` or `uncertain` before promising that outcome; when that persistence fails, the runner records the row `uncertain/write_failed` (§ Immediate attempt failure bookkeeping) and returns uncertainty, and the row stays in progress only when that record also fails. The live runner may reconcile retained stage evidence into the same row. A stopped or unconfirmed prompt or exec records `uncertain` with its stop cause (§ Stop cause), exits 1 and is retried only by a deliberate action; the runner sends no second submit key and leaves composer clearing to the human or Director.
 
-Retire only the in-memory receipt after validating durable settlement, the current full run/owner and original run lock, exclusion of every active writer, and absence of a held write authorization or available attempt permit for that input. Cache absence is idempotent only after the same durable and ownership checks. For a preview, atomically stamp `notified_at` (or verify the message is already consumed) and set its input row to `settled/submitted`; a later `receipt retire` verifies that transaction before freeing memory. For prompt/exec, the durable accepted input row itself is the queryable submission record: the creator or runner can settle it as submitted and retire the cache after verifying that stored row. Printed stdout only presents its input ID and supplies no durable acknowledgement. Settled operation keys/digests/dispositions persist for the lifetime of the database file, so a delayed request still returns the prior disposition and never types again.
+Retire only the in-memory receipt after validating durable settlement, the current full run/owner and original run lock, exclusion of every active writer, and absence of a held write authorization or available attempt permit for that input. Cache absence is idempotent only after the same durable and ownership checks. For prompt/exec, the durable accepted input row itself is the queryable submission record: the creator or runner can settle it as submitted and retire the cache after verifying that stored row. Printed stdout only presents its input ID and supplies no durable acknowledgement. Settled operation keys/digests/dispositions persist for the lifetime of the database file, so a delayed request still returns the prior disposition and never types again.
 
-Bound unretired side-effect receipts, including queued deferred inputs, to 4096: while that unresolved set is full, new side-effect attempts fail with an explicit zero-byte capacity error; settled receipts leave the set. Keep uncertain receipts until the Director records an evidence-based disposition through `input reconcile` (§6.3 Runtime event and input commands), which settles the key and permits cache retirement. For prompt/exec and permission responses, a consumed not-submitted key requires a new deliberate operation key. For previews, every `not_submitted` disposition, including reconciliation after possible bytes, permits the runner sweep or the next send to start N+1 in the same run; it grants no permission answer or prompt/exec replay.
+Bound unretired side-effect receipts, including queued deferred inputs, to 4096: while that unresolved set is full, new side-effect attempts fail with an explicit zero-byte capacity error; settled receipts leave the set. Keep uncertain receipts until the Director records an evidence-based disposition through `input reconcile` (§6.3 Runtime event and input commands), which settles the key and permits cache retirement. For prompt/exec and permission responses, a consumed not-submitted key requires a new deliberate operation key.
 
-For a preview stopped as `left_in_composer`, one immediate transaction settles attempt N and inserts N+1 as `ready`, with `deferred_at` and `defer_reason=redelivery`. The runner places its canonical base preview at the FIFO head, preserving message order, and selects rendering/framing/method afresh at zero bytes. It waits for a verified empty composer; consumption and target removal cancel it under § Runner-owned deferred delivery. Attempts have no cap. A settled left-in-composer latest attempt without this successor is an invariant violation.
-
-`left_stage` records the exact complete prefix: `escape_only` for only fallback Escape, `partial` for less than the complete literal with no submit key, `literal_complete` for the entire closed literal with no submit key, and `submitted` for the complete literal and key whose effect is unconfirmed. The `submitted` stage pairs exactly with `submit_unconfirmed`, and `escape_only` requires method `fallback`; recording and receipt reads validate both associations. Escape-only typed no text. Prompt/exec left in the composer exit 1 and are retried only by a deliberate action; later input follows the held-composer rules. The runner sends no second submit key and leaves composer clearing to the human or Director.
-
-Reconciliation runs under the original deadline clipped to any inherited SQL bound, and every transaction it commits is a supplied-connection immediate transaction. It pins the original input row in its supplied-connection snapshot: `input_id`, `run_id`, `operation_key`, `kind`, `payload_digest`, `message_id`, `created_at`, the complete immutable permission-response audit where present, and expected state remain fixed through live reconciliation and settlement. For a recorded concrete placement, acquire its genuine pane/input lock and hold that same lock through current-owner synchronization. Synchronize with the pinned runner's receipt handler so an active byte-writing operation cannot be settled concurrently. An unreachable writer leaves the receipt uncertain, and the Director records `abandoned-uncertain` through `input reconcile`. Compare-and-swap the original expected operation state in the settlement transaction; a changed row requires a separate invocation. Settlement records the observed input disposition, not the native command's execution outcome.
+Reconciliation runs under the original deadline clipped to any inherited SQL bound, and every transaction it commits is a supplied-connection immediate transaction. It pins the original input row in its supplied-connection snapshot: `input_id`, `run_id`, `operation_key`, `kind`, `payload_digest`, `created_at`, the complete immutable permission-response audit where present, and expected state remain fixed through live reconciliation and settlement. For a recorded concrete placement, acquire its genuine pane/input lock and hold that same lock through current-owner synchronization. Synchronize with the pinned runner's receipt handler so an active byte-writing operation cannot be settled concurrently. An unreachable writer leaves the receipt uncertain, and the Director records `abandoned-uncertain` through `input reconcile`. Compare-and-swap the original expected operation state in the settlement transaction; a changed row requires a separate invocation. Settlement records the observed input disposition, not the native command's execution outcome.
 
 For an ordinary or permission receipt already settled with the requested disposition, reconciliation returns the unchanged validated durable row and its original `evidence_ref` before live locks, health probes or exchange. A conflicting disposition fails with the row unchanged. This historical return grants no new input authority. For a live nonsettled receipt, validate the full fixed identity and original ownership lock inside the transaction of the expected-state settlement CAS, after the SQL wait. After a new reconciliation, require the matching `settled` acknowledgment and a validated durable reread, then exactly one `retire` exchange with a matching input ID under the same held pane lock and original expiration. A post-commit failure retains the known input context and original cause while the durable settlement remains authoritative. A changed expected state requires a separately reconciled attempt.
 
@@ -3835,31 +3730,31 @@ Rearm additionally requires the unchanged old token/epoch/metadata and the actua
 
 Permission receipts use the ordinary query, reconciliation, receipt-only exclusion, zero-byte proof and retirement rules above. A proven-zero not-submitted settlement deletes the matching claim in the same transaction; the proof comes only from actual retained zero-byte in-progress evidence or exact durable ready history. Possibly transmitted, absent-cache, submitted and abandoned-uncertain history retains its claim. Retirement leaves durable audit, key and claim history.
 
-A process loss, ownership change or unavailable receipt preserves durable uncertainty and leaves notification unstamped. Preview retry follows the latest-attempt table after evidence-based settlement; explicit prompt/exec use generated keys and printed input IDs and require a separate deliberate action.
+A process loss, ownership change or unavailable receipt preserves durable uncertainty. Explicit prompt/exec use generated keys and printed input IDs and require a separate deliberate action.
 
-Native-exec success means submission, not execution success. Queued and held messages keep `notified_at` unset, and only confirmed submission or settlement of accepted delivery stamps them; a consuming poll (§6.3 `message poll`) removes them from preview eligibility. Queueing supplies no new permission event and never closes the native request.
+Native-exec success means submission, not execution success. A pending message keeps `notified_at` unset until the sweep stamps it (§ Runner pending-preview sweep); a consuming poll (§6.3 `message poll`) removes it from preview eligibility. Queueing supplies no new permission event and never closes the native request.
 
 Screen observation cannot create an atomic native request API: unread child output may race with a write, an unknown CLI can redraw unexpectedly, and a person can type concurrently. The runner therefore guarantees zero ordinary-input bytes for detected and candidate interactions and refuses uncertain states; tested composer profiles bound the remaining race for profile delivery without asserting universal prompt preservation. Release evidence must include this race and preserve uncertainty instead of authorizing a second submission.
 
-Human keystrokes from the outer terminal pass to the child as native input, including the human's intentional approval, denial or cancellation. A Director may submit a request-bound allow or deny through the permission-response path below after applying its session decision policy; ordinary preview/prompt/exec input stays queued with zero bytes during the request. Keep attributed decisions, key submission, native outcomes and actual continuation separately observable. Unknown answer capability or uncertain request identity preserves manual original-surface operation.
+Human keystrokes from the outer terminal pass to the child as native input, including the human's intentional approval, denial or cancellation. A Director may submit a request-bound allow or deny through the permission-response path below after applying its session decision policy; previews stay pending and prompt/exec input stays queued with zero bytes during the request. Keep attributed decisions, key submission, native outcomes and actual continuation separately observable. Unknown answer capability or uncertain request identity preserves manual original-surface operation.
 
 ##### Delivery method and interaction priority
 
-These ordered rules select the delivery of every wrapped preview, `member prompt` and `member exec`:
+These ordered rules select the delivery of every sweep preview, `member prompt` and `member exec`; where a rule queues input, a preview stays pending instead and the sweep retries it (§ Runner pending-preview sweep):
 
-1. Validate target/run identity, reachability, writer ownership, storage and receipt history. An uncertain prior attempt under this operation's own key is an operational failure; another operation's uncertainty follows the per-message and held-composer rules. Unknown detection coverage is valid capability absence.
+1. Validate target/run identity, reachability, writer ownership, storage and receipt history. An uncertain prior attempt under this operation's own key is an operational failure; while another prompt or exec of this run is uncertain, the FIFO is stopped (§ Runner-owned deferred delivery). Unknown detection coverage is valid capability absence.
 2. A candidate or open detected interaction queues ordinary input with zero bytes. An obscured interaction remains preserved, and `permission_request`, `question` and `unknown_interaction` are all blocking interactions.
 3. A verified empty composer with the operation's executable plan uses profile delivery without Escape (§ Measured submission plans and settle intervals). This includes a working member whose composer row is empty: the native CLI queues the submitted input behind its current turn without interrupting it.
-4. With an executable plan and a busy composer, queue with zero bytes under `composer_busy` and drain by profile delivery when verified empty. A head waiting 3 minutes solely on a busy composer uses fallback with `idle_timeout`, except while the held composer is set (§ Runner-owned deferred delivery); every head is exempt while it is set. The bound starts when the head first waits solely on the composer and restarts when an interaction blocks it; time behind interactions or earlier input does not count.
+4. With an executable plan and a busy composer, queue with zero bytes under `composer_busy` and drain by profile delivery when verified empty. On a verified-composer run every preview and queued input waits for a verified empty composer.
 5. Otherwise use delivery fallback: Escape, settle 500 ms, literal prefix and text, settle 500 ms, Enter (`0d`). This covers missing operation plans, missing profile coverage and failed version probes.
 
 | Selection | Bytes | `delivery.method` | Selection reason |
 |---|---|---|---|
-| Queued behind an interaction, composer, earlier input, re-delivery or insufficient attempt budget | Zero | `null` until a later attempt selects one | `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input`, `redelivery` or `delivery_budget_exhausted` |
+| Queued behind an interaction, composer, earlier input or insufficient attempt budget | Zero | `null` until a later attempt selects one | `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted` |
 | Profile delivery | Literal stage, 500 ms settle, measured submit key | `profile` | `null` |
-| Fallback | Escape, settle, literal stage, settle, `0d` | `fallback` | `submission_plan_unavailable` (rule 5) or `idle_timeout` (rule 4 bound) |
+| Fallback | Escape, settle, literal stage, settle, `0d` | `fallback` | `submission_plan_unavailable` (rule 5) |
 
-The Director interrupts a working member explicitly with `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`; ordinary delivery sends a member whose profile has an executable plan no Escape before the 3-minute bound.
+The Director interrupts a working member explicitly with `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`; ordinary delivery sends a member whose profile has an executable plan no Escape.
 
 Fallback runs through the owned child PTY and the same input coordinator and receipts and preserves the literal and exec `! ` prefix. Revalidate the higher-priority interaction rule before Escape and every later stage: a newly detected interaction before the first byte requeues input; one after a positive write follows § Stop cause, including an `escape_only` stop during the first fallback settle.
 
@@ -3867,7 +3762,7 @@ Fallback may interrupt work, mix text with a draft, and dismiss an undetected pe
 
 ##### Runner-owned deferred delivery
 
-The runner owns a FIFO of ordinary input requests, including previews. It accepts a blocked request into the queue only after allocating its durable input ID and committing a `ready` receipt with `deferred_at` and `defer_reason` under its operation key, digest and target identity. The literal or control payload stays in runner memory; receipt tables, result events and diagnostics retain metadata only.
+The runner owns a FIFO of prompt and exec requests; previews stay outside it (§ Runner pending-preview sweep). It accepts a blocked request into the queue only after allocating its durable input ID and committing a `ready` receipt with `deferred_at` and `defer_reason` under its operation key, digest and target identity. The literal or control payload stays in runner memory; receipt tables, result events and diagnostics retain metadata only.
 
 Only one ordinary request writes at a time, in enqueue order, and a request queued behind another receives the same explicit queued result. Queue processing is scheduled from the runner event loop:
 
@@ -3878,47 +3773,43 @@ Only one ordinary request writes at a time, in enqueue order, and a request queu
 | The active input completes | Retry the queued head after rechecking the current interaction state |
 | A temporary zero-byte obstacle during an active attempt | Retry on a 100-millisecond timer within the same five-second attempt deadline |
 
-No external send or Director wake is required to resume the accepted queue. Queue housekeeping (§ Queue housekeeping) cancels every queued preview whose message is consumed, and the head whose target is removed, independently of the queue turn. Each attempt also rechecks the head's message status and target immediately before its first byte, through the same consumption check, so housekeeping latency never types a consumed preview.
+No external send or Director wake is required to resume the accepted queue. Queue housekeeping (§ Queue housekeeping) cancels the head whose target is removed, independently of the queue turn, and each attempt also rechecks the head's target immediately before its first byte.
 
 A queued request outlives the originating CLI connection and command deadline. Each actual drain attempt has its own five-second budget, and waiting for an interaction consumes none of it. A client timeout after queue acceptance reports the known input ID and directs the caller to inspect the receipt instead of generating a new operation key. The timer retry runs even without child output or broker commands, preserving the input ID, FIFO position and `ready` receipt without renewing the deadline. A reappearing candidate or open interaction pauses dispatch and ends the zero-byte attempt; the next closure or clearance starts another bounded attempt.
 
 | Deferred-attempt condition | Receipt and queue outcome | Result publication |
 |---|---|---|
 | Busy pane lock or temporary storage/observer unavailability before the deadline, with zero bytes | Retain the queued head and retry on the timer | Input inspection remains `queued` with its original defer reason |
-| Five-second deadline expires with zero bytes | Settle `not_submitted` with reason `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted`, according to the last obstacle; clear the unused selected method, and advance after the terminal transaction commits | Prompt/exec: `input_delivery_result`; preview: none (a retried preview result, § Input delivery result event) |
+| Five-second deadline expires with zero bytes | Settle `not_submitted` with reason `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted`, according to the last obstacle; clear the unused selected method, and advance after the terminal transaction commits | `input_delivery_result` |
 | Target/run/placement identity fails revalidation, with zero bytes | Settle `not_submitted` with reason `target_inactive` or `target_changed` immediately and advance after commit | The result with its reason and diagnostic context |
-| A queued preview's message is consumed, with zero bytes | Settle `not_submitted/message_consumed` immediately and advance after commit | None (a retried preview result) |
 | Queued prompt/exec exceeds its plain limit with no safe framing | Settle `not_submitted/plain_limit_exceeded` with zero bytes and advance | `input_delivery_result` |
-| A recorded complete prefix stops on a verified-composer run | Settle `left_in_composer`; previews atomically queue their successor at the head | The stopped input's result |
-| An attempt records `uncertain` on a verified-composer run | Advance past the head and set the held composer with that input as blocker | The uncertain result; later input waits for verified empty composer |
-| An attempt records `uncertain` on another run | Keep the FIFO stopped until reconciliation | The uncertain result |
+| A prompt or exec attempt records `uncertain` | Keep the FIFO stopped until `input reconcile` settles it | The uncertain result |
 
-The held composer is set by a `left_in_composer` input whose `left_stage` is not `escape_only`, and by advancing past an uncertain head on a verified-composer run. Releasing an ordinary writer after exceptional positive or unknown I/O also retains the hold, even when its receipt remains `in_progress`. A fresh verified empty composer clears it. Receipt reconciliation preserves the physical hold and its original blocking input; its recorded disposition describes delivery independently of the remaining native text. While set, every head requires verified-empty profile delivery and is exempt from rule 4's `idle_timeout`, including a re-delivery head and ordinary input behind uncertain bytes; new bytes therefore remain queued while CAFleet text is retained. Rule 4 applies again after the hold clears, including for a human draft.
+**FIFO stop.** On every run, with or without composer verification, after a prompt or exec records `uncertain` the FIFO stays stopped, and no queued input and no sweep preview is written, until `input reconcile` settles that input. No later head can therefore type into a composer that may still hold the stopped text.
 
 A head that has started no attempt within 3 minutes of becoming the head publishes one `input_delivery_stalled` event naming its cause (§ Input delivery stalled event). Time an interaction blocks the head does not count. Each head is deduplicated by run/input identity through orderly shutdown and recovery.
 
-If storage prevents the terminal transaction, discard the zero-byte payload and retain a metadata-only pending finalization at the FIFO head. Retry that transaction on the 100 ms timer without sending bytes or starting another input; commit the receipt when storage recovers, then advance, and its result event follows from that durable receipt. While publication is unavailable, write a runner-stderr diagnostic naming the input ID and persistence failure; the Director receives the durable result after recovery. Ownership loss transfers finalization to fenced recovery. Accepted requests become queued, submitted, not submitted, left in the composer or uncertain; `held` describes work the runner did not accept.
+If storage prevents the terminal transaction, discard the zero-byte payload and retain a metadata-only pending finalization at the FIFO head. Retry that transaction on the 100 ms timer without sending bytes or starting another input; commit the receipt when storage recovers, then advance, and its result event follows from that durable receipt. While publication is unavailable, write a runner-stderr diagnostic naming the input ID and persistence failure; the Director receives the durable result after recovery. Ownership loss transfers finalization to fenced recovery. Accepted requests become queued, submitted, not submitted or uncertain; `held` describes work the runner did not accept.
 
-Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` with reason `runner_stopped`. After runner loss, recovery may settle a deferred `ready` receipt as not submitted with `runner_lost` once ownership fencing establishes its payload and writer are gone. Explicit payloads remain memory-only and require a new deliberate request. A preview settled with `runner_stopped` or `runner_lost` publishes no result (§ Input delivery result event). An unnotified preview settled not submitted is delivered again under the same run's next attempt key by the runner sweep (§ Runner pending-preview sweep); a new run sweeps it under its own key.
+Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` with reason `runner_stopped`. After runner loss, recovery may settle a deferred `ready` receipt as not submitted with `runner_lost` once ownership fencing establishes its payload and writer are gone. Explicit payloads remain memory-only and require a new deliberate request. A pending preview stays unnotified, and a new run's sweep delivers it (§ Runner pending-preview sweep).
 
 ##### Immediate attempt failure bookkeeping
 
-Every path that ends an immediate ordinary (`preview`, `prompt` or `exec`) attempt after its first child byte records the receipt `uncertain` with `stop_cause=write_failed` before the runner replies to the client. This covers an error while advancing the attempt's stages, including an expired deadline, and an input-drain failure while the runner completes the in-flight attempt. When the caller's deadline has passed, the bookkeeping transaction uses the deferred finalization interval (1 s) from now as its storage deadline. A zero-byte attempt returns to `ready`. The held composer is set as for any uncertain write, and the receipt's `uncertain/write_failed` state is the blocker provenance a held-composer stall event requires.
+Every path that ends an immediate `prompt` or `exec` attempt after its first child byte records the receipt `uncertain` with `stop_cause=write_failed` before the runner replies to the client. This covers an error while advancing the attempt's stages, including an expired deadline, and an input-drain failure while the runner completes the in-flight attempt. When the caller's deadline has passed, the bookkeeping transaction uses the deferred finalization interval (1 s) from now as its storage deadline. A zero-byte attempt returns to `ready`. The uncertain receipt stops the FIFO (§ Runner-owned deferred delivery). A sweep preview that fails after its first child byte is an uncertain preview (§ Input delivery result event).
 
 ##### Queue housekeeping
 
-Queue housekeeping runs from the runner event loop every housekeeping interval (1 s) while the FIFO is non-empty and ordinary input is not fenced. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization and stamp retries, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds consumption-detection latency to about one second, at one read transaction per second per queued member.
+Queue housekeeping runs from the runner event loop every housekeeping interval (1 s) while the FIFO is non-empty and ordinary input is not fenced. It runs before the in-flight client attempt is driven and independently of the queue turn, the input drain and the finalization retry, so none of their gates holds it. It writes no PTY byte and takes no pane lock. The 1 s cadence bounds target-removal detection latency to about one second, at one read transaction per second per queued member.
 
 Each sweep:
 
-1. Opens one read transaction that loads every queued entry's receipt state and delivery method and its message status, the head's target inputs (run identity, member activity and placement), and the lowest-ID other ordinary `in_progress` receipt of the run.
+1. Opens one read transaction that loads every queued entry's receipt state and delivery method, the head's target inputs (run identity, member activity and placement), and the lowest-ID other `in_progress` prompt or exec receipt of the run.
 2. Acts on each entry in FIFO order:
 
-   | Durable receipt state | Message state | Action |
-   |---|---|---|
-   | `ready` | `input_required` | Keep the entry |
-   | `ready` | Any other status | Remove the entry and settle it `not_submitted/message_consumed` in its own owned write transaction, with zero bytes and no published result |
-   | Any other state | Any | Fail with `queued input INPUT_ID changed to STATE outside the runner queue`, fencing ordinary input as a permanent invariant violation |
+   | Durable receipt state | Action |
+   |---|---|
+   | `ready` | Keep the entry |
+   | Any other state | Fail with `queued input INPUT_ID changed to STATE outside the runner queue`, fencing ordinary input as a permanent invariant violation |
 
 3. Applies the head's target result: a removed or changed target settles the head `not_submitted/target_inactive` or `target_changed` and removes it.
 4. Runs the stall watchdog (§ Input delivery stalled event).
@@ -3929,72 +3820,61 @@ Every receipt write for a queued entry is made by the runner itself, so a non-`r
 
 ##### Runner pending-preview sweep
 
-Each ordinary member's runner retries that member's own unnotified pending previews with no caller command. The sweep covers every message that never reached the runner FIFO: a busy pane lock through the send budget, a runner/transport/storage failure, `delivery_budget_exhausted`, a pending placement at send time, or a deferred preview settled `not_submitted`. `message send`'s synchronous drain (§6.5 Push notifications) remains the first attempt.
+Each ordinary member's runner delivers that member's own unnotified pending messages with no caller command; `message send` only stores the message (§6.3 `message send`).
 
 | Property | Contract |
 |---|---|
 | Cadence | From the runner event loop, at most once per preview sweep interval (1 s), and not before the run-wide backoff expires |
-| Preconditions | The run is live and its native child is running; no client-owned attempt and no sweep attempt is awaiting its result; the runner FIFO holds no preview request |
+| Preconditions | The run is live and its native child is running; no ordinary attempt is active and no sweep attempt awaits its result; the runner FIFO is empty and not stopped |
 | Selection | One short read snapshot confirms that the run's member is an active ordinary member whose recorded run is this run with a concrete placement, then takes the oldest `to_member_id=<member> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
-| Attempt decision | The latest-attempt table of § Durable input receipts and settlement for `preview:<run_id>:<message_id>:<attempt>`: no receipt starts attempt 1, a not-submitted settlement starts N+1, and accepted or submitted history settles and stamps without typing |
-| Skips | Only a per-message hold of that table on a verified-composer run (an in-progress, uncertain or abandoned receipt) moves to the next message; every other hold, and every per-message hold on a run without composer verification, ends the sweep for this tick |
+| Order | Strict oldest first: the sweep types only the selected message and waits for its outcome before it selects again |
 
-Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected.
+Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected. Because the sweep starts a preview only when the FIFO is empty and not stopped and no ordinary attempt is active, a queued prompt or exec always precedes a sweep-selected preview.
 
-**Submission.** The sweep acquires no lock beforehand. It hands the canonical preview to the same runner-internal entry point a control-socket preview request reaches, as an input control request built with the run's own control identity. That entry point reserves the `preview:` receipt, applies § Delivery method and interaction priority, and either submits immediately or queues with zero bytes. A sweep request that meets the pane input lock held by another process at submission queues with zero bytes under `earlier_input`. For actual stages the runner acquires the pane input lock nonblockingly from its event loop (§6.5 Pane input lock), so a merely queued sweep request holds no lock. A send's synchronous drain and the sweep serialize through that lock and the runner's under-lock revalidation of message status, notification stamp and receipt.
+**Delivery state.** A preview's delivery state is `messages.notified_at` plus the runner's in-memory record of a preview typed and awaiting verification; it holds no durable input receipt. On a verified-composer run the sweep types a preview only into a verified empty composer and stamps `notified_at` after confirmed submission; a preview whose submission is not confirmed is uncertain (§ Input delivery result event), stays unnotified and is typed again once the composer is verified empty. On a run without composer verification the sweep types by § Delivery method and interaction priority and stamps `notified_at` after its complete stages; an uncertain preview is stamped first and then published, so it is not typed again.
+
+**Submission.** The sweep acquires no lock beforehand. It hands the canonical preview to the runner-internal input entry point that serves `member prompt`, built with the run's own control identity, which applies § Delivery method and interaction priority; a preview that cannot be written now stays pending for a later tick. For actual stages the runner acquires the pane input lock nonblockingly from its event loop (§6.5 Pane input lock).
 
 **Clientless tracking.** A sweep request has no control-socket client. The runner tracks a sweep attempt separately from client-owned attempts, holding its attempt deadline:
 
-- When the entry point leaves an immediate sweep attempt awaiting its result, the runner records it as the pending sweep attempt. The completion path that drives client-owned attempts drives it to its reply and settles it without replying to any client, feeding the reply's delivery status and reason to the backoff.
-- A reply returned at once (queued or settled) is handled the same way, and no pending sweep attempt is recorded.
+- When the entry point leaves an immediate sweep attempt awaiting its result, the runner records it as the pending sweep attempt. The completion path that drives client-owned attempts drives it to its outcome without replying to any client, feeding that outcome to the backoff.
+- An outcome returned at once is handled the same way, and no pending sweep attempt is recorded.
 - An accepted immediate attempt requires that no client-owned attempt and no sweep attempt is awaiting its result. A control-socket request arriving while a sweep attempt awaits its result is handled exactly as one arriving while a client-owned attempt is in flight.
-- Orderly shutdown settles a pending sweep attempt like a client-owned one, with no reply.
+- Orderly shutdown ends a pending sweep attempt with no reply; a preview it wrote bytes for is an uncertain preview.
 
-**Settlement.** The runner settles a sweep attempt: an accepted attempt's settlement transaction stamps `notified_at` and marks the receipt `settled/submitted`, the same transaction that settles a drained queued preview.
-
-**Run-wide backoff.** A sweep attempt that settles `not_submitted` with `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted` publishes no result (§ Input delivery result event) and sets a memory-only run-wide backoff: 1 s, doubling, capped at 30 s. An accepted sweep attempt, an `interaction_closed` or a candidate clearing resets it to zero. The message stays at the head, so strict oldest-first order is preserved. Each backed-off retry settles one more durable `not_submitted` receipt for the head message only, at most one per 30 s once the cap is reached.
+**Run-wide backoff.** A sweep attempt that cannot write because the pane input lock is busy, storage or the observer is unavailable, or its attempt budget is insufficient sets a memory-only run-wide backoff: 1 s, doubling, capped at 30 s. A submitted preview, an `interaction_closed` or a candidate clearing resets it to zero. The message stays at the head, so strict oldest-first order is preserved.
 
 **Lifecycle.** Orderly shutdown and runner loss stop the sweep. A recovered or new run sweeps under its own run key. A member with no live runner keeps its messages pending.
 
 ##### Delivery reporting
 
-`message send`, `member prompt` and `member exec` JSON append a `delivery` object with ordered `status,method,reason` (§6.3 Runtime presentation). `method` is `profile`, `fallback`, or null before selection. The shared projection is:
+`member prompt` and `member exec` JSON append a `delivery` object with ordered `status,method,reason` (§6.3 Runtime presentation). `method` is `profile`, `fallback`, or null before selection. The shared projection is:
 
 | Status | Meaning | CLI behavior |
 |---|---|---|
-| `submitted` | Submission confirmed on a verified-composer run, or complete stages written on another run | Exit 0; send has `notification_sent=true`, exec has `dispatched=true` |
-| `queued` | The runner accepted durable zero-byte deferred work | Exit 0; send has `notification_sent=false`, exec has `dispatched=false`; the input ID and reason are returned |
-| `held` | No queue acceptance or write, due to unavailable health, ownership or storage | Send preserves its committed message and prints the reason; explicit prompt/exec exits 1 with its delivery context |
-| `uncertain` | Some stage may have written; reconciliation is required | Prompt/exec exit 1 with input identity, recorded `stop_cause` (§ Stop cause) and method; a committed send retains exit 0 |
-| `left_in_composer` | Settled complete prefix without confirmed submission on a verified-composer run | Prompt/exec exit 1; a committed send retains exit 0 and diagnoses its automatic re-delivery successor |
+| `submitted` | Submission confirmed on a verified-composer run, or complete stages written on another run | Exit 0; exec has `dispatched=true` |
+| `queued` | The runner accepted durable zero-byte deferred work | Exit 0; exec has `dispatched=false`; the input ID and reason are returned |
+| `held` | No queue acceptance or write, due to unavailable health, ownership or storage | Prompt/exec exits 1 with its delivery context |
+| `uncertain` | Some stage may have written; reconciliation is required | Prompt/exec exit 1 with input identity, recorded `stop_cause` (§ Stop cause) and method |
 | `not_submitted` | Work was cancelled with established zero-byte evidence | Visible through input inspection and, for deferred work, its result event |
-| `not_applicable` | A self-send or root-Director target uses broker consumption without automatic pane delivery | Send retains `notification_sent=false`, null method and input ID, and no warning |
 
-A held `message send` reports one of these reasons:
-
-| Held reason | Cause |
-|---|---|
-| `observer_unavailable` | The wrapped recipient's runner cannot currently observe its native screen, so it accepted no queue work |
-| `notification_held` | No deliverable pane, recipient deregistration, placement/run change, or an unresolved earlier preview receipt on a run without composer verification |
-| `notification_failed` | The pane stayed busy, runner exchange or storage failed, or the attempt deadline expired |
-
-Self-sends and sends to a root Director project as §6.3 `message send` specifies; self-sends stay excluded from automatic preview selection and the runner queue.
+Self-sends stay excluded from automatic preview selection (§6.3 `message send`).
 
 Preview forms, body folding, inline limits and long-body pointers follow §6.5 Push notifications.
 
-Ordinary inputs (`preview`, `prompt` and `exec`) use the SHA-256 over the canonical JSON (§6.4 JSON encoding) of the object with keys `run_id`, `kind`, `message_id` and `literal`. The preview client sends the canonical base preview, the method-independent wrapped line ending at the resume clause, in the `literal` field of its `submit_prompt` request. The runner reloads the immutable broker message, validates its run/recipient/key relationship, reconstructs the same canonical base and requires byte equality before reserving or reusing the receipt. Prompt and exec use their submitted literal and a null `message_id`. A preview preimage is:
+Prompt and exec inputs use the SHA-256 over the canonical JSON (§6.4 JSON encoding) of the object with keys `run_id`, `kind` and `literal`, where `literal` is the submitted prompt or command text. A prompt preimage is:
 
 ```json
-{"kind":"preview","literal":"CANONICAL_BASE_PREVIEW","message_id":99,"run_id":42}
+{"kind":"prompt","literal":"PROMPT_TEXT","run_id":42}
 ```
 
 Method, appended clause, framing, inline/pointer rendering, native prefix/key bytes and timing are outside the digest preimage. The runner selects and renders afresh only while zero bytes are established; once a stage writes, its method and rendered bytes stay pinned through its result. Queries and duplicate requests validate canonical identity before current composer state, so a later method change preserves the digest and grants no replay of an existing key.
 
 Permission responses use the canonical payload digest of § Permission response storage; typed permission reservation, retained-operation lookup and input reads validate it against the immutable audit row and its bound run, interaction, event and Director (§ Request-bound permission responses).
 
-`defer_reason` records why a request first entered the queue and stays paired with its original `deferred_at`. `delivery_reason` records the eventual selected-method reason or a terminal zero-byte cancellation reason. The owned transaction that changes an ordinary receipt to `in_progress` commits its `delivery_method` and `delivery_reason` before the first byte: profile delivery has a null reason, and fallback has `submission_plan_unavailable` or `idle_timeout`, also for an immediate fallback. A zero-byte requeue clears unexecuted selection metadata before any later reselection; a terminal zero-byte cancellation commits a null method and its outcome reason. After any possible positive write, the selected method and reason persist through accepted, uncertain and settled states.
+`defer_reason` records why a request first entered the queue and stays paired with its original `deferred_at`. `delivery_reason` records the eventual selected-method reason or a terminal zero-byte cancellation reason. The owned transaction that changes an ordinary receipt to `in_progress` commits its `delivery_method` and `delivery_reason` before the first byte: profile delivery has a null reason, and fallback has `submission_plan_unavailable`, also for an immediate fallback. A zero-byte requeue clears unexecuted selection metadata before any later reselection; a terminal zero-byte cancellation commits a null method and its outcome reason. After any possible positive write, the selected method and reason persist through accepted, uncertain and settled states.
 
-Every result consumer projects these durable fields rather than recomputing a reason from the current catalog or composer. Receipt outcome, eventual method and reason and preview notification settlement commit together, and the deferred-result event follows from that durable receipt (§ Input delivery result event).
+Every result consumer projects these durable fields rather than recomputing a reason from the current catalog or composer. Receipt outcome and eventual method and reason commit together, and the deferred-result event follows from that durable receipt (§ Input delivery result event).
 
 | Ordinary receipt state/disposition | `submission.status` | Stage without a cache entry | `delivery.status` | Method and reason |
 |---|---|---|---|---|
@@ -4004,15 +3884,14 @@ Every result consumer projects these durable fields rather than recomputing a re
 | `accepted` or `settled/submitted` | `accepted` | `submitted` | `submitted` | Recorded selection |
 | `settled/not_submitted` | `rejected` | `unknown` | `not_submitted` | Null method and recorded outcome reason for a zero-byte cancellation; recorded selection for a reconciled attempt that may have written bytes |
 | `settled/abandoned_uncertain` | `rejected` | `unknown` | `uncertain` | Recorded selection; abandonment ends retries without establishing zero bytes |
-| `settled/left_in_composer` | `left_in_composer` | Recorded `left_stage` | `left_in_composer` | Recorded selection |
 
 `submission.status` is the runner's outcome vocabulary for the attempt (§ Durable input receipts and settlement); `delivery.status` is the separate delivery projection. Every attempted ordinary receipt records its delivery method, and a stored attempted receipt without one fails as an invalid stored value. A not-submitted receipt whose method and reason were never recorded reports a null method and reason `method_unrecorded`; no method or cancellation reason is invented. Permission-response receipts expose `delivery:null` and null deferred metadata; their semantic decision/submission/settlement projection remains authoritative. Unknown stored combinations fail validation.
 
-The stage vocabulary is `zero_bytes,escape_only,partial,literal_complete,submitted,unknown`. In-progress or uncertain inputs retain `partial` for any known written prefix; a settled left input projects its durable `left_stage`. Asynchronous completion leaves originating CLI output unchanged; `input show` and § Input delivery result event expose the outcome. Queue reasons include `redelivery` and `delivery_budget_exhausted`, and terminal zero-byte reasons include `plain_limit_exceeded`.
+The stage vocabulary is `zero_bytes,escape_only,partial,literal_complete,submitted,unknown`. In-progress or uncertain inputs retain `partial` for any known written prefix. Asynchronous completion leaves originating CLI output unchanged; `input show` and § Input delivery result event expose the outcome. Queue reasons include `delivery_budget_exhausted`, and terminal zero-byte reasons include `plain_limit_exceeded`.
 
 ###### Stop cause
 
-Every transition from `in_progress` to `uncertain`, or to `settled/left_in_composer`, records one `stop_cause` in the same transaction; storage refuses either transition without it. Selection metadata remains separate. A verified-composer ordinary attempt with every write result recorded and a complete prefix settles left in the composer; permission responses and runs without composer verification keep uncertainty.
+Every transition from `in_progress` to `uncertain` records one `stop_cause` in the same transaction; storage refuses the transition without it. Selection metadata remains separate. A sweep preview's stop cause stays in runner memory and its uncertain-preview event (§ Input delivery result event).
 
 | Value | Recorded when |
 |---|---|
@@ -4023,14 +3902,14 @@ Every transition from `in_progress` to `uncertain`, or to `settled/left_in_compo
 | `interaction_open` | A staged stage stops on any other blocking interaction: a visible or obscured interaction, an interaction hold or a retained transition |
 | `observer_unavailable` | A staged stage stops because the observer is unavailable, has a gap or reported an observation diagnostic |
 | `deadline_expired` | Chunk bound reached at a complete prefix, or insufficient budget remains for the full verification window plus the stage write margin (250 ms) before submit |
-| `submit_unconfirmed` | The 2 s verification window ends without confirmation; only `left_in_composer`, stage `submitted` |
+| `submit_unconfirmed` | The 2 s verification window ends without confirmation; recorded `uncertain`, stage `submitted` |
 | `short_write` | A stop leaves a prefix inside a UTF-8 scalar or paste marker; a positive short permission stage retains its uncertain behavior |
 | `write_failed` | PTY error, unrecorded possible I/O, failed checkpoint, failed/short close, positive short submit key, failed deferred or written immediate attempt (§ Immediate attempt failure bookkeeping), or failed permission response |
 | `runner_stopped` | Shutdown ended an active attempt that may have written a child byte |
 
-At a check, the first matching cause among the six rows from `manual_accounting_failed` through `observer_unavailable` wins. Apply the incomplete-prefix `short_write` override after cause selection, and finish any mandatory paste close before outcome recording. `short_write`, `write_failed` and `runner_stopped` always remain uncertain; other check/deadline stops settle left only under the complete-prefix and verified-composer conditions.
+At a check, the first matching cause among the six rows from `manual_accounting_failed` through `observer_unavailable` wins. Apply the incomplete-prefix `short_write` override after cause selection, and finish any mandatory paste close before outcome recording. Every stop records `uncertain`.
 
-Settlement and reconciliation preserve the cause. `left_stage` is required exactly for `left_in_composer`, and null otherwise; its stage meanings belong to § Durable input receipts and settlement. Other inputs without a stop and in-progress rows left by runner loss have a null cause. Input inspection reports both fields; stopped replies carry the cause as `reason`, and result events derive `cause` from the durable receipt.
+Settlement and reconciliation preserve the cause. Other inputs without a stop and in-progress rows left by runner loss have a null cause. Input inspection reports it; stopped replies carry the cause as `reason`, and result events derive `cause` from the durable receipt.
 
 ##### Explicit manual key input
 
@@ -4324,39 +4203,26 @@ CREATE TABLE member_input_operations (
     input_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     operation_key TEXT NOT NULL CHECK(length(trim(operation_key)) > 0),
-    kind TEXT NOT NULL CHECK(kind IN ('preview','prompt','exec','permission_response')),
+    kind TEXT NOT NULL CHECK(kind IN ('prompt','exec','permission_response')),
     payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64 AND payload_digest NOT GLOB '*[^0-9a-f]*'),
     state TEXT NOT NULL CHECK(state IN ('ready','in_progress','accepted','uncertain','settled')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    message_id INTEGER REFERENCES messages(message_id) ON DELETE RESTRICT,
-    disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain','left_in_composer')),
-    preview_attempt INTEGER CHECK((kind = 'preview') = (preview_attempt IS NOT NULL)
-        AND (preview_attempt IS NULL OR preview_attempt >= 1)),
+    disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain')),
     evidence_ref TEXT,
     delivery_method TEXT CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback')),
     delivery_reason TEXT CHECK(delivery_reason IS NULL OR length(trim(delivery_reason)) > 0),
     deferred_at TEXT,
     defer_reason TEXT CHECK((deferred_at IS NULL AND defer_reason IS NULL)
         OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
-            AND kind IN ('preview','prompt','exec'))),
+            AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
         OR (stop_cause IN ('manual_input','manual_accounting_failed','pointer_input',
                           'interaction_candidate','interaction_open','observer_unavailable',
                           'deadline_expired','submit_unconfirmed','short_write','write_failed',
                           'runner_stopped')
             AND state IN ('uncertain','settled'))),
-    left_stage TEXT CHECK(left_stage IS NULL
-        OR left_stage IN ('escape_only','partial','literal_complete','submitted')),
-    CHECK(disposition IS NOT 'left_in_composer'
-        OR (kind IN ('preview','prompt','exec') AND stop_cause IS NOT NULL AND stop_cause IN
-            ('manual_input','manual_accounting_failed','pointer_input','interaction_candidate',
-             'interaction_open','observer_unavailable','deadline_expired','submit_unconfirmed'))),
-    CHECK((disposition IS 'left_in_composer') = (left_stage IS NOT NULL)),
-    CHECK(state != 'uncertain' OR stop_cause IS NULL OR stop_cause != 'submit_unconfirmed'),
     UNIQUE(run_id, operation_key),
-    UNIQUE(run_id, message_id, preview_attempt),
-    CHECK(kind != 'preview' OR message_id IS NOT NULL),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
 
@@ -4420,7 +4286,7 @@ Initialization applies the baseline and inserts the `cafleet_database` row for t
 
 `native_session_json` records a `hermes` run's native session identity for work settlement (§6.7 Hermes work settlement) and is null for every other backend and for a run whose identity is not yet captured.
 
-The DDL above owns every runtime table column, type, enum, nullability constraint, foreign key, uniqueness invariant and partial unique index. Section 6.9 specifies their runtime semantics, including database-instance identity, preview attempt sequencing, complete-prefix settlement and durable left stages, transactional same-run/event/Director response checks, privacy, zero-byte claim release and immutable audit semantics. Setup's required-shape check includes `preview_attempt`, `stop_cause` and `left_stage` on `member_input_operations`; runtime validates the free-text defer/outcome reasons of §6.9 Delivery reporting.
+The DDL above owns every runtime table column, type, enum, nullability constraint, foreign key, uniqueness invariant and partial unique index. Section 6.9 specifies their runtime semantics, including database-instance identity, transactional same-run/event/Director response checks, privacy, zero-byte claim release and immutable audit semantics. Setup's required-shape check includes `stop_cause` on `member_input_operations`; runtime validates the free-text defer/outcome reasons of §6.9 Delivery reporting.
 
 ## 9. Testing strategy
 

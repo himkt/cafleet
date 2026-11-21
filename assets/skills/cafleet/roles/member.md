@@ -32,7 +32,7 @@ Poll after ready, on every wake (a preview arriving is a wake) and before comple
 
 A `[cafleet msg ID from SENDER TIMESTAMP]` preview line carries the body inline or a pointer to your `poll --json`; still run `poll --json` on that wake, which consumes that message and any others in one command. When that poll returns `[]`, an earlier poll consumed the message; read it with `message show MESSAGE_ID --json`. Deduplicate repeated preview lines by message ID.
 
-A send that prints `Message N was persisted. …` needs no follow-up: the recipient's runner retries the preview.
+A send needs no follow-up: the recipient's runner delivers and retries the preview.
 
 ## BASE
 
