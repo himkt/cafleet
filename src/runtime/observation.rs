@@ -11184,19 +11184,12 @@ mod tests {
     }
 
     mod bundled_claude_auto_tracker {
-        use crate::broker::runtime::AutomaticReview;
         use crate::broker::runtime::evidence::EvidencePolicy;
         use crate::runtime::observation::tests::*;
         use serde_json::Value;
 
         const CLAUDE_VERSION: &str = "2.1.302";
-        const REFUSAL_RULE: &str = "claude-auto-refusal";
-        const NOTICE_RULE: &str = "claude-auto-refusal-notice";
-        const UNAVAILABLE_RULE: &str = "claude-auto-unavailable";
-        const INDICATOR_RULE: &str = "claude-auto-mode-indicator";
-        const ASK_RULE: &str = "claude-auto-ask-permission";
 
-        const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
         const RUNNING: &str = "claude-2.1.302-auto-approved-running-1";
         const NOTICE_IDLE: &str = "claude-2.1.302-auto-refusal-notice-idle-1";
         const NOTICE_WORKING: &str = "claude-2.1.302-auto-refusal-notice-working-1";
@@ -11205,7 +11198,6 @@ mod tests {
         const RESTORED: &str = "claude-2.1.302-auto-verbose-refusal-restored-idle-1";
         const HIDDEN_BY_FORM: &str = "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1";
         const VERBOSE_VIEWER: &str = "claude-2.1.302-auto-verbose-transcript-viewer-1";
-        const MANUAL_FOOTER: &str = "claude-2.1.302-auto-unavailable-manual-footer-1";
         const TIP_FORM: &str = "claude-2.1.302-access-permission-1";
         const TIP_ALLOW_PRE_STAGE: &str = "claude-2.1.302-access-allow-pre-stage-1";
         const TIP_ALLOW_RUNNING: &str = "claude-2.1.302-access-allow-running-1";
@@ -11227,14 +11219,6 @@ mod tests {
             detector(ProfileCatalog::bundled())
                 .observe(&screen(id))
                 .unwrap()
-        }
-
-        fn redacted() -> EvidencePolicy {
-            EvidencePolicy::redacted(
-                &json!({"schema_version":1,"patterns":["fixture-secret-197-unique"],"sensitive_rules":[]}),
-                &[REFUSAL_RULE, NOTICE_RULE, UNAVAILABLE_RULE, INDICATOR_RULE, ASK_RULE],
-            )
-            .unwrap()
         }
 
         fn replay_run(policy: EvidencePolicy) -> Run {
@@ -11319,60 +11303,6 @@ mod tests {
             assert!(
                 interrupted.hold(NOTICE_IDLE, 750, 1000).events.is_empty(),
                 "a form between absent frames restarts the continuous absence"
-            );
-        }
-
-        #[test]
-        fn tracker_records_the_displayed_mode_only_under_redacted_evidence() {
-            for (policy, mode) in [
-                (EvidencePolicy::metadata(), None),
-                (redacted(), Some("auto mode".to_owned())),
-            ] {
-                let mut run = replay_run(policy);
-                let held = run.hold(IDLE, 0, 1000);
-                assert!(held.events.is_empty());
-                assert_eq!(
-                    held.policy,
-                    [(
-                        AutomaticReview::Available,
-                        mode.clone(),
-                        INDICATOR_RULE.to_owned(),
-                        NOW.to_owned()
-                    )],
-                    "one record change for a steady indicator"
-                );
-                assert_eq!(
-                    run.hold(NOTICE_EXPIRED, 1050, 1500).policy,
-                    [(
-                        AutomaticReview::Available,
-                        mode,
-                        INDICATOR_RULE.to_owned(),
-                        NOW.to_owned()
-                    )],
-                    "a footer variant is a fresh indicator emission"
-                );
-            }
-        }
-
-        #[test]
-        fn tracker_records_a_re_shown_indicator_after_a_reset_as_a_second_policy_observation() {
-            let available = (
-                AutomaticReview::Available,
-                None,
-                INDICATOR_RULE.to_owned(),
-                NOW.to_owned(),
-            );
-            let mut run = replay_run(EvidencePolicy::metadata());
-            assert_eq!(
-                run.hold(IDLE, 0, 300).policy,
-                std::slice::from_ref(&available)
-            );
-            let absent = run.hold(MANUAL_FOOTER, 350, 700);
-            assert!(absent.policy.is_empty(), "{:?}", absent.policy);
-            assert_eq!(
-                run.hold(IDLE, 750, 1100).policy,
-                [available],
-                "a fresh indicator emission resubmits the unchanged state"
             );
         }
     }

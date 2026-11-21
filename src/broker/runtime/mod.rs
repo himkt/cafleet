@@ -977,19 +977,6 @@ pub(crate) mod test_support {
             owner
         }
 
-        /// A fixture whose run records redacted event evidence.
-        pub(crate) fn redacted() -> Self {
-            let fixture = Self::new();
-            fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                    [fixture.run.run_id],
-                )
-                .unwrap();
-            fixture
-        }
-
         pub(crate) fn activate(&mut self) -> RunOwner {
             self.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[self.run.run_id]).unwrap();
             self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
@@ -1297,17 +1284,6 @@ pub(crate) mod test_support {
             }
         }
     }
-    pub(crate) fn effective_policy(
-        automatic_review: &str,
-        observed_mode: Option<&str>,
-        event_id: Option<i64>,
-    ) -> Value {
-        json!({
-            "automatic_review":automatic_review,"observed_mode":observed_mode,
-            "rule_id":"codex-auto-review-unavailable","event_id":event_id,
-            "observed_at":"2026-10-29T02:30:00Z",
-        })
-    }
 
     /// The redaction policy for `patterns` that recognizes the native permission request.
     pub(crate) fn redacted_policy(patterns: &[&str]) -> evidence::EvidencePolicy {
@@ -1318,15 +1294,6 @@ pub(crate) mod test_support {
         .unwrap()
     }
 
-    pub(crate) fn store_effective_policy(fixture: &Fixture, record: &Value) {
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET event_evidence='redacted',effective_policy_json=?1 WHERE run_id=?2",
-                params![record.to_string(), fixture.run.run_id],
-            )
-            .unwrap();
-    }
     pub(crate) fn replace_public_payload(
         conn: &mut Connection,
         event: &RuntimeEventRecord,
