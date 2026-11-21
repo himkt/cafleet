@@ -73,23 +73,31 @@ const KINFO_PROC_BYTES: usize = 648;
 // helpers), while kern.proc.pid reports the same p_start for every process.
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
-fn kinfo_proc_bytes(pid: i32) -> io::Result<([u8; KINFO_PROC_BYTES], usize)> {
+fn kern_proc(
+    selector: nix::libc::c_int,
+    argument: nix::libc::c_int,
+    buffer: Option<&mut [u8]>,
+) -> io::Result<usize> {
     let mut mib = [
         nix::libc::CTL_KERN,
         nix::libc::KERN_PROC,
-        nix::libc::KERN_PROC_PID,
-        pid,
+        selector,
+        argument,
     ];
-    let mut buffer = [0u8; KINFO_PROC_BYTES];
-    let mut length: nix::libc::size_t = KINFO_PROC_BYTES;
-    // SAFETY: `mib` is a live four-element array and its length is passed exactly; `buffer` is
-    // a live, writable byte array whose capacity is passed in `length`, and the kernel writes at
-    // most `length` bytes and stores the written count back into `length`; no new value is set.
+    let (old, mut length): (*mut nix::libc::c_void, nix::libc::size_t) = match buffer {
+        Some(buffer) => (buffer.as_mut_ptr().cast(), buffer.len()),
+        None => (std::ptr::null_mut(), 0),
+    };
+    // SAFETY: `mib` is a live four-element array and its length is passed exactly. With a
+    // buffer, `old` points to a live, writable byte slice whose capacity is passed in `length`;
+    // the kernel writes at most `length` bytes and stores the written count back into `length`.
+    // Without one, `old` is null and the kernel only stores the required size into `length`.
+    // No new value is set.
     let status = unsafe {
         nix::libc::sysctl(
             mib.as_mut_ptr(),
             mib.len() as nix::libc::c_uint,
-            buffer.as_mut_ptr().cast(),
+            old,
             &mut length,
             std::ptr::null_mut(),
             0,
@@ -98,13 +106,14 @@ fn kinfo_proc_bytes(pid: i32) -> io::Result<([u8; KINFO_PROC_BYTES], usize)> {
     if status != 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok((buffer, length))
+    Ok(length)
 }
 #[cfg(target_os = "macos")]
 fn kernel_process(pid: i64) -> Result<Option<KernelProcess>> {
     const SZOMB: u8 = 5;
     let pid32 = i32::try_from(pid).map_err(io_error)?;
-    let (bytes, length) = kinfo_proc_bytes(pid32)
+    let mut bytes = [0u8; KINFO_PROC_BYTES];
+    let length = kern_proc(nix::libc::KERN_PROC_PID, pid32, Some(&mut bytes))
         .map_err(|cause| error(format!("cannot establish process start identity: {cause}")))?;
     if length == 0 {
         return Ok(None);
@@ -130,13 +139,30 @@ fn kernel_process(pid: i64) -> Result<Option<KernelProcess>> {
 }
 #[cfg(target_os = "macos")]
 fn group_members(group: i32) -> Result<Vec<i64>> {
-    // libproc interprets an empty group through errno, which preceding I/O can leave stale.
-    nix::errno::Errno::clear();
-    libproc::processes::pids_by_type(libproc::processes::ProcFilter::ByProgramGroup {
-        pgrpid: group.try_into().map_err(io_error)?,
-    })
-    .map(|pids| pids.into_iter().map(i64::from).collect())
-    .map_err(io_error)
+    const ATTEMPTS: usize = 3;
+    const SLACK_RECORDS: usize = 8;
+    for _ in 0..ATTEMPTS {
+        let size = kern_proc(nix::libc::KERN_PROC_PGRP, group, None).map_err(io_error)?;
+        let mut buffer = vec![0u8; size + SLACK_RECORDS * KINFO_PROC_BYTES];
+        let length = match kern_proc(nix::libc::KERN_PROC_PGRP, group, Some(&mut buffer)) {
+            Ok(length) => length,
+            Err(cause) if cause.raw_os_error() == Some(nix::libc::ENOMEM) => continue,
+            Err(cause) => return Err(io_error(cause)),
+        };
+        ensure(
+            length % KINFO_PROC_BYTES == 0,
+            "kern.proc.pgrp returned a partial kinfo_proc record",
+        )?;
+        return Ok(buffer[..length]
+            .chunks_exact(KINFO_PROC_BYTES)
+            .map(|record| {
+                i64::from(i32::from_ne_bytes(
+                    record[40..44].try_into().expect("four-byte p_pid"),
+                ))
+            })
+            .collect());
+    }
+    Err(error("kern.proc.pgrp kept growing during the read"))
 }
 #[cfg(not(target_os = "macos"))]
 fn group_members(group: i32) -> Result<Vec<i64>> {

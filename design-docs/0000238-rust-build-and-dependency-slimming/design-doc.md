@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
 **Status**: Approved
-**Progress**: 14/37 tasks complete
+**Progress**: 22/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -413,14 +413,14 @@ The first suite run includes an incremental rebuild of about 6 s after the incre
 
 ### Step 4: Remove `libproc` and trim `chrono` features
 
-- [ ] Replace `kinfo_proc_bytes` with the `kern_proc` helper and move the PID read onto its named local buffer <!-- completed: -->
-- [ ] Rewrite the macOS `group_members` per § `group_members` on macOS <!-- completed: -->
-- [ ] Add `kern_proc_pgrp_lists_a_spawned_group_leader_and_then_nothing` <!-- completed: -->
-- [ ] Remove the macOS open-file observation from `post_refusal_lock_diagnostic` <!-- completed: -->
-- [ ] Delete the macOS `libproc` dependency table and refresh `Cargo.lock` <!-- completed: -->
-- [ ] Declare `chrono` with `default-features = false, features = ["std", "now"]` per § Darwin framework links <!-- completed: -->
-- [ ] `mise //:test` and `mise //:lint` pass on Linux; Step 5's macOS `lint` and `test` entries validate the macOS code <!-- completed: -->
-- [ ] Verify the crate-count gates and the absence of `refinery`, `libproc`, `bindgen`, `clang-sys`, `iana-time-zone` and `core-foundation-sys` in `Cargo.lock` <!-- completed: -->
+- [x] Replace `kinfo_proc_bytes` with the `kern_proc` helper and move the PID read onto its named local buffer <!-- completed: 2026-11-21T11:35 -->
+- [x] Rewrite the macOS `group_members` per § `group_members` on macOS <!-- completed: 2026-11-21T11:35 -->
+- [x] Add `kern_proc_pgrp_lists_a_spawned_group_leader_and_then_nothing` <!-- completed: 2026-11-21T11:35 -->
+- [x] Remove the macOS open-file observation from `post_refusal_lock_diagnostic` <!-- completed: 2026-11-21T11:35 -->
+- [x] Delete the macOS `libproc` dependency table and refresh `Cargo.lock` <!-- completed: 2026-11-21T11:35 -->
+- [x] Declare `chrono` with `default-features = false, features = ["std", "now"]` per § Darwin framework links <!-- completed: 2026-11-21T11:35 -->
+- [x] `mise //:test` and `mise //:lint` pass on Linux; Step 5's macOS `lint` and `test` entries validate the macOS code <!-- completed: 2026-11-21T11:35 -->
+- [x] Verify the crate-count gates and the absence of `refinery`, `libproc`, `bindgen`, `clang-sys`, `iana-time-zone` and `core-foundation-sys` in `Cargo.lock` <!-- completed: 2026-11-21T11:35 -->
 
 ### Step 5: CI test entries
 
