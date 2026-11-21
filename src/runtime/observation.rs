@@ -9528,7 +9528,7 @@ mod tests {
             #[test]
             fn runner_failure_after_terminal_enqueue_never_appends_a_live_post_terminal_gap() {
                 let mut case = LiveCase::new();
-                case.hooks.pause(WriterBoundary::Persist);
+                case.hooks.busy(WriterBoundary::Persist);
                 let release = Release(case.hooks.clone());
                 case.exit(300);
                 case.hooks.wait(WriterBoundary::Persist, 2);

@@ -385,6 +385,11 @@ mod tests {
                 .try_submit(original.clone())
                 .expect_err("channel pressure returns the original");
             assert_eq!(rejected.transition, original);
+            assert!(
+                matches!(rejected.reason, RetainReason::ChannelFull),
+                "{:?}",
+                rejected.reason
+            );
             let status = writer.status();
             assert_eq!(status.pending_count, 64);
             assert!(status.diagnostic.is_some());
@@ -408,16 +413,17 @@ mod tests {
             assert!(writer.try_submit(original.clone()).is_ok());
             yield_until(|| writer.status().diagnostic.is_some());
             assert_eq!(committed(&fixture), 0, "the retry waits for its backoff");
+            assert_eq!(writer.status().pending_count, 1);
             clock.advance(Duration::from_millis(100));
             yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let persisted = storage::get_event(&fixture.fixture.conn, 1).unwrap().event;
             assert_eq!(
-                storage::get_event(&fixture.fixture.conn, 1)
-                    .unwrap()
-                    .event
-                    .payload_json["evidence"],
-                original.evidence_json
+                persisted.kind, original.kind,
+                "a transient failure retries the original"
             );
+            assert_eq!(persisted.payload_json["evidence"], original.evidence_json);
             assert_eq!(committed(&fixture), 1);
+            assert_eq!(writer.status().diagnostic, None);
             assert_eq!(writer.finish(until(&clock)).0, 0);
         }
 
@@ -447,7 +453,7 @@ mod tests {
         }
 
         #[test]
-        fn writer_retry_exhaustion_reports_a_degraded_status_and_keeps_the_transition() {
+        fn writer_fences_when_the_rejection_event_also_fails_permanently() {
             let clock = clock();
             let mut fixture = WriterFixture::new();
             crate::db::test_support::FaultPlan::Abort {
@@ -456,20 +462,54 @@ mod tests {
                 message: "injected event failure",
             }
             .arm(&mut fixture.fixture.conn);
-            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
+            let hooks = Arc::new(Hooks::default());
+            hooks.pause(WriterBoundary::Receive);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let release = Release(hooks.clone());
+            hooks.wait(WriterBoundary::Receive, 1);
             assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
-            yield_until(|| writer.status().diagnostic.is_some());
-            let status = writer.status();
-            assert_eq!(status.pending_count, 1, "{status:?}");
-            assert_eq!(committed(&fixture), 0);
-            let until = until(&clock);
-            writer.begin_shutdown(until);
-            clock.advance(Duration::from_secs(2));
+            assert!(writer.try_submit(transition(&fixture, 2)).is_ok());
+            drop(release);
+            yield_until(|| {
+                writer
+                    .status()
+                    .diagnostic
+                    .is_some_and(|diagnostic| diagnostic.starts_with("event writer fenced: "))
+            });
+            let fenced = writer.status();
             assert_eq!(
-                writer.finish(until).0,
-                1,
-                "the unsaved transition stays counted"
+                fenced.pending_count, 0,
+                "the queue is discarded: {fenced:?}"
             );
+            assert!(
+                fenced
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains("injected event failure")),
+                "{fenced:?}"
+            );
+            assert_eq!(committed(&fixture), 0);
+            let refused = writer
+                .try_submit(transition(&fixture, 3))
+                .expect_err("a fenced writer accepts no transition");
+            assert!(
+                matches!(refused.reason, RetainReason::Fenced),
+                "{:?}",
+                refused.reason
+            );
+            assert_eq!(refused.cause.message(), "event writer is fenced");
+            let after = writer.status();
+            assert_eq!(
+                after.diagnostic, fenced.diagnostic,
+                "a refusal after the fence keeps the fence diagnostic"
+            );
+            assert_eq!(after.gap_count, fenced.gap_count);
+            assert_eq!(
+                writer.finish(until(&clock)),
+                (0, 2),
+                "the discarded transitions are counted unsaved"
+            );
+            assert_eq!(committed(&fixture), 0);
         }
 
         #[test]
@@ -626,6 +666,192 @@ mod tests {
         }
     }
 
+    mod rejection {
+        use crate::broker::runtime::RuntimeEventKind;
+        use crate::broker::runtime::RuntimeEventRecord;
+        use crate::runtime::writer::tests::*;
+
+        const REJECT_COVERAGE_UNKNOWN: crate::db::test_support::FaultPlan =
+            crate::db::test_support::FaultPlan::Abort {
+                trigger: "reject_coverage_unknown",
+                on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='coverage_unknown'",
+                message: "injected kind rejection",
+            };
+
+        fn event_at(fixture: &WriterFixture, sequence: i64) -> RuntimeEventRecord {
+            let id: i64 = fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
+                    rusqlite::params![fixture.fixture.run.run_id, sequence],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            storage::get_event(&fixture.fixture.conn, id).unwrap().event
+        }
+
+        fn assert_rejection(event: &RuntimeEventRecord, rejected: &ObservedTransition) {
+            assert_eq!(event.kind, RuntimeEventKind::RunnerDegraded);
+            assert_eq!(event.event_seq, rejected.event_seq);
+            let cause = &event.payload_json["cause"];
+            assert_eq!(
+                cause
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["kind", "rejected_kind", "rejected_observed_at", "error"]
+            );
+            assert_eq!(cause["kind"], "event_rejected");
+            assert_eq!(cause["rejected_kind"], rejected.kind.as_str());
+            assert_eq!(cause["rejected_observed_at"], rejected.observed_at.as_str());
+            assert!(
+                cause["error"]
+                    .as_str()
+                    .is_some_and(|error| error.contains("injected kind rejection")),
+                "{cause}"
+            );
+            assert_eq!(
+                event.payload_json["director_action"],
+                serde_json::Value::Null
+            );
+            assert_eq!(
+                event.payload_json["evidence"]["screen_seq"],
+                rejected.evidence_json["screen_seq"]
+            );
+        }
+
+        #[test]
+        fn writer_replaces_a_permanent_failure_with_its_rejection_and_continues_without_a_gap() {
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            REJECT_COVERAGE_UNKNOWN.arm(&mut fixture.fixture.conn);
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let rejected = transition(&fixture, 1);
+            assert!(writer.try_submit(rejected.clone()).is_ok());
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let replaced = writer.status();
+            assert_eq!(replaced.diagnostic, None, "{replaced:?}");
+            assert_eq!(replaced.gap_count, 0, "{replaced:?}");
+            assert_rejection(&event_at(&fixture, 1), &rejected);
+            REJECT_COVERAGE_UNKNOWN.clear(&mut fixture.fixture.conn);
+            let next = transition(&fixture, 2);
+            assert!(writer.try_submit(next.clone()).is_ok());
+            yield_until(|| committed(&fixture) == 2 && writer.status().pending_count == 0);
+            assert_eq!(event_at(&fixture, 2).kind, next.kind);
+            let continued = writer.status();
+            assert_eq!(continued.diagnostic, None, "{continued:?}");
+            assert_eq!(continued.gap_count, 0, "{continued:?}");
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        #[test]
+        fn writer_keeps_a_transiently_failing_replacement_at_the_front_until_the_backoff_retry() {
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            REJECT_COVERAGE_UNKNOWN.arm(&mut fixture.fixture.conn);
+            let hooks = Arc::new(Hooks::default());
+            hooks.busy_on_call(WriterBoundary::Persist, 2);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let rejected = transition(&fixture, 1);
+            assert!(writer.try_submit(rejected.clone()).is_ok());
+            yield_until(|| writer.status().diagnostic.is_some());
+            let held = writer.status();
+            assert_eq!(held.pending_count, 1, "{held:?}");
+            assert!(
+                held.diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains("fixture writer boundary busy")),
+                "the transient cause takes the ordinary path: {held:?}"
+            );
+            assert_eq!(committed(&fixture), 0, "the retry waits for its backoff");
+            clock.advance(Duration::from_millis(100));
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_rejection(&event_at(&fixture, 1), &rejected);
+            assert_eq!(writer.status().diagnostic, None);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
+        }
+
+        #[test]
+        fn writer_fences_on_a_sequence_slot_failure() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
+            assert!(writer.try_submit(transition(&fixture, 2)).is_ok());
+            yield_until(|| {
+                writer
+                    .status()
+                    .diagnostic
+                    .is_some_and(|diagnostic| diagnostic.starts_with("event writer fenced: "))
+            });
+            let fenced = writer.status();
+            assert!(
+                fenced
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains("event sequence")),
+                "{fenced:?}"
+            );
+            assert_eq!(fenced.pending_count, 0, "{fenced:?}");
+            assert_eq!(committed(&fixture), 0);
+            assert_eq!(writer.finish(until(&clock)), (0, 1));
+        }
+
+        #[test]
+        fn writer_refuses_invalid_evidence_without_degrading() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
+            let mut forged = transition(&fixture, 1);
+            forged.evidence_json = serde_json::json!({"forged": true});
+            let refused = writer
+                .try_submit(forged.clone())
+                .expect_err("invalid evidence is refused before hand-off");
+            assert!(
+                matches!(refused.reason, RetainReason::EvidenceInvalid),
+                "{:?}",
+                refused.reason
+            );
+            assert_eq!(refused.transition, forged);
+            let status = writer.status();
+            assert_eq!(status.diagnostic, None, "{status:?}");
+            assert_eq!(status.gap_count, 0, "{status:?}");
+            assert_eq!(status.pending_count, 0, "{status:?}");
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        #[test]
+        fn writer_refuses_submissions_after_stop_and_sequence_regression_as_pressure() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            let regressed = writer
+                .try_submit(transition(&fixture, 1))
+                .expect_err("a regressed sequence is refused");
+            assert!(
+                matches!(regressed.reason, RetainReason::SequenceRegressed),
+                "{:?}",
+                regressed.reason
+            );
+            writer.begin_shutdown(until(&clock));
+            let stopped = writer
+                .try_submit(transition(&fixture, 3))
+                .expect_err("a stopped writer refuses new work");
+            assert!(
+                matches!(stopped.reason, RetainReason::Stopped),
+                "{:?}",
+                stopped.reason
+            );
+            writer.finish(until(&clock));
+        }
+    }
+
     #[test]
     fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
@@ -679,6 +905,8 @@ pub(crate) mod test_support {
         pub(crate) calls: [u64; 2],
         pub(crate) first: [Option<u64>; 2],
         pub(crate) ordinal: u64,
+        pub(crate) busy_call: [Option<u64>; 2],
+        pub(crate) busy: [bool; 2],
     }
     #[derive(Default)]
     pub(crate) struct Hooks {
@@ -695,11 +923,20 @@ pub(crate) mod test_support {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             state.paused = [false; 2];
+            state.busy = [false; 2];
             drop(state);
             self.changed.notify_all();
         }
         pub(crate) fn fail_once(&self, boundary: WriterBoundary) {
             self.state.lock().unwrap().failures[index(boundary)] += 1;
+        }
+        /// Fails only the `call`-th entry to `boundary`, counting from 1, as a transient busy cause.
+        pub(crate) fn busy_on_call(&self, boundary: WriterBoundary, call: u64) {
+            self.state.lock().unwrap().busy_call[index(boundary)] = Some(call);
+        }
+        /// Fails every entry to `boundary` as a transient busy cause until released.
+        pub(crate) fn busy(&self, boundary: WriterBoundary) {
+            self.state.lock().unwrap().busy[index(boundary)] = true;
         }
         pub(crate) fn wait(&self, boundary: WriterBoundary, count: u64) {
             let slot = index(boundary);
@@ -734,7 +971,14 @@ pub(crate) mod test_support {
             }
             if state.failures[slot] > 0 {
                 state.failures[slot] -= 1;
-                return Err(error("fixture writer boundary failure"));
+                return Err(CafleetError::DatabaseBusy(
+                    "fixture writer boundary busy".into(),
+                ));
+            }
+            if state.busy[slot] || state.busy_call[slot] == Some(state.calls[slot]) {
+                return Err(CafleetError::DatabaseBusy(
+                    "fixture writer boundary busy".into(),
+                ));
             }
             Ok(())
         }

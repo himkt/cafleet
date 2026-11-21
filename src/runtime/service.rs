@@ -3113,7 +3113,9 @@ pub(crate) mod test_support {
                 if matches!(boundary, WriterBoundary::Persist)
                     && self.directory.join("fail-persist").exists()
                 {
-                    return Err(error("owned synthetic persist failure"));
+                    return Err(CafleetError::DatabaseBusy(
+                        "owned synthetic persist busy".into(),
+                    ));
                 }
                 if matches!(boundary, WriterBoundary::Persist) {
                     match std::fs::OpenOptions::new()
@@ -3590,6 +3592,8 @@ pub(crate) mod test_support {
             ReleasePane,
             Arm(FaultPlan),
             Clear(FaultPlan),
+            /// Every event writer persist fails with a transient busy cause while set.
+            FailPersist(bool),
         }
 
         /// A scenario as data: the native screen the child starts on, the screen it redraws after
@@ -3639,14 +3643,22 @@ pub(crate) mod test_support {
             }
         }
 
-        struct ScenarioWriterHooks;
+        #[derive(Default)]
+        struct ScenarioWriterHooks {
+            fail_persist: std::sync::atomic::AtomicBool,
+        }
 
         impl WriterHooks for ScenarioWriterHooks {
             fn before(
                 &self,
-                _: WriterBoundary,
+                boundary: WriterBoundary,
                 _: &crate::runtime::writer::StepBound,
             ) -> Result<()> {
+                if matches!(boundary, WriterBoundary::Persist)
+                    && self.fail_persist.load(std::sync::atomic::Ordering::Acquire)
+                {
+                    return Err(CafleetError::DatabaseBusy("scenario persist busy".into()));
+                }
                 Ok(())
             }
         }
@@ -3806,6 +3818,7 @@ pub(crate) mod test_support {
             pub(crate) display: FakeDisplay,
             pub(crate) replies: Vec<std::result::Result<InputControlReply, CafleetError>>,
             pub(crate) held_pane: Option<crate::pane_lock::PaneLock>,
+            writer_hooks: Arc<ScenarioWriterHooks>,
             turns: InputTurns,
             finished: bool,
         }
@@ -3851,12 +3864,13 @@ pub(crate) mod test_support {
                     .unwrap();
                 fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 let mut controller = ObservationController::new(&fixture.run, catalog).unwrap();
+                let writer_hooks = Arc::new(ScenarioWriterHooks::default());
                 let writer = EventWriter::start_with_hooks(
                     format!("sqlite:///{}", fixture.conn.path().unwrap()),
                     fixture.run.clone(),
                     lock.clone(),
                     Arc::new(YieldingClock(clock.clone())),
-                    Arc::new(ScenarioWriterHooks),
+                    writer_hooks.clone(),
                 )
                 .unwrap();
                 let child = ProcessIdentity::current().unwrap();
@@ -3932,6 +3946,7 @@ pub(crate) mod test_support {
                     display: FakeDisplay::default(),
                     replies: Vec::new(),
                     held_pane: None,
+                    writer_hooks,
                     turns: InputTurns::new(),
                     finished: false,
                 }
@@ -4006,6 +4021,10 @@ pub(crate) mod test_support {
                     }
                     Step::Arm(plan) => plan.arm(&mut self.fixture.conn),
                     Step::Clear(plan) => plan.clear(&mut self.fixture.conn),
+                    Step::FailPersist(failing) => self
+                        .writer_hooks
+                        .fail_persist
+                        .store(failing, std::sync::atomic::Ordering::Release),
                 }
             }
 
@@ -5510,10 +5529,10 @@ mod tests {
         const IDLE: &str = "codex-0.167.0-composer-idle-empty-tmux-120-1";
         const APPROVAL: &str = "codex-0.167.0-allow-pre-stage-tmux-120-1";
         const STATUS: &str = "codex-0.167.0-auto-status-tmux-120-1";
-        const EVENT_FAULT: FaultPlan = FaultPlan::Abort {
-            trigger: "scenario_event_fault",
-            on: "BEFORE INSERT ON member_runtime_events",
-            message: "scenario event fault",
+        const REJECT_OPENING: FaultPlan = FaultPlan::Abort {
+            trigger: "scenario_reject_opening",
+            on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='interaction_opened'",
+            message: "scenario opening rejection",
         };
 
         fn prompt_program(literal: &str) -> Vec<u8> {
@@ -5902,6 +5921,93 @@ mod tests {
         }
 
         #[test]
+        fn a_head_that_stalls_again_after_an_interaction_archives_the_repeat_and_later_events_persist()
+         {
+            const BOUND: Duration = Duration::from_secs(2);
+            const RESTARTED: Scenario = Scenario {
+                name: "restarted head stall",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Prompt {
+                        key: "prompt:restarted-stall",
+                        literal: "head that stalls twice",
+                    },
+                    Step::Screen(DRAFT),
+                    Step::Run(Duration::from_secs(4)),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Screen(DRAFT),
+                    Step::Run(Duration::from_secs(4)),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                ],
+                events: &[
+                    "interaction_opened",
+                    "interaction_closed",
+                    "input_delivery_stalled",
+                    "interaction_opened",
+                    "interaction_closed",
+                    "input_delivery_stalled",
+                    "interaction_opened",
+                ],
+            };
+            let mut runner = RESTARTED.run_with(|runner| runner.coordinator.set_stall_bound(BOUND));
+            assert_eq!(runner.typed("head that stalls twice"), 0);
+            let head = crate::broker::runtime::find_input(
+                &runner.fixture.conn,
+                runner.fixture.run.run_id,
+                "prompt:restarted-stall",
+            )
+            .unwrap()
+            .expect("the queued head has a receipt");
+            let rows: Vec<(String, Option<i64>, Option<String>, serde_json::Value)> = runner
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT notification_state,message_id,archive_reason,payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' ORDER BY event_seq",
+                )
+                .unwrap()
+                .query_map([runner.fixture.run.run_id], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        serde_json::from_str(&row.get::<_, String>(3)?).unwrap(),
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            let [first, repeat] = rows.as_slice() else {
+                panic!("two stalled records, got {rows:?}");
+            };
+            assert_eq!(first.0, "inbox", "{first:?}");
+            assert!(first.1.is_some(), "{first:?}");
+            assert_eq!(first.2, None, "{first:?}");
+            assert_eq!(repeat.0, "archived", "{repeat:?}");
+            assert_eq!(repeat.1, None, "{repeat:?}");
+            assert_eq!(
+                repeat.2.as_deref(),
+                Some("duplicate_delivery"),
+                "{repeat:?}"
+            );
+            for (_, _, _, payload) in &rows {
+                assert_eq!(payload["input_id"], head.input_id, "{payload}");
+            }
+            assert!(
+                first.3["waiting_since"] != repeat.3["waiting_since"],
+                "the restarted watch carries its own wait start: {rows:?}"
+            );
+            let status = runner.writer.status();
+            assert_eq!(status.diagnostic, None, "{status:?}");
+            runner.finish();
+        }
+
+        #[test]
         fn an_uncertain_prompt_stops_queued_input_and_the_sweep_until_reconciled() {
             const STOPPED: Scenario = Scenario {
                 name: "uncertain prompt",
@@ -5961,7 +6067,7 @@ mod tests {
                 redraw: None,
                 interrupt: None,
                 steps: &[
-                    Step::Arm(EVENT_FAULT),
+                    Step::FailPersist(true),
                     Step::Screen(APPROVAL),
                     Step::Run(Duration::from_secs(1)),
                 ],
@@ -5973,7 +6079,7 @@ mod tests {
                 runner.eligibility(),
                 InputEligibility::Hold(GateReason::Gap)
             );
-            runner.step(Step::Clear(EVENT_FAULT));
+            runner.step(Step::FailPersist(false));
             runner.step(Step::Run(Duration::from_secs(5)));
             assert!(
                 runner
@@ -5982,6 +6088,45 @@ mod tests {
                 "{:?}",
                 runner.event_kinds()
             );
+            runner.finish();
+        }
+
+        #[test]
+        fn a_rejected_event_degrades_without_a_gap_and_the_held_preview_is_delivered() {
+            const REJECTED: Scenario = Scenario {
+                name: "rejected opening",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Arm(REJECT_OPENING),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Message("preview held by the rejected form"),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(5)),
+                ],
+                events: &["runner_degraded", "runner_degraded"],
+            };
+            let mut runner = REJECTED.run();
+            let body = "preview held by the rejected form";
+            let line = runner.preview_line(body);
+            let rejected: Vec<_> = runner
+                .payloads("runner_degraded")
+                .into_iter()
+                .map(|payload| {
+                    assert_eq!(payload["cause"]["kind"], "event_rejected", "{payload}");
+                    payload["cause"]["rejected_kind"].clone()
+                })
+                .collect();
+            assert_eq!(rejected, ["interaction_opened", "interaction_closed"]);
+            let status = runner.writer.status();
+            assert_eq!(status.diagnostic, None, "{status:?}");
+            assert_eq!(status.gap_count, 0, "{status:?}");
+            assert_eq!(runner.controller.status().gap_count, 0);
+            assert_eq!(runner.typed(&line), 1, "the held preview is typed once");
+            assert!(runner.notified(body));
             runner.finish();
         }
     }
