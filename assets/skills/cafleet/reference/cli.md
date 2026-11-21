@@ -458,9 +458,7 @@ A wrong-kind answer is a structured zero-byte `rejected` response (exit 1): `cho
 
 `cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID [--json]` reconciles active/deregistered recorded runs without starting agents; absent run fails before mutation.
 
-Exceptional form: `cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID --owner-terminated --expected-run-id RUN_ID --expected-owner-epoch EPOCH --evidence-ref REFERENCE [--json]`. All four options are required, with positive inspected snapshot IDs/epoch and nonempty operator attestation that owner/startup processes ended. Invalid combinations exit 2; changed ownership rejects and positive live evidence protects the owner.
-
-Result fields: `member_id,run_id,outcome,replayed_count,inbox_count,archived_count,status,cleanup_diagnostics`. Outcomes: `recovered,recovering,live_or_unreachable,operator_reconciliation_required`. Counts cover newly committed work; incomplete/unreachable outcomes remain distinct from recovery.
+Result fields: `member_id,run_id,outcome,inbox_count,archived_count,status,cleanup_diagnostics`. Outcomes: `recovered,recovering,live_or_unreachable`; a runner whose owner identity cannot be read reports `live_or_unreachable`, and `member delete` resolves it by force-closing its pane. Counts cover newly committed work; incomplete/unreachable outcomes remain distinct from recovery.
 
 ## `setup` and `doctor`
 

@@ -354,9 +354,9 @@ A multiplexer failure calls for diagnosis of the recorded Director placement and
 
 #### Inspect and recover
 
-Read stored identities with `member show --json` and diagnose without mutation through `doctor`; failed health holds input and preserves interactions. Run `member recover MEMBER_ID --from-member-id <my-member-id> --json` for exclusive bounded recovery; it sends no answer keys and launches no replacement agent, and [member recover](../reference/cli.md#member-recover) owns its replay and outcomes.
+Read stored identities with `member show --json` and diagnose without mutation through `doctor`; failed health holds input and preserves interactions. Run `member recover MEMBER_ID --from-member-id <my-member-id> --json` for exclusive bounded recovery; it sends no answer keys and launches no replacement agent, and [member recover](../reference/cli.md#member-recover) owns its outcomes.
 
-For unreadable owner identity, pass `--owner-terminated` only with operator evidence bound to the inspected run/epoch snapshot. Preserve unknown process/receipt outcomes until evidence resolves them. Coordinate owned shutdown before authorized pane/registry cleanup and retain unconfirmed-child diagnostics.
+A runner whose owner identity cannot be read stays `live_or_unreachable`; resolve it with `member delete`, which force-closes its pane. Preserve unknown process/receipt outcomes until evidence resolves them. Coordinate owned shutdown before authorized pane/registry cleanup and retain unconfirmed-child diagnostics.
 
 ### Shutdown
 
