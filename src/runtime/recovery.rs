@@ -984,8 +984,7 @@ mod tests {
         {
             let mut case = Case::new();
             persist_opening(&mut case);
-            case.release();
-            let report = case.recover(&mut new_host()).unwrap();
+            let report = recover_released(&mut case).unwrap();
             assert!(
                 matches!(report.outcome, RecoveryOutcome::Recovered),
                 "{:?}",
@@ -1229,7 +1228,7 @@ mod tests {
         #[test]
         fn runner_recovery_verified_recovery_removes_its_private_descriptor() {
             let mut case = described_run();
-            let report = case.recover(&mut new_host()).unwrap();
+            let report = recover_released(&mut case).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, RunStatus::Lost);
             secret_free(&serde_json::to_string(&report.cleanup_diagnostics).unwrap());
@@ -1255,7 +1254,7 @@ mod tests {
                     }
                     Ok(())
                 }));
-                assert!(case.recover(&mut host).is_err());
+                assert!(recover_released_with_host(&mut case, &mut host).is_err());
                 assert!(host.calls.iter().any(|name| name == "before_finish"));
                 case.refresh();
                 assert_eq!(case.fixture.run.owner_epoch, original_epoch + increment);
@@ -1266,7 +1265,7 @@ mod tests {
                 );
                 assert_eq!(events(&case).len(), 1);
             }
-            let report = case.recover(&mut new_host()).unwrap();
+            let report = recover_released(&mut case).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(events(&case).len(), 1);
             assert!(
@@ -1650,7 +1649,6 @@ mod tests {
     }
 
     mod completion {
-        use crate::runtime::recovery::test_support::descriptor::recover_released_with_host;
         use crate::runtime::recovery::tests::*;
         use rusqlite::hooks::AuthAction;
         use rusqlite::hooks::AuthContext;
@@ -2044,7 +2042,7 @@ mod tests {
             let deferred = insert(&case, "prompt:deferred", "ready", true);
             let attempted = insert(&case, "prompt:attempted", "in_progress", false);
             let attempted_before = storage::get_input(&case.fixture.conn, attempted).unwrap();
-            let report = case.recover(&mut new_host()).unwrap();
+            let report = recover_released(&mut case).unwrap();
             assert!(
                 matches!(report.outcome, RecoveryOutcome::Recovered),
                 "{:?}",
@@ -2687,6 +2685,33 @@ pub(crate) mod test_support {
         .0
     }
 
+    /// Recovers right after the case's owner lock is released. A child forked by a concurrent
+    /// test shares that flock until its exec closes it, which recovery reads as a live owner,
+    /// so retry that side-effect-free outcome briefly.
+    pub(crate) fn recover_released(case: &mut Case) -> TestResult<RecoveryReport> {
+        recover_released_with_host(case, &mut new_host())
+    }
+
+    pub(crate) fn recover_released_with_host(
+        case: &mut Case,
+        host: &mut Host,
+    ) -> TestResult<RecoveryReport> {
+        let until = host
+            .deadline
+            .min(Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE);
+        loop {
+            let result = case.recover(host);
+            let contended = matches!(
+                &result,
+                Ok(report) if matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable)
+            );
+            if !contended || Instant::now() >= until {
+                return result;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     pub(crate) fn missing_lock(case: &mut Case) {
         case.release();
         std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap();
@@ -2792,32 +2817,6 @@ pub(crate) mod test_support {
                 !text.contains("CAFLEET_TEST_PRIVATE_VALUE"),
                 "descriptor diagnostics preserve private environment names"
             );
-        }
-        /// Recovers right after the case's owner lock is released. A child forked by a concurrent
-        /// test shares that flock until its exec closes it, which recovery reads as a live owner,
-        /// so retry that side-effect-free outcome briefly.
-        pub(crate) fn recover_released(case: &mut Case) -> TestResult<RecoveryReport> {
-            recover_released_with_host(case, &mut new_host())
-        }
-
-        pub(crate) fn recover_released_with_host(
-            case: &mut Case,
-            host: &mut Host,
-        ) -> TestResult<RecoveryReport> {
-            let until = host
-                .deadline
-                .min(Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE);
-            loop {
-                let result = case.recover(host);
-                let contended = matches!(
-                    &result,
-                    Ok(report) if matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable)
-                );
-                if !contended || Instant::now() >= until {
-                    return result;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
         }
         pub(crate) fn incomplete(case: &Case, result: TestResult<RecoveryReport>) {
             match result {
