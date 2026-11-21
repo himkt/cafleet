@@ -3799,7 +3799,6 @@ pub(crate) mod native_capture {
                     capture: Some(port),
                     observation_hooks: None,
                     preview_sweep: false,
-                    stall_bound: Duration::from_secs(180),
                 },
             );
             let exported = task.finish(&result);
@@ -7415,7 +7414,6 @@ pub(crate) mod native_capture {
                             capture: Some(port),
                             observation_hooks: Some(observer.clone()),
                             preview_sweep: false,
-                            stall_bound: Duration::from_secs(180),
                         },
                     );
                     stop.store(true, Ordering::Release);
@@ -9505,7 +9503,9 @@ mod tests {
                     controller
                         .poll(&terminal.snapshot(), &writer, &clock)
                         .unwrap();
-                    wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+                    crate::runtime::writer::test_support::yield_until(|| {
+                        committed(&fixture) == 1 && writer.status().pending_count == 0
+                    });
                     Self {
                         writer,
                         controller,
@@ -9693,7 +9693,7 @@ mod tests {
             controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
-            wait_until(|| committed(&fixture) == 1);
+            crate::runtime::writer::test_support::yield_until(|| committed(&fixture) == 1);
             let view = storage::get_event(&fixture.fixture.conn, 1).unwrap();
             let interaction = view
                 .interaction
@@ -9924,7 +9924,7 @@ mod tests {
             assert!(controller.status().retained_transition);
             assert!(controller.status().retained_draft);
             drop(release);
-            wait_until_within(PRESSURE_DRAIN_BUDGET, || {
+            crate::runtime::writer::test_support::yield_until_within(PRESSURE_DRAIN_BUDGET, || {
                 let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
                 assert_retained_pressure(attempt, controller.status());
                 committed(&fixture) >= 66
@@ -9946,7 +9946,7 @@ mod tests {
                 assert_eq!(view.event.payload_json["evidence"]["screen_seq"], screen);
             }
             assert_eq!(opened.event.kind, RuntimeEventKind::InteractionOpened);
-            wait_until_within(PRESSURE_DRAIN_BUDGET, || {
+            crate::runtime::writer::test_support::yield_until_within(PRESSURE_DRAIN_BUDGET, || {
                 let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
                 assert_retained_pressure(attempt, controller.status());
                 !controller.has_pending() && writer.status().pending_count == 0

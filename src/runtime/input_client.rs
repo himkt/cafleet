@@ -1787,7 +1787,6 @@ mod tests {
         after_health: Option<Box<dyn FnMut()>>,
         health_reply: Option<serde_json::Value>,
         exchange_limit: usize,
-        expire_retirement: bool,
         wrong_query_id: Option<i64>,
         skip_reconcile: bool,
         tamper_inspection: Option<InspectionTamper>,
@@ -1817,7 +1816,6 @@ mod tests {
                 after_health: None,
                 health_reply: None,
                 exchange_limit: 1,
-                expire_retirement: false,
                 wrong_query_id: None,
                 skip_reconcile: false,
                 tamper_inspection: None,
@@ -1924,13 +1922,6 @@ mod tests {
                     InputState::Settled,
                     "Retire follows the committed durable reread"
                 );
-                if self.expire_retirement {
-                    std::thread::sleep(
-                        deadline.saturating_duration_since(Instant::now())
-                            + Duration::from_millis(1),
-                    );
-                    assert!(Instant::now() >= deadline);
-                }
             }
             if matches!(self.reply, ReplyMode::UnknownId) {
                 return Ok(InputControlReply::Submission(SubmissionResult {

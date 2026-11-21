@@ -1,7 +1,7 @@
 # SPEC Neutrality, Test Simplification and Feature Reduction
 
 **Status**: Approved
-**Progress**: 70/79 tasks complete
+**Progress**: 79/79 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -510,9 +510,9 @@ Per TD-1 (a), `CLAUDE.md` § Tests is unchanged.
 
 | Measure | Step C1 baseline | Step C5 result |
 |---|---|---|
-| `mise //:test` wall time | 41.5 s (mean of three warm runs: 41.1, 42.3, 41.1 s; harness 39.2–40.3 s; 1594 passed, 10 ignored) | — |
-| Production line coverage | 93.06 % (`mise //:coverage` TOTAL lines: 79,733, 5,531 missed) | — |
-| Ledger rows kept / merged / dropped | — | — |
+| `mise //:test` wall time | 41.5 s (mean of three warm runs: 41.1, 42.3, 41.1 s; harness 39.2–40.3 s; 1594 passed, 10 ignored) | 35.0 s (mean of three warm runs: 35.1, 34.9, 35.0 s; harness 33.0–33.2 s; 1346 passed, 10 ignored) |
+| Production line coverage | 93.06 % (`mise //:coverage` TOTAL lines: 79,733, 5,531 missed) | 92.94 % (TOTAL lines: 79,996, 5,649 missed; −0.12 percentage points) |
+| Ledger rows kept / merged / dropped | — | 1,356 / 380 / 498 (2,234 rows; fix_commit rows: 56 kept, 12 merged as named cases, 31 dropped) |
 
 ---
 
@@ -708,8 +708,8 @@ COMMENT(programmer): B16 production is in the tree (typecheck clean). Removed th
 ### Step C1: Baselines and classes
 
 - [x] Add § Coverage tooling to `mise.toml` and the coverage task to `docs/docs/contributing.md` <!-- completed: 2026-11-21T14:21 -->
-- [ ] Measure `mise //:test` wall time and `mise //:coverage` line coverage and record both in § Gate results <!-- completed: -->
-- [ ] Add the `class` column to every remaining ledger row <!-- completed: -->
+- [x] Measure `mise //:test` wall time and `mise //:coverage` line coverage and record both in § Gate results <!-- completed: 2026-11-21T15:59 -->
+- [x] Add the `class` column to every remaining ledger row <!-- completed: 2026-11-21T15:59 -->
 
 COMMENT(tester): C1 baselines are in § Gate results: `mise //:test` 41.5 s wall (three warm runs after a build; the harness reports 39.2–40.3 s), `mise //:coverage` 93.06 % lines (TOTAL 79,733 lines, 5,531 missed; the report counts every line of each file, inline test regions included). The ledger has a fifth column `class`, set on every live row; dropped and merged rows leave it empty. It now has 1,604 live rows, matching `mise //:test -- -- --list`, after adding 73 rows with an empty `fix_commit` for the tests written since Step B0 (new tests and merge targets), plus 497 dropped and 52 merged rows. Classes: 1 = 17, 2 = 238, 3 = 136, 4 = 302, 5 = 135, 6 = 125, 7 = 542, 8 = 109. Rules, first match wins (`.ledger/classify.py`):
 1. Class 1: test names about unwinding, drop order, poisoning, or a missing Debug/serialized representation.
@@ -736,16 +736,16 @@ COMMENT(programmer): C2 phase (b) production is in the tree (typecheck clean). E
 
 ### Step C4: Conversion
 
-- [ ] Convert classes 3, 4, 5 and 8 and the 22 identical clusters to table-driven tests, updating ledger fates <!-- completed: -->
-- [ ] Convert class 7 to scenarios and per-transaction operation tables, replacing real sleeps with `TestClock`, updating ledger fates <!-- completed: -->
-- [ ] Convert class 2 to table-driven in-file command tests in the `src/cli/*.rs` file that owns each command, updating ledger fates <!-- completed: -->
+- [x] Convert classes 3, 4, 5 and 8 and the 22 identical clusters to table-driven tests, updating ledger fates <!-- completed: 2026-11-21T16:57 -->
+- [x] Convert class 7 to scenarios and per-transaction operation tables, replacing real sleeps with `TestClock`, updating ledger fates <!-- completed: 2026-11-21T16:57 -->
+- [x] Convert class 2 to table-driven in-file command tests in the `src/cli/*.rs` file that owns each command, updating ledger fates <!-- completed: 2026-11-21T16:57 -->
 
 ### Step C5: Gates
 
-- [ ] Resolve every ledger row and confirm no `fix:`-traced case was lost outside `dropped:feature removed (R<n>)` <!-- completed: -->
-- [ ] Confirm in-scope production code reads time only through `time::Clock` and that, among tests of in-scope code, `std::thread::sleep` appears only in class-6 tests <!-- completed: -->
-- [ ] Measure wall time and coverage against § Gates and record them and the ledger counts in § Gate results <!-- completed: -->
-- [ ] Run `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
+- [x] Resolve every ledger row and confirm no `fix:`-traced case was lost outside `dropped:feature removed (R<n>)` <!-- completed: 2026-11-21T17:05 -->
+- [x] Confirm in-scope production code reads time only through `time::Clock` and that, among tests of in-scope code, `std::thread::sleep` appears only in class-6 tests <!-- completed: 2026-11-21T17:05 -->
+- [x] Measure wall time and coverage against § Gates and record them and the ledger counts in § Gate results <!-- completed: 2026-11-21T17:05 -->
+- [x] Run `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: 2026-11-21T17:05 -->
 
 ---
 

@@ -545,9 +545,6 @@ pub(crate) struct RunnerDependencies {
 
     #[cfg(test)]
     pub(crate) preview_sweep: bool,
-
-    #[cfg(test)]
-    pub(crate) stall_bound: Duration,
 }
 pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
     run_service(
@@ -568,9 +565,6 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 
             #[cfg(test)]
             preview_sweep: true,
-
-            #[cfg(test)]
-            stall_bound: Duration::from_secs(180),
         },
     )
 }
@@ -721,8 +715,6 @@ pub(crate) fn run_service(
         } else {
             PreviewSweep::disabled()
         },
-        #[cfg(test)]
-        stall_bound: services.stall_bound,
         deferred_retry: DeferredRetry::default(),
         queue_housekeeping_at: None,
         shutdown_client: None,
@@ -885,8 +877,6 @@ struct RunnerLoop<'a> {
     pending_input_client: Option<PendingInputClient>,
     pending_sweep: Option<PendingSweep>,
     preview_sweep: PreviewSweep,
-    #[cfg(test)]
-    stall_bound: Duration,
     deferred_retry: DeferredRetry,
     queue_housekeeping_at: Option<Instant>,
     shutdown_client: Option<u64>,
@@ -1173,8 +1163,6 @@ impl RunnerLoop<'_> {
             },
             self.handshake_deadline,
         )?);
-        #[cfg(test)]
-        started(&mut self.coordinator).set_stall_bound(self.stall_bound);
         serde_json::to_value(Started {
             identity: ControlIdentity::from_run(&self.run),
             runner: self.process.clone(),
@@ -3033,7 +3021,6 @@ pub(crate) mod test_support {
                     None => false,
                     Some(enabled) => enabled.as_bool().expect("preview_sweep is a boolean"),
                 },
-                stall_bound: Duration::from_secs(180),
             };
             crate::runtime::service::run_service(settings, descriptor, services)
         }

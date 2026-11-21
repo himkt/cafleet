@@ -675,8 +675,13 @@ pub(crate) mod test_support {
     }
 
     /// Yields until the worker thread makes `condition` hold, within a real-time bound.
-    pub(crate) fn yield_until(mut condition: impl FnMut() -> bool) {
-        let until = Instant::now() + Duration::from_secs(10);
+    pub(crate) fn yield_until(condition: impl FnMut() -> bool) {
+        yield_until_within(Duration::from_secs(10), condition);
+    }
+
+    /// Yields until the worker thread makes `condition` hold, within `budget` of real time.
+    pub(crate) fn yield_until_within(budget: Duration, mut condition: impl FnMut() -> bool) {
+        let until = Instant::now() + budget;
         while !condition() {
             assert!(
                 Instant::now() < until,

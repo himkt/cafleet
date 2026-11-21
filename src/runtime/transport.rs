@@ -1401,7 +1401,6 @@ mod tests {
     use crate::runtime::writer::test_support::committed;
     use crate::runtime::writer::test_support::start;
     use crate::runtime::writer::test_support::transition;
-    use crate::runtime::writer::test_support::wait_until;
     use crate::time::Clock as _;
     use crate::time::test_support::TestClock;
     use std::cell::Cell;
@@ -2225,7 +2224,9 @@ mod tests {
                 1
             );
             drop(h.release.take());
-            wait_until(|| h.writer.status().pending_count == 0);
+            crate::runtime::writer::test_support::yield_until(|| {
+                h.writer.status().pending_count == 0
+            });
             assert_eq!(committed(&h.fixture), 1);
             h.seal(&mut drain_transport);
             assert!(drain_transport.take_input_drain().is_some());
