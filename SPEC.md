@@ -252,28 +252,26 @@ Send and member creation require exactly one positional body or `--file PATH`; `
 
 `cafleet setup [--coding-agent AGENT...]` prepares the database first, then installs assets. It classifies the selected database before any write per §6.3 Schema-version guard, leaving a current file of this version unchanged. Compatible setup then installs embedded assets offline and records versions. Backend selection is multi-value/repeatable, deduplicated and defaults to the supported backend registry; selected backends install in registry order.
 
-After initializing, setup prints `Initialized database at {path}.`; a database that is already current prints `Database already initialized at {path}.`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation and record, and setup exits 1 with that backend's cause.
+After initializing, setup prints `Initialized database at {path}.`; a database that is already current prints `Database already initialized at {path}.`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation, and setup exits 1 with that backend's cause.
 
 ##### Config-dir resolution
 
 Every surface that installs to or checks a backend's user-level config directory resolves its base from the backend's native config-location environment variable, else the default:
 
-| Backend | Base | Skills dir | Preset target | Recorded path |
-|---|---|---|---|---|
-| claude | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | `<base>/skills` | — | `<base>` |
-| codex | `$CODEX_HOME`, else `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` | `<base>` |
-| opencode (skills) | `~/.config/opencode` (fixed discovery path) | `<base>/skills` | — | — |
-| opencode (preset) | `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` | `<base>` |
-| hermes | `$HERMES_HOME`, else `~/.hermes` | `<base>/skills` | — (setup installs the `cafleet` plugin under `<hermes home>` and enables it in the Hermes configuration; § Asset installation) | `<base>` |
-| pi | `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` | `<base>/skills` | — (setup installs the CAFleet pi extension under `<base>/extensions`; § Asset installation) | `<base>` |
+| Backend | Base | Skills dir | Preset target |
+|---|---|---|---|
+| claude | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | `<base>/skills` | — |
+| codex | `$CODEX_HOME`, else `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` |
+| opencode (skills) | `~/.config/opencode` (fixed discovery path) | `<base>/skills` | — |
+| opencode (preset) | `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` |
+| hermes | `$HERMES_HOME`, else `~/.hermes` | `<base>/skills` | — (setup installs the `cafleet` plugin under `<hermes home>` and enables it in the Hermes configuration; § Asset installation) |
+| pi | `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` | `<base>/skills` | — (setup installs the CAFleet pi extension under `<base>/extensions`; § Asset installation) |
 
 OpenCode discovers skills only at the fixed path but loads agent definitions from `OPENCODE_CONFIG_DIR`, so only its presets follow the variable.
 
 **Validation.** A set variable must hold an absolute path; any other value (the empty string, a relative path, a literal unexpanded `~/…`) fails at resolution time with exit 1 and `Error: <VAR> must be an absolute path (got '<value>')`. A set config-location variable or `HOME` whose value is not valid UTF-8 fails at the same point with exit 1 and `Error: <VAR> is not valid UTF-8` instead of selecting the default.
 
 Validation is lazy: a site reads and validates a variable only when it resolves that backend's directory. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds because the selector resolves only the targeted agent's directory; plain `cafleet setup` resolves each backend in registry order, so an invalid variable stops installation at that backend. `member create` resolves only the selected backend's directory during its availability check and forwards the validated value into the member environment (§6.3 Member environment). `doctor` reports a per-agent resolution error as that agent's `<agent>.configuration` check instead of aborting (§6.3 `cafleet doctor` — Environment Diagnosis).
-
-**Recorded-path identity.** `asset_installs` rows and `doctor`'s installation checks key on each agent's Recorded path, stored absolute exactly as resolved (no canonicalization beyond the absolute-path validation); the fixed opencode skills base carries no identity.
 
 ##### Asset installation
 
@@ -303,9 +301,9 @@ Existing targets are deleted before their replacements are written; a symlink ta
 
 The *executable record* is a one-line file holding the absolute path of the running `cafleet` executable as the OS reports it (Linux: the target of `/proc/self/exe`; macOS: the kernel-reported image path), with every symbolic link resolved, written after the extension files. It is neither an embedded asset nor byte-compared; OpenCode plugin discovery loads only `.ts`/`.js` files and directories, and pi extension discovery loads only `*.ts`, `*.js`, `*/index.ts` and `*/package.json` entries, so both ignore the record. The plugins and extensions execute only the recorded path.
 
-Skills-operation errors retain `failed to install skills into <skills_dir>: <error>`, preset-operation errors `failed to install preset into <target>: <error>`, and extension-operation errors, including the executable record, `failed to install extension into <target>: <error>`. A successful install records one `asset_installs` row for the agent, covering its skills, presets and extensions; a failure on any preset, extension or plugin enablement step fails setup and records no installation.
+Skills-operation errors retain `failed to install skills into <skills_dir>: <error>`, preset-operation errors `failed to install preset into <target>: <error>`, and extension-operation errors, including the executable record, `failed to install extension into <target>: <error>`. A failure on any preset, extension or plugin enablement step fails setup.
 
-Setup prints each success line after its operation completes and records the installed version after all operations succeed: the skills line, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written; a directory extension prints its directory once. Claude prints only the skills line; pi prints the skills line and the extension line; Hermes prints the skills line, the extension line and a plugin enablement line (§ Hermes plugin enablement):
+Setup prints each success line after its operation completes: the skills line, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written; a directory extension prints its directory once. Claude prints only the skills line; pi prints the skills line and the extension line; Hermes prints the skills line, the extension line and a plugin enablement line (§ Hermes plugin enablement):
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
@@ -344,13 +342,13 @@ After installing the skills, setup for `hermes` runs:
 4. Only when step 3 wrote, re-read `hermes config get --json plugins` once under its own ten-second deadline and require `cafleet` in `enabled` and `true` for `allow_gateway_injection`, because a `config set` can exit 0 without the value sticking under a managed scope.
 5. Print `hermes: plugin cafleet already enabled -> <config path>` when step 3 wrote nothing, otherwise `hermes: enabled plugin cafleet -> <config path>`.
 
-Any failed command, a timeout, an unexpected value or a listed `plugins.disabled` entry after step 1 fails setup with `failed to enable hermes plugin cafleet in <config path>: <cause>` and records no `asset_installs` row; Hermes's writer refusing a key pinned by its managed scope is such a cause.
+Any failed command, a timeout, an unexpected value or a listed `plugins.disabled` entry after step 1 fails setup with `failed to enable hermes plugin cafleet in <config path>: <cause>`; Hermes's writer refusing a key pinned by its managed scope is such a cause.
 
 Hermes's ruamel round-trip writer replaces the file atomically, writing through a symlinked `config.yaml` to its target and preserving comments, key order, quoting and untouched nodes. A rerun after a successful enablement writes nothing.
 
 A missing `plugins.enabled` enables no user plugin, and Hermes grandfathers installed user plugins only while the key is missing; after setup writes it, other installed but not enabled user plugins stay disabled until the operator enables them. Setup never runs `hermes plugins enable`, whose dependency admission re-syncs the Hermes environment, which the plugin does not need and which fails on installs without `uv.lock`.
 
-Setup runs only the local binary and stays offline. `cafleet setup --coding-agent hermes` requires `hermes` on `PATH`; its absence fails with the cause `binary hermes not found on PATH`. Plain `cafleet setup` with `hermes` absent from `PATH` installs the Hermes skills, records the `asset_installs` row, skips the extension and the plugin enablement and prints:
+Setup runs only the local binary and stays offline. `cafleet setup --coding-agent hermes` requires `hermes` on `PATH`; its absence fails with the cause `binary hermes not found on PATH`. Plain `cafleet setup` with `hermes` absent from `PATH` installs the Hermes skills, skips the extension and the plugin enablement and prints:
 
 ```
 hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes
@@ -547,7 +545,7 @@ Text output prints one `<status> <name>: <detail>` row per check in check order 
 ```text
 ok multiplexer: herdr server=default
 ok multiplexer.caller_pane: HERDR_PANE_ID=w2:p2N session=w2 window=w2:tP
-warn codex.installation: no installation recorded at /home/user/.codex; run 'cafleet setup --coding-agent codex'
+warn codex.skills: skills not installed at /home/user/.codex/skills; run 'cafleet setup --coding-agent codex'
 ```
 
 ```json
@@ -561,7 +559,7 @@ exits 0, `warn` included.
 
 ##### Check rows
 
-Each check has a stable `name`, a `status` and a one-line `detail`. Checks run in table order; the rows from `<agent>.configuration` through `<agent>.installation` repeat for each backend in registry order, each backend emitting only its own preset and extension rows.
+Each check has a stable `name`, a `status` and a one-line `detail`. Checks run in table order; the rows from `<agent>.configuration` through `<agent>.skills` repeat for each backend in registry order, each backend emitting only its own preset and extension rows.
 
 | Check name | `ok` | `info` | `warn` | `error` |
 |---|---|---|---|---|
@@ -572,11 +570,7 @@ Each check has a stable `name`, a `status` and a one-line `detail`. Checks run i
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
 | `opencode.extension`, `hermes.extension`, `hermes.plugin_enabled`, `pi.extension` | § Extension checks | § Extension checks | — | § Extension checks |
-| `<agent>.installation` | `recorded at <installed_at>` when an installation is recorded at the resolved path | `unavailable: configuration failed: <cause>`; `unavailable: <database error>` for a database that is not current | `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'` | `installation query failed: <cause>` |
-
-Installation records are
-read only at the resolved path of a current database; a row recorded at
-another path is not the resolved installation.
+| `<agent>.skills` | The skills dir, when every embedded skill file equals its installed copy | `unavailable: configuration failed: <cause>`; `unavailable: executable is absent` | `skills not installed at <skills dir>; run 'cafleet setup --coding-agent <agent>'` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` |
 
 The multiplexer rows follow the `fleet create` steps without `--pane` (§ Caller pane verification), and `<VAR>` is the verified pane variable:
 
@@ -593,11 +587,11 @@ The multiplexer rows follow the `fleet create` steps without `--pane` (§ Caller
 
 `doctor` has no selected launch policy, so it checks the preset `<preset base>/agents/<mode>.md` of every OpenCode launch-policy choice (§6.9 Launch policy and capability registry), in catalog order. The default choice's check is `opencode.preset`; every other choice's is `opencode.preset.<mode>`. After the shared `info` states of § Extension checks, a readable preset is `ok` with its path. Setup installs every preset, so a missing or unreadable one is `error` `<path>: <cause>; run 'cafleet setup --coding-agent opencode'`: the installation predates that preset or was altered.
 
-An OpenCode installation recorded only at another base is not the resolved installation; doctor reports through the checks at the resolved base, `~/.config/opencode` with `OPENCODE_CONFIG_DIR` unset: `opencode.configuration` is `ok` with that base, `opencode.installation` is `warn` `no installation recorded at <path>; run 'cafleet setup --coding-agent opencode'`, and every preset check is `error`. Rerunning setup installs every preset at the resolved base and leaves the files at the other base in place.
+OpenCode presets installed only at another base are not the resolved installation; doctor reports through the checks at the resolved base, `~/.config/opencode` with `OPENCODE_CONFIG_DIR` unset: `opencode.configuration` is `ok` with that base and every preset check is `error`. Rerunning setup installs every preset at the resolved base and leaves the files at the other base in place.
 
 ###### Extension checks
 
-Each extension check is read-only. An executable record is usable when it names an existing executable file. `opencode.extension` checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`; `hermes.extension` checks `<hermes home>/plugins/cafleet/`, located by the batch's `hermes config path`; `hermes.plugin_enabled` reads `disabled`, `enabled` and `entries.cafleet.allow_gateway_injection` from the batch's one bounded `hermes config get --json plugins` call under the *not set* and subtree rules (§ Hermes plugin enablement); `pi.extension` follows `pi.executable`, precedes `pi.installation` and checks `<pi base>/extensions/cafleet.ts` and `<pi base>/extensions/cafleet.executable`.
+Each extension check is read-only. An executable record is usable when it names an existing executable file. `opencode.extension` checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`; `hermes.extension` checks `<hermes home>/plugins/cafleet/`, located by the batch's `hermes config path`; `hermes.plugin_enabled` reads `disabled`, `enabled` and `entries.cafleet.allow_gateway_injection` from the batch's one bounded `hermes config get --json plugins` call under the *not set* and subtree rules (§ Hermes plugin enablement); `pi.extension` follows `pi.executable`, precedes `pi.skills` and checks `<pi base>/extensions/cafleet.ts` and `<pi base>/extensions/cafleet.executable`.
 
 `hermes.extension` and `hermes.plugin_enabled` share one concurrent read batch, `hermes config path` and `hermes config get --json plugins`, run with null stdin and `HERMES_HOME` set to the resolved base under one two-second deadline. The batch starts before the multiplexer, database and OpenCode checks and overlaps them; the rows keep their check order. A `hermes` call against a missing home makes Hermes create one, so when the resolved Hermes base does not exist doctor runs no `hermes` process.
 
@@ -605,8 +599,8 @@ A preset or extension check reports the first matching state:
 
 | Check | State | Status | Detail |
 |---|---|---|---|
-| Every preset and extension check | The backend configuration failed | `info` | `unavailable: configuration failed: <cause>` |
-| Every preset and extension check | The backend executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
+| Every preset, extension and skills check | The backend configuration failed | `info` | `unavailable: configuration failed: <cause>` |
+| Every preset, extension and skills check | The backend executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
 | `hermes.extension`, `hermes.plugin_enabled` | The resolved Hermes base does not exist | `info` | `unavailable: no Hermes home at <base>` |
 | `hermes.extension` | `hermes config path` fails or times out | `error` | `cannot read hermes configuration through 'hermes config path': <cause>` |
 | `opencode.extension`, `hermes.extension`, `pi.extension` | An embedded file's installed copy is missing, unreadable or differs | `error` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` |
@@ -732,24 +726,18 @@ Database contention retries stay inside the snapshot budget; exhaustion or anoth
 - **Stdout** carries only the `ready` record and the final `closed` record, so an unread PTY never stalls the five-second output deadline. Writing that `closed` record, with any reason including `session_exited`, is the listener's last action before exit; a write failure leaves the exit status unchanged.
 - **Forwarded events.** Each `pending` notice, and each `closed` record whose reason is `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in emission order. `ready` and `closed` `session_exited` are never forwarded.
 - **Forwarding command:** `codex queue --thread THREAD --message <text>`, where the text is `[cafleet listen record] <compact record JSON>`, for example `[cafleet listen record] {"event":"pending","next":"cafleet message poll 7 --json"}`.
-- **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded.
-- **Full-queue refusal.** Codex refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure.
-- **Refused notice.** A `pending` notice gets one `codex queue` attempt. Exit 0 delivers it and commits the hold; a full-queue refusal refuses it immediately, leaving the hold as reconcile left it (§ `message listen`). The listener then waits one second, checks the pinned session (§ Liveness) and takes a fresh snapshot, so the retry is rebuilt from the then-current pending set, and a notice whose pending set has become empty because a poll consumed it, or whose re-notice no longer has fresh IDs, is abandoned. The pinned session's exit ends the listener with `session_exited`.
-- **Refused `closed` record.** A forwarded `closed` record is retried in place on every full-queue refusal after 1 s, checking the pinned session before each retry, with no time limit; the pinned session's exit ends the listener with `session_exited`. After acceptance the record is written to stdout under a fresh five-second output deadline taken when forwarding returns, so a refusal of any length still leaves the stdout `closed` record. The `session_exited` record written after a refused closing record meets the pinned session's exit uses the same fresh deadline.
+- **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded. Exit 0 delivers the record and commits a `pending` notice's hold.
+- **Non-zero exit.** Any non-zero `codex queue` exit ends forwarding, including Codex's refusal of a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). The listener checks the pinned session first (§ Liveness), then exits as the table below states; it forwards nothing more and retries nothing.
 - **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of §6.9 Native executable resolution.
 
 | Condition | Behavior |
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex session ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| Full-queue refusal of a `pending` notice | Not an error: retried from a fresh snapshot after 1 s while the pinned session lives |
-| Full-queue refusal of a forwarded `closed` record | Not an error: the same record is retried every 1 s while the pinned session lives |
-| `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
-| `codex queue` exceeds 10 s while the pinned session is alive | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
-| Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, closed notice, exit 1 |
-| The pinned Codex process exits, including when the listener checks it first after a `codex queue` exits non-zero or exceeds 10 s | stdout `closed` with reason `session_exited`, exit 0; no diagnostic, no closed notice and nothing forwarded |
-
-**Closed notice.** Before every non-zero exit after `ready`, the listener makes one best-effort attempt, bounded by 10 s, to forward `[cafleet listen closed] exit 1: <stderr diagnostic>` with `codex queue`; the attempt can itself meet the full queue and is not retried. When that attempt also fails, stderr keeps the original diagnostic and adds `failed to forward the closed notice to codex thread <THREAD>: <cause>`, and the exit status stays 1.
+| `codex queue` exits non-zero while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, exit 1 |
+| `codex queue` exceeds 10 s while the pinned session is alive | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, exit 1 |
+| Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, exit 1 |
+| The pinned Codex process exits, including when the listener checks it first after a `codex queue` exits non-zero or exceeds 10 s | stdout `closed` with reason `session_exited`, exit 0; no diagnostic and nothing forwarded |
 
 **Session pinning.** At startup the listener walks its ancestors, starting from its parent, through the process-entry reader of §6.3 Caller pane verification (`/proc/<pid>/stat` and `/proc/<pid>/cmdline` on Linux, `ps -o ppid= -o args= -p <pid>` elsewhere), propagating its read errors. It pins the nearest ancestor whose argv[0] basename is exactly `codex`; shells, `bwrap`, node launchers and the sandbox helper (the same binary, run with argv[0] `codex-linux-sandbox`) are skipped. The executable path is not compared, because the helper shares it. A sandbox that unshares the PID namespace hides the ancestor, and startup fails with the missing-ancestor error.
 
@@ -1079,8 +1067,8 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member create` | The tmux `new-window` reply is malformed; the cleanup diagnostic follows (§6.5 Member pane creation) | `Error: unexpected tmux new-window output: <quoted>` | 1 |
 | `member create` | The herdr `tab create` reply lacks `result.root_pane.pane_id` or `result.tab.tab_id`; the cleanup diagnostic follows | `Error: herdr tab create missing '<key>' field` | 1 |
 | `member create` | A herdr re-parenting move failed; a stderr diagnostic while the spawn continues (§6.5 herdr re-parenting) | `layout re-parenting incomplete: <cause>` | The command's own result |
-| `setup` | An extension file or its executable record cannot be installed, or the Hermes `config path` read fails; no `asset_installs` row for the agent (§6.3 Asset installation, Hermes plugin enablement) | `failed to install extension into <target>: <error>` | 1 |
-| `setup` | The Hermes plugin enablement fails; no `asset_installs` row for `hermes` (§6.3 Hermes plugin enablement) | `failed to enable hermes plugin cafleet in <config path>: <cause>` | 1 |
+| `setup` | An extension file or its executable record cannot be installed, or the Hermes `config path` read fails (§6.3 Asset installation, Hermes plugin enablement) | `failed to install extension into <target>: <error>` | 1 |
+| `setup` | The Hermes plugin enablement fails (§6.3 Hermes plugin enablement) | `failed to enable hermes plugin cafleet in <config path>: <cause>` | 1 |
 | `message listen --codex-thread` | `codex` is not on `PATH`, or no Codex ancestor process exists; before `ready` | §6.3 Codex forwarding | 1 |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path, before registration or multiplexer effects. `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
 | (any command-line argument) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is non-normative. | 2 |
@@ -1309,9 +1297,7 @@ Acquire the canonical pane-input lock shared with deletion and validate its reta
 
 Validation establishes the tuple within the current recorded server only: the placement records no socket/server-generation identity, so it supplies no cross-server fallback or proof of historical server/build equivalence. Keep one adapter/environment across every probe and the write.
 
-Capture one inherited-or-new five-second absolute deadline before invocation database validation. Every press process — the availability, current-context and target-metadata probes and the write — runs under that absolute deadline through spawn, collection and cleanup, and a nested runner clips it by any earlier retained bound. The lock wait reserves one second for metadata/dispatch/cleanup (not the prompt reservation). Every later check uses the remaining original budget, and insufficient launch/cleanup reserve starts no new writing process.
-
-Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll for its exit without blocking (`waitpid` with `WNOHANG`), sleeping at most 2 milliseconds between polls, while the original cleanup deadline has time remaining, checking that deadline after every interruption. Cleanup on an error path and cleanup of an abandoned operation use the same deadline and perform no blocking wait, and each child is cleaned up at most once; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors, the primary process error (a timed run error keeps its original cause) and the ordered cleanup diagnostics; cleanup of an abandoned operation writes its diagnostics to stderr. Relative and untimed execution serve no press process and follow § Subprocess output and deadlines. Synchronous calls have no hard scheduler/syscall return-time guarantee.
+Capture one inherited-or-new five-second invocation deadline before invocation database validation. Every press process — the availability, current-context and target-metadata probes and the write, for `member press` and every other pane-input caller — runs through the shared bounded subprocess runner (§ Subprocess output and deadlines) with a timeout equal to the remaining invocation deadline, so its spawn, collection and cleanup follow that runner's contract. The lock wait reserves one second for metadata/dispatch/cleanup (not the prompt reservation). Every later check uses the remaining invocation deadline, and an expired deadline starts no new writing process.
 
 Both writing adapters acknowledge only successful process completion with empty/whitespace stdout. Unexpected non-whitespace stdout on success is unreadable acknowledgment with uncertain effects; herdr metadata retains its command-specific JSON parsing. Backend keyboard modes or key interception can affect actual PTY bytes even after acknowledgment. Use the CLI result/error contract (§6.3 `member press`), including its zero-write and no-retry cases, and observe actual native effects separately.
 
@@ -3679,7 +3665,6 @@ The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.
 | `member_interactions` | Observed interactive episodes and visibility closure |
 | `member_runtime_events` | Sequenced events with atomic Director inbox association or archival |
 | `member_input_operations` | Durable submission receipts, delivery method/deferral metadata, payload digests and settled replay protection |
-| `asset_installs` | Asset installation timestamps by backend and config path |
 | `refinery_schema_history` | Baseline ledger |
 
 Exact baseline DDL, ending with the ledger table that initialization creates beside it:
@@ -3704,13 +3689,6 @@ CREATE TABLE fleets (
     deleted_at TEXT,
     director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT,
     last_window_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(last_window_ordinal >= 0)
-);
-
-CREATE TABLE asset_installs (
-    coding_agent TEXT NOT NULL,
-    path TEXT NOT NULL,
-    installed_at TEXT NOT NULL,
-    PRIMARY KEY (coding_agent, path)
 );
 
 CREATE TABLE member_placements (
@@ -3861,7 +3839,6 @@ Baseline column semantics:
 | `members` | `status` decodes as `active` or `deregistered`; unknown values fail. Deregistration is soft and keeps the row |
 | `member_placements` | `mux_pane_id`, `mux_window_id` and `mux_window_name` are null exactly while member creation is pending. `mux_server` is the server every invocation for the fleet targets (§6.5 Multiplexer context); member placements copy the Director's |
 | `messages` | `status_state` decodes as `input_required` or `completed`; the recipient's consuming poll sets `completed`. `notified_at` is internal preview state that the public message record omits; a self-send stamps it on insertion and stays pending until a poll consumes it |
-| `asset_installs` | Each successful backend asset installation upserts its timestamp at `(coding_agent, path)`, independently of member registration |
 
 Window layout columns follow §6.5 Fleet window layout:
 

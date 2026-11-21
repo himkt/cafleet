@@ -162,7 +162,7 @@ Listening changes no consumption/notification state and retries no pane delivery
 
 - Stdout carries only `ready` and the final `closed` record, written right before exit with every reason, `session_exited` included.
 - Each `pending` notice, and each `closed` record with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, one at a time with a 10 s deadline each. `ready` and `closed` `session_exited` are never forwarded.
-- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal. A refused `pending` notice is rebuilt from a fresh snapshot after 1 s while the pinned session lives, and dropped when a poll consumed its messages meanwhile or its re-notice no longer has fresh messages. A refused `closed` record is retried every 1 s with no time limit and, once accepted, still written to stdout. The pinned session's exit during either wait ends the listener with `session_exited`.
+- Any non-zero `codex queue` exit ends forwarding, a full thread queue (`queue cannot contain more than 100 submissions`) included; nothing is retried.
 - At startup the listener pins its nearest ancestor whose argv[0] basename is exactly `codex`. When that process exits (a reused pid counts as exited), stdout gets `closed` `session_exited` and the listener exits 0.
 
 | Condition | Result |
@@ -170,13 +170,10 @@ Listening changes no consumption/notification state and retries no pane delivery
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | Process inspection fails at startup | The read error propagates before `ready`, including macOS `cannot run ps: Operation not permitted (os error 1)` |
 | No Codex ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| Full-queue refusal of a `pending` notice or forwarded `closed` record | Not an error: retried every 1 s while the pinned session lives |
-| `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
-| `codex queue` exceeds 10 s while the pinned session is alive | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
-| `codex queue` exits non-zero or exceeds 10 s after the pinned session exited | stdout `closed` `session_exited`, exit 0, no closed notice |
-| Any other failure after `ready` | its usual diagnostic, closed notice, exit 1 |
-
-The closed notice is one best-effort `codex queue` of `[cafleet listen closed] exit 1: <stderr diagnostic>`, bounded by 10 s and not retried on a full queue. When it also fails, stderr adds `failed to forward the closed notice to codex thread <THREAD>: <cause>` and the exit stays 1.
+| `codex queue` exits non-zero while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, exit 1 |
+| `codex queue` exceeds 10 s while the pinned session is alive | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, exit 1 |
+| `codex queue` exits non-zero or exceeds 10 s after the pinned session exited | stdout `closed` `session_exited`, exit 0 |
+| Any other failure after `ready` | its usual diagnostic, exit 1 |
 
 For sandbox startup failures, confirm exit and follow the [Codex native reception recipe](coding-agents.md#codex-native-director-reception) for approved escalation and readiness checks.
 
@@ -334,7 +331,7 @@ A failing first write may partially type; failure after Enter may have executed.
 
 ### `member press`
 
-`cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID KEY... [--json]` requests 1–64 ordered keys, each at most 32 UTF-8 bytes, with no implicit Escape/Enter or shell submission. For punctuation use `cafleet member press 42 --from-member-id 1 -- '-' '+' ';'`. Wrapped members receive manual keys through the outer pane. Exit 0 establishes backend acknowledgment, independently of native approval/effects; fields are `member_id,pane_id,keys,status`, with `status=acknowledged`.
+`cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID KEY... [--json]` requests 1–64 ordered keys, each at most 32 UTF-8 bytes, with no implicit Escape/Enter or shell submission. For punctuation use `cafleet member press 42 --from-member-id 1 -- '-' '+' ';'`. Wrapped members receive manual keys through the outer pane. Every probe and the write share one five-second invocation deadline. Exit 0 establishes backend acknowledgment, independently of native approval/effects; fields are `member_id,pane_id,keys,status`, with `status=acknowledged`.
 
 | Condition | Error body (exit 2) |
 |---|---|
@@ -455,9 +452,9 @@ A wrong-kind answer is a structured zero-byte `rejected` response (exit 1): `cho
 
 ## `setup` and `doctor`
 
-`cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>`, `failed to enable hermes plugin cafleet in <config path>: <cause>` or config-path error. One installation record per backend covers its skills, presets and extensions.
+`cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>`, `failed to enable hermes plugin cafleet in <config path>: <cause>` or config-path error.
 
-Codex receives `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; OpenCode the `cafleet` and `cafleet-ask` presets (shell rules for the four member broker commands, `"cafleet": "deny"` tool permission) and the plugin `<preset base>/plugins/cafleet.ts`; Hermes the plugin under `<hermes home>/plugins/cafleet/`, enabled with gateway injection in the file `hermes config path` reports, refusing when `plugins.disabled` lists `cafleet`; pi the extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record, without running `pi`. Each plugin and extension runs only the `cafleet` recorded in its executable record by the setup that installed it. Setup writes no Director-only deny, ask or prompt entry. `--coding-agent hermes` requires `hermes` on `PATH`; plain setup without it installs the skills, records the installation and prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`. `cafleet setup --coding-agent pi` prints:
+Codex receives `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; OpenCode the `cafleet` and `cafleet-ask` presets (shell rules for the four member broker commands, `"cafleet": "deny"` tool permission) and the plugin `<preset base>/plugins/cafleet.ts`; Hermes the plugin under `<hermes home>/plugins/cafleet/`, enabled with gateway injection in the file `hermes config path` reports, refusing when `plugins.disabled` lists `cafleet`; pi the extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record, without running `pi`. Each plugin and extension runs only the `cafleet` recorded in its executable record by the setup that installed it. Setup writes no Director-only deny, ask or prompt entry. `--coding-agent hermes` requires `hermes` on `PATH`; plain setup without it installs the skills and prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`. `cafleet setup --coding-agent pi` prints:
 
 ```
 pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
@@ -478,9 +475,9 @@ The `multiplexer` check reports the backend and server (`ok` `<backend> server=<
 
 The refusal body is the `fleet create` refusal without its `cafleet fleet create ` prefix, and a `warn` keeps the exit code at 0.
 
-Each backend reports `<agent>.configuration`, `<agent>.executable`, its preset and extension checks, then `<agent>.installation`. An absent executable is `info` `<binary> is optional and absent from PATH`, and that backend's preset and extension checks are `info` `unavailable: executable is absent`. A missing installation record is `warn` `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'`.
+Each backend reports `<agent>.configuration`, `<agent>.executable`, its preset and extension checks, then `<agent>.skills`. An absent executable is `info` `<binary> is optional and absent from PATH`, and that backend's preset, extension and skills checks are `info` `unavailable: executable is absent`. `<agent>.skills` byte-compares every embedded skill file with its installed copy, as the extension checks do: missing skills are `warn` `skills not installed at <skills dir>; run 'cafleet setup --coding-agent <agent>'`, and a differing or unreadable file is `error` `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'`.
 
-Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
+Extension checks precede `<agent>.skills`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
 
 | Check | `ok` detail | `error` details |
 |---|---|---|

@@ -36,7 +36,7 @@ Database files of earlier versions in `~/.local/share/cafleet/` stay in place, b
 
 ## Assets-install recording
 
-`asset_installs` records the CLI version for each coding-agent/config-path pair. Setup upserts it after installing that backend's embedded skills and any preset or plugin, and `cafleet doctor` reports the recorded asset version at each backend's resolved path. Operator customizations belong outside setup-owned assets.
+Setup writes each backend's embedded skills and any preset or plugin, and `cafleet doctor` compares every installed file with the embedded copy at each backend's resolved path. Operator customizations belong outside setup-owned assets.
 
 ## Retention and pane locks
 
