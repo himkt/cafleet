@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 27/57 tasks complete
+**Progress**: 32/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -470,11 +470,11 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 5: Silent archival of stale and duplicate delivery records
 
-- [ ] Add `head_not_ready` and `duplicate_delivery` to the `archive_reason` CHECK in `assets/migrations/V1__baseline.sql` and to `ArchiveReason` <!-- completed: -->
-- [ ] Add `DeliveryFields.archive`, and set it to `Some(HeadNotReady)` in `stalled_delivery` with `published=false` per § Stalled head no longer ready <!-- completed: -->
-- [ ] Make `persist_transition_in_transaction` commit a delivery whose `archive` is set as a silent archived row at `transition.event_seq` (`notification_state='archived'`, NULL `message_id`, no inbox message) <!-- completed: -->
-- [ ] Make the delivery dedup branch build the delivery fields and commit a `duplicate_delivery` archived row returned as inserted, with `duplicate_delivery` taking precedence over `head_not_ready` and both applying only when `historical_ownership` supplies no archive reason, per § Duplicate delivery records <!-- completed: -->
-- [ ] Add the `events.rs` tests for `head_not_ready` archival and, for the head and preview dedup queries, a duplicate committing a `duplicate_delivery` row at its `event_seq`, its idempotent retry comparing equal and the next transition persisting <!-- completed: -->
+- [x] Add `head_not_ready` and `duplicate_delivery` to the `archive_reason` CHECK in `assets/migrations/V1__baseline.sql` and to `ArchiveReason` <!-- completed: 2026-11-21T14:41 -->
+- [x] Add `DeliveryFields.archive`, and set it to `Some(HeadNotReady)` in `stalled_delivery` with `published=false` per § Stalled head no longer ready <!-- completed: 2026-11-21T14:41 -->
+- [x] Make `persist_transition_in_transaction` commit a delivery whose `archive` is set as a silent archived row at `transition.event_seq` (`notification_state='archived'`, NULL `message_id`, no inbox message) <!-- completed: 2026-11-21T14:41 -->
+- [x] Make the delivery dedup branch build the delivery fields and commit a `duplicate_delivery` archived row returned as inserted, with `duplicate_delivery` taking precedence over `head_not_ready` and both applying only when `historical_ownership` supplies no archive reason, per § Duplicate delivery records <!-- completed: 2026-11-21T14:41 -->
+- [x] Add the `events.rs` tests for `head_not_ready` archival and, for the head and preview dedup queries, a duplicate committing a `duplicate_delivery` row at its `event_seq`, its idempotent retry comparing equal and the next transition persisting <!-- completed: 2026-11-21T14:41 -->
 - [ ] Add the `service.rs` scenario where an interaction restarts a head's stall watch, the head stalls again, the second record commits as `duplicate_delivery` and later events still persist <!-- completed: -->
 
 ### Step 6: Runner diagnostics
