@@ -7,7 +7,7 @@ Exact command facts for running CAFleet and interpreting its results.
 | Command | Purpose | Subject | JSON |
 |---|---|---|---|
 | `setup` | Initialize the version's database and install assets | — | no |
-| `doctor` | Diagnose multiplexer, database, agent assets and member runtimes | — | yes |
+| `doctor` | Diagnose multiplexer, database and agent assets | — | yes |
 | `fleet create` | Register the calling Director atomically | — | yes |
 | `fleet list` / `fleet show` | Read fleet registry | `FLEET_ID` for show | yes |
 | `fleet delete` | End a fleet's ordinary members, then deregister the fleet | `FLEET_ID` | yes |
@@ -17,7 +17,6 @@ Exact command facts for running CAFleet and interpreting its results.
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
 | `member press` | Request explicit ordered keys | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
-| `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request or question | `INTERACTION_ID` | yes |
@@ -34,7 +33,7 @@ Place the complete DB-assigned integer subject immediately after its subcommand.
 
 ## Director-only command guard
 
-The Director-only commands are exactly `member prompt`, `member exec`, `member press`, `member recover`, `permission respond` and `input reconcile`. Each requires `--from-member-id <director-member-id>`, a positive integer (missing: parse error, exit 2); `permission respond` takes it as its pinned Director. After parsing and the schema-version guard, and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet (a member's fleet, or the fleet of the run owning an input or interaction) and requires it live with that ID as its root Director. An unknown subject keeps its not-found error, which comes first. Otherwise it exits 1, prints nothing on stdout and writes `Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.` to stderr.
+The Director-only commands are exactly `member prompt`, `member exec`, `member press`, `permission respond` and `input reconcile`. Each requires `--from-member-id <director-member-id>`, a positive integer (missing: parse error, exit 2); `permission respond` takes it as its pinned Director. After parsing and the schema-version guard, and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet (a member's fleet, or the fleet of the run owning an input or interaction) and requires it live with that ID as its root Director. An unknown subject keeps its not-found error, which comes first. Otherwise it exits 1, prints nothing on stdout and writes `Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.` to stderr.
 
 Every other command, including `permission inspect`, `input show`, `event show`, `member list`, `member capture` and the lifecycle commands, carries no guard refusal; `permission inspect` still requires `--from-member-id` as its pinned Director (§ `permission inspect`). The guard is cooperative, not a security boundary: it stops a member that passes its own `YOUR MEMBER ID:`, and a member that copies `DIRECTOR MEMBER ID:` passes it. A Director-only command the Director dispatches into a member pane with `member exec` is checked by the ID it carries.
 
@@ -454,12 +453,6 @@ Blocked current requests write no byte: `Error: runner control: permission reque
 
 A wrong-kind answer is a structured zero-byte `rejected` response (exit 1): `choice answers apply only to question interactions` (`--choice` on a non-question), `decision answers apply only to permission requests` (`--decision` on a question), or `choice CHOICE_ID has no tested answer for this question`.
 
-### `member recover`
-
-`cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID [--json]` reconciles active/deregistered recorded runs without starting agents; absent run fails before mutation.
-
-Result fields: `member_id,run_id,outcome,inbox_count,archived_count,status,cleanup_diagnostics`. Outcomes: `recovered,recovering,live_or_unreachable`; a runner whose owner identity cannot be read reports `live_or_unreachable`, and `member delete` resolves it by force-closing its pane. Counts cover newly committed work; incomplete/unreachable outcomes remain distinct from recovery.
-
 ## `setup` and `doctor`
 
 `cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>`, `failed to enable hermes plugin cafleet in <config path>: <cause>` or config-path error. One installation record per backend covers its skills, presets and extensions.
@@ -471,27 +464,21 @@ pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
 pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 ```
 
-`cafleet doctor [--verbose] [--json]` runs every check without aborting. Statuses are `ok`, `info`, `warn` and `error`; doctor exits 1 with `Error: doctor found errors` after printing when any check is `error`, otherwise 0, `warn` included.
+`cafleet doctor [--json]` runs every check without aborting. Text prints one `<status> <name>: <detail>` row per check in check order; `--json` prints one JSON array of `name,status,detail` objects in the same order, each detail equal to its text form without the `<status> <name>: ` prefix. Statuses are `ok`, `info`, `warn` and `error`; doctor exits 1 with `Error: doctor found errors` after printing when any check is `error`, otherwise 0, `warn` included.
 
-| Invocation | stdout |
-|---|---|
-| `cafleet doctor` | One `<status> <component>: <detail>` summary line per component: `multiplexer`, `database`, each backend, then `members` lines |
-| `cafleet doctor --verbose` | One `<status> <name>: <detail>` row per check, no summary |
-| `cafleet doctor --json` | `{"summary":[…],"checks":[…]}`; summary entries `component,status,detail` (`members` adds `state,member_ids`), check entries `name,status,detail` (`member_runtime` entries add `member_id,state`) |
+The `multiplexer` check reports the backend and server (`ok` `<backend> server=<server>`), and the `multiplexer.caller_pane` check that follows it reports the `fleet create` pane verification without `--pane` (§ Fleet commands):
 
-The `multiplexer` check reports the backend and server (`ok` `<backend> server=<server>`), and the `multiplexer.caller_pane` check that follows it reports the `fleet create` pane verification without `--pane` (§ Fleet commands). Their `multiplexer` summary line folds both:
-
-| Situation | Checks (`multiplexer`, `multiplexer.caller_pane`) | Summary line |
+| Situation | `multiplexer` | `multiplexer.caller_pane` |
 |---|---|---|
-| Pane verified | `ok`, `ok` `<VAR>=<pane_id> session=<session> window=<window_id>` | `ok multiplexer: <backend> (session <session>, pane <pane_id>)` |
-| Shared-server ancestor | `info` `not checked: a shared <label> server (pid <pid>) supplies the caller environment`, `warn` with the refusal body | `warn multiplexer: <refusal body>` |
-| Env pane unset or unverified | `ok`, `warn` with the refusal body | `warn multiplexer: <backend> (server <server>); <refusal body>` |
-| Verification or verified-pane context read errored | `ok`, `error` with the error | `error multiplexer: <error>` |
-| Detection, server or availability failed | `error` with the cause, `info` `unavailable: the multiplexer is unavailable` | `error multiplexer: <cause>` |
+| Pane verified | `ok` | `ok` `<VAR>=<pane_id> session=<session> window=<window_id>` |
+| Shared-server ancestor | `info` `not checked: a shared <label> server (pid <pid>) supplies the caller environment` | `warn` with the refusal body |
+| Env pane unset or unverified | `ok` | `warn` with the refusal body |
+| Verification or verified-pane context read errored | `ok` | `error` with the error |
+| Detection, server or availability failed | `error` with the cause | `info` `unavailable: the multiplexer is unavailable` |
 
 The refusal body is the `fleet create` refusal without its `cafleet fleet create ` prefix, and a `warn` keeps the exit code at 0.
 
-A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, an identical phrase listed once (`info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets not installed at /home/user/.codex — run 'cafleet setup --coding-agent codex'`. No installation recorded is `warn`.
+Each backend reports `<agent>.configuration`, `<agent>.executable`, its preset and extension checks, then `<agent>.installation`. An absent executable is `info` `<binary> is optional and absent from PATH`, and that backend's preset and extension checks are `info` `unavailable: executable is absent`. A missing installation record is `warn` `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'`.
 
 Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
 
@@ -502,22 +489,7 @@ Extension checks precede `<agent>.installation`: `opencode.extension` follows th
 | `hermes.plugin_enabled` | `cafleet enabled with gateway injection` | `cannot read hermes configuration through 'hermes config get': <cause>`; `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'`; `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
 | `pi.extension` | The extension path | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent pi'`; `<record path>: <cause>; run 'cafleet setup --coding-agent pi'` |
 
-An extension check is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable file. Their summary phrases are `extension <path> is missing or differs from the embedded copy` and `extension executable record <path> is unusable: <cause>` (setup fix), the two `cannot read hermes configuration through …` details above and `hermes plugins.disabled lists cafleet` (no setup fix), `hermes plugin cafleet is not enabled: <key>, …` (setup fix) and `info` `no Hermes home at <base>` (setup fix).
-
-`members` lines group member IDs by state, one line per occupied state: `<status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]`. Three or more consecutive IDs collapse to `a-b`; `ID` in the command stays literal, and a `member recover` command fills in `--from-member-id` with the fleet Director ID when every listed member shares one Director (else `<director-id>` stays literal). With no live member the line is `ok members: none running`; a database that is not current gives `info members: not checked (database unavailable)`; a failed run query gives `error members: could not be checked: <cause>`.
-
-| Label | Status | Next command |
-|---|---|---|
-| `running` | `ok` | — |
-| `not responding` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| `lost runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` or `cafleet member delete ID` |
-| `interrupted launch` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| `agent exited` | `warn` | `cafleet member delete ID` |
-| `deleted with leftover runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| `could not be checked` | `error` | `cafleet doctor --verbose` |
-| `not checked (time limit)` | `info` | `cafleet member show ID` |
-
-Ended runs of deregistered members are hidden from the summary and appear in `--verbose` as `info member_runtime.<run_id>: member <id> ended: run <status>, cleanup complete`. Other verbose runtime rows read `<status> member_runtime.<run_id>: member <id> <label>: <phrase>; …`, ending ` — run '<command>'` with the literal member ID, for example `warn member_runtime.9: member 9 lost runtime: owner lock is free; runtime did not answer the health probe: <cause> — run 'cafleet member recover 9 --from-member-id 2' or 'cafleet member delete 9'`.
+An extension check is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable file.
 
 ## Error messages
 

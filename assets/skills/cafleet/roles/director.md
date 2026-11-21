@@ -224,7 +224,7 @@ Backend acknowledgment establishes neither PTY input nor native outcome. Manual 
 
 ## Runtime events
 
-The Director owns `permission inspect`/`respond`, `input reconcile` and `member recover`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond`, `input reconcile` and `member recover`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
+The Director owns `permission inspect`/`respond` and `input reconcile`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond` and `input reconcile`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
 
 New members use CAFleet-owned PTYs with separate launch-policy, detection, empty-composer, prompt/native-exec and request-bound answer capabilities. `member create` selects the bundled profile that supplies every capability from the native version and refuses a version below the first boundary ([member create](../reference/cli.md#member-create)); failed probes/unknown coverage preserve manual work and generated-input fallback. [Runtime command facts](../reference/cli.md#member-runtime) owns commands and fields.
 
@@ -267,7 +267,7 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 ### Spawn Protocol
 
 1. Complete [Required reading](#required-reading) and the supplied host rules, then resolve each member's backend/model/effort before writing its prompt.
-2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn multiplexer` caller-pane line is resolved at step 3 by [Director pane identification](#director-pane-identification). Preserve the user's host continuation controls as supplied.
+2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn` `multiplexer.caller_pane` check is resolved at step 3 by [Director pane identification](#director-pane-identification). Preserve the user's host continuation controls as supplied.
 3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs; every later command targets the recorded placement. When it refuses the Director pane, follow [Director pane identification](#director-pane-identification). With a custom database, pass `--database-url <url>` on every command, this one included.
 4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin or extension tool. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
@@ -346,17 +346,11 @@ Relay explicit member questions through {decision_surface}, then send the user's
 
 ### Recovery
 
-Run `cafleet doctor` and read its `members` summary lines: each groups member IDs by state and names the next command, such as `cafleet member recover ID --from-member-id <director-id>`, to run per listed ID; `cafleet doctor --verbose` shows each run's probe observations. Check inbox/roster/pane/artifact evidence. Use `cafleet member capture` before deciding that an agent is dead or unusable.
+A member whose runtime is lost, not responding or unusable is deleted and re-created. Check inbox/roster/pane/artifact evidence and use `cafleet member capture` before deciding that an agent is dead or unusable; `member show --json` reads its stored runtime state without a probe.
 
-Once evidence confirms a missing/dead pane or an authorized unusable-session replacement, run [Member Delete](#member-delete), then `cafleet member create` with a context-preserving prompt carrying the assignment, full message IDs, completed/remaining work, artifacts and blocker context; the replacement gets a new ID and its own ready gate.
+Once evidence confirms a missing/dead pane or an authorized unusable-session replacement, run [Member Delete](#member-delete), then `cafleet member create` with a context-preserving prompt carrying the assignment, full message IDs, completed/remaining work, artifacts and blocker context; the replacement gets a new ID and its own ready gate. Deletion settles the old run's records, sends no answer keys and force-closes a pane whose runner does not answer. Preserve unknown process/receipt outcomes until evidence resolves them.
 
 A multiplexer failure calls for diagnosis of the recorded Director placement and server and the target placement. Registry existence alone proves no physical pane presence. Resolve connectivity before selecting destructive recovery.
-
-#### Inspect and recover
-
-Read stored identities with `member show --json` and diagnose without mutation through `doctor`; failed health holds input and preserves interactions. Run `member recover MEMBER_ID --from-member-id <my-member-id> --json` for exclusive bounded recovery; it sends no answer keys and launches no replacement agent, and [member recover](../reference/cli.md#member-recover) owns its outcomes.
-
-A runner whose owner identity cannot be read stays `live_or_unreachable`; resolve it with `member delete`, which force-closes its pane. Preserve unknown process/receipt outcomes until evidence resolves them. Coordinate owned shutdown before authorized pane/registry cleanup and retain unconfirmed-child diagnostics.
 
 ### Shutdown
 

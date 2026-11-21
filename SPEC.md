@@ -117,7 +117,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | Command | Purpose | Subject | JSON |
 |---|---|---|---|
 | `setup` | Initialize the version's database and install assets | — | no |
-| `doctor` | Diagnose multiplexer, database, agent assets and member runtimes | — | yes |
+| `doctor` | Diagnose multiplexer, database and agent assets | — | yes |
 | `fleet create` | Register the calling Director atomically | — | yes |
 | `fleet list` / `fleet show` | Read fleet registry | `FLEET_ID` for show | yes |
 | `fleet delete` | End a fleet's ordinary members, then deregister the fleet | `FLEET_ID` | yes |
@@ -127,7 +127,6 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
 | `member press` | Request explicit ordered keys | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
-| `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
@@ -175,7 +174,6 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `member create` | `ID NAME backend=AGENT pane=PANE window=WINDOW` plus runtime line | Member with placement and runtime |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
 | `member show` | `ID NAME STATUS window=WINDOW` plus wrapped runtime line | Detail including kind, placement and runtime |
-| `member recover` | Recovery counts/state and cleanup lines | Ordered recovery result |
 | `event show` | Event, runtime and optional interaction lines | Event and current state |
 | `input show` / `input reconcile` | Input receipt and optional decision lines | `{input}` |
 | `permission inspect` | Request identity/capability lines | `{request}` |
@@ -185,7 +183,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` or the queued line, plus delivery and input lines | `{member_id, pane_id, coding_agent, command, dispatched, input_id, delivery}` |
 | `member press` | `Acknowledged keys KEYS_JSON for member ID (PANE).` | Ordered `member_id, pane_id, keys, status` |
 | `member capture` | Exact selected content | `{member_id, pane_id, lines, content, captured_at, content_sha256}` |
-| `doctor` | One `STATUS COMPONENT: DETAIL` summary line per component (`--verbose`: one `STATUS NAME: DETAIL` row per check) | `{summary, checks}` |
+| `doctor` | One `STATUS NAME: DETAIL` row per check | Array of check objects |
 
 ##### Member list output
 
@@ -220,7 +218,7 @@ Send requires integer sender and recipient flags, validated per §6.2 Messaging;
 
 #### Director-only command guard
 
-The Director-only commands are exactly `member prompt`, `member exec` and `member press` (explicit native pane input), `permission respond` (native permission answers), `input reconcile` (input-receipt settlement) and `member recover` (run reconciliation), which write into a member's live native session or its runtime record. Every other subcommand, including `permission inspect`, `input show` and `event show`, is unguarded; the lifecycle commands `member create`, `member delete`, `fleet create` and `fleet delete`, roster listing (`member list`) and captures (`member capture`) remain Director-owned by role.
+The Director-only commands are exactly `member prompt`, `member exec` and `member press` (explicit native pane input), `permission respond` (native permission answers) and `input reconcile` (input-receipt settlement), which write into a member's live native session or its runtime record. Every other subcommand, including `permission inspect`, `input show` and `event show`, is unguarded; the lifecycle commands `member create`, `member delete`, `fleet create` and `fleet delete`, roster listing (`member list`) and captures (`member capture`) remain Director-owned by role.
 
 Each requires `--from-member-id <director-member-id>`, a positive integer: the caller's ID, or the pinned Director for `permission respond`. A missing or malformed value is a parse error, exit 2.
 
@@ -542,13 +540,20 @@ On success the text output is `Deleted fleet ID. Deregistered N members.` follow
 
 #### `cafleet doctor` — Environment Diagnosis
 
-A full-environment diagnosis that reports **every** check, with no early abort when the multiplexer is unavailable. `doctor` is exempt from the schema-version guard (§6.3 Schema-version guard), so a missing or incompatible database is reported, not fatal. Its optional flags are `--verbose`, whose help reads `Print one row per individual check instead of the per-component summary`, and `--json` (§6.3 JSON output (`--json`)).
+A full-environment diagnosis that reports **every** check, with no early abort when the multiplexer is unavailable. `doctor` is exempt from the schema-version guard (§6.3 Schema-version guard), so a missing or incompatible database is reported, not fatal. Its optional flag is `--json` (§6.3 JSON output (`--json`)).
 
-| Invocation | stdout |
-|---|---|
-| `cafleet doctor` | Summary lines (§ Summary lines) |
-| `cafleet doctor --verbose` | Per-check rows (§ Verbose rows), no summary |
-| `cafleet doctor --json`, with or without `--verbose` | `{"summary":[…],"checks":[…]}` (§ Doctor JSON) |
+Text output prints one `<status> <name>: <detail>` row per check in check order (§ Check rows), with each LF in the detail escaped as `\n` and each CR as `\r`. `--json` prints one JSON array of check objects in the same order, each ordered `name, status, detail`; each detail equals its text form without the `<status> <name>: ` prefix.
+
+```text
+ok multiplexer: herdr server=default
+ok multiplexer.caller_pane: HERDR_PANE_ID=w2:p2N session=w2 window=w2:tP
+warn codex.installation: no installation recorded at /home/user/.codex; run 'cafleet setup --coding-agent codex'
+```
+
+```json
+[{"name":"multiplexer","status":"ok","detail":"herdr server=default"},
+ {"name":"multiplexer.caller_pane","status":"ok","detail":"HERDR_PANE_ID=w2:p2N session=w2 window=w2:tP"}]
+```
 
 Statuses are `ok`, `info`, `warn` and `error`. After printing, doctor exits 1 with
 `Error: doctor found errors` when any check has status `error`; otherwise it
@@ -568,7 +573,6 @@ Each check has a stable `name`, a `status` and a one-line `detail`. Checks run i
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
 | `opencode.extension`, `hermes.extension`, `hermes.plugin_enabled`, `pi.extension` | § Extension checks | § Extension checks | — | § Extension checks |
 | `<agent>.installation` | `recorded at <installed_at>` when an installation is recorded at the resolved path | `unavailable: configuration failed: <cause>`; `unavailable: <database error>` for a database that is not current | `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'` | `installation query failed: <cause>` |
-| `member_runtime.<run_id>`, `member_runtime` | § Member runtime checks | § Member runtime checks | § Member runtime checks | § Member runtime checks |
 
 Installation records are
 read only at the resolved path of a current database; a row recorded at
@@ -585,85 +589,6 @@ The multiplexer rows follow the `fleet create` steps without `--pane` (§ Caller
 | Row 4 verifies the pane | `ok` | `ok` |
 | A pane-process command failure, a nested-namespace read error, or a failed context read of the verified pane | `ok` | `error` with the error message |
 
-##### Summary lines
-
-The default text output prints one `<status> <component>: <detail>` line per
-component, with each LF in the detail escaped as `\n` and each CR as `\r`.
-Components appear in check order: `multiplexer`, `database`, each backend in
-registry order, then the `members` lines (§ Member runtime checks).
-
-| Component | `ok` detail | Problem line |
-|---|---|---|
-| `multiplexer` | `<backend> (session <session>, pane <pane_id>)` | The multiplexer rules below |
-| `database` | `cafleet <VERSION>` | `error` with the check's cause, which names `run 'cafleet setup'` |
-| `<agent>` | `ready` | The backend rules below |
-
-The `multiplexer` line folds the `multiplexer` and `multiplexer.caller_pane` checks:
-
-| Statuses (`multiplexer`, `multiplexer.caller_pane`) | Summary line |
-|---|---|
-| `ok`, `ok` | `ok multiplexer: <backend> (session <session>, pane <pane_id>)` |
-| `info`, `warn` | `warn multiplexer: <caller_pane detail>` |
-| `ok`, `warn` | `warn multiplexer: <backend> (server <server>); <caller_pane detail>` |
-| `ok`, `error` | `error multiplexer: <caller_pane detail>` |
-| `error`, `info` | `error multiplexer: <multiplexer detail>` |
-
-A backend line folds that backend's `configuration`, `executable`, OpenCode `preset`, extension and `installation` checks under the first matching rule:
-
-1. A `configuration` check with status `error` prints `error <agent>: <cause>`.
-2. An absent `executable` prints `info <agent>: not installed (<agent> is not on PATH)`; the other checks of an unused backend raise nothing.
-3. Otherwise each non-`ok` check contributes a problem phrase, and the line takes the worst contributed status (`error` > `warn` > `info`). The detail joins the phrases with `; ` in check order, listing a phrase identical to an earlier one once (a missing Hermes home reads `info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), and ends once with ` — run 'cafleet setup --coding-agent <agent>'` when any phrase carries the setup fix.
-
-| Check state | Status | Phrase | Setup fix |
-|---|---|---|---|
-| OpenCode preset missing or unreadable | `error` | `preset <path> is unreadable: <cause>` | yes |
-| Extension missing, unreadable or differing | `error` | `extension <path> is missing or differs from the embedded copy` | yes |
-| Executable record unusable | `error` | `extension executable record <path> is unusable: <cause>` | yes |
-| Hermes config path unreadable | `error` | `cannot read hermes configuration through 'hermes config path': <cause>` | no |
-| Hermes plugins unreadable | `error` | `cannot read hermes configuration through 'hermes config get': <cause>` | no |
-| No Hermes home at the resolved base | `info` | `no Hermes home at <base>` | yes |
-| Hermes plugin listed in `plugins.disabled` | `error` | `hermes plugins.disabled lists cafleet` | no |
-| Hermes plugin not enabled | `error` | `hermes plugin cafleet is not enabled: <key>, …` | yes |
-| No installation recorded | `warn` | `assets not installed at <path>` | yes |
-| Installation unavailable because the database is not current | `info` | `assets unchecked (database unavailable)` | no |
-| Installation query failed | `error` | `installation query failed: <cause>` | no |
-
-For example:
-
-```
-ok claude: ready
-warn codex: assets not installed at /home/user/.codex — run 'cafleet setup --coding-agent codex'
-info opencode: not installed (opencode is not on PATH)
-error hermes: hermes plugin cafleet is not enabled: plugins.enabled — run 'cafleet setup --coding-agent hermes'
-```
-
-##### Verbose rows
-
-`--verbose` prints one `<status> <name>: <detail>` row per check in check
-order, with the same LF/CR escaping. Member runtime rows follow § Member
-runtime checks.
-
-##### Doctor JSON
-
-`--json` prints one object with `summary` and `checks` arrays:
-
-```json
-{"summary":[
-  {"component":"multiplexer","status":"ok","detail":"herdr (session w2, pane w2:p2N)"},
-  {"component":"members","status":"warn","detail":"20 lost runtime: 1-6, 9-22 — run 'cafleet member recover ID --from-member-id 2' or 'cafleet member delete ID'","state":"lost_runtime","member_ids":[1,2,3,4,5,6,9,10,11,12,13,14,15,16,17,18,19,20,21,22]}
- ],
- "checks":[
-  {"name":"multiplexer","status":"ok","detail":"herdr server=default"},
-  {"name":"multiplexer.caller_pane","status":"ok","detail":"HERDR_PANE_ID=w2:p2N session=w2 window=w2:tP"},
-  {"name":"member_runtime.9","status":"warn","detail":"member 9 lost runtime: …","member_id":9,"state":"lost_runtime"}
- ]}
-```
-
-- Summary entries are ordered `component, status, detail`; `members` entries add `state, member_ids`.
-- Check entries are ordered `name, status, detail`; `member_runtime.<run_id>` and `member_runtime` entries add `member_id, state`.
-- `summary` holds exactly the lines the text summary prints, and `checks` holds exactly the `--verbose` rows, `ended` rows included.
-- Each detail equals its text form without the `<component>: ` or `<name>: ` prefix; the verbose member-row prefix `member <id> <label>: ` stays.
-
 ###### OpenCode preset checks
 
 `doctor` has no selected launch policy, so it checks the preset `<preset base>/agents/<mode>.md` of every OpenCode launch-policy choice (§6.9 Launch policy and capability registry), in catalog order. The default choice's check is `opencode.preset`; every other choice's is `opencode.preset.<mode>`. After the shared `info` states of § Extension checks, a readable preset is `ok` with its path. Setup installs every preset, so a missing or unreadable one is `error` `<path>: <cause>; run 'cafleet setup --coding-agent opencode'`: the installation predates that preset or was altered.
@@ -674,7 +599,7 @@ An OpenCode installation recorded only at another base is not the resolved insta
 
 Each extension check is read-only. An executable record is usable when it names an existing executable file. `opencode.extension` checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`; `hermes.extension` checks `<hermes home>/plugins/cafleet/`, located by the batch's `hermes config path`; `hermes.plugin_enabled` reads `disabled`, `enabled` and `entries.cafleet.allow_gateway_injection` from the batch's one bounded `hermes config get --json plugins` call under the *not set* and subtree rules (§ Hermes plugin enablement); `pi.extension` follows `pi.executable`, precedes `pi.installation` and checks `<pi base>/extensions/cafleet.ts` and `<pi base>/extensions/cafleet.executable`.
 
-`hermes.extension` and `hermes.plugin_enabled` share one concurrent read batch, `hermes config path` and `hermes config get --json plugins`, run with null stdin and `HERMES_HOME` set to the resolved base under one two-second deadline. The batch starts before the multiplexer, database, OpenCode and member checks and overlaps them; the rows keep their check order. A `hermes` call against a missing home makes Hermes create one, so when the resolved Hermes base does not exist doctor runs no `hermes` process.
+`hermes.extension` and `hermes.plugin_enabled` share one concurrent read batch, `hermes config path` and `hermes config get --json plugins`, run with null stdin and `HERMES_HOME` set to the resolved base under one two-second deadline. The batch starts before the multiplexer, database and OpenCode checks and overlaps them; the rows keep their check order. A `hermes` call against a missing home makes Hermes create one, so when the resolved Hermes base does not exist doctor runs no `hermes` process.
 
 A preset or extension check reports the first matching state:
 
@@ -691,77 +616,6 @@ A preset or extension check reports the first matching state:
 | `hermes.plugin_enabled` | `plugins.disabled` lists `cafleet` | `error` | `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'` |
 | `hermes.plugin_enabled` | `plugins.enabled` lacks `cafleet`, or `allow_gateway_injection` is not `true` | `error` | `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
 | `hermes.plugin_enabled` | Otherwise | `ok` | `cafleet enabled with gateway injection` |
-
-##### Member runtime checks
-
-With a compatible current database, doctor classifies every recorded member run in ascending `run_id` order in two passes over a read-only connection, mutating no registry or runtime state:
-
-1. **Registry pass.** One query reads every run's `run_id`, `member_id`, run `status`, `cleanup_state` and the member's registry `status`. It runs no probes and sits outside the time budget.
-2. **Probe pass.** Only runs the registry pass leaves unclassified are probed, up to 16 at a time: the launch-descriptor, run-path, owner-lock and health probes. One five-second budget covers the pass, and each run is bounded by the smaller of 100 ms and the remaining budget when its probe starts. Results keep ascending `run_id` order.
-
-Each run gets the first matching state:
-
-| # | Condition | State | Label | Status | Next command |
-|---|---|---|---|---|---|
-| 1 | The run's diagnosis, including its own read of the run record, returned an error, or the owner-lock probe failed | `check_failed` | `could not be checked` | `error` | `cafleet doctor --verbose` |
-| 2 | Run `status` is `exited`, `failed` or `lost`, `cleanup_state` is `complete` and the member is deregistered | `ended` | `ended` (hidden from the summary) | `info` | — |
-| 3 | Run `status` is `exited`, `failed` or `lost`, `cleanup_state` is `complete` and the member is active | `agent_exited` | `agent exited` | `warn` | `cafleet member delete ID` |
-| 4 | Any other run of a deregistered member | `deleted_with_leftover_runtime` | `deleted with leftover runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| 5 | The budget was exhausted before this run was probed | `not_checked` | `not checked (time limit)` | `info` | `cafleet member show ID` |
-| 6 | A launch descriptor is left over, or the run paths fail validation | `interrupted_launch` | `interrupted launch` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| 7 | A health reply was observed | `running` | `running` | `ok` | — |
-| 8 | The health probe was skipped because the deadline passed | `not_checked` | `not checked (time limit)` | `info` | `cafleet member show ID` |
-| 9 | The owner lock is held and no health reply arrived | `not_responding` | `not responding` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| 10 | The owner lock is free and no health reply arrived | `lost_runtime` | `lost runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` or `cafleet member delete ID` |
-
-The registry pass decides rows 2–4; the probe pass decides rows 1 and 5–10. A probed run's diagnostic phrases are:
-
-| Observation | Phrase |
-|---|---|
-| A leftover launch descriptor | `launch descriptor left over` |
-| A free owner lock | `owner lock is free` |
-| A held owner lock | `owner lock is held` |
-| A health reply | `runtime answered the health probe` |
-| No health reply | `runtime did not answer the health probe: <cause>` |
-| Run paths that fail validation | `runtime files are invalid: <cause>` |
-
-**Summary lines.** Members are grouped by member ID; a member with several runs is listed once per distinct state. One line is printed per occupied state, in the order `running`, `not responding`, `lost runtime`, `interrupted launch`, `agent exited`, `deleted with leftover runtime`, `could not be checked`, `not checked (time limit)`:
-
-```
-<status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]
-```
-
-`<N>` counts the distinct member IDs in that state. The ID ranges list those IDs ascending and de-duplicated, joined with `, `; three or more consecutive IDs collapse to `a-b`, while one or two consecutive IDs stay separate (`7, 8`). The next command keeps `ID` literal, because the line covers several members. A `member recover` command fills in `--from-member-id` with the fleet Director ID when every listed member shares one fleet Director, and keeps `<director-id>` literal otherwise; a verbose row fills in its member's fleet Director ID. For example:
-
-```
-ok members: 4 running: 7, 8, 23, 24
-warn members: 20 lost runtime: 1-6, 9-22 — run 'cafleet member recover ID --from-member-id 2' or 'cafleet member delete ID'
-```
-
-**Verbose rows.** Each run produces one `member_runtime.<run_id>` row:
-
-```
-<status> member_runtime.<run_id>: member <member_id> <label>: <phrase>[; <phrase>…][ — run '<command with the literal member ID>']
-```
-
-A probed run joins its diagnostic phrases with `; `. A registry-pass row for state `agent_exited` or `deleted_with_leftover_runtime` uses the phrase `run <status>, cleanup <cleanup_state>`, and an `ended` row uses `run <status>, cleanup complete`. A `not_checked` row uses `runtime diagnosis time budget exhausted`. A `check_failed` row is `error member_runtime.<run_id>: member <member_id> could not be checked: <cause>`, where `<cause>` is the message of the diagnosis or owner-lock probe error, with no other phrase and no command suffix. For example:
-
-```
-ok member_runtime.7: member 7 running: owner lock is held; runtime answered the health probe
-warn member_runtime.9: member 9 lost runtime: owner lock is free; runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused — run 'cafleet member recover 9 --from-member-id 2' or 'cafleet member delete 9'
-info member_runtime.3: member 3 ended: run exited, cleanup complete
-error member_runtime.5: member 5 could not be checked: database is locked
-```
-
-**Run-independent results.** Each condition below prints one `members` summary line in place of the per-state lines. Its JSON entries carry `member_ids` `[]` and, for the check entry, `member_id` `null`:
-
-| Condition | Summary line | Per-run rows | Run-independent check row | JSON `state` |
-|---|---|---|---|---|
-| No runs, or only `ended` runs | `ok members: none running` | `ended` rows only | — | `running` |
-| The database is not current | `info members: not checked (database unavailable)` | None | — | `not_checked` |
-| The registry query fails; no run is known and the probe pass is skipped | `error members: could not be checked: <cause>` | None | `error member_runtime: member runtimes could not be read: <cause>` | `check_failed` |
-
-A registry-query failure still prints every other check and exits 1 with `Error: doctor found errors`. The recovery contract (§6.9 Storage pressure and durability boundary) owns the probes and their recovery actions.
 
 #### `cafleet message` — Message Broker
 
@@ -986,7 +840,7 @@ Once the runner reports `started` under the matching identity, creation removes 
 
 ##### `member delete`
 
-Request owned runner shutdown under the member's recorded run identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock a concrete placement before kill/deregistration (a member without a concrete pane needs no lock), retrying contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
+Request owned runner shutdown under the member's recorded run identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. Run recovery (§6.9 Storage pressure and durability boundary) before deregistration only within the remaining operation deadline. Lock a concrete placement before kill/deregistration (a member without a concrete pane needs no lock), retrying contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
 After the pane lock and before any cleanup step (Hermes settlement, runner shutdown, pane close), acquire the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and hold it through deregistration and layout restoration. The deletion deadline moves later by the wait's duration, as it does for Hermes settlement. Expiry exits 1 with the delete busy error (§6.3 Error Messages) and leaves the run, pane and row unchanged.
 
@@ -1107,12 +961,6 @@ Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-s
 
 All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
 
-##### `member recover`
-
-`cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID [--json]` is Director-owned and reconciles a recorded run of an active or deregistered member. A member without a run fails explicitly before mutation. §6.9 Storage pressure and durability boundary owns identity, ownership, archival and its bounded pass.
-
-Ordered JSON keys are `member_id,run_id,outcome,inbox_count,archived_count,status,cleanup_diagnostics`. Outcome is `recovered`, `recovering` or `live_or_unreachable`; diagnostics retain cleanup provenance. Counters measure work newly committed by this invocation under the runtime recovery count domains below. A completed terminal return preserves existing history with zero counts. Text is `Recovery: member=MEMBER_ID run=RUN_ID outcome=OUTCOME status=STATUS inbox=COUNT archived=COUNT`, followed by each bounded diagnostic as `Cleanup: DIAGNOSTIC` in array order; a string diagnostic renders its contained text and a structured one compact JSON. Incomplete or unreachable outcomes remain distinct from confirmed recovery.
-
 #### Permission commands
 
 `cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads the current request through its pinned runner. Require positive IDs, then an existing interaction (an unknown `INTERACTION_ID` is reported as not found before any event, run or database-identity check), then an active ordinary target, pinned active Director and live fleet; verify the event/message association and interaction ownership under the member's pane-input lock (§6.5 Pane input lock). One original five-second deadline, clipped to any inherited SQL bound, covers locking, current observation/manual progress, database work and the control exchange. Inspection sends zero programmatic child bytes and creates no receipt, audit or claim. Unknown answer capability is an inspection result; stale ownership or an unavailable owner is an operational error.
@@ -1212,7 +1060,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | (any command except `setup` and `doctor`) | A missing, empty or incompatible database | §6.3 Schema-version guard | 1 |
 | (any command with output) | Writing stdout fails with a broken pipe, e.g. `cafleet member list 1` piped into `head -1`; the command stops writing and nothing goes to stderr | — | The command's own result |
 | (any command with output) | Writing stdout fails with any other error | `Error: failed to write output: <cause>` | 1 |
-| `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
+| `member prompt` / `member exec` / `member press` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
 | `input reconcile` | The pinned input has no recorded placement (deregistered member or deleted fleet), so no live runner can synchronize the receipt; the receipt stays uncertain (§6.9 Durable input receipts and settlement) | `Error: receipt reconciliation requires the member's live runner; the input stays uncertain` | 1 |
 | (runner queue housekeeping) | A queued receipt is no longer `ready`; the runner fences ordinary input (§6.9 Queue housekeeping) | `queued input INPUT_ID changed to STATE outside the runner queue` | — |
 | `member prompt` / `member exec` | Above the plain-input limit and profile framing is `plain`; CAUSE in the command's pre-write error | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the BACKEND profile has no bracketed-paste delivery` | 1 |
@@ -3114,7 +2962,7 @@ Directories use `0700`, descriptor files `0600`, and a control socket is accessi
 
 Replacing a database file creates a different filesystem identity and namespace even when restored bytes retain the instance ID. Runners validate the selected path's file/instance identity before input and storage mutations; replacement fences the old run from the new database, holds input and initiates owned-child cleanup. Retain the old namespace for explicit reconciliation; a new creator never adopts its socket.
 
-The descriptor and control socket are local coordination mechanisms, not an authorization boundary against the same operating-system user; matching identities and the nonce reject stale endpoints. The creator's guarded cleanup deletes the descriptor on every outcome (success, handshake failure, timeout, rollback and uncertain post-`start` timeout) and reports a failed unlink explicitly. Failed run records retain only the non-secret `permission_argv_json`, never the assignment-bearing prompt element or raw environment. After a creator crash, `member recover` removes the descriptor only after identity/ownership validation, and read-only `doctor` reports the leftover and its recovery action. The runner removes its loaded descriptor after preparation when safe, independently of the creator's idempotent cleanup.
+The descriptor and control socket are local coordination mechanisms, not an authorization boundary against the same operating-system user; matching identities and the nonce reject stale endpoints. The creator's guarded cleanup deletes the descriptor on every outcome (success, handshake failure, timeout, rollback and uncertain post-`start` timeout) and reports a failed unlink explicitly. Failed run records retain only the non-secret `permission_argv_json`, never the assignment-bearing prompt element or raw environment. After a creator crash, deletion's recovery removes the descriptor only after identity/ownership validation. The runner removes its loaded descriptor after preparation when safe, independently of the creator's idempotent cleanup.
 
 During verified ordinary recovery, retain the original ownership lock and pin a leftover launch descriptor by its opened file identity and bounded content, validating the recorded namespace/directory, private regular file, immutable database/fleet/member/Director/run identity and nonce. A positive historical descriptor epoch at or below the captured current epoch remains valid across takeover and retry; native launch loading still requires current creator ownership and the exact current epoch. Expected absence is idempotent while the pathname remains absent.
 
@@ -3178,7 +3026,7 @@ The creator precreates `owner.lock`, records its device/inode and runtime-direct
 
 Normal recovery acquires the identity-matching lock before a CAS epoch takeover. Every event mutation validates complete database identity, owner kind and epoch; input additionally validates its ownership/lock identities immediately before child writes. A delayed live runner retaining the original lock prevents normal takeover. The missing-path branch also requires verified original-owner termination before fencing; missing files alone establish no exclusive ownership or safe input. Every takeover records the recovering process identity and advances the epoch, rejecting stale writes/input.
 
-Only the current lock/epoch owner allocates event sequences. Confirmed loss and its events are produced by the explicit recovery procedure below after exclusive takeover, ordered after every committed event. Concurrent reconcilers contend for the same lock and CAS rather than allocating competing loss events. PID/start identity assists child reconciliation; it never substitutes for ownership.
+Only the current lock/epoch owner allocates event sequences. Confirmed loss and its events are produced by the recovery procedure below after exclusive takeover, ordered after every committed event. Concurrent reconcilers contend for the same lock and CAS rather than allocating competing loss events. PID/start identity assists child reconciliation; it never substitutes for ownership.
 
 ##### Screen model facts
 
@@ -3429,7 +3277,7 @@ A verified empty composer resumes delivery on the next queue turn or sweep. Ever
 
 #### CLI presentation contract
 
-§6.3 CLI *Runtime presentation*, *Runtime event and input commands* and *`member recover`* fix the exact keys, order, nullability and text layouts of the runtime outputs of member create/show, `event show`, `input show`/`reconcile`, `member recover` and wrapped prompt/exec. Printed submission or settlement establishes no native execution result.
+§6.3 CLI *Runtime presentation* and *Runtime event and input commands* fix the exact keys, order, nullability and text layouts of the runtime outputs of member create/show, `event show`, `input show`/`reconcile` and wrapped prompt/exec. Printed submission or settlement establishes no native execution result.
 
 #### Storage pressure and durability boundary
 
@@ -3439,16 +3287,7 @@ A full channel or an exhausted retry changes the runner to `degraded`, holds all
 
 Durability begins at a successful SQLite commit, and notification is claimed only after it. A hard runner crash loses the transitions that had not committed; recovery records the run's loss with `runner_lost`, which identifies that coverage gap. While the database stays unavailable, the control health response and local diagnostic preserve the actual error, and memory stays bounded.
 
-The Director-owned explicit `member recover` command (§6.3 `member recover`) operates on the recorded run of an active or deregistered member, never starts an agent, and returns recovery counts, final lifecycle/notification state and cleanup diagnostics. A five-second invocation deadline bounds each recovery pass. Start one cleanup clock at entry to the common recovery coordinator, before snapshot, locking and process/health evidence; its two/three/four-second boundaries share that origin and are clipped to the supplied original deadline, including a deletion caller's earlier deadline. An incomplete pass retains the `recovering` state for the next pass. `doctor` diagnoses recovery needs without mutating them. Member/fleet deletion invokes the same recovery component after successful runner shutdown and before deregistration when its remaining deadline permits; otherwise retain the namespace for a later explicit pass.
-
-Every recovery counter counts, once after commit, durable work newly committed by this invocation; a duplicate lookup or failed/rolled-back transaction contributes zero.
-
-| Counter | Commit domain |
-|---|---|
-| `inbox_count` | Runtime event/message associations from newly synthesized recovery transitions. |
-| `archived_count` | Runtime events with archived disposition from newly synthesized recovery transitions. |
-
-An incomplete report retains its already committed work; a later invocation counts only its additional commits. A run that is already terminal returns a no-work result: it preserves existing status and diagnostics, reports zero counts and advances no ownership, even if the recorded current reconciler remains alive.
+Member and fleet deletion run recovery on the recorded run after successful runner shutdown and before deregistration when the remaining deadline permits (§6.3 `member delete`); otherwise they retain the namespace, and a later deletion retries. Recovery never starts an agent. A five-second deadline bounds each recovery pass. Start one cleanup clock at entry to the common recovery coordinator, before snapshot, locking and process/health evidence; its two/three/four-second boundaries share that origin and are clipped to the deletion caller's deadline. An incomplete pass retains the `recovering` state for the next pass. A run that is already terminal needs no work: recovery preserves existing status and diagnostics and advances no ownership, even if the recorded current reconciler remains alive.
 
 Recovery follows this sequence:
 

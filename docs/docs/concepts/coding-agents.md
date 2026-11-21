@@ -179,7 +179,7 @@ Under `approvals.mode: smart`, the default, commands Hermes does not consider da
 | Symptom | Cause | Resolution |
 |---|---|---|
 | Member messages and the Director's replies do not appear in the Director's pane | The Director runs the classic CLI | Restart the Director with `hermes chat --tui` |
-| `cafleet doctor` reports `error hermes: hermes plugin cafleet is not enabled: plugins.enabled — run 'cafleet setup --coding-agent hermes'` | The plugin was skipped or is not enabled, for example after a plain `cafleet setup` before Hermes was installed | Run `cafleet setup --coding-agent hermes` |
+| `cafleet doctor` reports `error hermes.plugin_enabled: hermes plugin cafleet is not enabled: plugins.enabled; run 'cafleet setup --coding-agent hermes'` | The plugin was skipped or is not enabled, for example after a plain `cafleet setup` before Hermes was installed | Run `cafleet setup --coding-agent hermes` |
 | Setup fails on the plugin | `plugins.disabled` lists `cafleet` | Remove `cafleet` from `plugins.disabled` and rerun setup |
 | Another user plugin stopped loading after setup | Once `plugins.enabled` exists, Hermes loads only the user plugins it lists | Add that plugin to `plugins.enabled` |
 | A Director command fails with `BLOCKED: this command matches the user-defined deny rule '<glob>' …` | An `approvals.deny` glob matches a `cafleet` command; Hermes applies the list to every session | Read the list with `hermes config get --json approvals.deny`, then write it back without the `cafleet` globs with `hermes config set approvals.deny '<JSON list without them>'` |
