@@ -98,50 +98,53 @@ mod tests {
     use crate::config::*;
 
     #[test]
-    fn an_omitted_database_url_selects_the_running_versions_default_database() {
-        let s = Settings::new(None).unwrap();
-        assert_eq!(
-            s.database_url,
-            format!(
-                "sqlite:///{}/.local/share/cafleet/cafleet_{}.db",
-                std::env::var("HOME").unwrap(),
-                env!("CARGO_PKG_VERSION")
-            )
+    fn settings_select_the_supplied_database_url_verbatim_or_the_running_versions_default() {
+        let default = format!(
+            "sqlite:///{}/.local/share/cafleet/cafleet_{}.db",
+            std::env::var("HOME").unwrap(),
+            env!("CARGO_PKG_VERSION")
         );
         assert!(
-            !s.database_url.contains('~'),
+            !default.contains('~'),
             "the default URL expands the home directory at startup"
         );
+        for (name, settings, url, explicit) in [
+            (
+                "omitted URL",
+                Settings::new(None).unwrap(),
+                default.clone(),
+                false,
+            ),
+            (
+                "supplied URL without ~ expansion",
+                Settings::new(Some("sqlite:///~/custom/path.db".to_string())).unwrap(),
+                "sqlite:///~/custom/path.db".to_owned(),
+                true,
+            ),
+            (
+                "supplied absolute URL",
+                Settings::new(Some("sqlite:///tmp/fleet.db".to_string())).unwrap(),
+                "sqlite:///tmp/fleet.db".to_owned(),
+                true,
+            ),
+            (
+                "supplied URL naming the default database",
+                Settings::new(Some(default_database_url().unwrap())).unwrap(),
+                default.clone(),
+                true,
+            ),
+            (
+                "database path supplied through for_database",
+                Settings::for_database(Path::new("/tmp/fleet.db")),
+                "sqlite:////tmp/fleet.db".to_owned(),
+                true,
+            ),
+        ] {
+            assert_eq!(settings.database_url, url, "{name}");
+            assert_eq!(settings.database_url_explicit, explicit, "{name}");
+        }
     }
 
-    #[test]
-    fn a_supplied_database_url_is_selected_verbatim() {
-        let s = Settings::new(Some("sqlite:///~/custom/path.db".to_string())).unwrap();
-        assert_eq!(
-            s.database_url, "sqlite:///~/custom/path.db",
-            "a user-supplied URL gets no ~ expansion and no rewriting"
-        );
-    }
-
-    #[test]
-    fn database_url_explicit_records_whether_database_url_was_supplied() {
-        assert!(!Settings::new(None).unwrap().database_url_explicit);
-        assert!(
-            Settings::new(Some("sqlite:///tmp/fleet.db".to_string()))
-                .unwrap()
-                .database_url_explicit
-        );
-        assert!(
-            Settings::new(Some(default_database_url().unwrap()))
-                .unwrap()
-                .database_url_explicit,
-            "a supplied URL naming the default database is still explicit"
-        );
-        assert!(
-            Settings::for_database(Path::new("/tmp/fleet.db")).database_url_explicit,
-            "for_database supplies its URL through new"
-        );
-    }
     use std::path::Path;
     use std::path::PathBuf;
 

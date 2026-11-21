@@ -3581,7 +3581,8 @@ mod tests {
 
         #[test]
         fn an_answer_outside_its_form_scope_or_choice_set_is_refused() {
-            let cases: [(&str, fn(&mut Value), &str); 5] = [
+            type RefusalCase = (&'static str, fn(&mut Value), &'static str);
+            let cases: [RefusalCase; 5] = [
                 (
                     "a choice answer on a permission rule",
                     |value| {
@@ -7627,7 +7628,12 @@ mod tests {
 
         #[test]
         fn threshold_selection_orders_versions_by_semver_precedence() {
-            let groups: [(&str, &[(&str, &str)], &[(&str, Option<&str>)]); 3] = [
+            type Group = (
+                &'static str,
+                &'static [(&'static str, &'static str)],
+                &'static [(&'static str, Option<&'static str>)],
+            );
+            let groups: [Group; 3] = [
                 (
                     "numeric components compare numerically",
                     &[("nine", "0.9.0"), ("ten", "0.10.0")],

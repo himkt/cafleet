@@ -221,7 +221,11 @@ pub(crate) struct RunArtifacts {
 impl RunArtifacts {
     #[cfg(test)]
     pub(crate) fn create(conn: &mut Connection, run_id: i64) -> Result<Self> {
-        Self::create_with_deadline(conn, run_id, Instant::now() + Duration::from_secs(5))
+        Self::create_with_deadline(
+            conn,
+            run_id,
+            crate::time::Clock::now(&crate::time::SystemClock) + Duration::from_secs(5),
+        )
     }
     pub(crate) fn create_with_deadline(
         conn: &mut Connection,
@@ -446,15 +450,16 @@ impl RunLock {
     /// The run-lock counterpart of [`crate::pane_lock::PaneLock::acquire_released`].
     #[cfg(test)]
     pub(crate) fn acquire_released(conn: &Connection, owner: &RunOwner) -> Result<Option<Self>> {
-        let until = Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
+        let until = crate::time::Clock::now(&crate::time::SystemClock)
+            + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
         loop {
             if let Some(lock) = Self::acquire(conn, owner)? {
                 return Ok(Some(lock));
             }
-            if Instant::now() >= until {
+            if crate::time::Clock::now(&crate::time::SystemClock) >= until {
                 return Ok(None);
             }
-            std::thread::sleep(Duration::from_millis(50));
+            crate::time::Clock::sleep(&crate::time::SystemClock, Duration::from_millis(50));
         }
     }
     pub(crate) fn validate(&self, conn: &Connection, owner: &RunOwner) -> Result<()> {
@@ -478,7 +483,7 @@ impl RunLock {
             conn,
             owner,
             process,
-            Instant::now() + Duration::from_secs(5),
+            crate::time::Clock::now(&crate::time::SystemClock) + Duration::from_secs(5),
             &crate::time::SystemClock,
         )
     }

@@ -633,8 +633,15 @@ mod tests {
         }
 
         #[test]
-        fn member_list_shows_each_members_window_between_backend_and_pane() {
-            let rows = [
+        fn member_text_shows_each_window_or_pending_beside_the_pane_and_status() {
+            let concrete = || placement(Some(("@6", "cafleet-3-1")), Some("%12"));
+            let pending = || placement(None, None);
+            let registered = RegisteredMember {
+                member_id: 9,
+                name: "drafter".into(),
+                registered_at: "registered".into(),
+            };
+            let list = format_member_list(&[
                 row(
                     8,
                     "director",
@@ -642,82 +649,51 @@ mod tests {
                     placement(Some(("@1", "main")), Some("%3")),
                     12,
                 ),
-                row(
-                    9,
-                    "drafter",
-                    MemberKind::Member,
-                    placement(Some(("@6", "cafleet-3-1")), Some("%12")),
-                    5,
+                row(9, "drafter", MemberKind::Member, concrete(), 5),
+            ]);
+            let pending_list =
+                format_member_list(&[row(10, "tester", MemberKind::Member, pending(), 0)]);
+            let cases = [
+                (
+                    "member list with concrete windows",
+                    list,
+                    [
+                        "2 members:",
+                        "  member_id  name           kind      backend   window         pane_id  idle",
+                        "  8          director       director  claude    main           %3       12s",
+                        "  9          drafter        member    claude    cafleet-3-1    %12      5s",
+                    ]
+                    .join("\n"),
+                ),
+                (
+                    "member list row with a pending window and pane",
+                    pending_list.lines().nth(2).unwrap().to_owned(),
+                    "  10         tester         member    claude    (pending)      (pending)  0s".into(),
+                ),
+                (
+                    "member create with a concrete placement",
+                    format_member(&registered, &concrete()),
+                    "9 drafter backend=claude pane=%12 window=cafleet-3-1".into(),
+                ),
+                (
+                    "member create with a pending placement",
+                    format_member(&registered, &pending()),
+                    "9 drafter backend=claude pane=(pending) window=(pending)".into(),
+                ),
+                (
+                    "member show with a concrete window",
+                    format_member_detail(&row(9, "drafter", MemberKind::Member, concrete(), 5).member),
+                    "9 drafter active window=cafleet-3-1".into(),
+                ),
+                (
+                    "member show with a pending window",
+                    format_member_detail(&row(10, "tester", MemberKind::Member, pending(), 0).member),
+                    "10 tester active window=(pending)".into(),
                 ),
             ];
-            assert_eq!(
-                format_member_list(&rows),
-                [
-                    "2 members:",
-                    "  member_id  name           kind      backend   window         pane_id  idle",
-                    "  8          director       director  claude    main           %3       12s",
-                    "  9          drafter        member    claude    cafleet-3-1    %12      5s",
-                ]
-                .join(
-                    "
-"
-                )
-            );
-        }
-
-        #[test]
-        fn member_list_shows_a_pending_window_and_pane() {
-            let rows = [row(
-                10,
-                "tester",
-                MemberKind::Member,
-                placement(None, None),
-                0,
-            )];
-            assert_eq!(
-                format_member_list(&rows).lines().nth(2).unwrap(),
-                "  10         tester         member    claude    (pending)      (pending)  0s"
-            );
-        }
-
-        #[test]
-        fn member_create_text_appends_the_window_after_the_pane() {
-            let registered = RegisteredMember {
-                member_id: 9,
-                name: "drafter".into(),
-                registered_at: "registered".into(),
-            };
-            assert_eq!(
-                format_member(
-                    &registered,
-                    &placement(Some(("@6", "cafleet-3-1")), Some("%12"))
-                ),
-                "9 drafter backend=claude pane=%12 window=cafleet-3-1"
-            );
-            assert_eq!(
-                format_member(&registered, &placement(None, None)),
-                "9 drafter backend=claude pane=(pending) window=(pending)"
-            );
-        }
-
-        #[test]
-        fn member_show_text_appends_the_window_after_the_status() {
-            let concrete = row(
-                9,
-                "drafter",
-                MemberKind::Member,
-                placement(Some(("@6", "cafleet-3-1")), Some("%12")),
-                5,
-            );
-            assert_eq!(
-                format_member_detail(&concrete.member),
-                "9 drafter active window=cafleet-3-1"
-            );
-            let pending = row(10, "tester", MemberKind::Member, placement(None, None), 0);
-            assert_eq!(
-                format_member_detail(&pending.member),
-                "10 tester active window=(pending)"
-            );
+            for (name, rendered, expected) in cases {
+                assert_eq!(rendered, expected, "{name}");
+            }
         }
     }
 
@@ -757,41 +733,41 @@ mod tests {
     use crate::runtime::control::test_support::inspection;
 
     #[test]
-    fn permission_inspection_text_names_the_token_sequence_and_answer_rule() {
+    fn permission_inspection_text_names_the_token_sequence_answers_and_rule_or_dashes() {
         let token = "a".repeat(64);
-        assert_eq!(
-            crate::output::text::format_permission_inspection(&inspection()),
-            format!(
-                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=allow,deny\nRequest: token={token} output_seq=5 rule=opencode-shell-allow-enter\nMissing evidence: arguments,cwd"
-            )
-        );
-    }
-
-    #[test]
-    fn permission_inspection_text_marks_an_unsupported_request_with_dashes_and_its_reason() {
         let mut unsupported = inspection();
         unsupported.answer_rule_id = None;
         unsupported.request_token = None;
         unsupported.supported_decisions = Vec::new();
         unsupported.capability_reason = Some("native profile unavailable".into());
         unsupported.missing_evidence = Vec::new();
-        assert_eq!(
-            crate::output::text::format_permission_inspection(&unsupported),
-            "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\nRequest: token=- output_seq=5 rule=-\nCapability: native profile unavailable"
-        );
-    }
-
-    #[test]
-    fn permission_inspection_text_lists_a_questions_supported_choice_ids() {
-        let token = "a".repeat(64);
-        assert_eq!(
-            crate::output::text::format_permission_inspection(
-                &crate::runtime::control::test_support::question_inspection()
+        for (name, inspected, expected) in [
+            (
+                "supported permission request",
+                inspection(),
+                format!(
+                    "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=allow,deny\nRequest: token={token} output_seq=5 rule=opencode-shell-allow-enter\nMissing evidence: arguments,cwd"
+                ),
             ),
-            format!(
-                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=not-now,dont-show-again\nRequest: token={token} output_seq=5 rule=-"
-            )
-        );
+            (
+                "unsupported request",
+                unsupported,
+                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\nRequest: token=- output_seq=5 rule=-\nCapability: native profile unavailable".into(),
+            ),
+            (
+                "question with supported choice ids",
+                crate::runtime::control::test_support::question_inspection(),
+                format!(
+                    "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=not-now,dont-show-again\nRequest: token={token} output_seq=5 rule=-"
+                ),
+            ),
+        ] {
+            assert_eq!(
+                crate::output::text::format_permission_inspection(&inspected),
+                expected,
+                "{name}"
+            );
+        }
     }
 
     #[test]

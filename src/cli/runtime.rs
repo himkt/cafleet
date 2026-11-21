@@ -512,15 +512,6 @@ mod tests {
             }
         }
 
-        #[test]
-        fn permission_respond_accepts_each_semantic_decision() {
-            for decision in storage::PermissionDecision::VALUES {
-                let mut args = respond();
-                set(&mut args, "--decision", decision);
-                accepted(&args);
-            }
-        }
-
         fn respond_choice(choice: &str) -> Vec<String> {
             let mut args = respond();
             let index = args
@@ -549,7 +540,31 @@ mod tests {
         }
 
         #[test]
-        fn permission_respond_accepts_a_choice_in_place_of_a_decision() {
+        fn permission_respond_parses_exactly_one_valid_decision_or_choice() {
+            type Answer = (Option<storage::PermissionDecision>, Option<String>);
+            let with = |mut args: Vec<String>, extra: [&str; 2]| {
+                args.extend(extra.map(String::from));
+                args
+            };
+            let with_token = |token: &str| {
+                let mut args = respond();
+                set(&mut args, "--request-token", token);
+                args
+            };
+            let mut neither = respond();
+            let index = neither.iter().position(|arg| arg == "--decision").unwrap();
+            neither.drain(index..index + 2);
+            let mut cases: Vec<(String, Vec<String>, Option<Answer>)> = Vec::new();
+            for decision in storage::PermissionDecision::VALUES {
+                let mut args = respond();
+                set(&mut args, "--decision", decision);
+                let parsed = storage::PermissionDecision::try_from(*decision).unwrap();
+                cases.push((
+                    format!("decision {decision}"),
+                    args,
+                    Some((Some(parsed), None)),
+                ));
+            }
             for choice in [
                 "decline",
                 "not-now",
@@ -557,44 +572,40 @@ mod tests {
                 "a",
                 &"a".repeat(64),
             ] {
-                let args = respond_choice(choice);
-                accepted(&args);
-                assert_eq!(
-                    parsed_answer(&args),
-                    (None, Some(choice.to_owned())),
-                    "{choice}"
-                );
+                cases.push((
+                    format!("choice {choice}"),
+                    respond_choice(choice),
+                    Some((None, Some(choice.to_owned()))),
+                ));
             }
-            assert_eq!(
-                parsed_answer(&respond()),
-                (Some(storage::PermissionDecision::Allow), None)
-            );
-        }
-
-        #[test]
-        fn permission_respond_requires_exactly_one_of_a_decision_and_a_choice() {
-            let mut both = respond();
-            both.extend(["--choice".into(), "decline".into()]);
-            rejected(&both);
-            let mut both_choice_first = respond_choice("decline");
-            both_choice_first.extend(["--decision".into(), "deny".into()]);
-            rejected(&both_choice_first);
-            let mut neither = respond();
-            let index = neither.iter().position(|arg| arg == "--decision").unwrap();
-            neither.drain(index..index + 2);
-            rejected(&neither);
-            let mut repeated = respond_choice("decline");
-            repeated.extend(["--choice".into(), "not-now".into()]);
-            rejected(&repeated);
-        }
-
-        #[test]
-        fn permission_respond_validates_each_checked_flag() {
-            rejected(&respond_choice("Decline"));
-            for token in ["A".repeat(64), "a".repeat(63)] {
-                let mut args = respond();
-                set(&mut args, "--request-token", &token);
-                rejected(&args);
+            for (name, args) in [
+                (
+                    "decision then choice",
+                    with(respond(), ["--choice", "decline"]),
+                ),
+                (
+                    "choice then decision",
+                    with(respond_choice("decline"), ["--decision", "deny"]),
+                ),
+                ("neither", neither),
+                (
+                    "repeated choice",
+                    with(respond_choice("decline"), ["--choice", "not-now"]),
+                ),
+                ("choice outside the id shape", respond_choice("Decline")),
+                ("uppercase request token", with_token(&"A".repeat(64))),
+                ("short request token", with_token(&"a".repeat(63))),
+            ] {
+                cases.push((name.to_owned(), args, None));
+            }
+            for (name, args, expected) in cases {
+                match expected {
+                    Some(answer) => {
+                        accepted(&args);
+                        assert_eq!(parsed_answer(&args), answer, "{name}");
+                    }
+                    None => rejected(&args),
+                }
             }
         }
 
@@ -646,69 +657,72 @@ mod tests {
     }
 
     #[test]
-    fn input_reconcile_accepts_exact_cli_dispositions_with_evidence() {
-        for disposition in ["submitted", "not-submitted", "abandoned-uncertain"] {
-            assert!(
-                CliArgs::try_parse_from([
-                    "cafleet",
-                    "input",
-                    "reconcile",
-                    "17",
-                    "--from-member-id",
-                    "1",
-                    "--disposition",
-                    disposition,
-                    "--evidence-ref",
-                    "audit:inspected-receipt",
-                    "--json",
-                ])
-                .is_ok(),
-                "{disposition}"
-            );
+    fn input_reconcile_requires_an_exact_disposition_nonempty_evidence_and_a_positive_id() {
+        fn reconcile<'a>(
+            id: &'a str,
+            disposition: Option<&'a str>,
+            evidence: Option<&'a str>,
+        ) -> Vec<&'a str> {
+            let mut args = vec!["input", "reconcile", id, "--from-member-id", "1"];
+            if let Some(disposition) = disposition {
+                args.extend(["--disposition", disposition]);
+            }
+            if let Some(evidence) = evidence {
+                args.extend(["--evidence-ref", evidence]);
+            }
+            args
         }
-    }
-
-    #[test]
-    fn input_reconcile_requires_valid_disposition_and_nonempty_evidence() {
-        for args in [
-            vec!["input", "reconcile", "17", "--disposition", "submitted"],
-            vec![
-                "input",
-                "reconcile",
-                "17",
-                "--evidence-ref",
-                "audit:missing-choice",
-            ],
-            vec![
-                "input",
-                "reconcile",
-                "17",
-                "--disposition",
-                "approved",
-                "--evidence-ref",
-                "audit:x",
-            ],
-            vec![
-                "input",
-                "reconcile",
-                "17",
-                "--disposition",
+        let evidence = Some("audit:inspected-receipt");
+        for (name, args, accepted) in [
+            (
                 "submitted",
-                "--evidence-ref",
-                "   ",
-            ],
-            vec![
-                "input",
-                "reconcile",
-                "0",
-                "--disposition",
-                "submitted",
-                "--evidence-ref",
-                "audit:x",
-            ],
+                reconcile("17", Some("submitted"), evidence),
+                true,
+            ),
+            (
+                "not submitted",
+                reconcile("17", Some("not-submitted"), evidence),
+                true,
+            ),
+            (
+                "abandoned uncertain",
+                reconcile("17", Some("abandoned-uncertain"), evidence),
+                true,
+            ),
+            (
+                "missing evidence",
+                reconcile("17", Some("submitted"), None),
+                false,
+            ),
+            (
+                "missing disposition",
+                reconcile("17", None, Some("audit:missing-choice")),
+                false,
+            ),
+            (
+                "unknown disposition",
+                reconcile("17", Some("approved"), Some("audit:x")),
+                false,
+            ),
+            (
+                "blank evidence",
+                reconcile("17", Some("submitted"), Some("   ")),
+                false,
+            ),
+            (
+                "zero input id",
+                reconcile("0", Some("submitted"), Some("audit:x")),
+                false,
+            ),
         ] {
-            let args = [args, vec!["--from-member-id", "1"]].concat();
-            assert_eq!(usage_error(&args).exit_code(), 2, "{args:?}");
+            if accepted {
+                let mut argv = vec!["cafleet"];
+                argv.extend(&args);
+                argv.push("--json");
+                assert!(CliArgs::try_parse_from(argv).is_ok(), "{name}");
+            } else {
+                assert_eq!(usage_error(&args).exit_code(), 2, "{name}");
+            }
         }
     }
 }

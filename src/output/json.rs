@@ -327,34 +327,41 @@ mod tests {
         }
 
         #[test]
-        fn a_concrete_placement_orders_its_window_and_slot_keys_before_the_pane() {
-            let value = crate::output::json::placement(&placement(true));
-            assert_key_order(&value, &PLACEMENT_KEYS);
-            assert_eq!(
-                value,
-                json!({
-                    "backend": "tmux",
-                    "mux_session": "main",
-                    "mux_window_id": "@6",
-                    "mux_window_name": "cafleet-3-1",
-                    "window_ordinal": 1,
-                    "column_side": "left",
-                    "mux_pane_id": "%12",
-                    "coding_agent": "claude",
-                    "created_at": "2026-11-13T00:00:00+00:00",
-                })
-            );
-        }
-
-        #[test]
-        fn a_pending_placement_has_a_null_window_and_pane_and_keeps_its_slot() {
-            let value = crate::output::json::placement(&placement(false));
-            assert_key_order(&value, &PLACEMENT_KEYS);
-            for key in ["mux_window_id", "mux_window_name", "mux_pane_id"] {
-                assert_eq!(value[key], Value::Null, "{key}");
+        fn a_placement_orders_its_window_and_slot_keys_before_the_pane_and_nulls_pending_ids() {
+            for (name, concrete, window_id, window_name, pane_id) in [
+                (
+                    "concrete placement",
+                    true,
+                    json!("@6"),
+                    json!("cafleet-3-1"),
+                    json!("%12"),
+                ),
+                (
+                    "pending placement",
+                    false,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                ),
+            ] {
+                let value = crate::output::json::placement(&placement(concrete));
+                assert_key_order(&value, &PLACEMENT_KEYS);
+                assert_eq!(
+                    value,
+                    json!({
+                        "backend": "tmux",
+                        "mux_session": "main",
+                        "mux_window_id": window_id,
+                        "mux_window_name": window_name,
+                        "window_ordinal": 1,
+                        "column_side": "left",
+                        "mux_pane_id": pane_id,
+                        "coding_agent": "claude",
+                        "created_at": "2026-11-13T00:00:00+00:00",
+                    }),
+                    "{name}"
+                );
             }
-            assert_eq!(value["window_ordinal"], 1);
-            assert_eq!(value["column_side"], "left");
         }
 
         #[test]

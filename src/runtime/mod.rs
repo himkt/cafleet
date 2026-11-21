@@ -192,6 +192,17 @@ pub(crate) mod test_support {
     use crate::runtime::*;
     pub(crate) const STARTED_AT: &str = "2026-10-27T14:00:00.000000+00:00";
 
+    /// How far a runtime test's virtual clock starts ahead of real time. The database and lock
+    /// budgets keep real time, so a deadline derived from the virtual clock must lie in the real
+    /// future however little virtual time a test spends.
+    pub(crate) const VIRTUAL_LEAD: std::time::Duration = std::time::Duration::from_secs(3600);
+
+    pub(crate) fn virtual_clock() -> std::sync::Arc<crate::time::test_support::TestClock> {
+        std::sync::Arc::new(crate::time::test_support::TestClock::starting_at(
+            std::time::Instant::now() + VIRTUAL_LEAD,
+        ))
+    }
+
     pub(crate) fn read_fixture_bytes(
         stream: &mut std::os::unix::net::UnixStream,
         mut bytes: &mut [u8],

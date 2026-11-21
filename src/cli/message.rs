@@ -1055,37 +1055,45 @@ mod tests {
         use crate::cli::message::tests::*;
 
         #[test]
-        fn an_omitted_database_url_appends_nothing() {
-            assert_eq!(poll_command(7, None), "cafleet message poll 7 --json");
-        }
-
-        #[test]
-        fn a_database_url_of_only_safe_characters_is_appended_verbatim() {
-            assert_eq!(
-                poll_command(7, Some("sqlite:///tmp/fleet.db")),
-                "cafleet message poll 7 --json --database-url sqlite:///tmp/fleet.db"
-            );
+        fn the_next_poll_command_appends_the_database_url_quoted_only_when_needed() {
             let every_safe_class = "sqlite:///Home/u_1/~x/a-b.c@d%e+f=g,h.db";
-            assert_eq!(
-                poll_command(42, Some(every_safe_class)),
-                format!("cafleet message poll 42 --json --database-url {every_safe_class}")
-            );
-        }
-
-        #[test]
-        fn a_database_url_with_a_space_is_single_quoted() {
-            assert_eq!(
-                poll_command(7, Some("sqlite:///tmp/my fleet.db")),
-                "cafleet message poll 7 --json --database-url 'sqlite:///tmp/my fleet.db'"
-            );
-        }
-
-        #[test]
-        fn a_single_quote_in_the_database_url_is_closed_escaped_and_reopened() {
-            assert_eq!(
-                poll_command(7, Some("sqlite:///tmp/it's.db")),
-                r"cafleet message poll 7 --json --database-url 'sqlite:///tmp/it'\''s.db'"
-            );
+            for (name, member, url, expected) in [
+                (
+                    "omitted database URL",
+                    7,
+                    None,
+                    "cafleet message poll 7 --json".to_owned(),
+                ),
+                (
+                    "only safe characters",
+                    7,
+                    Some("sqlite:///tmp/fleet.db"),
+                    "cafleet message poll 7 --json --database-url sqlite:///tmp/fleet.db"
+                        .to_owned(),
+                ),
+                (
+                    "every safe character class",
+                    42,
+                    Some(every_safe_class),
+                    format!("cafleet message poll 42 --json --database-url {every_safe_class}"),
+                ),
+                (
+                    "a space",
+                    7,
+                    Some("sqlite:///tmp/my fleet.db"),
+                    "cafleet message poll 7 --json --database-url 'sqlite:///tmp/my fleet.db'"
+                        .to_owned(),
+                ),
+                (
+                    "a single quote closed, escaped and reopened",
+                    7,
+                    Some("sqlite:///tmp/it's.db"),
+                    r"cafleet message poll 7 --json --database-url 'sqlite:///tmp/it'\''s.db'"
+                        .to_owned(),
+                ),
+            ] {
+                assert_eq!(poll_command(member, url), expected, "{name}");
+            }
         }
 
         #[test]
@@ -1260,21 +1268,25 @@ mod tests {
         }
 
         #[test]
-        #[should_panic(expected = "only a pending notice may be refused")]
-        fn a_refused_ready_record_panics() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::new(&clock);
-            output.refused_event = Some("ready");
-            listen_over(&clock, &mut output, 2, |_| Vec::new());
-        }
-
-        #[test]
-        #[should_panic(expected = "only a pending notice may be refused")]
-        fn a_refused_closed_record_panics() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::new(&clock);
-            output.refused_event = Some("closed");
-            listen_over(&clock, &mut output, 2, |_| Vec::new());
+        fn refusing_a_ready_or_closed_record_panics() {
+            for event in ["ready", "closed"] {
+                let refused = std::panic::catch_unwind(|| {
+                    let clock = test_clock();
+                    let mut output = RecordingOutput::new(&clock);
+                    output.refused_event = Some(event);
+                    listen_over(&clock, &mut output, 2, |_| Vec::new());
+                });
+                let payload = refused.expect_err(event);
+                let message = payload
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or_default();
+                assert!(
+                    message.contains("only a pending notice may be refused"),
+                    "{event}: {message}"
+                );
+            }
         }
 
         mod consuming_polls {

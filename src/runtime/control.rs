@@ -4058,123 +4058,121 @@ mod tests {
             }
         }
 
-        #[test]
-        fn identity_decode_requires_each_owning_database_identity_field() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["canonical_path", "instance_id", "device", "inode"] {
-                let mut bad = good.clone();
-                bad["identity"]["database_identity_json"]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove(field)
-                    .unwrap();
-                reject_decode(&good, &bad, field);
-            }
+        fn bad_instance_ids() -> Vec<Value> {
+            bad_hex(32)
         }
 
+        fn bad_nonces() -> Vec<Value> {
+            bad_hex(64)
+        }
+
+        #[derive(Clone, Copy)]
+        enum Slot {
+            Database(&'static str),
+            LaunchNonce,
+        }
+
+        #[derive(Clone, Copy)]
+        enum Invalid {
+            Absent,
+            Values(fn() -> Vec<Value>),
+        }
+
+        /// An owning identity slot and the invalid contents both the decoder and the encoder of
+        /// a constructed request refuse without leaking private identity text.
+        struct InvalidIdentity {
+            name: &'static str,
+            slot: Slot,
+            invalid: Invalid,
+        }
+
+        const INVALID_IDENTITIES: &[InvalidIdentity] = &[
+            InvalidIdentity {
+                name: "a database identity without canonical_path",
+                slot: Slot::Database("canonical_path"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a database identity without instance_id",
+                slot: Slot::Database("instance_id"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a database identity without device",
+                slot: Slot::Database("device"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a database identity without inode",
+                slot: Slot::Database("inode"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a canonical_path that is not an absolute string",
+                slot: Slot::Database("canonical_path"),
+                invalid: Invalid::Values(bad_paths),
+            },
+            InvalidIdentity {
+                name: "an instance_id that is not 32 ASCII hex characters",
+                slot: Slot::Database("instance_id"),
+                invalid: Invalid::Values(bad_instance_ids),
+            },
+            InvalidIdentity {
+                name: "a device that is not an unsigned 64-bit integer",
+                slot: Slot::Database("device"),
+                invalid: Invalid::Values(bad_numbers),
+            },
+            InvalidIdentity {
+                name: "an inode that is not an unsigned 64-bit integer",
+                slot: Slot::Database("inode"),
+                invalid: Invalid::Values(bad_numbers),
+            },
+            InvalidIdentity {
+                name: "a launch nonce that is not 64 ASCII hex characters",
+                slot: Slot::LaunchNonce,
+                invalid: Invalid::Values(bad_nonces),
+            },
+        ];
+
         #[test]
-        fn identity_decode_requires_an_absolute_string_database_path() {
+        fn identity_decode_and_encode_refuse_every_invalid_owning_identity_privately() {
             let case = Case::new();
             let good = control(&case);
-            for (field, values) in [
-                ("canonical_path", bad_paths()),
-                ("instance_id", bad_hex(32)),
-            ] {
-                for (index, value) in values.into_iter().enumerate() {
+            for row in INVALID_IDENTITIES {
+                let replacements: Vec<Option<Value>> = match row.invalid {
+                    Invalid::Absent => vec![None],
+                    Invalid::Values(values) => values().into_iter().map(Some).collect(),
+                };
+                for (index, replacement) in replacements.into_iter().enumerate() {
+                    let label = format!("{}: value {index}", row.name);
                     let mut bad = good.clone();
-                    bad["identity"]["database_identity_json"][field] = value;
-                    reject_decode(&good, &bad, &format!("{field} {index}"));
-                }
-            }
-        }
-
-        #[test]
-        fn identity_decode_requires_an_unsigned_64_bit_device() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["device", "inode"] {
-                for (index, value) in bad_numbers().into_iter().enumerate() {
-                    let mut bad = good.clone();
-                    bad["identity"]["database_identity_json"][field] = value;
-                    reject_decode(&good, &bad, &format!("{field} {index}"));
-                }
-            }
-        }
-
-        #[test]
-        fn identity_decode_requires_a_64_character_ascii_hex_launch_nonce() {
-            let case = Case::new();
-            let good = control(&case);
-            for (index, value) in bad_hex(64).into_iter().enumerate() {
-                let mut bad = good.clone();
-                bad["identity"]["launch_nonce"] = value;
-                reject_decode(&good, &bad, &format!("launch_nonce {index}"));
-            }
-        }
-
-        #[test]
-        fn identity_encoder_requires_each_owning_database_identity_field() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["canonical_path", "instance_id", "device", "inode"] {
-                let mut database = good["identity"]["database_identity_json"].clone();
-                database.as_object_mut().unwrap().remove(field).unwrap();
-                reject_encode(&good, database, &case.fixture.run.launch_nonce, field);
-            }
-        }
-
-        #[test]
-        fn identity_encoder_validates_constructed_database_path_and_instance_id() {
-            let case = Case::new();
-            let good = control(&case);
-            for (field, values) in [
-                ("canonical_path", bad_paths()),
-                ("instance_id", bad_hex(32)),
-            ] {
-                for (index, value) in values.into_iter().enumerate() {
                     let mut database = good["identity"]["database_identity_json"].clone();
-                    database[field] = value;
-                    reject_encode(
-                        &good,
-                        database,
-                        &case.fixture.run.launch_nonce,
-                        &format!("{field} {index}"),
-                    );
-                }
-            }
-        }
-
-        #[test]
-        fn identity_encoder_validates_constructed_unsigned_device_and_inode() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["device", "inode"] {
-                for (index, value) in bad_numbers().into_iter().enumerate() {
-                    let mut database = good["identity"]["database_identity_json"].clone();
-                    database[field] = value;
-                    reject_encode(
-                        &good,
-                        database,
-                        &case.fixture.run.launch_nonce,
-                        &format!("{field} {index}"),
-                    );
-                }
-            }
-        }
-
-        #[test]
-        fn identity_encoder_validates_a_constructed_launch_nonce() {
-            let case = Case::new();
-            let good = control(&case);
-            for value in bad_hex(64) {
-                if let Some(nonce) = value.as_str() {
-                    reject_encode(
-                        &good,
-                        good["identity"]["database_identity_json"].clone(),
-                        nonce,
-                        "launch_nonce",
-                    );
+                    let mut nonce = Some(case.fixture.run.launch_nonce.clone());
+                    match (row.slot, replacement) {
+                        (Slot::Database(field), None) => {
+                            bad["identity"]["database_identity_json"]
+                                .as_object_mut()
+                                .unwrap()
+                                .remove(field)
+                                .unwrap();
+                            database.as_object_mut().unwrap().remove(field).unwrap();
+                        }
+                        (Slot::Database(field), Some(value)) => {
+                            bad["identity"]["database_identity_json"][field] = value.clone();
+                            database[field] = value;
+                        }
+                        (Slot::LaunchNonce, Some(value)) => {
+                            nonce = value.as_str().map(str::to_owned);
+                            bad["identity"]["launch_nonce"] = value;
+                        }
+                        (Slot::LaunchNonce, None) => {
+                            unreachable!("{label}: a request always carries a launch nonce")
+                        }
+                    }
+                    reject_decode(&good, &bad, &label);
+                    if let Some(nonce) = nonce {
+                        reject_encode(&good, database, &nonce, &label);
+                    }
                 }
             }
         }

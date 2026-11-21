@@ -755,7 +755,7 @@ impl Transport {
                 self.observation_fenced = true;
                 return Err(cause);
             }
-            if let Err(cause) = check_deadline(Instant::now(), deadline) {
+            if let Err(cause) = check_deadline(self.clock.now(), deadline) {
                 self.retain_observation_remainder(bytes);
                 return Err(cause);
             }
@@ -1402,6 +1402,8 @@ mod tests {
     use crate::runtime::writer::test_support::start;
     use crate::runtime::writer::test_support::transition;
     use crate::runtime::writer::test_support::wait_until;
+    use crate::time::Clock as _;
+    use crate::time::test_support::TestClock;
     use std::cell::Cell;
     use std::cell::RefCell;
     use std::io;
@@ -1423,7 +1425,30 @@ mod tests {
         Health,
     }
 
-    type Trace = Rc<RefCell<Vec<Site>>>;
+    /// The harness's endpoint call trace and the virtual clock every fake endpoint reads.
+    struct Recorder {
+        sites: RefCell<Vec<Site>>,
+        clock: Arc<TestClock>,
+    }
+
+    impl std::ops::Deref for Recorder {
+        type Target = RefCell<Vec<Site>>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.sites
+        }
+    }
+
+    impl Recorder {
+        /// Advances the virtual clock just past `deadline`, as a call blocking that long would.
+        fn block_past(&self, deadline: Instant) {
+            self.clock.advance(
+                deadline.saturating_duration_since(self.clock.now()) + Duration::from_millis(1),
+            );
+        }
+    }
+
+    type Trace = Rc<Recorder>;
 
     #[derive(Debug)]
     enum Read {
@@ -1479,12 +1504,10 @@ mod tests {
     impl ByteInput for Reader {
         fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
             assert!(!target.is_empty(), "an actual read has positive capacity");
-            let entered = Instant::now();
+            let entered = self.trace.clock.now();
             self.trace.borrow_mut().push(self.site);
             if let Some(until) = self.delay_until.take() {
-                std::thread::sleep(
-                    until.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
-                );
+                self.trace.block_past(until);
             }
             let result = match self.steps.pop_front() {
                 Some(Read::Data(mut bytes)) => {
@@ -1516,7 +1539,7 @@ mod tests {
                 capacity: target.len(),
                 count: result.as_ref().ok().copied(),
                 entered,
-                returned: Instant::now(),
+                returned: self.trace.clock.now(),
             });
             result
         }
@@ -1672,7 +1695,8 @@ mod tests {
 
     impl Harness {
         fn new() -> Self {
-            let until = Instant::now() + Duration::from_secs(4);
+            let time = Arc::new(TestClock::starting_at(Instant::now()));
+            let until = time.now() + Duration::from_secs(4);
             let fixture = WriterFixture::new();
             let controller =
                 ObservationController::new(&fixture.fixture.run, ProfileCatalog::bundled())
@@ -1689,9 +1713,30 @@ mod tests {
                 hooks,
                 release,
                 until,
-                trace: Rc::default(),
+                trace: Rc::new(Recorder {
+                    sites: RefCell::default(),
+                    clock: time,
+                }),
                 observations: Rc::default(),
             }
+        }
+
+        fn time(&self) -> &Arc<TestClock> {
+            &self.trace.clock
+        }
+
+        /// A transport with these limits on the harness's virtual clock.
+        fn transport(&self, bytes: usize, input: usize, display: usize) -> Transport {
+            Transport::new(
+                TerminalSize { rows: 24, cols: 80 },
+                TransportLimits {
+                    input_bytes: input,
+                    display_bytes: display,
+                    bytes_per_tick: bytes,
+                },
+                self.time().clone(),
+            )
+            .unwrap()
         }
 
         fn drain(
@@ -1761,7 +1806,7 @@ mod tests {
         }
 
         fn control(&mut self) {
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = self.transport(64, 64, 64);
             self.seal(&mut drain_transport);
             assert!(drain_transport.take_input_drain().is_some());
             assert!(drain_transport.take_input_drain().is_none());
@@ -1809,19 +1854,6 @@ mod tests {
         }
     }
 
-    fn drain_transport(bytes: usize, input: usize, display: usize) -> Transport {
-        Transport::new(
-            TerminalSize { rows: 24, cols: 80 },
-            TransportLimits {
-                input_bytes: input,
-                display_bytes: display,
-                bytes_per_tick: bytes,
-            },
-            std::sync::Arc::new(crate::time::SystemClock),
-        )
-        .unwrap()
-    }
-
     fn assert_pending(result: Result<InputDrain>, drain_transport: &mut Transport) {
         assert_eq!(result.unwrap(), InputDrain::Pending);
         assert!(drain_transport.take_input_drain().is_none());
@@ -1857,7 +1889,7 @@ mod tests {
     #[test]
     fn drain_actual_quiet_round_seals_health_without_granting_composer_eligibility() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(32, 32, 32);
+            let mut drain_transport = h.transport(32, 32, 32);
             assert_eq!(drain_transport.human_generation(), 0);
             assert!(drain_transport.take_input_drain().is_none());
             h.seal(&mut drain_transport);
@@ -1888,7 +1920,7 @@ mod tests {
         with_harness(|h| {
             let human_bytes = "literal 世界\r".as_bytes();
             let child_bytes = b"child\r\n";
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut human = Reader::data(Site::Human, &h.trace, human_bytes, 4);
             let mut pty = DrainPty::new(&h.trace);
             pty.reader = Reader::data(Site::Child, &h.trace, child_bytes, 2);
@@ -1947,7 +1979,7 @@ mod tests {
             (Read::Eof, false),
         ] {
             with_harness(|h| {
-                let mut drain_transport = drain_transport(32, 32, 32);
+                let mut drain_transport = h.transport(32, 32, 32);
                 let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
                 let interrupted = matches!(step, Read::Interrupted);
                 if on_human {
@@ -1975,7 +2007,7 @@ mod tests {
         {
             with_harness(|h| {
                 h.control();
-                let mut drain_transport = drain_transport(bytes, 128, 128);
+                let mut drain_transport = h.transport(bytes, 128, 128);
                 let mut human = Reader::new(Site::Human, &h.trace, []);
                 human.fill = Some(b'h');
                 human.width = width;
@@ -2016,7 +2048,7 @@ mod tests {
         }
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut human = Reader::data(Site::Human, &h.trace, b"1234567", 1);
             let mut pty = DrainPty::new(&h.trace);
             let mut output = DrainOutput::new(&h.trace);
@@ -2039,7 +2071,7 @@ mod tests {
     #[test]
     fn drain_full_manual_queue_supplies_no_read_proof_and_preserves_order_on_release() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(16, 4, 32);
+            let mut drain_transport = h.transport(16, 4, 32);
             let mut io = Endpoints::new(
                 &h.trace,
                 Reader::data(Site::Human, &h.trace, b"abcdefgh", 8),
@@ -2068,7 +2100,7 @@ mod tests {
     fn drain_display_and_prefetched_child_pressure_require_real_later_drain() {
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(16, 32, 4);
+            let mut drain_transport = h.transport(16, 32, 4);
             let mut human = Reader::data(Site::Human, &h.trace, b"manual", 6);
             let mut pty = DrainPty::new(&h.trace);
             pty.reader = Reader::data(Site::Child, &h.trace, b"abcdefgh", 8);
@@ -2101,7 +2133,7 @@ mod tests {
         });
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(16, 32, 32);
+            let mut drain_transport = h.transport(16, 32, 32);
             let mut human = Reader::new(Site::Human, &h.trace, []);
             let mut pty = DrainPty::new(&h.trace);
             pty.reader.steps = [
@@ -2159,7 +2191,7 @@ mod tests {
             let expected = h.controller.health(&h.writer);
             assert!(expected.degraded);
             assert!(expected.gap_count > 0);
-            let mut drain_transport = drain_transport(32, 32, 32);
+            let mut drain_transport = h.transport(32, 32, 32);
             let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
             let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
@@ -2179,7 +2211,7 @@ mod tests {
             h.writer.submit(transition(&h.fixture, 1)).unwrap();
             h.hooks.wait(WriterBoundary::Persist, 1);
             assert_eq!(h.writer.status().pending_count, 1);
-            let mut drain_transport = drain_transport(32, 32, 32);
+            let mut drain_transport = h.transport(32, 32, 32);
             let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
             let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
@@ -2205,7 +2237,7 @@ mod tests {
         for quiesce in [false, true] {
             for failure in ["pty", "child", "display", "flush", "observer", "zero"] {
                 with_harness(|h| {
-                    let mut drain_transport = drain_transport(32, 32, 32);
+                    let mut drain_transport = h.transport(32, 32, 32);
                     h.seal(&mut drain_transport);
                     let mut io = Endpoints::new(
                         &h.trace,
@@ -2279,7 +2311,7 @@ mod tests {
             "drain-expired",
         ] {
             with_harness(|h| {
-                let mut drain_transport = drain_transport(32, 32, 32);
+                let mut drain_transport = h.transport(32, 32, 32);
                 h.seal(&mut drain_transport);
                 let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
                 match operation {
@@ -2351,7 +2383,7 @@ mod tests {
                                 &mut io.human,
                                 &mut io.pty,
                                 &mut io.output,
-                                Instant::now(),
+                                h.time().now(),
                             ),
                             &mut drain_transport,
                         );
@@ -2366,7 +2398,7 @@ mod tests {
     #[test]
     fn drain_original_expiry_prevents_later_io_and_proof_while_retaining_completed_reads() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(32, 32, 32);
+            let mut drain_transport = h.transport(32, 32, 32);
             h.seal(&mut drain_transport);
             h.reset_observations();
             let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
@@ -2376,7 +2408,7 @@ mod tests {
                     &mut io.human,
                     &mut io.pty,
                     &mut io.output,
-                    Instant::now(),
+                    h.time().now(),
                 ),
                 &mut drain_transport,
             );
@@ -2387,7 +2419,7 @@ mod tests {
         });
         for fails in [false, true] {
             with_harness(|h| {
-                let mut drain_transport = drain_transport(32, 32, 32);
+                let mut drain_transport = h.transport(32, 32, 32);
                 let human = Reader::new(
                     Site::Human,
                     &h.trace,
@@ -2398,7 +2430,7 @@ mod tests {
                     }],
                 );
                 let mut io = Endpoints::new(&h.trace, human);
-                let until = Instant::now() + Duration::from_millis(100);
+                let until = h.time().now() + Duration::from_millis(100);
                 io.human.delay_until = Some(until);
                 let result = h.drain(
                     &mut drain_transport,
@@ -2407,7 +2439,7 @@ mod tests {
                     &mut io.output,
                     until,
                 );
-                let returned = Instant::now();
+                let returned = h.time().now();
                 assert_eq!(io.human.calls.len(), 1);
                 let call = &io.human.calls[0];
                 assert!(call.entered < until);
@@ -2457,11 +2489,12 @@ mod tests {
         records: Rc<RefCell<Vec<CallbackRecord>>>,
         fault: CallbackFault,
         deadline: Instant,
+        trace: Trace,
     }
 
     impl<O: ScreenObserver> ScreenObserver for ControlledObservation<O> {
         fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
-            let entered = Instant::now();
+            let entered = self.trace.clock.now();
             let actual = self.inner.observe(screen);
             let targeted = self.records.borrow().len() == 1;
             if targeted
@@ -2470,16 +2503,13 @@ mod tests {
                     CallbackFault::Expire | CallbackFault::ExpireAndFail
                 )
             {
-                std::thread::sleep(
-                    self.deadline.saturating_duration_since(Instant::now())
-                        + Duration::from_millis(1),
-                );
+                self.trace.block_past(self.deadline);
             }
             self.records.borrow_mut().push(CallbackRecord {
                 sequence: screen.screen_seq,
                 contents: screen.screen.contents(),
                 entered,
-                returned: Instant::now(),
+                returned: self.trace.clock.now(),
             });
             actual?;
             if targeted
@@ -2659,13 +2689,13 @@ mod tests {
     #[test]
     fn drain_incomplete_delayed_positive_child_read_feeds_the_retained_chunk_on_the_next_drain() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             h.seal(&mut drain_transport);
             h.reset_observations();
             let child_bytes = b"unseen\r\nsuffix";
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
             io.pty.reader = Reader::data(Site::Child, &h.trace, child_bytes, child_bytes.len());
-            let until = Instant::now() + Duration::from_millis(100);
+            let until = h.time().now() + Duration::from_millis(100);
             io.pty.reader.delay_until = Some(until);
             let result = h.drain(
                 &mut drain_transport,
@@ -2728,6 +2758,7 @@ mod tests {
                 records: records.clone(),
                 fault,
                 deadline: until,
+                trace: h.trace.clone(),
             },
             until,
         )
@@ -2736,7 +2767,7 @@ mod tests {
     #[test]
     fn drain_incomplete_complete_control_observes_every_fragment_and_can_seal() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
             io.pty.reader = Reader::data(
                 Site::Child,
@@ -2782,7 +2813,7 @@ mod tests {
     fn incomplete_callback_case(fault: CallbackFault) {
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             h.seal(&mut drain_transport);
             h.reset_observations();
             let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
@@ -2794,7 +2825,7 @@ mod tests {
                 CONTROL_SEPARATED_CHILD.len(),
             );
             let mut output = DrainOutput::new(&h.trace);
-            let until = Instant::now() + Duration::from_millis(100);
+            let until = h.time().now() + Duration::from_millis(100);
             let records = Rc::default();
             let result = callback_drain(
                 h,
@@ -2884,7 +2915,7 @@ mod tests {
     fn drain_incomplete_remainder_feeds_on_the_next_tick_before_new_child_output() {
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             h.seal(&mut drain_transport);
             h.reset_observations();
             let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
@@ -2894,7 +2925,7 @@ mod tests {
                 CONTROL_SEPARATED_CHILD,
                 CONTROL_SEPARATED_CHILD.len(),
             );
-            let until = Instant::now() + Duration::from_millis(100);
+            let until = h.time().now() + Duration::from_millis(100);
             let records = Rc::default();
             let result = callback_drain(
                 h,
@@ -2952,7 +2983,7 @@ mod tests {
     fn drain_incomplete_fatal_observer_error_feeds_the_retained_remainder_on_the_next_drain() {
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
             let mut pty = DrainPty::new(&h.trace);
             pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
@@ -2971,6 +3002,7 @@ mod tests {
                     records: records.clone(),
                     fault: CallbackFault::Fail,
                     deadline: h.until,
+                    trace: h.trace.clone(),
                 },
             );
             assert_eq!(drain_transport.human_generation(), 5);
@@ -3023,6 +3055,7 @@ mod tests {
         refuse_at: Option<usize>,
         refusal: Refusal,
         deadline: Instant,
+        trace: Trace,
     }
 
     impl<O: ScreenObserver> ScreenObserver for RefusingObservation<O> {
@@ -3032,10 +3065,7 @@ mod tests {
             if self.refuse_at == Some(call) {
                 return match self.refusal {
                     Refusal::Expire => {
-                        std::thread::sleep(
-                            self.deadline.saturating_duration_since(Instant::now())
-                                + Duration::from_millis(1),
-                        );
+                        self.trace.block_past(self.deadline);
                         Err(CafleetError::DeadlineExceeded)
                     }
                     Refusal::Fail => Err(CafleetError::App("fixture observation refused".into())),
@@ -3079,6 +3109,7 @@ mod tests {
                 refuse_at,
                 refusal,
                 deadline: until,
+                trace: h.trace.clone(),
             },
             until,
         )
@@ -3087,13 +3118,13 @@ mod tests {
     fn final_step_fault_case(refusal: Refusal) {
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             h.seal(&mut drain_transport);
             h.reset_observations();
             let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
             io.pty.reader =
                 Reader::data(Site::Child, &h.trace, TWO_STEP_CHILD, TWO_STEP_CHILD.len());
-            let until = Instant::now() + Duration::from_millis(100);
+            let until = h.time().now() + Duration::from_millis(100);
             let result = refused_drain(h, &mut drain_transport, &mut io, Some(1), refusal, until);
             match refusal {
                 Refusal::Expire => assert_deadline(result, &mut drain_transport),
@@ -3158,7 +3189,7 @@ mod tests {
         for quiesce in [false, true] {
             for discard in [false, true] {
                 with_harness(|h| {
-                    let mut drain_transport = drain_transport(64, 64, 64);
+                    let mut drain_transport = h.transport(64, 64, 64);
                     let mut io =
                         Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
                     io.pty.reader =
@@ -3219,7 +3250,7 @@ mod tests {
     #[test]
     fn drain_incomplete_prefetch_consumption_control_observes_once_and_can_seal() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
             io.pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
             assert_eq!(
@@ -3242,7 +3273,7 @@ mod tests {
     fn drain_incomplete_discarding_unobserved_prefetch_keeps_lifetime_fence() {
         with_harness(|h| {
             h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
             let progress = h.tick_with(&mut drain_transport, &mut io).unwrap();
             assert_eq!(progress.human_bytes, 5);
@@ -3277,7 +3308,7 @@ mod tests {
     fn drain_complete_terminal_reply_seals_a_proof_without_manual_generation() {
         with_harness(|h| {
             let reply = b"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R";
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, reply, 64));
             let result = h.drain_with(&mut drain_transport, &mut io);
             assert_eq!(result.unwrap(), InputDrain::Quiescent);
@@ -3293,7 +3324,7 @@ mod tests {
     #[test]
     fn drain_completed_reply_prefix_seals_a_proof_with_unchanged_generation() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut io = Endpoints::new(
                 &h.trace,
                 Reader::data(Site::Human, &h.trace, b"\x1b[24;", 64),
@@ -3332,7 +3363,7 @@ mod tests {
     #[test]
     fn drain_proof_taken_before_a_reply_prefix_fails_validation_while_it_is_pending() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             h.seal(&mut drain_transport);
             let proof = drain_transport
                 .take_input_drain()
@@ -3365,7 +3396,7 @@ mod tests {
     #[test]
     fn drain_backdated_lone_escape_resolves_as_manual_on_the_next_drain() {
         with_harness(|h| {
-            let mut drain_transport = drain_transport(64, 64, 64);
+            let mut drain_transport = h.transport(64, 64, 64);
             let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"\x1b", 64));
             let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
@@ -3395,68 +3426,23 @@ mod tests {
         ReplyClassifier::default()
     }
 
-    fn feed_once(bytes: &[u8]) -> (usize, bool) {
-        let mut classifier = classifier();
-        let manual = classifier.feed(bytes, Instant::now()).manual;
-        (manual, classifier.pending())
-    }
-
-    fn assert_reply(bytes: &[u8]) {
-        let mut classifier = classifier();
-        let classified = classifier.feed(bytes, Instant::now());
-        assert_eq!(
-            (classified.manual, classified.pointer, classifier.pending()),
-            (0, 0, false),
-            "{:?} is a complete allowlisted reply",
-            String::from_utf8_lossy(bytes)
-        );
-    }
-
-    fn assert_manual(bytes: &[u8]) {
-        let mut classifier = classifier();
-        let classified = classifier.feed(bytes, Instant::now());
-        assert_eq!(
-            (classified.manual, classified.pointer, classifier.pending()),
-            (bytes.len(), 0, false),
-            "{:?} counts every byte as manual",
-            String::from_utf8_lossy(bytes)
-        );
-    }
-
-    fn joined(params: &[&str]) -> String {
-        params.join(";")
-    }
+    const POINTER_REPORTS: &[&[u8]] = &[
+        b"\x1b[<0;10;20M",
+        b"\x1b[<0;10;20m",
+        b"\x1b[<35;120;40M",
+        b"\x1b[<64;5;5M",
+        b"\x1b[<65;5;5M",
+        b"\x1b[M !!",
+        b"\x1b[M\xff\x80\x7f",
+    ];
 
     mod pointer {
         use crate::runtime::transport::tests::*;
 
-        const REPORTS: &[&[u8]] = &[
-            b"\x1b[<0;10;20M",
-            b"\x1b[<0;10;20m",
-            b"\x1b[<35;120;40M",
-            b"\x1b[<64;5;5M",
-            b"\x1b[<65;5;5M",
-            b"\x1b[M !!",
-            b"\x1b[M\xff\x80\x7f",
-        ];
-
-        #[test]
-        fn pointer_reports_classify_every_byte_as_pointer_input() {
-            for report in REPORTS {
-                let mut classifier = classifier();
-                let classified = classifier.feed(report, Instant::now());
-                assert_eq!(
-                    (classified.manual, classified.pointer, classifier.pending()),
-                    (0, report.len(), false),
-                    "{report:?}"
-                );
-            }
-        }
-
         #[test]
         fn pointer_reports_split_at_every_boundary_classify_only_when_complete() {
             let start = Instant::now();
-            for report in REPORTS {
+            for report in POINTER_REPORTS {
                 for split in 1..report.len() {
                     let mut classifier = classifier();
                     let prefix = classifier.feed(&report[..split], start);
@@ -3491,46 +3477,6 @@ mod tests {
         }
 
         #[test]
-        fn pointer_x10_consumes_exactly_three_payload_bytes() {
-            let mut classifier = classifier();
-            let classified = classifier.feed(b"\x1b[M !!xy\x1b[I", Instant::now());
-            assert_eq!(
-                (classified.manual, classified.pointer, classifier.pending()),
-                (2, 6, false)
-            );
-        }
-
-        #[test]
-        fn pointer_sgr_requires_exactly_three_numeric_parameters() {
-            for bytes in [
-                b"\x1b[<0;10M".as_slice(),
-                b"\x1b[<0;10;20;30M",
-                b"\x1b[<;10;20M",
-                b"\x1b[<0;;20m",
-                b"\x1b[<0;10;m",
-                b"\x1b[<0:10:20M",
-                b"\x1b[<0;10;20 M",
-                b"\x1b[?0;10;20M",
-                b"\x1b[0;10;20M",
-                b"\x1b[<0;10;20R",
-            ] {
-                assert_manual(bytes);
-            }
-        }
-
-        #[test]
-        fn pointer_x10_requires_a_parameterless_csi_without_intermediates() {
-            for bytes in [
-                b"\x1b[1M !!".as_slice(),
-                b"\x1b[?M !!",
-                b"\x1b[ M !!",
-                b"\x1b[1 M !!",
-            ] {
-                assert_manual(bytes);
-            }
-        }
-
-        #[test]
         fn pointer_x10_low_payload_bytes_resolve_the_report_as_manual() {
             let now = Instant::now();
             for position in 3..6 {
@@ -3554,16 +3500,6 @@ mod tests {
         }
 
         #[test]
-        fn pointer_x10_invalid_escape_restarts_the_reply_classifier() {
-            let mut classifier = classifier();
-            let classified = classifier.feed(b"\x1b[M \x1b[I", Instant::now());
-            assert_eq!(
-                (classified.manual, classified.pointer, classifier.pending()),
-                (4, 0, false)
-            );
-        }
-
-        #[test]
         fn pointer_x10_prefix_expires_as_manual_at_the_bound() {
             let report = b"\x1b[M !!";
             let start = Instant::now();
@@ -3582,29 +3518,6 @@ mod tests {
                 assert_eq!((suffix.manual, suffix.pointer), (report.len() - split, 0));
                 assert!(!classifier.pending());
             }
-        }
-
-        #[test]
-        fn pointer_x10_pending_bound_restarts_at_each_payload_byte() {
-            let start = Instant::now();
-            let mut classifier = classifier();
-            let prefix = classifier.feed(b"\x1b[M", start);
-            assert_eq!((prefix.manual, prefix.pointer), (0, 0));
-            let second = start + Duration::from_millis(60);
-            let first_payload = classifier.feed(b" ", second);
-            assert_eq!((first_payload.manual, first_payload.pointer), (0, 0));
-            let initial_bound = classifier.expire(start + REPLY_PREFIX_BOUND);
-            assert_eq!((initial_bound.manual, initial_bound.pointer), (0, 0));
-            assert!(classifier.pending());
-            let third = start + Duration::from_millis(120);
-            let second_payload = classifier.feed(b"!", third);
-            assert_eq!((second_payload.manual, second_payload.pointer), (0, 0));
-            let previous_bound = classifier.expire(second + REPLY_PREFIX_BOUND);
-            assert_eq!((previous_bound.manual, previous_bound.pointer), (0, 0));
-            assert!(classifier.pending());
-            let expired = classifier.expire(third + REPLY_PREFIX_BOUND);
-            assert_eq!((expired.manual, expired.pointer), (5, 0));
-            assert!(!classifier.pending());
         }
 
         #[test]
@@ -3643,23 +3556,10 @@ mod tests {
         }
 
         #[test]
-        fn pointer_mixed_keyboard_reports_and_replies_keep_independent_counts() {
-            let mut classifier = classifier();
-            let classified = classifier.feed(
-                b"ab\x1b[<0;10;20M\x1b[I\x1b[M !!cd\x1b[24;80R",
-                Instant::now(),
-            );
-            assert_eq!(
-                (classified.manual, classified.pointer, classifier.pending()),
-                (4, b"\x1b[<0;10;20M\x1b[M !!".len(), false)
-            );
-        }
-
-        #[test]
         fn pointer_drain_forwards_reports_and_seals_both_generations() {
             with_harness(|h| {
-                for report in REPORTS {
-                    let mut transport = drain_transport(64, 64, 64);
+                for report in POINTER_REPORTS {
+                    let mut transport = h.transport(64, 64, 64);
                     let mut io =
                         Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, report, 64));
                     assert_eq!(
@@ -3686,7 +3586,7 @@ mod tests {
             with_harness(|h| {
                 let report = b"\x1b[M\xff\x80\x7f";
                 for split in 1..report.len() {
-                    let mut transport = drain_transport(64, 64, 64);
+                    let mut transport = h.transport(64, 64, 64);
                     let mut io = Endpoints::new(
                         &h.trace,
                         Reader::data(Site::Human, &h.trace, &report[..split], 64),
@@ -3714,7 +3614,7 @@ mod tests {
         fn pointer_drain_expired_x10_prefix_counts_manual_bytes_once() {
             with_harness(|h| {
                 let prefix = b"\x1b[M !";
-                let mut transport = drain_transport(64, 64, 64);
+                let mut transport = h.transport(64, 64, 64);
                 let mut io =
                     Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, prefix, 64));
                 let pending = h.drain_with(&mut transport, &mut io);
@@ -3743,7 +3643,7 @@ mod tests {
         fn pointer_drain_ordinary_proof_ignores_only_a_stale_pointer_generation() {
             with_harness(|h| {
                 let report = b"\x1b[<0;10;20M";
-                let mut transport = drain_transport(64, 64, 64);
+                let mut transport = h.transport(64, 64, 64);
                 let mut io =
                     Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, report, 64));
                 assert_eq!(
@@ -3763,7 +3663,7 @@ mod tests {
         #[test]
         fn pointer_drain_both_proofs_reject_a_stale_keyboard_generation() {
             with_harness(|h| {
-                let mut transport = drain_transport(64, 64, 64);
+                let mut transport = h.transport(64, 64, 64);
                 let mut io =
                     Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"x", 64));
                 assert_eq!(
@@ -3785,7 +3685,7 @@ mod tests {
         #[test]
         fn pointer_drain_both_proofs_retain_the_turn_binding() {
             with_harness(|h| {
-                let mut transport = drain_transport(64, 64, 64);
+                let mut transport = h.transport(64, 64, 64);
                 h.seal(&mut transport);
                 let old = transport
                     .take_input_drain()
@@ -3814,12 +3714,12 @@ mod tests {
         #[test]
         fn pointer_drain_both_proofs_retain_the_deadline_check() {
             with_harness(|h| {
-                let mut transport = drain_transport(64, 64, 64);
+                let mut transport = h.transport(64, 64, 64);
                 h.seal(&mut transport);
                 let proof = transport
                     .take_input_drain()
                     .expect("the actual drain sealed a proof");
-                let expired = Instant::now();
+                let expired = h.time().now();
                 assert!(transport.validate_ordinary(&proof, expired).is_err());
                 assert!(transport.validate_permission(&proof, expired).is_err());
             });
@@ -3844,385 +3744,692 @@ mod tests {
         }
     }
 
-    mod allowlist {
+    mod classification {
         use crate::runtime::transport::tests::*;
 
-        #[test]
-        fn reply_classifier_cursor_position_reports_are_replies() {
-            assert_reply(b"\x1b[24;80R");
-            assert_reply(b"\x1b[1;1R");
-            assert_reply(b"\x1b[?24;80R");
-            assert_reply(b"\x1b[?24;80;1R");
+        /// What one read of an input classifies.
+        #[derive(Clone, Copy, Debug)]
+        enum Expected {
+            /// Every byte is an allowlisted reply.
+            Reply,
+            /// Every byte counts as manual input.
+            Manual,
+            /// Every byte is pointer input.
+            Pointer,
+            Counts {
+                manual: usize,
+                pointer: usize,
+            },
         }
 
-        #[test]
-        fn reply_classifier_modified_f3_collides_with_a_cursor_position_report() {
-            assert_reply(b"\x1b[1;5R");
+        use Expected::Counts;
+        use Expected::Manual;
+        use Expected::Pointer;
+        use Expected::Reply;
+
+        /// Inputs that one read classifies alike, leaving no prefix pending.
+        struct OneRead {
+            name: &'static str,
+            inputs: &'static [&'static [u8]],
+            classified: Expected,
         }
 
-        #[test]
-        fn reply_classifier_device_status_reports_are_replies() {
-            assert_reply(b"\x1b[0n");
-            assert_reply(b"\x1b[3n");
-            assert_reply(b"\x1b[?1n");
-            assert_reply(b"\x1b[?997;1n");
-            assert_reply(b"\x1b[?1;2;3;4n");
+        const ONE_READS: &[OneRead] = &[
+            OneRead {
+                name: "cursor position reports are replies",
+                inputs: &[
+                    b"\x1b[24;80R",
+                    b"\x1b[1;1R",
+                    b"\x1b[?24;80R",
+                    b"\x1b[?24;80;1R",
+                ],
+                classified: Reply,
+            },
+            OneRead {
+                name: "a modified F3 collides with a cursor position report",
+                inputs: &[b"\x1b[1;5R"],
+                classified: Reply,
+            },
+            OneRead {
+                name: "device status reports are replies",
+                inputs: &[
+                    b"\x1b[0n",
+                    b"\x1b[3n",
+                    b"\x1b[?1n",
+                    b"\x1b[?997;1n",
+                    b"\x1b[?1;2;3;4n",
+                ],
+                classified: Reply,
+            },
+            OneRead {
+                name: "device attribute reports are replies",
+                inputs: &[
+                    b"\x1b[?1;2c",
+                    b"\x1b[?62;22c",
+                    b"\x1b[>0c",
+                    b"\x1b[>1;10;0c",
+                    b"\x1b[>41;380;0;1c",
+                ],
+                classified: Reply,
+            },
+            OneRead {
+                name: "mode reports are replies",
+                inputs: &[b"\x1b[?1004;1$y", b"\x1b[?2026;2$y", b"\x1b[4;2$y"],
+                classified: Reply,
+            },
+            OneRead {
+                name: "window reports are replies",
+                inputs: &[b"\x1b[1t", b"\x1b[2t", b"\x1b[4;600;800t", b"\x1b[8;24;80t"],
+                classified: Reply,
+            },
+            OneRead {
+                name: "the kitty keyboard flags report is a reply",
+                inputs: &[b"\x1b[?1u", b"\x1b[?31u"],
+                classified: Reply,
+            },
+            OneRead {
+                name: "focus events are replies",
+                inputs: &[b"\x1b[I", b"\x1b[O"],
+                classified: Reply,
+            },
+            OneRead {
+                name: "OSC replies terminate with BEL or ST",
+                inputs: &[
+                    b"\x1b]11;rgb:0000/0000/0000\x07",
+                    b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+                    b"\x1b]4;1;rgb:cdcd/0000/0000\x1b\\",
+                ],
+                classified: Reply,
+            },
+            OneRead {
+                name: "an OSC body accepts bytes at or above 0x80",
+                inputs: &["\x1b]2;caf\u{e9}\x07".as_bytes()],
+                classified: Reply,
+            },
+            OneRead {
+                name: "DCS replies terminate with ST",
+                inputs: &[
+                    b"\x1bP>|XTerm(380)\x1b\\",
+                    b"\x1bP1+r544e=787465726d\x1b\\",
+                    b"\x1bP1$r0m\x1b\\",
+                    b"\x1bP!|00000000\x1b\\",
+                ],
+                classified: Reply,
+            },
+            OneRead {
+                name: "APC replies terminate with ST",
+                inputs: &[
+                    b"\x1b_Gi=31;OK\x1b\\",
+                    b"\x1b_Gi=1;ENOENT:file not found\x1b\\",
+                ],
+                classified: Reply,
+            },
+            OneRead {
+                name: "a burst of replies counts zero",
+                inputs: &[
+                    b"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R\x1b[O\x1bP>|XTerm(380)\x1b\\",
+                ],
+                classified: Reply,
+            },
+            OneRead {
+                name: "a window report with four parameters is manual",
+                inputs: &[b"\x1b[8;24;80;1t"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "a cursor position report with one parameter is manual",
+                inputs: &[b"\x1b[5R", b"\x1b[?5R", b"\x1b[?1;2;3;4R"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "empty parameters are manual",
+                inputs: &[
+                    b"\x1b[8;t",
+                    b"\x1b[;24R",
+                    b"\x1b[24;;80R",
+                    b"\x1b[?n",
+                    b"\x1b[?c",
+                ],
+                classified: Manual,
+            },
+            OneRead {
+                name: "device status outside its forms is manual",
+                inputs: &[b"\x1b[1n", b"\x1b[5n", b"\x1b[?1;2;3;4;5n"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "device attributes outside their arity are manual",
+                inputs: &[b"\x1b[>1;2;3;4;5c", b"\x1b[1c"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "mode reports outside their arity are manual",
+                inputs: &[b"\x1b[?1$y", b"\x1b[?1;2;3$y", b"\x1b[4$y"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "kitty flags with more than one parameter are manual",
+                inputs: &[b"\x1b[?1;2u"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "focus with parameters or intermediates is manual",
+                inputs: &[b"\x1b[1I", b"\x1b[?I", b"\x1b[ O"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "an unlisted intermediate is manual",
+                inputs: &[b"\x1b[1;1 R", b"\x1b[1$t"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "text and C0 controls are manual immediately",
+                inputs: &[
+                    b"hello",
+                    "caf\u{e9} \u{65e5}\u{672c}".as_bytes(),
+                    b"\r",
+                    b"\t",
+                    b"\x03",
+                    b"\x7f",
+                    b"\x07",
+                ],
+                classified: Manual,
+            },
+            OneRead {
+                name: "cursor and function keys are manual",
+                inputs: &[
+                    b"\x1b[A",
+                    b"\x1b[1;5C",
+                    b"\x1b[3~",
+                    b"\x1b[15;2~",
+                    b"\x1b[Z",
+                ],
+                classified: Manual,
+            },
+            OneRead {
+                name: "kitty key events are manual",
+                inputs: &[b"\x1b[97u", b"\x1b[97;5u", b"\x1b[97;5;97u"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "SS3 and alt-modified keys are manual",
+                inputs: &[b"\x1bOP", b"\x1bOA", b"\x1ba", b"\x1bx", b"\x1b\r"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "SOS and PM strings are manual",
+                inputs: &[b"\x1bXhello\x1b\\", b"\x1b^hi\x1b\\"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "eight-bit C1 bytes are manual",
+                inputs: &[&[0x9b], &[0x9d], &[0x90], &[0x9f], b"\x9b1;1R", b"\x9bI"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "a mixed read counts only the text around a reply",
+                inputs: &[b"ab\x1b[Icd"],
+                classified: Counts {
+                    manual: 4,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "a bracketed paste counts every byte including reply forms",
+                inputs: &[b"\x1b[200~\x1b[1;1R\x1b[Ipasted\x1b]11;x\x07\x1b[201~"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "an escape inside CSI restarts a reply",
+                inputs: &[b"\x1b[1;\x1b[I"],
+                classified: Counts {
+                    manual: 4,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "an escape before a reply counts one",
+                inputs: &[b"\x1b\x1b[I"],
+                classified: Counts {
+                    manual: 1,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "a control byte inside CSI counts the prefix and the byte",
+                inputs: &[
+                    &[0x1b, b'[', b'1', 0x18],
+                    &[0x1b, b'[', b'1', 0x1a],
+                    &[0x1b, b'[', b'1', 0x00],
+                    &[0x1b, b'[', b'1', 0x03],
+                    &[0x1b, b'[', b'1', 0x07],
+                    &[0x1b, b'[', b'1', 0x0d],
+                    &[0x1b, b'[', b'1', 0x7f],
+                    &[0x1b, b'[', b'1', 0x80],
+                    &[0x1b, b'[', b'1', 0xc3],
+                    &[0x1b, b'[', b'1', 0xff],
+                ],
+                classified: Counts {
+                    manual: 4,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "a control byte inside CSI is followed by classification from ground",
+                inputs: &[b"\x1b[1\x18\x1b[I"],
+                classified: Counts {
+                    manual: 4,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "a parameter byte after an intermediate is manual",
+                inputs: &[b"\x1b[1$1y"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "BEL inside DCS or APC is manual",
+                inputs: &[b"\x1bP1$r\x07", b"\x1b_Gi=1\x07"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "BEL inside DCS resolves before a following reply",
+                inputs: &[b"\x1bP1$r\x07\x1b[I"],
+                classified: Counts {
+                    manual: 6,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "an escape without backslash inside OSC is manual",
+                inputs: &[b"\x1b]11;x\x1ba", b"\x1b]1\x1b[I"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "an escape without backslash inside OSC reclassifies the next byte",
+                inputs: &[b"\x1b]1\x1b\x1b[I"],
+                classified: Counts {
+                    manual: 4,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "an escape without backslash inside DCS or APC is manual",
+                inputs: &[b"\x1bP1$r\x1bq", b"\x1b_G\x1bq"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "a control byte inside a string body is manual",
+                inputs: &[b"\x1b]11;x\x18", b"\x1bP1\r"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "an escape with an invalid continuation counts both bytes",
+                inputs: &[b"\x1b1", b"\x1b\x7f"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "pointer reports classify every byte as pointer input",
+                inputs: POINTER_REPORTS,
+                classified: Pointer,
+            },
+            OneRead {
+                name: "an X10 report consumes exactly three payload bytes",
+                inputs: &[b"\x1b[M !!xy\x1b[I"],
+                classified: Counts {
+                    manual: 2,
+                    pointer: 6,
+                },
+            },
+            OneRead {
+                name: "an SGR report requires exactly three numeric parameters",
+                inputs: &[
+                    b"\x1b[<0;10M",
+                    b"\x1b[<0;10;20;30M",
+                    b"\x1b[<;10;20M",
+                    b"\x1b[<0;;20m",
+                    b"\x1b[<0;10;m",
+                    b"\x1b[<0:10:20M",
+                    b"\x1b[<0;10;20 M",
+                    b"\x1b[?0;10;20M",
+                    b"\x1b[0;10;20M",
+                    b"\x1b[<0;10;20R",
+                ],
+                classified: Manual,
+            },
+            OneRead {
+                name: "an X10 report requires a parameterless CSI without intermediates",
+                inputs: &[b"\x1b[1M !!", b"\x1b[?M !!", b"\x1b[ M !!", b"\x1b[1 M !!"],
+                classified: Manual,
+            },
+            OneRead {
+                name: "an invalid escape inside an X10 report restarts the reply classifier",
+                inputs: &[b"\x1b[M \x1b[I"],
+                classified: Counts {
+                    manual: 4,
+                    pointer: 0,
+                },
+            },
+            OneRead {
+                name: "mixed keyboard, reports and replies keep independent counts",
+                inputs: &[b"ab\x1b[<0;10;20M\x1b[I\x1b[M !!cd\x1b[24;80R"],
+                classified: Counts {
+                    manual: 4,
+                    pointer: 17,
+                },
+            },
+        ];
+
+        /// A generated input at a classifier limit, which one read classifies.
+        struct BuiltRead {
+            name: &'static str,
+            input: fn() -> Vec<u8>,
+            classified: Expected,
         }
 
-        #[test]
-        fn reply_classifier_device_attribute_reports_are_replies() {
-            assert_reply(b"\x1b[?1;2c");
-            assert_reply(b"\x1b[?62;22c");
-            assert_reply(b"\x1b[>0c");
-            assert_reply(b"\x1b[>1;10;0c");
-            assert_reply(b"\x1b[>41;380;0;1c");
-        }
+        const BUILT_READS: &[BuiltRead] = &[
+            BuiltRead {
+                name: "primary device attributes accept thirty-two parameters",
+                input: || {
+                    let reply = format!("\x1b[?{}c", ["1"; 32].join(";"));
+                    assert_eq!(
+                        reply.len() - 3,
+                        CSI_PARAMETER_LIMIT,
+                        "the private marker and 32 parameters fill the CSI parameter limit exactly"
+                    );
+                    reply.into_bytes()
+                },
+                classified: Reply,
+            },
+            BuiltRead {
+                name: "a string body at the limit is a reply",
+                input: || {
+                    let mut reply = b"\x1b]".to_vec();
+                    reply.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT));
+                    reply.push(0x07);
+                    reply
+                },
+                classified: Reply,
+            },
+            BuiltRead {
+                name: "an OSC 52 clipboard read over the limit counts every byte",
+                input: || {
+                    let mut input = b"\x1b]52;c;".to_vec();
+                    input.extend(std::iter::repeat_n(b'A', STRING_BODY_LIMIT));
+                    input.push(0x07);
+                    input
+                },
+                classified: Manual,
+            },
+            BuiltRead {
+                name: "a DCS body over the limit counts every byte",
+                input: || {
+                    let mut input = b"\x1bP".to_vec();
+                    input.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT + 1));
+                    input.extend(b"\x1b\\");
+                    input
+                },
+                classified: Manual,
+            },
+            BuiltRead {
+                name: "an APC body over the limit counts every byte",
+                input: || {
+                    let mut input = b"\x1b_".to_vec();
+                    input.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT + 1));
+                    input.extend(b"\x1b\\");
+                    input
+                },
+                classified: Manual,
+            },
+        ];
 
-        #[test]
-        fn reply_classifier_primary_device_attributes_accept_thirty_two_parameters() {
-            let reply = format!("\x1b[?{}c", joined(&["1"; 32]));
-            assert_eq!(
-                reply.len() - 3,
-                CSI_PARAMETER_LIMIT,
-                "the private marker and 32 parameters fill the CSI parameter limit exactly"
-            );
-            assert_reply(reply.as_bytes());
-        }
-
-        #[test]
-        fn reply_classifier_mode_reports_are_replies() {
-            assert_reply(b"\x1b[?1004;1$y");
-            assert_reply(b"\x1b[?2026;2$y");
-            assert_reply(b"\x1b[4;2$y");
-        }
-
-        #[test]
-        fn reply_classifier_window_reports_are_replies() {
-            assert_reply(b"\x1b[1t");
-            assert_reply(b"\x1b[2t");
-            assert_reply(b"\x1b[4;600;800t");
-            assert_reply(b"\x1b[8;24;80t");
-        }
-
-        #[test]
-        fn reply_classifier_kitty_keyboard_flags_report_is_a_reply() {
-            assert_reply(b"\x1b[?1u");
-            assert_reply(b"\x1b[?31u");
-        }
-
-        #[test]
-        fn reply_classifier_focus_events_are_replies() {
-            assert_reply(b"\x1b[I");
-            assert_reply(b"\x1b[O");
-        }
-
-        #[test]
-        fn reply_classifier_osc_replies_terminate_with_bel_or_st() {
-            assert_reply(b"\x1b]11;rgb:0000/0000/0000\x07");
-            assert_reply(b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
-            assert_reply(b"\x1b]4;1;rgb:cdcd/0000/0000\x1b\\");
-        }
-
-        #[test]
-        fn reply_classifier_osc_body_accepts_bytes_at_or_above_0x80() {
-            assert_reply("\x1b]2;caf\u{e9}\x07".as_bytes());
-        }
-
-        #[test]
-        fn reply_classifier_dcs_replies_terminate_with_st() {
-            assert_reply(b"\x1bP>|XTerm(380)\x1b\\");
-            assert_reply(b"\x1bP1+r544e=787465726d\x1b\\");
-            assert_reply(b"\x1bP1$r0m\x1b\\");
-            assert_reply(b"\x1bP!|00000000\x1b\\");
-        }
-
-        #[test]
-        fn reply_classifier_apc_replies_terminate_with_st() {
-            assert_reply(b"\x1b_Gi=31;OK\x1b\\");
-            assert_reply(b"\x1b_Gi=1;ENOENT:file not found\x1b\\");
-        }
-
-        #[test]
-        fn reply_classifier_string_body_at_the_limit_is_a_reply() {
-            let mut reply = b"\x1b]".to_vec();
-            reply.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT));
-            reply.push(0x07);
-            assert_reply(&reply);
-        }
-
-        #[test]
-        fn reply_classifier_a_burst_of_replies_counts_zero() {
-            assert_reply(
-                b"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R\x1b[O\x1bP>|XTerm(380)\x1b\\",
-            );
-        }
-    }
-
-    mod arity {
-        use crate::runtime::transport::tests::*;
-
-        #[test]
-        fn reply_classifier_window_report_with_four_parameters_is_manual() {
-            assert_manual(b"\x1b[8;24;80;1t");
-        }
-
-        #[test]
-        fn reply_classifier_cursor_position_report_with_one_parameter_is_manual() {
-            assert_manual(b"\x1b[5R");
-            assert_manual(b"\x1b[?5R");
-            assert_manual(b"\x1b[?1;2;3;4R");
-        }
-
-        #[test]
-        fn reply_classifier_empty_parameters_are_manual() {
-            assert_manual(b"\x1b[8;t");
-            assert_manual(b"\x1b[;24R");
-            assert_manual(b"\x1b[24;;80R");
-            assert_manual(b"\x1b[?n");
-            assert_manual(b"\x1b[?c");
-        }
-
-        #[test]
-        fn reply_classifier_device_status_outside_its_forms_is_manual() {
-            assert_manual(b"\x1b[1n");
-            assert_manual(b"\x1b[5n");
-            assert_manual(b"\x1b[?1;2;3;4;5n");
-        }
-
-        #[test]
-        fn reply_classifier_device_attributes_outside_their_arity_are_manual() {
-            assert_manual(b"\x1b[>1;2;3;4;5c");
-            assert_manual(b"\x1b[1c");
-        }
-
-        #[test]
-        fn reply_classifier_mode_reports_outside_their_arity_are_manual() {
-            assert_manual(b"\x1b[?1$y");
-            assert_manual(b"\x1b[?1;2;3$y");
-            assert_manual(b"\x1b[4$y");
-        }
-
-        #[test]
-        fn reply_classifier_kitty_flags_with_more_than_one_parameter_are_manual() {
-            assert_manual(b"\x1b[?1;2u");
-        }
-
-        #[test]
-        fn reply_classifier_focus_with_parameters_or_intermediates_is_manual() {
-            assert_manual(b"\x1b[1I");
-            assert_manual(b"\x1b[?I");
-            assert_manual(b"\x1b[ O");
-        }
-
-        #[test]
-        fn reply_classifier_unlisted_intermediate_is_manual() {
-            assert_manual(b"\x1b[1;1 R");
-            assert_manual(b"\x1b[1$t");
-        }
-    }
-
-    mod manual {
-        use crate::runtime::transport::tests::*;
-
-        #[test]
-        fn reply_classifier_text_and_c0_controls_are_manual_immediately() {
-            assert_manual(b"hello");
-            assert_manual("caf\u{e9} \u{65e5}\u{672c}".as_bytes());
-            assert_manual(b"\r");
-            assert_manual(b"\t");
-            assert_manual(b"\x03");
-            assert_manual(b"\x7f");
-            assert_manual(b"\x07");
-        }
-
-        #[test]
-        fn reply_classifier_cursor_and_function_keys_are_manual() {
-            assert_manual(b"\x1b[A");
-            assert_manual(b"\x1b[1;5C");
-            assert_manual(b"\x1b[3~");
-            assert_manual(b"\x1b[15;2~");
-            assert_manual(b"\x1b[Z");
-        }
-
-        #[test]
-        fn reply_classifier_kitty_key_events_are_manual() {
-            assert_manual(b"\x1b[97u");
-            assert_manual(b"\x1b[97;5u");
-            assert_manual(b"\x1b[97;5;97u");
-        }
-
-        #[test]
-        fn reply_classifier_ss3_and_alt_modified_keys_are_manual() {
-            assert_manual(b"\x1bOP");
-            assert_manual(b"\x1bOA");
-            assert_manual(b"\x1ba");
-            assert_manual(b"\x1bx");
-            assert_manual(b"\x1b\r");
-        }
-
-        #[test]
-        fn reply_classifier_sos_and_pm_strings_are_manual() {
-            assert_manual(b"\x1bXhello\x1b\\");
-            assert_manual(b"\x1b^hi\x1b\\");
-        }
-
-        #[test]
-        fn reply_classifier_eight_bit_c1_bytes_are_manual() {
-            assert_manual(&[0x9b]);
-            assert_manual(&[0x9d]);
-            assert_manual(&[0x90]);
-            assert_manual(&[0x9f]);
-            assert_manual(b"\x9b1;1R");
-            assert_manual(b"\x9bI");
-        }
-
-        #[test]
-        fn reply_classifier_overlong_csi_is_manual_at_the_byte_exceeding_the_limit() {
-            let mut prefix = b"\x1b[".to_vec();
-            prefix.extend(std::iter::repeat_n(b'1', CSI_PARAMETER_LIMIT));
+        fn assert_one_read(name: &str, input: &[u8], classified: Expected) {
+            let expected = match classified {
+                Reply => (0, 0),
+                Manual => (input.len(), 0),
+                Pointer => (0, input.len()),
+                Counts { manual, pointer } => (manual, pointer),
+            };
             let mut classifier = classifier();
-            let now = Instant::now();
-            assert_eq!(classifier.feed(&prefix, now).manual, 0);
-            assert!(classifier.pending());
+            let result = classifier.feed(input, Instant::now());
             assert_eq!(
-                classifier.feed(b"1", now).manual,
-                prefix.len() + 1,
-                "the parameter byte that exceeds the limit resolves the whole prefix"
+                (result.manual, result.pointer, classifier.pending()),
+                (expected.0, expected.1, false),
+                "{name}: {:?}",
+                String::from_utf8_lossy(input)
             );
-            assert!(!classifier.pending());
-            assert_eq!(classifier.feed(b"R", now).manual, 1);
         }
 
         #[test]
-        fn reply_classifier_osc_body_over_the_limit_is_manual() {
-            let mut prefix = b"\x1b]".to_vec();
-            prefix.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT));
-            let mut classifier = classifier();
-            let now = Instant::now();
-            assert_eq!(classifier.feed(&prefix, now).manual, 0);
-            assert!(classifier.pending());
-            assert_eq!(
-                classifier.feed(b"x", now).manual,
-                prefix.len() + 1,
-                "the body byte that exceeds the limit resolves the whole prefix"
-            );
-            assert!(!classifier.pending());
-            assert_eq!(classifier.feed(b"\x07", now).manual, 1);
-        }
-
-        #[test]
-        fn reply_classifier_osc_52_clipboard_read_over_the_limit_counts_every_byte() {
-            let mut input = b"\x1b]52;c;".to_vec();
-            input.extend(std::iter::repeat_n(b'A', STRING_BODY_LIMIT));
-            input.push(0x07);
-            assert_manual(&input);
-        }
-
-        #[test]
-        fn reply_classifier_dcs_and_apc_bodies_over_the_limit_count_every_byte() {
-            for introducer in [b"\x1bP", b"\x1b_"] {
-                let mut input = introducer.to_vec();
-                input.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT + 1));
-                input.extend(b"\x1b\\");
-                assert_manual(&input);
+        fn reply_classifier_one_read_classifies_every_byte_and_leaves_nothing_pending() {
+            for case in ONE_READS {
+                for input in case.inputs {
+                    assert_one_read(case.name, input, case.classified);
+                }
+            }
+            for case in BUILT_READS {
+                assert_one_read(case.name, &(case.input)(), case.classified);
             }
         }
 
-        #[test]
-        fn reply_classifier_mixed_read_counts_only_the_text_around_a_reply() {
-            assert_eq!(feed_once(b"ab\x1b[Icd"), (4, false));
+        /// One classifier call at an offset from the case's start instant.
+        #[derive(Clone, Copy)]
+        enum Op {
+            Feed(&'static [u8], Duration),
+            Expire(Duration),
+            Finish,
         }
 
-        #[test]
-        fn reply_classifier_bracketed_paste_counts_every_byte_including_reply_forms() {
-            assert_manual(b"\x1b[200~\x1b[1;1R\x1b[Ipasted\x1b]11;x\x07\x1b[201~");
+        /// A call, the manual bytes it resolves and whether a prefix stays pending after it;
+        /// no step in these cases yields pointer input.
+        struct Step {
+            op: Op,
+            manual: usize,
+            pending: bool,
         }
 
-        #[test]
-        fn reply_classifier_reply_after_bracketed_paste_counts_zero() {
-            let paste: &[u8] = b"\x1b[200~text\x1b[201~";
-            let mut classifier = classifier();
-            let now = Instant::now();
-            assert_eq!(classifier.feed(paste, now).manual, paste.len());
-            assert_eq!(classifier.feed(b"\x1b[I", now).manual, 0);
-            assert!(!classifier.pending());
-        }
-    }
-
-    mod invalid_continuation {
-        use crate::runtime::transport::tests::*;
-
-        #[test]
-        fn reply_classifier_escape_inside_csi_restarts_a_reply() {
-            assert_eq!(feed_once(b"\x1b[1;\x1b[I"), (4, false));
-        }
-
-        #[test]
-        fn reply_classifier_escape_before_a_reply_counts_one() {
-            assert_eq!(feed_once(b"\x1b\x1b[I"), (1, false));
-        }
-
-        #[test]
-        fn reply_classifier_control_bytes_inside_csi_count_the_prefix_and_the_byte() {
-            for byte in [0x18, 0x1a, 0x00, 0x03, 0x07, 0x0d, 0x7f, 0x80, 0xc3, 0xff] {
-                let input = [0x1b, b'[', b'1', byte];
-                assert_eq!(feed_once(&input), (4, false), "byte {byte:#04x}");
+        const fn step(op: Op, manual: usize, pending: bool) -> Step {
+            Step {
+                op,
+                manual,
+                pending,
             }
         }
 
-        #[test]
-        fn reply_classifier_control_byte_inside_csi_is_followed_by_classification_from_ground() {
-            assert_eq!(feed_once(b"\x1b[1\x18\x1b[I"), (4, false));
+        const START: Duration = Duration::ZERO;
+        const BOUND: Duration = REPLY_PREFIX_BOUND;
+        const JUST_BEFORE_BOUND: Duration = BOUND.saturating_sub(Duration::from_millis(1));
+        const HALF_BOUND: Duration = Duration::from_nanos(BOUND.as_nanos() as u64 / 2);
+        const TWICE_BOUND: Duration = BOUND.saturating_add(BOUND);
+        const SECOND_BYTE: Duration = Duration::from_millis(60);
+        const THIRD_BYTE: Duration = Duration::from_millis(120);
+
+        use Op::Expire;
+        use Op::Feed;
+        use Op::Finish;
+
+        struct Sequence {
+            name: &'static str,
+            steps: &'static [Step],
         }
 
-        #[test]
-        fn reply_classifier_parameter_byte_after_an_intermediate_is_manual() {
-            assert_manual(b"\x1b[1$1y");
-        }
+        const SEQUENCES: &[Sequence] = &[
+            Sequence {
+                name: "a reply split across reads at different instants counts zero",
+                steps: &[
+                    step(Feed(b"\x1b[24", START), 0, true),
+                    step(Expire(HALF_BOUND), 0, true),
+                    step(Feed(b";80R", HALF_BOUND), 0, false),
+                ],
+            },
+            Sequence {
+                name: "a lone escape resolves as manual at the bound",
+                steps: &[
+                    step(Feed(b"\x1b", START), 0, true),
+                    step(Expire(JUST_BEFORE_BOUND), 0, true),
+                    step(Expire(BOUND), 1, false),
+                ],
+            },
+            Sequence {
+                name: "a CSI prefix resolves as manual at the bound",
+                steps: &[
+                    step(Feed(b"\x1b[12;", START), 0, true),
+                    step(Expire(JUST_BEFORE_BOUND), 0, true),
+                    step(Expire(BOUND), 5, false),
+                ],
+            },
+            Sequence {
+                name: "the bound restarts at each new prefix byte",
+                steps: &[
+                    step(Feed(b"\x1b", START), 0, true),
+                    step(Feed(b"[", SECOND_BYTE), 0, true),
+                    step(Expire(BOUND), 0, true),
+                    step(Expire(SECOND_BYTE.saturating_add(BOUND)), 2, false),
+                ],
+            },
+            Sequence {
+                name: "bytes after an expired prefix classify from ground",
+                steps: &[
+                    step(Feed(b"\x1b", START), 0, true),
+                    step(Expire(BOUND), 1, false),
+                    step(Feed(b"[I", BOUND), 2, false),
+                    step(Feed(b"\x1b[I", BOUND), 0, false),
+                ],
+            },
+            Sequence {
+                name: "expiry without a pending prefix counts zero",
+                steps: &[
+                    step(Expire(BOUND), 0, false),
+                    step(Feed(b"\x1b[I", START), 0, false),
+                    step(Expire(TWICE_BOUND), 0, false),
+                ],
+            },
+            Sequence {
+                name: "finish resolves a pending prefix as manual",
+                steps: &[
+                    step(Feed(b"\x1b[1;", START), 0, true),
+                    step(Finish, 4, false),
+                ],
+            },
+            Sequence {
+                name: "finish resolves a pending string body as manual",
+                steps: &[
+                    step(Feed(b"\x1b]11;rgb:00", START), 0, true),
+                    step(Finish, 11, false),
+                ],
+            },
+            Sequence {
+                name: "finish resolves a pending string escape as manual",
+                steps: &[
+                    step(Feed(b"\x1bP1$r0m\x1b", START), 0, true),
+                    step(Finish, 8, false),
+                ],
+            },
+            Sequence {
+                name: "finish without a pending prefix counts zero",
+                steps: &[
+                    step(Finish, 0, false),
+                    step(Feed(b"ab", START), 2, false),
+                    step(Finish, 0, false),
+                ],
+            },
+            Sequence {
+                name: "text before a pending prefix counts in the same read",
+                steps: &[
+                    step(Feed(b"ab\x1b[", START), 2, true),
+                    step(Feed(b"O", START), 0, false),
+                ],
+            },
+            Sequence {
+                name: "a reply after a bracketed paste counts zero",
+                steps: &[
+                    step(Feed(b"\x1b[200~text\x1b[201~", START), 16, false),
+                    step(Feed(b"\x1b[I", START), 0, false),
+                ],
+            },
+            Sequence {
+                name: "the X10 pending bound restarts at each payload byte",
+                steps: &[
+                    step(Feed(b"\x1b[M", START), 0, true),
+                    step(Feed(b" ", SECOND_BYTE), 0, true),
+                    step(Expire(BOUND), 0, true),
+                    step(Feed(b"!", THIRD_BYTE), 0, true),
+                    step(Expire(SECOND_BYTE.saturating_add(BOUND)), 0, true),
+                    step(Expire(THIRD_BYTE.saturating_add(BOUND)), 5, false),
+                ],
+            },
+        ];
 
         #[test]
-        fn reply_classifier_bel_inside_dcs_or_apc_is_manual() {
-            assert_manual(b"\x1bP1$r\x07");
-            assert_manual(b"\x1b_Gi=1\x07");
+        fn reply_classifier_sequences_resolve_prefixes_at_the_bound_or_at_finish() {
+            for case in SEQUENCES {
+                let name = case.name;
+                let start = Instant::now();
+                let mut classifier = classifier();
+                for (index, step) in case.steps.iter().enumerate() {
+                    let result = match step.op {
+                        Feed(bytes, at) => classifier.feed(bytes, start + at),
+                        Expire(at) => classifier.expire(start + at),
+                        Finish => classifier.finish(),
+                    };
+                    assert_eq!(
+                        (result.manual, result.pointer, classifier.pending()),
+                        (step.manual, 0, step.pending),
+                        "{name}: step {index}"
+                    );
+                }
+            }
         }
+
+        /// A pending prefix filled to a limit; one more body byte resolves it.
+        struct LimitOverflow {
+            name: &'static str,
+            prefix: fn() -> Vec<u8>,
+            overflow: &'static [u8],
+            terminator: &'static [u8],
+        }
+
+        const LIMIT_OVERFLOWS: &[LimitOverflow] = &[
+            LimitOverflow {
+                name: "an overlong CSI is manual at the parameter byte exceeding the limit",
+                prefix: || {
+                    let mut prefix = b"\x1b[".to_vec();
+                    prefix.extend(std::iter::repeat_n(b'1', CSI_PARAMETER_LIMIT));
+                    prefix
+                },
+                overflow: b"1",
+                terminator: b"R",
+            },
+            LimitOverflow {
+                name: "an OSC body over the limit is manual at the body byte exceeding the limit",
+                prefix: || {
+                    let mut prefix = b"\x1b]".to_vec();
+                    prefix.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT));
+                    prefix
+                },
+                overflow: b"x",
+                terminator: b"\x07",
+            },
+        ];
 
         #[test]
-        fn reply_classifier_bel_inside_dcs_resolves_before_a_following_reply() {
-            assert_eq!(feed_once(b"\x1bP1$r\x07\x1b[I"), (6, false));
+        fn reply_classifier_the_byte_exceeding_a_limit_resolves_the_whole_prefix() {
+            for case in LIMIT_OVERFLOWS {
+                let name = case.name;
+                let prefix = (case.prefix)();
+                let mut classifier = classifier();
+                let now = Instant::now();
+                assert_eq!(classifier.feed(&prefix, now).manual, 0, "{name}");
+                assert!(classifier.pending(), "{name}");
+                assert_eq!(
+                    classifier.feed(case.overflow, now).manual,
+                    prefix.len() + 1,
+                    "{name}"
+                );
+                assert!(!classifier.pending(), "{name}");
+                assert_eq!(classifier.feed(case.terminator, now).manual, 1, "{name}");
+            }
         }
-
-        #[test]
-        fn reply_classifier_escape_without_backslash_inside_osc_is_manual() {
-            assert_manual(b"\x1b]11;x\x1ba");
-            assert_manual(b"\x1b]1\x1b[I");
-        }
-
-        #[test]
-        fn reply_classifier_escape_without_backslash_inside_osc_reclassifies_the_next_byte() {
-            assert_eq!(feed_once(b"\x1b]1\x1b\x1b[I"), (4, false));
-        }
-
-        #[test]
-        fn reply_classifier_escape_without_backslash_inside_dcs_or_apc_is_manual() {
-            assert_manual(b"\x1bP1$r\x1bq");
-            assert_manual(b"\x1b_G\x1bq");
-        }
-
-        #[test]
-        fn reply_classifier_control_byte_inside_a_string_body_is_manual() {
-            assert_manual(b"\x1b]11;x\x18");
-            assert_manual(b"\x1bP1\r");
-        }
-
-        #[test]
-        fn reply_classifier_escape_with_an_invalid_continuation_counts_both_bytes() {
-            assert_manual(b"\x1b1");
-            assert_manual(b"\x1b\x7f");
-        }
-    }
-
-    mod pending {
-        use crate::runtime::transport::tests::*;
 
         const SPLIT_REPLIES: [&[u8]; 7] = [
             b"\x1b[I",
@@ -4240,130 +4447,20 @@ mod tests {
             for reply in SPLIT_REPLIES {
                 for split in 1..reply.len() {
                     let mut classifier = classifier();
-                    assert_eq!(classifier.feed(&reply[..split], now).manual, 0);
+                    assert_eq!(
+                        classifier.feed(&reply[..split], now).manual,
+                        0,
+                        "{reply:?} split at {split}"
+                    );
                     assert!(classifier.pending(), "{reply:?} split at {split}");
-                    assert_eq!(classifier.feed(&reply[split..], now).manual, 0);
+                    assert_eq!(
+                        classifier.feed(&reply[split..], now).manual,
+                        0,
+                        "{reply:?} split at {split}"
+                    );
                     assert!(!classifier.pending(), "{reply:?} split at {split}");
                 }
             }
-        }
-
-        #[test]
-        fn reply_classifier_reply_split_across_reads_at_different_instants_counts_zero() {
-            let start = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"\x1b[24", start).manual, 0);
-            let later = start + REPLY_PREFIX_BOUND / 2;
-            assert_eq!(classifier.expire(later).manual, 0);
-            assert_eq!(classifier.feed(b";80R", later).manual, 0);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_lone_escape_resolves_as_manual_at_the_bound() {
-            let start = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"\x1b", start).manual, 0);
-            assert!(classifier.pending());
-            let before = start + REPLY_PREFIX_BOUND - Duration::from_millis(1);
-            assert_eq!(classifier.expire(before).manual, 0);
-            assert!(classifier.pending());
-            assert_eq!(classifier.expire(start + REPLY_PREFIX_BOUND).manual, 1);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_csi_prefix_resolves_as_manual_at_the_bound() {
-            let start = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"\x1b[12;", start).manual, 0);
-            assert!(classifier.pending());
-            let before = start + REPLY_PREFIX_BOUND - Duration::from_millis(1);
-            assert_eq!(classifier.expire(before).manual, 0);
-            assert!(classifier.pending());
-            assert_eq!(classifier.expire(start + REPLY_PREFIX_BOUND).manual, 5);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_bound_restarts_at_each_new_prefix_byte() {
-            let start = Instant::now();
-            let second = start + Duration::from_millis(60);
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"\x1b", start).manual, 0);
-            assert_eq!(classifier.feed(b"[", second).manual, 0);
-            assert_eq!(classifier.expire(start + REPLY_PREFIX_BOUND).manual, 0);
-            assert!(classifier.pending());
-            assert_eq!(classifier.expire(second + REPLY_PREFIX_BOUND).manual, 2);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_bytes_after_an_expired_prefix_classify_from_ground() {
-            let start = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"\x1b", start).manual, 0);
-            let expired = start + REPLY_PREFIX_BOUND;
-            assert_eq!(classifier.expire(expired).manual, 1);
-            assert_eq!(classifier.feed(b"[I", expired).manual, 2);
-            assert_eq!(classifier.feed(b"\x1b[I", expired).manual, 0);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_expire_without_a_pending_prefix_counts_zero() {
-            let now = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.expire(now + REPLY_PREFIX_BOUND).manual, 0);
-            assert_eq!(classifier.feed(b"\x1b[I", now).manual, 0);
-            assert_eq!(classifier.expire(now + REPLY_PREFIX_BOUND * 2).manual, 0);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_finish_resolves_a_pending_prefix_as_manual() {
-            let now = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"\x1b[1;", now).manual, 0);
-            assert_eq!(classifier.finish().manual, 4);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_finish_resolves_a_pending_string_body_as_manual() {
-            let prefix: &[u8] = b"\x1b]11;rgb:00";
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(prefix, Instant::now()).manual, 0);
-            assert_eq!(classifier.finish().manual, prefix.len());
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_finish_resolves_a_pending_string_escape_as_manual() {
-            let prefix: &[u8] = b"\x1bP1$r0m\x1b";
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(prefix, Instant::now()).manual, 0);
-            assert!(classifier.pending());
-            assert_eq!(classifier.finish().manual, prefix.len());
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_finish_without_a_pending_prefix_counts_zero() {
-            let mut classifier = classifier();
-            assert_eq!(classifier.finish().manual, 0);
-            assert_eq!(classifier.feed(b"ab", Instant::now()).manual, 2);
-            assert_eq!(classifier.finish().manual, 0);
-        }
-
-        #[test]
-        fn reply_classifier_text_before_a_pending_prefix_counts_in_the_same_read() {
-            let now = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"ab\x1b[", now).manual, 2);
-            assert!(classifier.pending());
-            assert_eq!(classifier.feed(b"O", now).manual, 0);
-            assert!(!classifier.pending());
         }
     }
 
@@ -4379,7 +4476,7 @@ mod tests {
                 display_bytes: 64,
                 bytes_per_tick: 16,
             },
-            std::sync::Arc::new(crate::time::SystemClock),
+            Arc::new(TestClock::starting_at(Instant::now())),
         )
         .unwrap()
     }
@@ -4392,7 +4489,7 @@ mod tests {
                 display_bytes: 65536,
                 bytes_per_tick: 16384,
             },
-            std::sync::Arc::new(crate::time::SystemClock),
+            Arc::new(TestClock::starting_at(Instant::now())),
         )
         .unwrap()
     }
@@ -4871,7 +4968,7 @@ mod tests {
                 Transport::new(
                     TerminalSize { rows: 24, cols: 80 },
                     limits,
-                    std::sync::Arc::new(crate::time::SystemClock)
+                    Arc::new(TestClock::starting_at(Instant::now()))
                 )
                 .is_err(),
                 "{field}"

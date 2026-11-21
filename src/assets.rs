@@ -1561,42 +1561,46 @@ mod tests {
         }
 
         #[test]
-        fn hermes_setup_fails_into_the_resolved_base_when_the_config_path_is_unavailable() {
-            for plugins_failure in [false, true] {
+        fn hermes_setup_fails_into_the_resolved_base_without_a_usable_config_path() {
+            const DEADLINE: &str = "did not finish within its deadline";
+            let cases: [(&str, fn(&mut FakeHermes), &str); 3] = [
+                (
+                    "unavailable config path",
+                    |fake| {
+                        fake.reply(FakeHermes::path_call(), Reply::Fail(DEADLINE.into()));
+                    },
+                    DEADLINE,
+                ),
+                (
+                    "unavailable config path and plugins read",
+                    |fake| {
+                        fake.reply(FakeHermes::path_call(), Reply::Fail(DEADLINE.into()));
+                        fake.reply(get(PLUGINS_KEY), Reply::Fail("permission denied".into()));
+                    },
+                    DEADLINE,
+                ),
+                (
+                    "relative config path",
+                    |fake| {
+                        fake.reply(FakeHermes::path_call(), Reply::Path("config.yaml".into()));
+                    },
+                    "printed no absolute file path: config.yaml",
+                ),
+            ];
+            for (name, arrange, cause) in cases {
                 let mut fake = FakeHermes::new();
-                fake.reply(
-                    FakeHermes::path_call(),
-                    Reply::Fail("did not finish within its deadline".into()),
-                );
-                if plugins_failure {
-                    fake.reply(get(PLUGINS_KEY), Reply::Fail("permission denied".into()));
-                }
+                arrange(&mut fake);
                 let installed = install(&fake);
                 assert_failure(
                     &installed,
                     &extension_prefix(&installed.base),
-                    Cause::Exact("did not finish within its deadline"),
+                    Cause::Exact(cause),
                 );
-                assert_eq!(installed.lines, [skills_line(&installed)]);
-                assert!(after_batch(&fake.calls()).is_empty());
-                assert!(!fake.plugin_dir().exists());
-                assert!(!installed.base.join("plugins").exists());
+                assert_eq!(installed.lines, [skills_line(&installed)], "{name}");
+                assert!(after_batch(&fake.calls()).is_empty(), "{name}");
+                assert!(!fake.plugin_dir().exists(), "{name}");
+                assert!(!installed.base.join("plugins").exists(), "{name}");
             }
-        }
-
-        #[test]
-        fn hermes_setup_fails_into_the_resolved_base_when_the_config_path_is_not_absolute() {
-            let mut fake = FakeHermes::new();
-            fake.reply(FakeHermes::path_call(), Reply::Path("config.yaml".into()));
-            let installed = install(&fake);
-            assert_failure(
-                &installed,
-                &extension_prefix(&installed.base),
-                Cause::Exact("printed no absolute file path: config.yaml"),
-            );
-            assert_eq!(installed.lines, [skills_line(&installed)]);
-            assert!(after_batch(&fake.calls()).is_empty());
-            assert!(!installed.base.join("plugins").exists());
         }
 
         #[test]

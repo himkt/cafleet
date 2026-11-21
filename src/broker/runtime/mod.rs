@@ -970,7 +970,6 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::params;
     use serde_json::json;
 
     use crate::broker::fleets::test_support::create_fleet_fixture;
@@ -980,19 +979,141 @@ mod tests {
     use crate::broker::runtime::*;
 
     #[test]
-    fn new_run_records_launch_intent_and_unreached_phases() {
-        let fixture = Fixture::new();
-        let run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        assert_eq!(run.status, RunStatus::Starting);
-        assert_eq!(run.owner_epoch, 1);
-        assert_eq!(run.owner_kind, OwnerKind::Creator);
-        assert_eq!(run.cleanup_state, CleanupState::Incomplete);
-        assert_eq!(run.mode_source, ModeSource::Default);
-        assert_eq!(run.requested_mode, None);
-        assert_eq!(run.resolved_mode, "never");
-        assert_eq!(run.child_pid, None);
-        assert_eq!(run.exit_code, None);
-        assert_eq!(run.coverage, Coverage::Unknown);
+    fn run_creation_records_the_default_or_explicit_mode_and_unreached_phases() {
+        struct Case {
+            name: &'static str,
+            requested: Option<&'static str>,
+            resolved: &'static str,
+            source: ModeSource,
+        }
+        const CASES: &[Case] = &[
+            Case {
+                name: "the backend default",
+                requested: None,
+                resolved: "never",
+                source: ModeSource::Default,
+            },
+            Case {
+                name: "an explicit mode",
+                requested: Some("on-request"),
+                resolved: "on-request",
+                source: ModeSource::Explicit,
+            },
+        ];
+        for case in CASES {
+            let name = case.name;
+            let mut fixture = Fixture::new();
+            let member = register(&mut fixture.conn, fixture.fleet, "worker-run", None);
+            let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
+            spec.requested_mode = case.requested.map(Into::into);
+            spec.resolved_mode = case.resolved.into();
+            spec.mode_source = case.source;
+            spec.permission_argv_json = json!(["--ask-for-approval", case.resolved]);
+            let run = create_run(&mut fixture.conn, &spec).unwrap();
+            let run = storage::get_run(&fixture.conn, run.run_id).unwrap();
+            assert_eq!(run.requested_mode.as_deref(), case.requested, "{name}");
+            assert_eq!(run.resolved_mode, case.resolved, "{name}");
+            assert_eq!(run.mode_source, case.source, "{name}");
+            assert_eq!(
+                run.permission_argv_json, spec.permission_argv_json,
+                "{name}"
+            );
+            assert_eq!(run.status, RunStatus::Starting, "{name}");
+            assert_eq!(run.owner_epoch, 1, "{name}");
+            assert_eq!(run.owner_kind, OwnerKind::Creator, "{name}");
+            assert_eq!(run.cleanup_state, CleanupState::Incomplete, "{name}");
+            assert_eq!(run.child_pid, None, "{name}");
+            assert_eq!(run.exit_code, None, "{name}");
+            assert_eq!(run.coverage, Coverage::Unknown, "{name}");
+        }
+    }
+
+    #[test]
+    fn corrupt_or_missing_required_storage_fails_its_typed_reader() {
+        const CASES: &[(&str, &str, &str)] = &[
+            (
+                "status",
+                "PRAGMA ignore_check_constraints=ON; UPDATE member_runs SET status='invented'",
+                "status",
+            ),
+            (
+                "database identity",
+                "PRAGMA ignore_check_constraints=ON; UPDATE member_runs SET database_identity_json='[]'",
+                "database_identity_json",
+            ),
+            (
+                "instance identity",
+                "DELETE FROM runtime_database_identity",
+                "",
+            ),
+        ];
+        for &(name, corruption, field) in CASES {
+            let fixture = Fixture::new();
+            fixture.conn.execute_batch(corruption).unwrap();
+            let error = if field.is_empty() {
+                storage::database_identity(&fixture.conn).unwrap_err()
+            } else {
+                storage::get_run(&fixture.conn, fixture.run.run_id).unwrap_err()
+            };
+            assert!(error.message().contains(field), "{name}: {error:?}");
+        }
+    }
+
+    #[test]
+    fn a_stale_owner_kind_epoch_or_database_identity_fences_every_owner_operation() {
+        type Stale = fn(&mut RunOwner);
+        const STALE: &[(&str, Stale)] = &[
+            ("epoch", |owner| owner.owner_epoch += 1),
+            ("kind", |owner| owner.owner_kind = OwnerKind::Reconciler),
+            ("database", |owner| {
+                owner.database_identity_json["instance_id"] = json!("0".repeat(32))
+            }),
+        ];
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        assert_eq!(
+            validate_owner(&fixture.conn, &owner).unwrap().run_id,
+            owner.run_id
+        );
+        for &(name, make_stale) in STALE {
+            let mut stale = owner.clone();
+            make_stale(&mut stale);
+            let before = durable_state(&fixture.conn);
+            assert!(validate_owner(&fixture.conn, &stale).is_err(), "{name}");
+            assert!(
+                storage::persist_transition(
+                    &mut fixture.conn,
+                    &stale,
+                    &opening(owner.run_id, 1, 1, metadata()),
+                    PersistenceMode::Live
+                )
+                .is_err(),
+                "{name}"
+            );
+            assert!(
+                reserve_input(
+                    &mut fixture.conn,
+                    &stale,
+                    &NewInput {
+                        operation_key: "stale".into(),
+                        kind: InputKind::Prompt,
+                        payload_digest: "d".repeat(64),
+                        message_id: None
+                    }
+                )
+                .is_err(),
+                "{name}"
+            );
+            assert_eq!(durable_state(&fixture.conn), before, "{name}");
+        }
+        let mut stale = owner.clone();
+        stale.owner_epoch += 1;
+        assert!(
+            validate_owner(&fixture.conn, &stale)
+                .unwrap_err()
+                .message()
+                .contains("stale ownership token")
+        );
     }
 
     #[test]
@@ -1016,98 +1137,6 @@ mod tests {
             );
             assert_eq!(durable_state(&fixture.conn), before, "{mismatch}");
         }
-    }
-
-    #[test]
-    fn explicit_mode_is_distinct_from_the_default() {
-        let mut fixture = Fixture::new();
-        let member = register(&mut fixture.conn, fixture.fleet, "explicit", None);
-        let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
-        spec.requested_mode = Some("on-request".into());
-        spec.resolved_mode = "on-request".into();
-        spec.mode_source = ModeSource::Explicit;
-        spec.permission_argv_json = json!([
-            "--ask-for-approval",
-            "on-request",
-            "--sandbox",
-            "workspace-write"
-        ]);
-        let run =
-            crate::broker::runtime::test_support::create_run(&mut fixture.conn, &spec).unwrap();
-        assert_eq!(run.requested_mode.as_deref(), Some("on-request"));
-        assert_eq!(run.mode_source, ModeSource::Explicit);
-        assert_eq!(run.permission_argv_json, spec.permission_argv_json);
-    }
-
-    #[test]
-    fn typed_runtime_readers_fail_on_corrupt_required_values() {
-        for (field, value) in [("status", "invented"), ("database_identity_json", "[]")] {
-            let fixture = Fixture::new();
-            fixture
-                .conn
-                .execute_batch("PRAGMA ignore_check_constraints=ON")
-                .unwrap();
-            fixture
-                .conn
-                .execute(
-                    &format!("UPDATE member_runs SET {field}=?1 WHERE run_id=?2"),
-                    params![value, fixture.run.run_id],
-                )
-                .unwrap();
-            let error = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap_err();
-            assert!(error.message().contains(field), "{field}: {error:?}");
-        }
-    }
-
-    #[test]
-    fn stale_owner_kind_epoch_or_database_identity_fences_every_mutation() {
-        let mut fixture = Fixture::new();
-        let owner = fixture.activate();
-        for mismatch in ["epoch", "kind", "database"] {
-            let mut stale = owner.clone();
-            match mismatch {
-                "epoch" => stale.owner_epoch += 1,
-                "kind" => stale.owner_kind = OwnerKind::Reconciler,
-                "database" => stale.database_identity_json["instance_id"] = json!("0".repeat(32)),
-                _ => unreachable!(),
-            }
-            let before = durable_state(&fixture.conn);
-            assert!(
-                storage::persist_transition(
-                    &mut fixture.conn,
-                    &stale,
-                    &opening(owner.run_id, 1, 1, metadata()),
-                    PersistenceMode::Live
-                )
-                .is_err(),
-                "{mismatch}"
-            );
-            assert!(
-                crate::broker::runtime::test_support::reserve_input(
-                    &mut fixture.conn,
-                    &stale,
-                    &NewInput {
-                        operation_key: "stale".into(),
-                        kind: InputKind::Prompt,
-                        payload_digest: "d".repeat(64),
-                        message_id: None
-                    }
-                )
-                .is_err(),
-                "{mismatch}"
-            );
-            assert_eq!(durable_state(&fixture.conn), before, "{mismatch}");
-        }
-    }
-
-    #[test]
-    fn missing_database_instance_identity_fails_at_the_identity_read_boundary() {
-        let fixture = Fixture::new();
-        fixture
-            .conn
-            .execute("DELETE FROM runtime_database_identity", [])
-            .unwrap();
-        assert!(storage::database_identity(&fixture.conn).is_err());
     }
 
     mod runner_registry {
@@ -1230,26 +1259,5 @@ mod tests {
                 Some(reason.1)
             );
         }
-    }
-
-    #[test]
-    fn validate_owner_requires_the_current_token_and_database_identity() {
-        let mut fixture = Fixture::new();
-        let owner = fixture.activate();
-        assert_eq!(
-            validate_owner(&fixture.conn, &owner).unwrap().run_id,
-            owner.run_id
-        );
-        let mut stale = owner.clone();
-        stale.owner_epoch += 1;
-        assert!(
-            validate_owner(&fixture.conn, &stale)
-                .unwrap_err()
-                .message()
-                .contains("stale ownership token")
-        );
-        let mut foreign = owner.clone();
-        foreign.database_identity_json["instance_id"] = json!("0".repeat(32));
-        assert!(validate_owner(&fixture.conn, &foreign).is_err());
     }
 }

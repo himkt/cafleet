@@ -3158,10 +3158,10 @@ impl InputCoordinator {
                 .hooks
                 .checkpoint(boundary, &_checkpoint, deadline)?;
 
-            check_deadline(Instant::now(), deadline)
+            check_deadline(self.services.clock.now(), deadline)
         })();
         #[cfg(not(test))]
-        let result = check_deadline(Instant::now(), deadline);
+        let result = check_deadline(self.services.clock.now(), deadline);
         if result.is_err()
             && let Some(pending) = &mut self.pending
         {
@@ -4991,6 +4991,7 @@ mod tests {
         use crate::error::CafleetError;
         use crate::runtime::input::tests::ordinary_prompt::support::RunnerFixture;
         use crate::runtime::input::*;
+        use crate::time::Clock as _;
         use std::io::ErrorKind;
         use std::panic::AssertUnwindSafe;
         use std::panic::catch_unwind;
@@ -5011,6 +5012,7 @@ mod tests {
                         crate::runtime::input::test_support::default_input_hooks(),
                         crate::runtime::input::STAGE_SETTLE,
                         "manual progress",
+                        &self.clock,
                     ),
                     self.until,
                 )
@@ -5023,15 +5025,15 @@ mod tests {
                         .poll(
                             &self.transport.snapshot(),
                             &self.writer,
-                            &crate::time::SystemClock,
+                            self.clock.as_ref(),
                         )
                         .unwrap();
                     let health = self.controller.health(&self.writer);
                     if !health.degraded && health.pending_count == 0 {
                         break;
                     }
-                    assert!(Instant::now() < self.until, "writer health: {health:?}");
-                    std::thread::sleep(Duration::from_millis(1));
+                    assert!(self.clock.now() < self.until, "writer health: {health:?}");
+                    self.clock.advance(Duration::from_millis(1));
                 }
                 assert_eq!(
                     self.transport
@@ -5039,9 +5041,7 @@ mod tests {
                             &mut FakeInput::default(),
                             &mut FakePty::new(b"", 1),
                             &mut FakeDisplay::default(),
-                            &mut self
-                                .controller
-                                .observer(&self.writer, &crate::time::SystemClock),
+                            &mut self.controller.observer(&self.writer, self.clock.as_ref()),
                             self.until,
                         )
                         .unwrap(),
@@ -5061,6 +5061,7 @@ mod tests {
                     bytes_per_tick: 64,
                 },
                 Instant::now() + Duration::from_secs(4),
+                crate::runtime::test_support::VIRTUAL_LEAD,
             );
             let primary = catch_unwind(AssertUnwindSafe(|| body(&mut harness)));
             let cleanup = catch_unwind(AssertUnwindSafe(|| harness.finish()));
@@ -5089,7 +5090,7 @@ mod tests {
                             &mut human,
                             &mut pty,
                             &mut FakeDisplay::default(),
-                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
+                            &mut h.controller.observer(&h.writer, h.clock.as_ref()),
                             h.until,
                         )
                     })
@@ -5109,7 +5110,7 @@ mod tests {
                             &mut human,
                             &mut pty,
                             &mut FakeDisplay::default(),
-                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
+                            &mut h.controller.observer(&h.writer, h.clock.as_ref()),
                         )
                     })
                     .unwrap();
@@ -5128,7 +5129,7 @@ mod tests {
                             &mut human,
                             &mut pty,
                             &mut FakeDisplay::default(),
-                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
+                            &mut h.controller.observer(&h.writer, h.clock.as_ref()),
                         )
                     })
                     .unwrap();
@@ -5160,7 +5161,7 @@ mod tests {
                         &mut human,
                         &mut pty,
                         &mut FakeDisplay::default(),
-                        &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
+                        &mut h.controller.observer(&h.writer, h.clock.as_ref()),
                     )
                 });
                 let failure = match result {
@@ -5257,6 +5258,7 @@ mod tests {
             struct ExpiringReservedHooks {
                 fail: bool,
                 observed: Mutex<Option<ObservedCheckpoint>>,
+                clock: Arc<TestClock>,
             }
 
             impl InputHooks for ExpiringReservedHooks {
@@ -5267,7 +5269,7 @@ mod tests {
                     deadline: Instant,
                 ) -> std::result::Result<(), CafleetError> {
                     assert!(matches!(boundary, InputBoundary::Reserved));
-                    assert!(Instant::now() < deadline);
+                    assert!(self.clock.now() < deadline);
                     {
                         let mut observed = self.observed.lock().unwrap();
                         assert!(observed.is_none(), "one actual reservation checkpoint");
@@ -5279,8 +5281,9 @@ mod tests {
                             deadline,
                         });
                     }
-                    std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
-                    assert!(Instant::now() >= deadline);
+                    self.clock
+                        .advance(deadline.saturating_duration_since(self.clock.now()));
+                    assert!(self.clock.now() >= deadline);
                     if self.fail {
                         Err(CafleetError::App(
                             "fixture checkpoint failed after expiry".into(),
@@ -5300,9 +5303,10 @@ mod tests {
                     let hooks = Arc::new(ExpiringReservedHooks {
                         fail,
                         observed: Mutex::new(None),
+                        clock: h.clock.clone(),
                     });
                     h.coordinator.services.hooks = hooks.clone();
-                    let deadline = Instant::now() + Duration::from_millis(150);
+                    let deadline = h.clock.now() + Duration::from_millis(150);
                     assert!(deadline < h.until);
                     let failure = (0..8)
                         .find_map(|_| {
@@ -5335,7 +5339,7 @@ mod tests {
                         .expect("the hook received the actual reserved input");
                     let id = attempt.receipt_id();
                     assert_eq!(actual_deadline, deadline);
-                    assert!(Instant::now() >= deadline);
+                    assert!(h.clock.now() >= deadline);
                     if fail {
                         assert!(
                             matches!(&failure.source, CafleetError::App(cause) if cause == "fixture checkpoint failed after expiry")
@@ -5363,7 +5367,7 @@ mod tests {
                         (&blocked.0, &blocked.1, &blocked.2, blocked.3),
                         (&pending.0, &pending.1, &pending.2, pending.3)
                     );
-                    assert!(matches!(blocked.4, InputPhase::Blocked));
+                    assert!(matches!(blocked.4, InputPhase::Blocked), "fail={fail}");
                     assert_eq!(blocked.5, Some(id));
                     assert_eq!(h.coordinator.operations.len(), cache_count + 1);
                     let durable = storage::get_input(&h.fixture.conn, id).unwrap();
@@ -5398,13 +5402,13 @@ mod tests {
                 let first_seq = h.transport.snapshot().screen_seq;
                 let reply = loop {
                     assert!(
-                        Instant::now() < h.until,
+                        h.clock.now() < h.until,
                         "the staged write completes in time"
                     );
                     if let Some(reply) = h.advance() {
                         break submitted(reply);
                     }
-                    std::thread::sleep(Duration::from_millis(5));
+                    h.clock.advance(Duration::from_millis(5));
                     h.drain();
                 };
                 assert!(matches!(reply.status, SubmissionStatus::Accepted));
@@ -5605,7 +5609,7 @@ mod tests {
                             &mut h.human,
                             &mut h.pty,
                             &mut h.output,
-                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
+                            &mut h.controller.observer(&h.writer, h.clock.as_ref()),
                         )
                         .unwrap();
                 }
@@ -5671,7 +5675,7 @@ mod tests {
                         let bound = if possible {
                             h.until
                         } else {
-                            Instant::now() + Duration::from_millis(30)
+                            h.clock.now() + Duration::from_millis(30)
                         };
                         let effective = guard
                             .begin_write(&h.transport, LITERAL.as_bytes(), bound)
@@ -5686,8 +5690,8 @@ mod tests {
                                     .is_err(),
                                 "successful pre-I/O validation consumes the permit too"
                             );
-                            std::thread::sleep(
-                                effective.saturating_duration_since(Instant::now())
+                            h.clock.advance(
+                                effective.saturating_duration_since(h.clock.now())
                                     + Duration::from_millis(1),
                             );
                         }
@@ -5972,7 +5976,7 @@ mod tests {
                             "{fixture_id}"
                         );
                         host.coordinator
-                            .set_post_submit_verification_until(Instant::now());
+                            .set_post_submit_verification_until(host.clock.now());
                         let reply = native_verification_reply(host);
                         assert_uncertain(host, &reply, storage::StopCause::SubmitUnconfirmed);
                         assert_eq!(reply.stage, SubmissionStage::Submitted, "{fixture_id}");
@@ -6066,7 +6070,7 @@ mod tests {
                     .and_then(PendingInput::composer_mut)
                     && composer.settle_until.is_some()
                 {
-                    composer.settle_until = Some(Instant::now());
+                    composer.settle_until = Some(host.clock.now());
                 }
                 crate::runtime::input::tests::ordinary_prompt::deferred_queue::housekeep(host);
                 host.drain();
@@ -6099,7 +6103,7 @@ mod tests {
                             host.child_output(SCREEN);
                         } else {
                             host.coordinator
-                                .set_post_submit_verification_until(Instant::now());
+                                .set_post_submit_verification_until(host.clock.now());
                         }
                     }
                     if let Some(reply) = turn(host) {
@@ -6256,7 +6260,7 @@ mod tests {
                     start(host, "prompt:chunk-deadline", LITERAL);
                     until_written(host, 3);
                     host.coordinator.pending.as_mut().unwrap().deadline =
-                        Instant::now() + Duration::from_millis(100);
+                        host.clock.now() + Duration::from_millis(100);
                     let reply = finish(host, false);
                     assert_uncertain(host, &reply, storage::StopCause::DeadlineExpired);
                 });
@@ -6464,7 +6468,7 @@ mod tests {
                     start(host, "prompt:submit-budget", LITERAL);
                     until_written(host, LITERAL.len());
                     host.coordinator.pending.as_mut().unwrap().deadline =
-                        Instant::now() + Duration::from_secs(1);
+                        host.clock.now() + Duration::from_secs(1);
                     let reply = finish(host, false);
                     assert_uncertain(host, &reply, storage::StopCause::DeadlineExpired);
                     assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
@@ -6476,7 +6480,7 @@ mod tests {
                 with_host(|host| {
                     let request = request(host, "prompt:initial-budget", LITERAL);
                     let reply = submitted(
-                        host.handle_until(request, Instant::now() + Duration::from_secs(1))
+                        host.handle_until(request, host.clock.now() + Duration::from_secs(1))
                             .unwrap()
                             .expect("short budget queues immediately"),
                     );
@@ -6519,7 +6523,7 @@ mod tests {
                             .queue
                             .front_mut()
                             .expect("the actual queued head")
-                            .attempt_deadline = Some(Instant::now() + Duration::from_secs(1));
+                            .attempt_deadline = Some(host.clock.now() + Duration::from_secs(1));
                         let _ = turn(host);
                         assert_eq!(row(host, id).state, storage::InputState::Ready);
                         assert!(host.pty.offers.is_empty());
@@ -6938,21 +6942,27 @@ mod tests {
             fn until_literal_written(host: &mut Host, request: InputControlRequest) {
                 assert!(host.handle(request).unwrap().is_none());
                 while host.pty.stages.is_empty() {
-                    assert!(Instant::now() < host.until, "the literal stage is written");
+                    assert!(
+                        host.clock.now() < host.until,
+                        "the literal stage is written"
+                    );
                     host.drain();
                     assert!(host.advance().is_none(), "no reply before the submit stage");
-                    std::thread::sleep(Duration::from_millis(5));
+                    host.clock.advance(Duration::from_millis(5));
                 }
             }
 
             fn finish_after_interruption(host: &mut Host) -> SubmissionResult {
                 loop {
-                    assert!(Instant::now() < host.until, "the interrupted input replies");
+                    assert!(
+                        host.clock.now() < host.until,
+                        "the interrupted input replies"
+                    );
                     host.drain();
                     if let Some(reply) = host.advance() {
                         return submitted(reply);
                     }
-                    std::thread::sleep(Duration::from_millis(5));
+                    host.clock.advance(Duration::from_millis(5));
                 }
             }
 
@@ -7014,12 +7024,12 @@ mod tests {
                             .unwrap()
                             .is_none()
                     );
-                    let busy_until = Instant::now() + Duration::from_millis(300);
-                    while Instant::now() < busy_until {
+                    let busy_until = host.clock.now() + Duration::from_millis(300);
+                    while host.clock.now() < busy_until {
                         host.drain();
                         assert!(host.advance().is_none());
                         assert!(host.pty.offers.is_empty(), "no byte while the lock is busy");
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                     }
                     drop(held);
                     let reply = finish_after_interruption(host);
@@ -7031,20 +7041,21 @@ mod tests {
             mod immediate_failure_bookkeeping {
                 use crate::runtime::input::tests::ordinary_prompt::staged_delivery::*;
 
-                fn expired() -> Instant {
-                    let deadline = Instant::now();
-                    std::thread::sleep(Duration::from_millis(2));
+                fn expired(host: &Host) -> Instant {
+                    let deadline = host.clock.now();
+                    host.clock.advance(Duration::from_millis(2));
                     deadline
                 }
 
                 fn fail_advance_at_an_expired_deadline(host: &mut Host) {
                     host.drain();
+                    let deadline = expired(host);
                     let failed = host.coordinator.advance(
                         &mut host.fixture.conn,
                         &mut host.transport,
                         &mut host.pty,
                         &host.controller,
-                        expired(),
+                        deadline,
                     );
                     assert!(
                         failed.is_err(),
@@ -7080,12 +7091,13 @@ mod tests {
                         host.confirm_submissions = false;
                         until_literal_written(host, prompt_request(host, "prompt:d1-submit"));
                         let id = host.hooks.input_id();
-                        std::thread::sleep(host.stage_settle + Duration::from_millis(50));
+                        host.clock
+                            .advance(host.stage_settle + Duration::from_millis(50));
                         while host.pty.stage_bytes().len() < 2 {
-                            assert!(Instant::now() < host.until, "the submit stage is written");
+                            assert!(host.clock.now() < host.until, "the submit stage is written");
                             host.drain();
                             assert!(host.advance().is_none(), "no reply before verification");
-                            std::thread::sleep(Duration::from_millis(1));
+                            host.clock.advance(Duration::from_millis(1));
                         }
                         fail_advance_at_an_expired_deadline(host);
                         assert_recorded_uncertain_write_failed(host, id);
@@ -7099,6 +7111,7 @@ mod tests {
                         until_literal_written(host, prompt_request(host, "prompt:d2-drain"));
                         let id = host.hooks.input_id();
                         host.child_output(b"echo");
+                        let deadline = expired(host);
                         let drained = host.coordinator.progress_with_manual(
                             &mut host.transport,
                             |transport| {
@@ -7108,8 +7121,8 @@ mod tests {
                                     &mut host.output,
                                     &mut host
                                         .controller
-                                        .observer(&host.writer, &crate::time::SystemClock),
-                                    expired(),
+                                        .observer(&host.writer, host.clock.as_ref()),
+                                    deadline,
                                 )
                             },
                         );
@@ -7201,12 +7214,13 @@ mod tests {
                 }
 
                 fn until_armed(host: &mut Host) {
-                    std::thread::sleep(host.stage_settle + Duration::from_millis(50));
+                    host.clock
+                        .advance(host.stage_settle + Duration::from_millis(50));
                     while host.pending_snapshot().4 != InputPhase::Armed {
-                        assert!(Instant::now() < host.until, "the submit stage arms");
+                        assert!(host.clock.now() < host.until, "the submit stage arms");
                         host.drain();
                         assert!(host.advance().is_none());
-                        std::thread::sleep(Duration::from_millis(1));
+                        host.clock.advance(Duration::from_millis(1));
                     }
                     assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
                 }
@@ -7496,6 +7510,24 @@ mod tests {
                 );
             }
 
+            /// A permission host whose clock starts at real time, for a test that holds a real
+            /// SQLite write lock and needs the coordinator's busy wait to expire.
+            pub(super) fn with_contended_permission_host(
+                until: Duration,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_profile_host_until(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile {
+                        clock_lead: Duration::ZERO,
+                        ..HostProfile::metadata()
+                    },
+                    Instant::now() + until,
+                    body,
+                );
+            }
+
             pub(super) fn queued(
                 host: &mut Host,
                 request: InputControlRequest,
@@ -7523,11 +7555,14 @@ mod tests {
             /// no further request until `done` holds.
             pub(super) fn turns_until(host: &mut Host, mut done: impl FnMut(&Host) -> bool) {
                 while !done(host) {
-                    assert!(Instant::now() < host.until, "queued work resolves in time");
+                    assert!(
+                        host.clock.now() < host.until,
+                        "queued work resolves in time"
+                    );
                     housekeep(host);
                     host.drain();
                     host.advance();
-                    std::thread::sleep(Duration::from_millis(5));
+                    host.clock.advance(Duration::from_millis(5));
                 }
             }
 
@@ -7682,10 +7717,10 @@ mod tests {
                 with_host(|host| {
                     assert!(host.handle(host.request("prompt:first")).unwrap().is_none());
                     while host.pty.stages.is_empty() {
-                        assert!(Instant::now() < host.until);
+                        assert!(host.clock.now() < host.until);
                         host.drain();
                         host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                     }
                     let second = queued(host, host.request("prompt:second"), "earlier_input");
                     turns_until(host, |host| settled(host, second));
@@ -7713,11 +7748,11 @@ mod tests {
                         .unwrap()
                         .unwrap();
                     close(host);
-                    let busy_until = Instant::now() + Duration::from_millis(300);
-                    while Instant::now() < busy_until {
+                    let busy_until = host.clock.now() + Duration::from_millis(300);
+                    while host.clock.now() < busy_until {
                         host.drain();
                         host.advance();
-                        std::thread::sleep(Duration::from_millis(20));
+                        host.clock.advance(Duration::from_millis(20));
                     }
                     assert!(host.pty.offers.is_empty());
                     assert_eq!(row(host, id).state, storage::InputState::Ready);
@@ -7738,14 +7773,14 @@ mod tests {
                         .unwrap()
                         .unwrap();
                     close(host);
-                    let started = Instant::now();
+                    let started = host.clock.now();
                     turns_until(host, |host| {
                         row(host, id).state == storage::InputState::Settled
                     });
+                    let spent = host.clock.now().duration_since(started);
                     assert!(
-                        started.elapsed() >= Duration::from_secs(5),
-                        "the attempt keeps its five-second budget: {:?}",
-                        started.elapsed()
+                        spent >= Duration::from_secs(5),
+                        "the attempt keeps its five-second budget: {spent:?}"
                     );
                     assert_not_submitted(host, id, "pane_input_busy");
                     assert_eq!(
@@ -7889,7 +7924,9 @@ mod tests {
 
             /// Backdates the queued head's wait past the three-minute stall bound.
             pub(super) fn backdate_head_since(host: &mut Host, input_id: i64) {
-                let since = Instant::now()
+                let since = host
+                    .clock
+                    .now()
                     .checked_sub(Duration::from_secs(181))
                     .expect("the host has run past the stall bound");
                 let head = host.coordinator.queue.front_mut().expect("a queued head");
@@ -7939,10 +7976,10 @@ mod tests {
                         .is_some()
                     {
                         assert!(
-                            Instant::now() < host.until,
+                            host.clock.now() < host.until,
                             "the observer reports the interaction closed"
                         );
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                         host.drain();
                     }
                 }
@@ -7956,18 +7993,18 @@ mod tests {
                             return payloads.remove(0);
                         }
                         assert!(
-                            Instant::now() < host.until,
+                            host.clock.now() < host.until,
                             "the watchdog publishes the stalled head"
                         );
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                     }
                 }
 
                 fn settle_publications(host: &mut Host) {
-                    let until = Instant::now() + Duration::from_millis(300);
-                    while Instant::now() < until {
+                    let until = host.clock.now() + Duration::from_millis(300);
+                    while host.clock.now() < until {
                         host.drain();
-                        std::thread::sleep(Duration::from_millis(10));
+                        host.clock.advance(Duration::from_millis(10));
                     }
                 }
 
@@ -8059,7 +8096,9 @@ mod tests {
                             .unwrap()
                             .head_since
                             .expect("the head's wait restarts when the interaction closes");
-                        assert!(restarted.elapsed() < Duration::from_secs(10));
+                        assert!(
+                            host.clock.now().duration_since(restarted) < Duration::from_secs(10)
+                        );
                         assert_unpublished(host, head);
                         assert_stalled_once(host, head);
                     });
@@ -8166,12 +8205,12 @@ mod tests {
             fn until_head_literal(host: &mut Host) {
                 while host.pty.stages.is_empty() {
                     assert!(
-                        Instant::now() < host.until,
+                        host.clock.now() < host.until,
                         "the head's literal stage is written"
                     );
                     host.drain();
                     host.advance();
-                    std::thread::sleep(Duration::from_millis(5));
+                    host.clock.advance(Duration::from_millis(5));
                 }
             }
 
@@ -8212,14 +8251,15 @@ mod tests {
                         match case {
                             "write_failure" => host.pty.failure = Some(io::ErrorKind::BrokenPipe),
                             "interaction_after_the_settle" => {
-                                std::thread::sleep(host.stage_settle + Duration::from_millis(100));
+                                host.clock
+                                    .advance(host.stage_settle + Duration::from_millis(100));
                                 form(host);
                             }
                             _ => form(host),
                         }
                         while row(host, first).state != storage::InputState::Uncertain {
                             assert!(
-                                Instant::now() < host.until,
+                                host.clock.now() < host.until,
                                 "{case}: the head records its stopped outcome"
                             );
                             host.drain();
@@ -8233,7 +8273,7 @@ mod tests {
                                     "{failure:?}"
                                 );
                             }
-                            std::thread::sleep(Duration::from_millis(5));
+                            host.clock.advance(Duration::from_millis(5));
                         }
                         if case == "write_failure" {
                             assert_eq!(
@@ -8293,14 +8333,14 @@ mod tests {
                     let queued_receipt = row(host, id);
                     close(host);
                     while row(host, id).state == storage::InputState::Ready {
-                        assert!(Instant::now() < host.until, "the deferred attempt starts");
+                        assert!(host.clock.now() < host.until, "the deferred attempt starts");
                         host.drain();
                         host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                     }
                     assert!(host.pty.offers.is_empty());
                     host.coordinator.pending.as_mut().unwrap().deadline =
-                        Instant::now() - Duration::from_millis(1);
+                        host.clock.now() - Duration::from_millis(1);
                     form(host);
                     crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     let requeued = row(host, id);
@@ -8326,7 +8366,7 @@ mod tests {
 
             #[test]
             fn deferred_attempt_expiring_after_storage_contention_settles_storage_unavailable() {
-                with_permission_host(Duration::from_secs(60), |host| {
+                with_contended_permission_host(Duration::from_secs(60), |host| {
                     form(host);
                     let id = queued(host, host.request("prompt:contended"), "interaction_open");
                     close(host);
@@ -8336,10 +8376,10 @@ mod tests {
                         .as_ref()
                         .is_none_or(|pending| pending.phase != InputPhase::Armed)
                     {
-                        assert!(Instant::now() < host.until, "the deferred attempt arms");
+                        assert!(host.clock.now() < host.until, "the deferred attempt arms");
                         host.drain();
                         host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                     }
                     assert!(host.pty.offers.is_empty());
                     let writer =
@@ -8355,7 +8395,7 @@ mod tests {
                     );
                     assert_eq!(row(host, id).state, storage::InputState::InProgress);
                     host.coordinator.pending.as_mut().unwrap().deadline =
-                        Instant::now() - Duration::from_millis(1);
+                        host.clock.now() - Duration::from_millis(1);
                     turns_until(host, |host| settled(host, id));
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
                     assert_not_submitted(host, id, "storage_unavailable");
@@ -8394,10 +8434,10 @@ mod tests {
                             until_head_literal(host);
                         } else {
                             while row(host, id).state == storage::InputState::Ready {
-                                assert!(Instant::now() < host.until, "the attempt starts");
+                                assert!(host.clock.now() < host.until, "the attempt starts");
                                 host.drain();
                                 host.advance();
-                                std::thread::sleep(Duration::from_millis(5));
+                                host.clock.advance(Duration::from_millis(5));
                             }
                             assert!(host.pty.offers.is_empty());
                         }
@@ -8427,7 +8467,7 @@ mod tests {
             #[test]
             fn queue_head_terminal_commit_survives_a_temporary_storage_failure_and_publishes_once()
             {
-                with_permission_host(Duration::from_secs(60), |host| {
+                with_contended_permission_host(Duration::from_secs(60), |host| {
                     let id = queued_for_a_moved_target(host);
                     let writer =
                         rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap();
@@ -8438,7 +8478,7 @@ mod tests {
                     };
                     while host.coordinator.finalization.is_none() {
                         assert!(
-                            Instant::now() < host.until,
+                            host.clock.now() < host.until,
                             "the busy terminal transaction becomes a pending finalization"
                         );
                         host.drain();
@@ -8520,7 +8560,7 @@ mod tests {
                         .unwrap();
                     let failure = loop {
                         assert!(
-                            Instant::now() < host.until,
+                            host.clock.now() < host.until,
                             "the permanent failure surfaces"
                         );
                         assert!(
@@ -8531,7 +8571,7 @@ mod tests {
                         if let Err(failure) = host.try_advance() {
                             break failure;
                         }
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                     };
                     assert!(
                         failure.source.message().contains("not authorized"),
@@ -8583,15 +8623,15 @@ mod tests {
                         .is_none_or(|head| head.attempt_deadline.is_none())
                     {
                         assert!(
-                            Instant::now() < host.until,
+                            host.clock.now() < host.until,
                             "the head starts its attempt budget"
                         );
                         host.drain();
                         host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
+                        host.clock.advance(Duration::from_millis(5));
                     }
                     host.coordinator.queue.front_mut().unwrap().attempt_deadline =
-                        Some(Instant::now() + Duration::from_millis(300));
+                        Some(host.clock.now() + Duration::from_millis(300));
                     drop(busy);
                     turns_until(host, |host| settled(host, id));
                     assert!(
@@ -8613,13 +8653,13 @@ mod tests {
                     let mut backdated = false;
                     while !settled(host, id) {
                         assert!(
-                            Instant::now() < host.until,
+                            host.clock.now() < host.until,
                             "the observer_unavailable attempt budget, not the 3-minute bound, settles the head"
                         );
                         host.controller
                             .observer_failed(
                                 crate::runtime::observation::ObservationFailure::Detector,
-                                &crate::time::SystemClock,
+                                host.clock.as_ref(),
                             )
                             .unwrap();
                         host.advance();
@@ -8628,10 +8668,10 @@ mod tests {
                             && head.attempt_deadline.is_some()
                         {
                             head.attempt_deadline =
-                                Some(Instant::now() + Duration::from_millis(300));
+                                Some(host.clock.now() + Duration::from_millis(300));
                             backdated = true;
                         }
-                        std::thread::sleep(Duration::from_millis(20));
+                        host.clock.advance(Duration::from_millis(20));
                     }
                     assert!(backdated, "the outage started the head's attempt budget");
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
@@ -8836,12 +8876,12 @@ mod tests {
                         host.show(SCREEN.to_vec());
                         while row(host, id).state == storage::InputState::Ready {
                             assert!(
-                                Instant::now() < host.until,
+                                host.clock.now() < host.until,
                                 "the deferred attempt starts on the verified empty composer"
                             );
                             host.drain();
                             host.advance();
-                            std::thread::sleep(Duration::from_millis(5));
+                            host.clock.advance(Duration::from_millis(5));
                         }
                         assert_eq!(row(host, id).state, storage::InputState::InProgress);
                         assert!(host.pty.offers.is_empty());
@@ -8932,6 +8972,7 @@ mod tests {
                 run_read: AtomicBool,
                 delay: Option<Instant>,
                 entered: AtomicBool,
+                clock: Arc<TestClock>,
             }
             fn observed_sql<T>(
                 conn: &mut Connection,
@@ -8964,10 +9005,7 @@ mod tests {
                             && !state.entered.swap(true, Ordering::SeqCst)
                             && let Some(until) = state.delay
                         {
-                            std::thread::sleep(
-                                until.saturating_duration_since(Instant::now())
-                                    + Duration::from_millis(1),
-                            );
+                            pass(until, &state.clock);
                         }
                         false
                     }),
@@ -8987,13 +9025,20 @@ mod tests {
                     Err(primary) => resume_unwind(primary),
                 }
             }
-            fn sql_state(delay: Option<Instant>) -> Arc<SqlObservation> {
+            fn sql_state(delay: Option<Instant>, clock: &Arc<TestClock>) -> Arc<SqlObservation> {
                 Arc::new(SqlObservation {
                     begins: AtomicUsize::new(0),
                     run_read: AtomicBool::new(false),
                     delay,
                     entered: AtomicBool::new(false),
+                    clock: clock.clone(),
                 })
+            }
+
+            fn pass(until: Instant, clock: &TestClock) {
+                clock.advance(
+                    until.saturating_duration_since(clock.now()) + Duration::from_millis(1),
+                );
             }
             fn timeout(conn: &Connection) -> i64 {
                 conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))
@@ -9016,7 +9061,7 @@ mod tests {
                     ))
                     .unwrap();
                     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
-                    let state = sql_state(None);
+                    let state = sql_state(None, &h.clock);
                     let until = h.until;
                     let coordinator = &mut h.coordinator;
                     let transport = &mut h.transport;
@@ -9063,14 +9108,14 @@ mod tests {
                     );
                     let result = loop {
                         assert!(
-                            Instant::now() < h.until,
+                            h.clock.now() < h.until,
                             "the released write completes in time"
                         );
                         h.drain();
                         if let Some(reply) = h.advance() {
                             break submitted(reply);
                         }
-                        std::thread::sleep(Duration::from_millis(5));
+                        h.clock.advance(Duration::from_millis(5));
                     };
                     assert!(matches!(result.status, SubmissionStatus::Accepted));
                     assert_eq!(result.input_id, Some(id));
@@ -9094,8 +9139,9 @@ mod tests {
                             .conn
                             .busy_timeout(Duration::from_millis(123))
                             .unwrap();
-                        let outer = Instant::now() + Duration::from_millis(50);
-                        let state = sql_state(during.then_some(outer));
+                        let outer = h.clock.now() + Duration::from_millis(50);
+                        let state = sql_state(during.then_some(outer), &h.clock);
+                        let clock = h.clock.clone();
                         let until = h.until;
                         let coordinator = &mut h.coordinator;
                         let transport = &mut h.transport;
@@ -9103,10 +9149,7 @@ mod tests {
                         let result = observed_sql(&mut h.fixture.conn, state.clone(), |conn| {
                             with_database_budget(conn, Deadline::until(outer), |conn| {
                                 if !during {
-                                    std::thread::sleep(
-                                        outer.saturating_duration_since(Instant::now())
-                                            + Duration::from_millis(1),
-                                    );
+                                    pass(outer, &clock);
                                 }
                                 match coordinator.acquire_write_guard(
                                     conn,
@@ -9148,7 +9191,7 @@ mod tests {
                         .conn
                         .busy_timeout(Duration::from_millis(321))
                         .unwrap();
-                    let outer = Instant::now() + Duration::from_millis(80);
+                    let outer = h.clock.now() + Duration::from_millis(80);
                     let until = h.until;
                     let coordinator = &mut h.coordinator;
                     let transport = &mut h.transport;
@@ -9165,10 +9208,8 @@ mod tests {
                         })
                         .unwrap();
                     assert_eq!(timeout(&h.fixture.conn), 321);
-                    std::thread::sleep(
-                        outer.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
-                    );
-                    assert!(Instant::now() < until);
+                    pass(outer, &h.clock);
+                    assert!(h.clock.now() < until);
                     let result =
                         h.transport
                             .write_programmatic(&mut h.pty, &encoded(), &mut guard, until);
@@ -9190,11 +9231,28 @@ mod tests {
 
         pub(in crate::runtime::input) mod support {
             use crate::runtime::input::tests::ordinary_prompt::*;
-            use crate::runtime::system::test_support::TestChild;
             use crate::runtime::writer::test_support::WriterFixture;
-            use std::process::Command;
-            use std::process::Stdio;
+            pub(in crate::runtime::input) use crate::runtime::writer::test_support::YieldingClock;
+            pub(in crate::runtime::input) use crate::time::Clock;
+            pub(in crate::runtime::input) use crate::time::test_support::TestClock;
             use std::sync::Mutex;
+
+            /// Yields until the writer has persisted every accepted event or reported a failure,
+            /// within a real-time bound, so a drain observes a settled sink.
+            pub(in crate::runtime::input) fn await_writer(writer: &EventWriter) {
+                let until = Instant::now() + Duration::from_secs(10);
+                loop {
+                    let status = writer.status();
+                    if status.pending_count == 0 || status.diagnostic.is_some() {
+                        return;
+                    }
+                    assert!(
+                        Instant::now() < until,
+                        "the event writer settles: {status:?}"
+                    );
+                    std::thread::yield_now();
+                }
+            }
 
             pub(super) const LITERAL: &str = "ordinary fixture λ";
             pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
@@ -9211,11 +9269,12 @@ mod tests {
                 hooks: Arc<dyn InputHooks>,
                 stage_settle: Duration,
                 purpose: &'static str,
+                clock: &Arc<TestClock>,
             ) -> InputServices {
                 InputServices {
                     catalog,
                     token_source: Box::new(PanicTokens(purpose)),
-                    clock: Arc::new(crate::time::SystemClock),
+                    clock: clock.clone(),
                     hooks,
                     stage_settle,
                 }
@@ -9277,14 +9336,14 @@ mod tests {
                 }
                 loop {
                     assert!(
-                        Instant::now() < host.until,
+                        host.clock.now() < host.until,
                         "the submission replies in time"
                     );
                     host.drain();
                     if let Some(reply) = host.advance() {
                         return submitted(reply);
                     }
-                    std::thread::sleep(Duration::from_millis(5));
+                    host.clock.advance(Duration::from_millis(5));
                 }
             }
 
@@ -9308,6 +9367,9 @@ mod tests {
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
                 pub(crate) stage_settle: Duration,
+                /// How far the host clock starts ahead of real time; zero for a test whose
+                /// storage contention must expire on the real-time database budget.
+                pub(crate) clock_lead: Duration,
             }
             pub(in crate::runtime::input) const TEST_STAGE_SETTLE: Duration =
                 Duration::from_millis(50);
@@ -9319,6 +9381,7 @@ mod tests {
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
                         stage_settle: TEST_STAGE_SETTLE,
+                        clock_lead: crate::runtime::test_support::VIRTUAL_LEAD,
                     }
                 }
             }
@@ -9415,6 +9478,7 @@ mod tests {
                 program_offset: usize,
                 database_url: String,
                 hooks: Arc<Hooks>,
+                clock: Arc<TestClock>,
             }
             impl Pty {
                 pub(crate) fn expect_program(&mut self, bytes: Vec<u8>) {
@@ -9460,7 +9524,7 @@ mod tests {
                             "a programmatic stage writes only for an in-progress reservation"
                         );
                         assert!(self.hooks.count("before") > 0);
-                        self.stages.push((Instant::now(), bytes.to_vec()));
+                        self.stages.push((self.clock.now(), bytes.to_vec()));
                         let accepted = self.short.unwrap_or(bytes.len()).min(bytes.len());
                         self.written.extend_from_slice(&bytes[..accepted]);
                         if belongs_to_program {
@@ -9493,16 +9557,6 @@ mod tests {
                 input.chunks.push_back(bytes.to_vec());
             }
 
-            pub(in crate::runtime::input) struct Child {
-                native: TestChild,
-                until: Instant,
-            }
-            impl Drop for Child {
-                fn drop(&mut self) {
-                    self.native.terminate_until(self.until);
-                }
-            }
-
             pub(in crate::runtime::input) struct RunSelection<'a> {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'a str,
@@ -9526,7 +9580,8 @@ mod tests {
             }
 
             /// A run owned by this process as its runner, with a started writer, observation
-            /// controller and transport over a live `/bin/cat` native child.
+            /// controller and transport on one virtual clock; this process stands in as the
+            /// recorded native child.
             pub(in crate::runtime::input) struct RunnerFixture {
                 pub(crate) fixture: Fixture,
                 pub(crate) artifacts: RunArtifacts,
@@ -9534,7 +9589,7 @@ mod tests {
                 pub(crate) writer: EventWriter,
                 pub(crate) controller: ObservationController,
                 pub(crate) transport: Transport,
-                pub(crate) child: Child,
+                pub(crate) clock: Arc<TestClock>,
                 pub(crate) until: Instant,
             }
 
@@ -9545,6 +9600,7 @@ mod tests {
                     size: TerminalSize,
                     limits: TransportLimits,
                     until: Instant,
+                    clock_lead: Duration,
                 ) -> Self {
                     let mut writer_fixture = WriterFixture::new();
                     let fixture = &mut writer_fixture.fixture;
@@ -9562,12 +9618,15 @@ mod tests {
                             .unwrap();
                     }
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                    let budget = until.saturating_duration_since(Instant::now());
+                    let clock = Arc::new(TestClock::starting_at(Instant::now() + clock_lead));
+                    let until = clock.now() + budget;
                     let mut controller = ObservationController::new(&fixture.run, catalog).unwrap();
                     let mut writer = EventWriter::start_with_hooks(
                         format!("sqlite:///{}", writer_fixture.fixture.conn.path().unwrap()),
                         writer_fixture.fixture.run.clone(),
                         writer_fixture.lock.clone(),
-                        std::sync::Arc::new(crate::time::SystemClock),
+                        Arc::new(YieldingClock(clock.clone())),
                         Arc::new(InputFixtureWriterHooks),
                     )
                     .unwrap();
@@ -9577,34 +9636,13 @@ mod tests {
                         artifacts,
                         lock,
                     } = writer_fixture;
-                    let child = Child {
-                        native: TestChild::new(
-                            Command::new("/bin/cat")
-                                .stdin(Stdio::piped())
-                                .stdout(Stdio::null())
-                                .stderr(Stdio::null())
-                                .spawn()
-                                .unwrap(),
-                        ),
-                        until,
-                    };
-                    let identity = ProcessIdentity::read(i64::from(child.native.id()))
-                        .unwrap()
-                        .expect("owned live child");
-                    assert!(identity.matches().unwrap());
-                    fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
+                    let identity = ProcessIdentity::current().unwrap();
+                    fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,clock.wall_stamp(),fixture.run.run_id]).unwrap();
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                     assert_eq!(fixture.run.status, storage::RunStatus::Running);
-                    let transport =
-                        Transport::new(size, limits, std::sync::Arc::new(crate::time::SystemClock))
-                            .unwrap();
+                    let transport = Transport::new(size, limits, clock.clone()).unwrap();
                     controller
-                        .started(
-                            &fixture.run,
-                            &transport.snapshot(),
-                            &writer,
-                            &crate::time::SystemClock,
-                        )
+                        .started(&fixture.run, &transport.snapshot(), &writer, clock.as_ref())
                         .unwrap();
                     Self {
                         fixture,
@@ -9613,27 +9651,24 @@ mod tests {
                         writer,
                         controller,
                         transport,
-                        child,
+                        clock,
                         until,
                     }
                 }
 
                 pub(crate) fn finish(&mut self) {
-                    finish_runner(&mut self.writer, &mut self.child, self.until);
+                    finish_writer(&mut self.writer, self.until);
                 }
             }
 
-            fn finish_runner(writer: &mut EventWriter, child: &mut Child, until: Instant) {
+            fn finish_writer(writer: &mut EventWriter, until: Instant) {
                 let counts = writer.finish(until);
                 let status = writer.status();
-                child.native.terminate_until(until);
-                let reaped = child.native.try_wait();
                 assert_eq!(counts, (0, 0), "writer cleanup: {status:?}");
                 assert!(
                     status.diagnostic.is_none(),
                     "writer finish confirms join or reports degradation: {status:?}"
                 );
-                assert!(reaped.unwrap().is_some(), "owned native child was reaped");
             }
 
             pub(in crate::runtime::input) struct Host {
@@ -9654,7 +9689,7 @@ mod tests {
                 confirmation_programs: std::collections::VecDeque<Vec<u8>>,
                 confirmed_bytes: usize,
                 expires: u64,
-                child: Child,
+                pub(crate) clock: Arc<TestClock>,
             }
 
             impl Host {
@@ -9712,15 +9747,13 @@ mod tests {
                         Instant::now() < until,
                         "original fixture construction deadline"
                     );
-                    let expires = InputExpiration::capture(until, &crate::time::SystemClock)
-                        .unwrap()
-                        .monotonic_ns();
                     let HostProfile {
                         backend,
                         native_version,
                         size,
                         screen,
                         stage_settle,
+                        clock_lead,
                     } = profile;
                     let catalog = catalog();
                     let composer_selected =
@@ -9733,7 +9766,7 @@ mod tests {
                         writer,
                         controller,
                         transport,
-                        child,
+                        clock,
                         until,
                     } = RunnerFixture::new(
                         &catalog,
@@ -9748,7 +9781,11 @@ mod tests {
                             bytes_per_tick: 4096,
                         },
                         until,
+                        clock_lead,
                     );
+                    let expires = InputExpiration::capture(until, clock.as_ref())
+                        .unwrap()
+                        .monotonic_ns();
                     let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
                     let hooks = Arc::new(Hooks {
                         points: Mutex::new(Vec::new()),
@@ -9758,7 +9795,13 @@ mod tests {
                         &mut fixture.conn,
                         &fixture.run,
                         lock,
-                        services(catalog, hooks.clone(), stage_settle, "ordinary Prompt"),
+                        services(
+                            catalog,
+                            hooks.clone(),
+                            stage_settle,
+                            "ordinary Prompt",
+                            &clock,
+                        ),
                         until,
                     )
                     .unwrap();
@@ -9776,6 +9819,7 @@ mod tests {
                         program_offset: 0,
                         database_url: url,
                         hooks: hooks.clone(),
+                        clock: clock.clone(),
                     };
                     let mut host = Self {
                         fixture,
@@ -9795,7 +9839,7 @@ mod tests {
                         confirmation_programs: std::collections::VecDeque::new(),
                         confirmed_bytes: 0,
                         expires,
-                        child,
+                        clock,
                     };
                     host.drain();
                     if composer_selected {
@@ -9838,14 +9882,15 @@ mod tests {
                 pub(crate) fn drain(&mut self) {
                     loop {
                         assert!(
-                            Instant::now() < self.until,
+                            self.clock.now() < self.until,
                             "actual fixture becomes healthy and quiescent within its original deadline"
                         );
+                        await_writer(&self.writer);
                         self.controller
                             .poll(
                                 &self.transport.snapshot(),
                                 &self.writer,
-                                &crate::time::SystemClock,
+                                self.clock.as_ref(),
                             )
                             .unwrap();
                         let result = self
@@ -9857,7 +9902,7 @@ mod tests {
                                     &mut self.output,
                                     &mut self
                                         .controller
-                                        .observer(&self.writer, &crate::time::SystemClock),
+                                        .observer(&self.writer, self.clock.as_ref()),
                                     self.until,
                                 )
                             })
@@ -9865,7 +9910,7 @@ mod tests {
                         if matches!(result, InputDrain::Quiescent) {
                             return;
                         }
-                        std::thread::sleep(Duration::from_millis(1));
+                        self.clock.sleep(Duration::from_millis(1));
                     }
                 }
                 pub(crate) fn advance(&mut self) -> Option<InputControlReply> {
@@ -9928,12 +9973,12 @@ mod tests {
                     request: InputControlRequest,
                     deadline: Instant,
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
-                    let deadline = check_deadline(Instant::now(), deadline)
+                    let deadline = check_deadline(self.clock.now(), deadline)
                         .and_then(|()| {
                             crate::runtime::receive_input_expiration(
                                 request.expires_at_mono_ns,
-                                Instant::now(),
-                                &crate::time::SystemClock,
+                                self.clock.now(),
+                                self.clock.as_ref(),
                             )
                         })
                         .map(|received| received.min(deadline))
@@ -10011,7 +10056,7 @@ mod tests {
                     panic!("real reservation and BeforeWrite reach Armed within finite turns");
                 }
                 pub(crate) fn finish(&mut self) {
-                    finish_runner(&mut self.writer, &mut self.child, self.until);
+                    finish_writer(&mut self.writer, self.until);
                 }
                 pub(crate) fn placement(&self) -> crate::broker::Placement {
                     crate::broker::get_member(
@@ -10030,9 +10075,7 @@ mod tests {
                                 &mut self.human,
                                 &mut self.pty,
                                 &mut self.output,
-                                &mut self
-                                    .controller
-                                    .observer(&self.writer, &crate::time::SystemClock),
+                                &mut self.controller.observer(&self.writer, self.clock.as_ref()),
                                 self.until,
                             )
                         })
@@ -10099,6 +10142,7 @@ mod tests {
         use crate::runtime::input::tests::ordinary_prompt::support::catalog_definition;
         use crate::runtime::input::tests::ordinary_prompt::support::with_profile_host;
         use crate::runtime::input::*;
+        use crate::time::Clock as _;
         use rusqlite::OptionalExtension;
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::AtomicUsize;
@@ -10263,10 +10307,10 @@ mod tests {
                     return ids;
                 }
                 assert!(
-                    Instant::now() < h.until,
+                    h.clock.now() < h.until,
                     "stable actual request within original fixture deadline"
                 );
-                std::thread::sleep(Duration::from_millis(2));
+                h.clock.advance(Duration::from_millis(2));
             }
         }
 
@@ -10616,7 +10660,7 @@ mod tests {
                 let original = token(&inspect(h, ids));
                 let before = input_rows(h);
                 h.drain();
-                assert!(inspect_request(h, request(h, ids), Instant::now()).is_err());
+                assert!(inspect_request(h, request(h, ids), h.clock.now()).is_err());
                 h.fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",rusqlite::params![crate::time::now_stamp(),ids.1]).unwrap();
                 h.drain();
                 assert!(inspect_request(h, request(h, ids), h.until).is_err());
@@ -10684,10 +10728,7 @@ mod tests {
                 let original = token(&inspect(h, ids));
                 let generation = h.controller.request_generation();
                 h.controller
-                    .observer_failed(
-                        crate::runtime::ObservationFailure::Parser,
-                        &crate::time::SystemClock,
-                    )
+                    .observer_failed(crate::runtime::ObservationFailure::Parser, h.clock.as_ref())
                     .unwrap();
                 assert!(h.controller.current_request().is_none());
                 assert!(h.controller.request_generation() > generation);
@@ -10732,6 +10773,7 @@ mod tests {
         use crate::runtime::input::tests::permission_inspection_contracts::with_definition;
         use crate::runtime::input::tests::permission_inspection_contracts::with_inspection;
         use crate::runtime::input::*;
+        use crate::time::Clock as _;
         use std::sync::atomic::Ordering;
         use std::time::Duration;
 
@@ -10869,7 +10911,7 @@ mod tests {
                             &mut h.human,
                             &mut h.pty,
                             &mut h.output,
-                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
+                            &mut h.controller.observer(&h.writer, h.clock.as_ref()),
                             h.until,
                         )
                     })
@@ -11015,10 +11057,10 @@ mod tests {
                             storage::InputState::Accepted | storage::InputState::Settled
                         )
                     }) {
-                        assert!(Instant::now() < h.until, "the queued inputs drain in time");
+                        assert!(h.clock.now() < h.until, "the queued inputs drain in time");
                         h.drain();
                         h.advance();
-                        std::thread::sleep(Duration::from_millis(5));
+                        h.clock.advance(Duration::from_millis(5));
                     }
                     for _ in 0..20 {
                         h.drain();
@@ -11385,10 +11427,10 @@ mod tests {
                         return ids;
                     }
                     assert!(
-                        Instant::now() < h.until,
+                        h.clock.now() < h.until,
                         "the question opens within the fixture deadline"
                     );
-                    std::thread::sleep(Duration::from_millis(2));
+                    h.clock.advance(Duration::from_millis(2));
                 }
             }
 
@@ -11731,8 +11773,8 @@ mod tests {
                 loop {
                     h.drain();
                     match h.try_advance() {
-                        Ok(None) if Instant::now() >= until => return Ok(None),
-                        Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+                        Ok(None) if h.clock.now() >= until => return Ok(None),
+                        Ok(None) => h.clock.advance(Duration::from_millis(2)),
                         Ok(Some(reply)) => return Ok(Some(response(reply))),
                         Err(failure) => return Err(failure),
                     }
@@ -11782,8 +11824,8 @@ mod tests {
                     .unwrap()
             }
 
-            fn soon(millis: u64) -> Instant {
-                Instant::now() + Duration::from_millis(millis)
+            fn soon(h: &Host, millis: u64) -> Instant {
+                h.clock.now() + Duration::from_millis(millis)
             }
 
             // Writes deny stages one and two on the synthetic form, leaving the response open.
@@ -11872,7 +11914,7 @@ mod tests {
             fn gated_first_stage_is_never_written_while_its_focus_gate_is_unmet() {
                 with_gated(|h, _| {
                     let ids = gated_form(h, "deny");
-                    let deadline = soon(600);
+                    let deadline = soon(h, 600);
                     let inspected = inspect(h, ids);
                     let input = command(h, &inspected, PermissionDecision::Allow);
                     let outcome = match h.respond_until(&input, deadline) {
@@ -11893,7 +11935,7 @@ mod tests {
             fn gated_stage_waits_while_the_previous_focus_persists_until_the_deadline() {
                 with_gated(|h, _| {
                     let ids = gated_form(h, "allow");
-                    let deadline = soon(900);
+                    let deadline = soon(h, 900);
                     admit(h, ids, PermissionDecision::Deny, deadline);
                     write_stage(h, 1);
                     let waiting = settle(h, deadline - Duration::from_millis(150));
@@ -11934,7 +11976,7 @@ mod tests {
                 ] {
                     with_gated(|h, _| {
                         let ids = gated_form(h, "allow");
-                        let deadline = soon(3000);
+                        let deadline = soon(h, 3000);
                         admit(h, ids, PermissionDecision::Deny, deadline);
                         write_stage(h, 1);
                         h.show(screen);
@@ -11965,24 +12007,24 @@ mod tests {
                         h.controller
                             .observer_failed(
                                 crate::runtime::ObservationFailure::Parser,
-                                &crate::time::SystemClock,
+                                h.clock.as_ref(),
                             )
                             .unwrap();
                     }),
                     ("the episode closing", |h| {
                         h.show(IDLE_COMPOSER.to_vec());
-                        std::thread::sleep(Duration::from_millis(300));
+                        h.clock.advance(Duration::from_millis(300));
                         h.drain();
                     }),
                     ("a different episode", |h| {
                         h.show(gated_fixture_form("PRIVATE_OTHER_OPERATION", "deny"));
-                        std::thread::sleep(Duration::from_millis(150));
+                        h.clock.advance(Duration::from_millis(150));
                         h.drain();
                     }),
                 ];
                 for (case, disturb) in cases {
                     with_gated(|h, _| {
-                        let deadline = soon(2500);
+                        let deadline = soon(h, 2500);
 
                         deny_through_stage_two(h, deadline);
                         disturb(h);
@@ -12005,7 +12047,7 @@ mod tests {
             #[test]
             fn gated_continuation_with_a_reason_never_satisfies_the_screen_gate() {
                 with_gated(|h, _| {
-                    let deadline = soon(1500);
+                    let deadline = soon(h, 1500);
                     deny_through_stage_two(h, deadline);
                     h.show(gated_reason_dialog(Some("typed reason")));
                     let outcome = settle(h, deadline + Duration::from_millis(500));
@@ -12027,7 +12069,7 @@ mod tests {
                     assert!(token.is_some());
                     let before = events(h);
                     h.show(gated_reason_dialog(None));
-                    std::thread::sleep(Duration::from_millis(150));
+                    h.clock.advance(Duration::from_millis(150));
                     h.drain();
                     let reason = blocked_reason(h, ids);
                     assert!(!reason.is_empty());
@@ -12158,7 +12200,7 @@ mod tests {
                         ),
                     ));
                     let ids = settled_ids(h);
-                    let deadline = soon(3000);
+                    let deadline = soon(h, 3000);
                     admit(h, ids, PermissionDecision::Deny, deadline);
                     write_stage(h, 1);
                     h.show(opencode_screen(
@@ -12211,7 +12253,7 @@ mod tests {
                         116,
                     ));
                     let ids = settled_ids(h);
-                    let deadline = soon(3000);
+                    let deadline = soon(h, 3000);
                     admit(h, ids, PermissionDecision::Deny, deadline);
                     write_stage(h, 1);
                     let generation = h.controller.request_generation();
@@ -12254,7 +12296,7 @@ mod tests {
                             "opencode-2.1.4-deny-pre-stage-3",
                         ),
                     ));
-                    std::thread::sleep(Duration::from_millis(150));
+                    h.clock.advance(Duration::from_millis(150));
                     h.drain();
                     blocked_reason(h, ids);
                     assert!(interaction_open(h, ids.1));
@@ -12332,8 +12374,9 @@ mod tests {
 
         #[test]
         fn completed_coordinator_settlement_and_retirement_exceeds_cache_capacity_without_replay() {
-            let until = Instant::now() + Duration::from_secs(30);
-            with_host_until(until, |h| {
+            let budget = Instant::now() + Duration::from_secs(30);
+            with_host_until(budget, |h| {
+                let until = h.until;
                 let run = h.fixture.run.clone();
                 let first_key = "prompt:capacity:0";
                 let first_request = h.request(first_key);
@@ -12353,7 +12396,7 @@ mod tests {
                         assert_eq!(h.coordinator.operations.len(), RECEIPT_CACHE_CAPACITY);
                         let overflow = h.request("prompt:capacity:overflow");
                         assert!(
-                            h.handle_until(overflow, until).is_err(),
+                            h.handle_until(overflow, h.until).is_err(),
                             "a full receipt cache refuses a new input"
                         );
                         assert!(

@@ -2229,130 +2229,117 @@ mod tests {
                 scenario.views()
             }
 
-            fn assert_multiplexer(views: &Views, rows: [&str; 2], code: i32) {
-                assert_eq!(views.text[..2], rows);
-                views.assert_exit(code);
-            }
-
             #[test]
-            fn a_shared_server_reports_info_multiplexer_and_warn_caller_pane() {
-                let detail = shared_server_message(&codex_daemon());
-                assert_multiplexer(
-                    &views_with(|| CallerReading::SharedServer {
-                        label: codex_daemon().label,
-                        pid: codex_daemon().pid,
-                        message: shared_server_message(&codex_daemon()),
-                    }),
-                    [
-                        "info multiplexer: not checked: a shared codex app-server server (pid 407596) supplies the caller environment",
-                        &format!("warn multiplexer.caller_pane: {detail}"),
-                    ],
-                    0,
-                );
-            }
-
-            #[test]
-            fn an_unavailable_multiplexer_reports_error_and_an_unavailable_caller_pane() {
-                assert_multiplexer(
-                    &views_with(|| {
-                        CallerReading::Unavailable(CafleetError::App(NO_MULTIPLEXER.into()))
-                    }),
-                    [
-                        &format!("error multiplexer: {NO_MULTIPLEXER}"),
-                        "info multiplexer.caller_pane: unavailable: the multiplexer is unavailable",
-                    ],
-                    1,
-                );
-            }
-
-            #[test]
-            fn an_unset_env_pane_warns_with_the_unset_message() {
-                let detail = unset_message(MuxBackend::Tmux);
-                assert_multiplexer(
-                    &views_with(|| CallerReading::Resolved {
-                        name: "tmux",
-                        server: TMUX_SOCKET.to_string(),
-                        pane: Ok(PaneReading::Unverified {
-                            detail: unset_message(MuxBackend::Tmux),
-                        }),
-                    }),
-                    [
-                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
-                        &format!("warn multiplexer.caller_pane: {detail}"),
-                    ],
-                    0,
-                );
-            }
-
-            #[test]
-            fn a_refused_env_pane_warns_with_the_unverified_message() {
-                let detail = unverified_detail();
-                assert_multiplexer(
-                    &views_with(|| CallerReading::Resolved {
-                        name: "tmux",
-                        server: TMUX_SOCKET.to_string(),
-                        pane: Ok(PaneReading::Unverified {
-                            detail: unverified_detail(),
-                        }),
-                    }),
-                    [
-                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
-                        &format!("warn multiplexer.caller_pane: {detail}"),
-                    ],
-                    0,
-                );
-            }
-
-            #[test]
-            fn a_verified_pane_reports_its_context() {
-                assert_multiplexer(
-                    &views_with(verified_caller),
-                    [
-                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
-                        "ok multiplexer.caller_pane: TMUX_PANE=%1 session=main window=@1",
-                    ],
-                    0,
-                );
-            }
-
-            #[test]
-            fn a_propagated_pane_error_reports_error_caller_pane_and_fails() {
-                assert_multiplexer(
-                    &views_with(|| CallerReading::Resolved {
-                        name: "tmux",
-                        server: TMUX_SOCKET.to_string(),
-                        pane: Err(CafleetError::App(PANE_READ_FAILURE.into())),
-                    }),
-                    [
-                        &format!("ok multiplexer: tmux server={TMUX_SOCKET}"),
-                        &format!("error multiplexer.caller_pane: {PANE_READ_FAILURE}"),
-                    ],
-                    1,
-                );
-            }
-
-            #[test]
-            fn a_herdr_verified_pane_names_herdr_pane_id() {
-                let views = views_with(|| CallerReading::Resolved {
-                    name: "herdr",
-                    server: "default".to_string(),
-                    pane: Ok(PaneReading::Verified {
-                        variable: "HERDR_PANE_ID",
-                        context: MultiplexerContext {
-                            session: "w4".into(),
-                            window_id: "w4:t1".into(),
-                            pane_id: "w4:p3N".into(),
+            fn the_caller_reading_decides_the_multiplexer_and_caller_pane_rows_and_exit() {
+                let tmux = format!("ok multiplexer: tmux server={TMUX_SOCKET}");
+                type CallerCase = (&'static str, fn() -> CallerReading, [String; 2], i32);
+                let cases: [CallerCase; 7] = [
+                    (
+                        "shared server",
+                        || CallerReading::SharedServer {
+                            label: codex_daemon().label,
+                            pid: codex_daemon().pid,
+                            message: shared_server_message(&codex_daemon()),
                         },
-                    }),
-                });
-                assert_multiplexer(
-                    &views,
-                    [
-                        "ok multiplexer: herdr server=default",
-                        "ok multiplexer.caller_pane: HERDR_PANE_ID=w4:p3N session=w4 window=w4:t1",
-                    ],
-                    0,
-                );
+                        [
+                            "info multiplexer: not checked: a shared codex app-server server (pid 407596) supplies the caller environment".into(),
+                            format!(
+                                "warn multiplexer.caller_pane: {}",
+                                shared_server_message(&codex_daemon())
+                            ),
+                        ],
+                        0,
+                    ),
+                    (
+                        "unavailable multiplexer",
+                        || CallerReading::Unavailable(CafleetError::App(NO_MULTIPLEXER.into())),
+                        [
+                            format!("error multiplexer: {NO_MULTIPLEXER}"),
+                            "info multiplexer.caller_pane: unavailable: the multiplexer is unavailable".into(),
+                        ],
+                        1,
+                    ),
+                    (
+                        "unset env pane",
+                        || CallerReading::Resolved {
+                            name: "tmux",
+                            server: TMUX_SOCKET.to_string(),
+                            pane: Ok(PaneReading::Unverified {
+                                detail: unset_message(MuxBackend::Tmux),
+                            }),
+                        },
+                        [
+                            tmux.clone(),
+                            format!(
+                                "warn multiplexer.caller_pane: {}",
+                                unset_message(MuxBackend::Tmux)
+                            ),
+                        ],
+                        0,
+                    ),
+                    (
+                        "refused env pane",
+                        || CallerReading::Resolved {
+                            name: "tmux",
+                            server: TMUX_SOCKET.to_string(),
+                            pane: Ok(PaneReading::Unverified {
+                                detail: unverified_detail(),
+                            }),
+                        },
+                        [
+                            tmux.clone(),
+                            format!("warn multiplexer.caller_pane: {}", unverified_detail()),
+                        ],
+                        0,
+                    ),
+                    (
+                        "verified tmux pane",
+                        verified_caller,
+                        [
+                            tmux.clone(),
+                            "ok multiplexer.caller_pane: TMUX_PANE=%1 session=main window=@1".into(),
+                        ],
+                        0,
+                    ),
+                    (
+                        "propagated pane error",
+                        || CallerReading::Resolved {
+                            name: "tmux",
+                            server: TMUX_SOCKET.to_string(),
+                            pane: Err(CafleetError::App(PANE_READ_FAILURE.into())),
+                        },
+                        [
+                            tmux.clone(),
+                            format!("error multiplexer.caller_pane: {PANE_READ_FAILURE}"),
+                        ],
+                        1,
+                    ),
+                    (
+                        "verified herdr pane",
+                        || CallerReading::Resolved {
+                            name: "herdr",
+                            server: "default".to_string(),
+                            pane: Ok(PaneReading::Verified {
+                                variable: "HERDR_PANE_ID",
+                                context: MultiplexerContext {
+                                    session: "w4".into(),
+                                    window_id: "w4:t1".into(),
+                                    pane_id: "w4:p3N".into(),
+                                },
+                            }),
+                        },
+                        [
+                            "ok multiplexer: herdr server=default".into(),
+                            "ok multiplexer.caller_pane: HERDR_PANE_ID=w4:p3N session=w4 window=w4:t1".into(),
+                        ],
+                        0,
+                    ),
+                ];
+                for (name, caller, rows, code) in cases {
+                    let views = views_with(caller);
+                    assert_eq!(views.text[..2], rows, "{name}");
+                    views.assert_exit(code);
+                }
             }
         }
 

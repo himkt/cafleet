@@ -2569,7 +2569,6 @@ pub(crate) mod test_support {
         Host::new(Instant::now() + Duration::from_secs(2))
     }
 
-
     pub(crate) fn rows(conn: &Connection) -> Vec<TableSnapshot> {
         crate::db::test_support::table_snapshot(conn, |_| true)
     }

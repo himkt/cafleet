@@ -809,7 +809,14 @@ pub(super) fn press(
     json: bool,
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
-    let acknowledgment = crate::runtime::press_member(conn, settings, member_id, keys, deadline)?;
+    let acknowledgment = crate::runtime::press_member(
+        conn,
+        settings,
+        member_id,
+        keys,
+        deadline,
+        &crate::time::SystemClock,
+    )?;
     emit(
         json,
         &crate::output::json::member_press(&acknowledgment),
@@ -1256,13 +1263,10 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_member_deletion_terminal_no_work_finishes_under_the_original_guard() {
-            run_case("terminal");
-        }
-
-        #[test]
-        fn runner_recovery_member_deletion_foreign_epoch_after_close_preserves_registration() {
-            run_case("epoch");
+        fn runner_recovery_member_deletion_finishes_terminal_work_and_preserves_a_foreign_epoch() {
+            for scenario in ["terminal", "epoch"] {
+                run_case(scenario);
+            }
         }
 
         fn run_case(scenario: &str) {
@@ -1993,23 +1997,15 @@ mod tests {
     }
 
     #[test]
-    fn over_limit_dispatch_prompt_plain_names_the_command_before_the_complete_cause() {
-        assert_over_limit_dispatch("prompt", "plain");
-    }
-
-    #[test]
-    fn over_limit_dispatch_exec_plain_counts_its_prefix_and_names_the_command() {
-        assert_over_limit_dispatch("exec", "plain");
-    }
-
-    #[test]
-    fn over_limit_dispatch_prompt_disabled_paste_names_the_command_and_character_limit() {
-        assert_over_limit_dispatch("prompt", "bracketed_paste");
-    }
-
-    #[test]
-    fn over_limit_dispatch_exec_disabled_paste_counts_its_prefix_in_the_character_limit() {
-        assert_over_limit_dispatch("exec", "bracketed_paste");
+    fn over_limit_dispatch_names_the_command_counts_its_prefix_and_states_the_limit_cause() {
+        for (action, framing) in [
+            ("prompt", "plain"),
+            ("exec", "plain"),
+            ("prompt", "bracketed_paste"),
+            ("exec", "bracketed_paste"),
+        ] {
+            assert_over_limit_dispatch(action, framing);
+        }
     }
 
     #[test]

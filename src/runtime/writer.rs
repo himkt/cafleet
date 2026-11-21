@@ -346,39 +346,38 @@ impl Worker {
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::writer::test_support::WriterFixture;
-    use crate::runtime::writer::test_support::deadline;
-    use crate::runtime::writer::test_support::transition;
+    use crate::runtime::writer::test_support::*;
     use crate::runtime::writer::*;
+    use crate::time::Clock;
+    use crate::time::test_support::TestClock;
     use std::time::Duration;
 
-    mod supplied_connection_compaction {}
+    fn clock() -> Arc<TestClock> {
+        crate::runtime::test_support::virtual_clock()
+    }
 
-    mod terminal_tail {}
-
-    use crate::runtime::writer::test_support::*;
-
-    mod refresh {}
+    fn until(clock: &TestClock) -> Instant {
+        clock.now() + Duration::from_secs(2)
+    }
 
     mod worker {
         use crate::runtime::writer::tests::*;
         #[test]
         fn writer_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
+            let hooks = Arc::new(Hooks::on_virtual_time());
             hooks.pause(WriterBoundary::Receive);
-            let mut writer = start(&fixture, hooks.clone());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
             hooks.wait(WriterBoundary::Receive, 1);
             for sequence in 1..=64 {
                 assert!(writer.try_submit(transition(&fixture, sequence)).is_ok());
             }
             let original = transition(&fixture, 65);
-            let begin = Instant::now();
             let rejected = writer
                 .try_submit(original.clone())
                 .expect_err("channel pressure returns the original");
-            assert!(begin.elapsed() < Duration::from_millis(250));
             assert_eq!(rejected.transition, original);
             let status = writer.status();
             assert_eq!(status.pending_count, 64);
@@ -386,21 +385,25 @@ mod tests {
             assert!(status.gap_count > 0);
             assert_eq!(committed(&fixture), 0);
             drop(release);
-            wait_until(|| writer.status().pending_count == 0);
+            yield_until(|| writer.status().pending_count == 0);
             assert_eq!(committed(&fixture), 64);
-            assert_eq!(writer.finish(deadline()).0, 0);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
         }
 
         #[test]
         fn writer_worker_database_failure_retains_the_same_transition_for_retry() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
+            let hooks = Arc::new(Hooks::on_virtual_time());
             hooks.fail_once(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let _release = Release(hooks);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let _release = Release(hooks.clone());
             let original = transition(&fixture, 1);
             assert!(writer.try_submit(original.clone()).is_ok());
-            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            yield_until(|| writer.status().diagnostic.is_some());
+            assert_eq!(committed(&fixture), 0, "the retry waits for its backoff");
+            clock.advance(Duration::from_millis(100));
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
             assert_eq!(
                 storage::get_event(&fixture.fixture.conn, 1)
                     .unwrap()
@@ -409,17 +412,18 @@ mod tests {
                 original.evidence_json
             );
             assert_eq!(committed(&fixture), 1);
-            assert_eq!(writer.finish(deadline()).0, 0);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
         }
 
         #[test]
         fn writer_commits_each_submitted_transition_directly_with_its_event_sequence() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let mut writer = start(&fixture, Arc::new(Hooks::default()));
+            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
             for sequence in 1..=3 {
                 assert!(writer.try_submit(transition(&fixture, sequence)).is_ok());
             }
-            wait_until(|| committed(&fixture) == 3 && writer.status().pending_count == 0);
+            yield_until(|| committed(&fixture) == 3 && writer.status().pending_count == 0);
             let sequences: Vec<i64> = fixture
                 .fixture
                 .conn
@@ -433,33 +437,42 @@ mod tests {
                 .unwrap();
             assert_eq!(sequences, [1, 2, 3]);
             assert!(writer.status().diagnostic.is_none());
-            assert_eq!(writer.finish(deadline()).0, 0);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
         }
 
         #[test]
         fn writer_retry_exhaustion_reports_a_degraded_status_and_keeps_the_transition() {
-            let fixture = WriterFixture::new();
-            fixture
-                .fixture
-                .conn
-                .execute_batch(
-                    "CREATE TRIGGER injected_event_failure BEFORE INSERT ON member_runtime_events BEGIN SELECT RAISE(ABORT,'injected event failure'); END",
-                )
-                .unwrap();
-            let writer = start(&fixture, Arc::new(Hooks::default()));
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            crate::db::test_support::FaultPlan::Abort {
+                trigger: "injected_event_failure",
+                on: "BEFORE INSERT ON member_runtime_events",
+                message: "injected event failure",
+            }
+            .arm(&mut fixture.fixture.conn);
+            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
             assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
-            wait_until(|| writer.status().diagnostic.is_some());
+            yield_until(|| writer.status().diagnostic.is_some());
             let status = writer.status();
             assert_eq!(status.pending_count, 1, "{status:?}");
             assert_eq!(committed(&fixture), 0);
+            let until = until(&clock);
+            writer.begin_shutdown(until);
+            clock.advance(Duration::from_secs(2));
+            assert_eq!(
+                writer.finish(until).0,
+                1,
+                "the unsaved transition stays counted"
+            );
         }
 
         #[test]
         fn writer_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
+            let hooks = Arc::new(Hooks::on_virtual_time());
             hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
             assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
             hooks.wait(WriterBoundary::Persist, 1);
@@ -477,13 +490,16 @@ mod tests {
             assert_eq!(writer.status().pending_count, accepted);
             assert!(writer.status().diagnostic.is_some());
             drop(release);
-            wait_until(|| writer.status().pending_count == 0);
+            yield_until(|| writer.status().pending_count == 0);
             assert_eq!(committed(&fixture), i64::try_from(accepted).unwrap());
-            assert_eq!(writer.finish(deadline()).0, 0);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
         }
     }
 
-    fn assert_start_rejected(fixture: &WriterFixture) {
+    #[test]
+    fn writer_stale_owner_is_rejected_before_worker_start() {
+        let mut fixture = WriterFixture::new();
+        fixture.fixture.run.owner_epoch += 1;
         let result = fixture.start();
         let rejected = result.is_err();
         if let Ok(mut writer) = result {
@@ -493,13 +509,6 @@ mod tests {
             rejected,
             "writer startup validates the run owner before accepting work"
         );
-    }
-
-    #[test]
-    fn writer_stale_owner_is_rejected_before_worker_start() {
-        let mut fixture = WriterFixture::new();
-        fixture.fixture.run.owner_epoch += 1;
-        assert_start_rejected(&fixture);
     }
 }
 
@@ -522,6 +531,10 @@ pub(crate) mod test_support {
     use crate::broker::runtime::*;
     use crate::runtime::test_support::Fixture;
     use crate::runtime::writer::*;
+    use crate::time::Clock;
+    use crate::time::ClockKind;
+    use crate::time::MonotonicSample;
+    use crate::time::test_support::TestClock;
     use std::sync::Condvar;
     pub(crate) fn index(boundary: WriterBoundary) -> usize {
         match boundary {
@@ -541,8 +554,17 @@ pub(crate) mod test_support {
     pub(crate) struct Hooks {
         pub(crate) state: Mutex<HookState>,
         pub(crate) changed: Condvar,
+        work_slice: Option<Duration>,
     }
     impl Hooks {
+        /// Hooks for a worker on a virtual clock: a work slice longer than any test, so a pause
+        /// measured in real time never outlives the worker's virtual work deadline.
+        pub(crate) fn on_virtual_time() -> Self {
+            Self {
+                work_slice: Some(Duration::from_secs(3600)),
+                ..Self::default()
+            }
+        }
         pub(crate) fn pause(&self, boundary: WriterBoundary) {
             self.state.lock().unwrap().paused[index(boundary)] = true;
         }
@@ -574,6 +596,9 @@ pub(crate) mod test_support {
         }
     }
     impl WriterHooks for Hooks {
+        fn work_slice(&self) -> Duration {
+            self.work_slice.unwrap_or(WORK_SLICE)
+        }
         fn before(&self, boundary: WriterBoundary, until: Instant) -> Result<()> {
             let slot = index(boundary);
             let mut state = self.state.lock().unwrap();
@@ -600,6 +625,64 @@ pub(crate) mod test_support {
     impl Drop for Release {
         fn drop(&mut self) {
             self.0.release_for_cleanup();
+        }
+    }
+
+    /// A [`TestClock`] as a background worker sees it: the same virtual time, but its sleeps
+    /// yield instead of advancing, so only the test moves time. A sleep on a panicking thread
+    /// advances the clock, so an unwinding writer still reaches its shutdown deadline.
+    pub(crate) struct YieldingClock(pub(crate) Arc<TestClock>);
+
+    impl Clock for YieldingClock {
+        fn now(&self) -> Instant {
+            self.0.now()
+        }
+        fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+            self.0.wall_now()
+        }
+        fn monotonic_sample(&self) -> Result<MonotonicSample> {
+            self.0.monotonic_sample()
+        }
+        fn sleep(&self, duration: Duration) {
+            if std::thread::panicking() {
+                self.0.advance(duration);
+            } else {
+                std::thread::yield_now();
+            }
+        }
+        fn shutdown_unit(&self) -> Duration {
+            self.0.shutdown_unit()
+        }
+        fn kind(&self) -> ClockKind {
+            ClockKind::Deterministic
+        }
+    }
+
+    /// Starts a writer whose worker reads `clock`'s virtual time.
+    pub(crate) fn start_on(
+        fixture: &WriterFixture,
+        hooks: Arc<Hooks>,
+        clock: &Arc<TestClock>,
+    ) -> EventWriter {
+        EventWriter::start_with_hooks(
+            format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+            fixture.fixture.run.clone(),
+            fixture.lock.clone(),
+            Arc::new(YieldingClock(clock.clone())),
+            hooks,
+        )
+        .unwrap()
+    }
+
+    /// Yields until the worker thread makes `condition` hold, within a real-time bound.
+    pub(crate) fn yield_until(mut condition: impl FnMut() -> bool) {
+        let until = Instant::now() + Duration::from_secs(10);
+        while !condition() {
+            assert!(
+                Instant::now() < until,
+                "bounded worker condition did not complete"
+            );
+            std::thread::yield_now();
         }
     }
 

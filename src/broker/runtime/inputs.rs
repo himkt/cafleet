@@ -816,7 +816,12 @@ mod tests {
     fn failed_input_reservation_and_corrupt_receipt_reads_surface_the_original_state() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.conn.execute_batch("CREATE TRIGGER fail_input BEFORE INSERT ON member_input_operations BEGIN SELECT RAISE(ABORT,'injected input failure'); END").unwrap();
+        let fault = crate::db::test_support::FaultPlan::Abort {
+            trigger: "fail_input",
+            on: "BEFORE INSERT ON member_input_operations",
+            message: "injected input failure",
+        };
+        fault.arm(&mut fixture.conn);
         assert!(
             crate::broker::runtime::test_support::reserve_input(
                 &mut fixture.conn,
@@ -831,10 +836,7 @@ mod tests {
             .is_err()
         );
         assert!(rows(&fixture.reopen(), "member_input_operations").is_empty());
-        fixture
-            .conn
-            .execute_batch("DROP TRIGGER fail_input")
-            .unwrap();
+        fault.clear(&mut fixture.conn);
         let input = fixture.input(&owner, "reserved", InputKind::Exec, None);
         fixture
             .conn
@@ -875,50 +877,21 @@ mod tests {
         }
 
         #[test]
-        fn record_input_uncertain_persists_its_cause_across_reconnection() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let input = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
-            assert_eq!(input.stop_cause, None);
-            let uncertain = storage::record_input_uncertain(
-                &mut fixture.conn,
-                &owner,
-                input.input_id,
-                StopCause::ShortWrite,
-            )
-            .unwrap();
-            assert_eq!(uncertain.state, InputState::Uncertain);
-            assert_eq!(uncertain.stop_cause, Some(StopCause::ShortWrite));
-            assert_eq!(uncertain.delivery().status, DeliveryStatus::Uncertain);
-            let read = storage::get_input(&fixture.reopen(), input.input_id).unwrap();
-            assert_eq!(read, uncertain);
-            let found = storage::find_input(&fixture.reopen(), owner.run_id, "prompt:caused")
-                .unwrap()
-                .unwrap();
-            assert_eq!(found.stop_cause, Some(StopCause::ShortWrite));
-        }
-
-        #[test]
-        fn record_input_uncertain_stores_every_cause_value() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            for (index, cause) in [
+        fn record_input_uncertain_persists_each_cause_across_reconnection() {
+            const CAUSES: &[StopCause] = &[
                 StopCause::InteractionCandidate,
                 StopCause::InteractionOpen,
                 StopCause::DeadlineExpired,
                 StopCause::ShortWrite,
                 StopCause::WriteFailed,
                 StopCause::RunnerStopped,
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let input = fixture.input(
-                    &owner,
-                    &format!("exec:cause:{index}"),
-                    InputKind::Exec,
-                    None,
-                );
+            ];
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for (index, &cause) in CAUSES.iter().enumerate() {
+                let key = format!("exec:cause:{index}");
+                let input = fixture.input(&owner, &key, InputKind::Exec, None);
+                assert_eq!(input.stop_cause, None, "{cause:?}");
                 let uncertain = storage::record_input_uncertain(
                     &mut fixture.conn,
                     &owner,
@@ -926,120 +899,117 @@ mod tests {
                     cause,
                 )
                 .unwrap_or_else(|error| panic!("{cause:?}: {error}"));
-                assert_eq!(uncertain.stop_cause, Some(cause));
+                assert_eq!(uncertain.state, InputState::Uncertain, "{cause:?}");
+                assert_eq!(uncertain.stop_cause, Some(cause), "{cause:?}");
                 assert_eq!(
-                    storage::get_input(&fixture.reopen(), input.input_id)
-                        .unwrap()
-                        .stop_cause,
-                    Some(cause)
+                    uncertain.delivery().status,
+                    DeliveryStatus::Uncertain,
+                    "{cause:?}"
                 );
+                assert_eq!(
+                    storage::get_input(&fixture.reopen(), input.input_id).unwrap(),
+                    uncertain,
+                    "{cause:?}"
+                );
+                let found = storage::find_input(&fixture.reopen(), owner.run_id, &key)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(found.stop_cause, Some(cause), "{cause:?}");
             }
         }
 
         #[test]
-        fn record_input_state_rejects_in_progress_to_uncertain() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let input = fixture.input(&owner, "prompt:no-cause", InputKind::Prompt, None);
-            let before = durable_state(&fixture.conn);
-            let error = storage::record_input_state(
-                &mut fixture.conn,
-                &owner,
-                input.input_id,
-                InputState::InProgress,
-                InputState::Uncertain,
-            )
-            .unwrap_err();
-            assert!(
-                error.message().contains("invalid input transition"),
-                "{}",
-                error.message()
-            );
-            assert_eq!(durable_state(&fixture.conn), before);
-            assert_eq!(
-                storage::get_input(&fixture.conn, input.input_id)
-                    .unwrap()
-                    .state,
-                InputState::InProgress
-            );
-        }
-
-        #[test]
-        fn record_input_uncertain_requires_an_in_progress_receipt() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let queued = fixture.input(&owner, "prompt:queued", InputKind::Prompt, None);
-            storage::requeue_zero_byte_immediate(
-                &mut fixture.conn,
-                &owner,
-                queued.input_id,
-                "interaction_open",
-            )
-            .unwrap();
-            let accepted = fixture.input(&owner, "prompt:accepted", InputKind::Prompt, None);
-            storage::record_input_state(
-                &mut fixture.conn,
-                &owner,
-                accepted.input_id,
-                InputState::InProgress,
-                InputState::Accepted,
-            )
-            .unwrap();
-            let uncertain = fixture.input(&owner, "prompt:uncertain", InputKind::Prompt, None);
-            storage::record_input_uncertain(
-                &mut fixture.conn,
-                &owner,
-                uncertain.input_id,
-                StopCause::WriteFailed,
-            )
-            .unwrap();
-            for (input, state) in [
-                (queued.input_id, "ready"),
-                (accepted.input_id, "accepted"),
-                (uncertain.input_id, "uncertain"),
-            ] {
+        fn an_uncertain_transition_requires_an_owned_in_progress_receipt_and_changes_nothing() {
+            #[derive(Clone, Copy, Debug)]
+            enum Refused {
+                PlainStateTransition,
+                Ready,
+                Accepted,
+                AlreadyUncertain,
+                SupersededOwner,
+            }
+            const CASES: &[(Refused, &str)] = &[
+                (Refused::PlainStateTransition, "invalid input transition"),
+                (Refused::Ready, "input state changed"),
+                (Refused::Accepted, "input state changed"),
+                (Refused::AlreadyUncertain, "input state changed"),
+                (Refused::SupersededOwner, ""),
+            ];
+            for &(case, message) in CASES {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let input = fixture.input(&owner, "prompt:refused", InputKind::Prompt, None);
+                match case {
+                    Refused::PlainStateTransition | Refused::SupersededOwner => {}
+                    Refused::Ready => {
+                        storage::requeue_zero_byte_immediate(
+                            &mut fixture.conn,
+                            &owner,
+                            input.input_id,
+                            "interaction_open",
+                        )
+                        .unwrap();
+                    }
+                    Refused::Accepted => {
+                        storage::record_input_state(
+                            &mut fixture.conn,
+                            &owner,
+                            input.input_id,
+                            InputState::InProgress,
+                            InputState::Accepted,
+                        )
+                        .unwrap();
+                    }
+                    Refused::AlreadyUncertain => {
+                        storage::record_input_uncertain(
+                            &mut fixture.conn,
+                            &owner,
+                            input.input_id,
+                            StopCause::WriteFailed,
+                        )
+                        .unwrap();
+                    }
+                }
+                if matches!(case, Refused::SupersededOwner) {
+                    fixture.activate_next_epoch();
+                }
                 let before = durable_state(&fixture.conn);
-                let error = storage::record_input_uncertain(
-                    &mut fixture.conn,
-                    &owner,
-                    input,
-                    StopCause::ShortWrite,
-                )
-                .unwrap_err();
+                let result = if matches!(case, Refused::PlainStateTransition) {
+                    storage::record_input_state(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        InputState::InProgress,
+                        InputState::Uncertain,
+                    )
+                } else {
+                    storage::record_input_uncertain(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        StopCause::ShortWrite,
+                    )
+                };
+                let error = result.expect_err(&format!("{case:?}"));
                 assert!(
-                    error.message().contains("input state changed"),
-                    "{state}: {}",
+                    error.message().contains(message),
+                    "{case:?}: {}",
                     error.message()
                 );
-                assert_eq!(durable_state(&fixture.conn), before, "{state}");
+                assert_eq!(durable_state(&fixture.conn), before, "{case:?}");
+                let stored = storage::get_input(&fixture.conn, input.input_id).unwrap();
+                match case {
+                    Refused::PlainStateTransition => {
+                        assert_eq!(stored.state, InputState::InProgress, "{case:?}")
+                    }
+                    Refused::AlreadyUncertain => assert_eq!(
+                        stored.stop_cause,
+                        Some(StopCause::WriteFailed),
+                        "a repeated transition keeps the first recorded cause"
+                    ),
+                    _ => {}
+                }
             }
-            assert_eq!(
-                storage::get_input(&fixture.conn, uncertain.input_id)
-                    .unwrap()
-                    .stop_cause,
-                Some(StopCause::WriteFailed),
-                "a repeated transition keeps the first recorded cause"
-            );
-        }
-
-        #[test]
-        fn record_input_uncertain_checks_run_ownership() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let input = fixture.input(&owner, "prompt:owned", InputKind::Prompt, None);
-            fixture.activate_next_epoch();
-            let before = durable_state(&fixture.conn);
-            assert!(
-                storage::record_input_uncertain(
-                    &mut fixture.conn,
-                    &owner,
-                    input.input_id,
-                    StopCause::ShortWrite,
-                )
-                .is_err(),
-                "a superseded owner records no cause"
-            );
-            assert_eq!(durable_state(&fixture.conn), before);
         }
 
         #[test]

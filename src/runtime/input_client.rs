@@ -82,7 +82,7 @@ impl InputContext {
     }
 }
 pub(crate) trait InputCommandHost {
-    fn clock(&self) -> &dyn crate::time::Clock;
+    fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock>;
     fn lock(
         &mut self,
         settings: &Settings,
@@ -100,8 +100,8 @@ pub(crate) trait InputCommandHost {
 
 pub(crate) struct NativeInputHost;
 impl InputCommandHost for NativeInputHost {
-    fn clock(&self) -> &dyn crate::time::Clock {
-        &crate::time::SystemClock
+    fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+        std::sync::Arc::new(crate::time::SystemClock)
     }
 
     fn lock(
@@ -114,7 +114,7 @@ impl InputCommandHost for NativeInputHost {
     }
 
     fn health(&mut self, run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-        probe_health(run, deadline, self.clock())
+        probe_health(run, deadline, &*self.clock())
     }
 
     fn exchange(
@@ -127,9 +127,9 @@ impl InputCommandHost for NativeInputHost {
         let mut client = crate::runtime::control::ControlClient::connect(
             &paths.control_socket,
             deadline,
-            self.clock(),
+            &*self.clock(),
         )?;
-        client.exchange_input(request, deadline, self.clock())
+        client.exchange_input(request, deadline, &*self.clock())
     }
 }
 
@@ -183,6 +183,7 @@ pub(crate) fn find_submission(
     identity: &PermissionReceiptIdentity,
     request: &SubmitInput,
     deadline: Deadline,
+    clock: &dyn crate::time::Clock,
 ) -> std::result::Result<Option<InputOperation>, InputFailure> {
     let mut context = submission_context(identity.run_id, request);
     let result = (|| {
@@ -203,7 +204,7 @@ pub(crate) fn find_submission(
                     "conflicting input operation key reuse",
                 )?;
             }
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
             tx.commit()?;
             Ok(retained)
         })
@@ -254,9 +255,13 @@ fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
     })
 }
 
-fn submission_deadline(conn: &Connection, deadline: Deadline) -> Result<Deadline> {
+fn submission_deadline(
+    conn: &Connection,
+    deadline: Deadline,
+    clock: &dyn crate::time::Clock,
+) -> Result<Deadline> {
     let deadline = Deadline::until(bounded_by_inherited(conn, deadline.instant()));
-    deadline.remaining()?;
+    deadline.remaining_at(clock.now())?;
     Ok(deadline)
 }
 
@@ -428,23 +433,24 @@ fn prepare_submission_with_host<'a>(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<SubmissionPreparation<'a>, InputFailure> {
+    let clock = host.clock();
     let identity = PermissionReceiptIdentity::for_run(expected_run);
-    let retained = find_submission(conn, &identity, request, deadline)?;
+    let retained = find_submission(conn, &identity, request, deadline, clock.as_ref())?;
     if let Some(result) = retained.as_ref().and_then(historical_submission) {
         return Ok(SubmissionPreparation::History(result));
     }
     let mut context = submission_context(expected_run.run_id, request);
     context.input_id = retained.as_ref().map(|input| input.input_id);
     (|| {
-        let deadline = submission_deadline(conn, deadline)?;
+        let deadline = submission_deadline(conn, deadline, clock.as_ref())?;
         with_database_budget(conn, deadline, |conn| {
             validate_submission_target(conn, settings, expected_run, expected_placement)
         })?;
-        let attempt = PreparedSubmission::new(request, deadline.instant(), host.clock())?;
+        let attempt = PreparedSubmission::new(request, deadline.instant(), clock.as_ref())?;
         let held = host
             .lock(settings, expected_placement, deadline)?
             .ok_or_else(|| error("pane input remained busy before submission"))?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         Ok(SubmissionPreparation::Locked {
             attempt,
             held,
@@ -468,26 +474,28 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<SubmissionResult, InputFailure> {
+    let clock = host.clock();
     let deadline = submission_deadline(
         conn,
         Deadline::until(deadline.instant().min(attempt.deadline)),
+        clock.as_ref(),
     )
     .map_err(|source| submission_context(expected_run.run_id, attempt.request).failure(source))?;
     let identity = PermissionReceiptIdentity::for_run(expected_run);
-    let retained = find_submission(conn, &identity, attempt.request, deadline)?;
+    let retained = find_submission(conn, &identity, attempt.request, deadline, clock.as_ref())?;
     if let Some(result) = retained.as_ref().and_then(historical_submission) {
         return Ok(result);
     }
     let mut context = submission_context(expected_run.run_id, attempt.request);
     context.input_id = retained.as_ref().map(|input| input.input_id);
     let result = (|| {
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         held.validate_binding(&settings.database_url, expected_placement)?;
         with_database_budget(conn, deadline, |conn| {
             validate_submission_target(conn, settings, expected_run, expected_placement)
         })?;
         host.health(expected_run, deadline.instant())?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             held.validate_binding(&settings.database_url, expected_placement)?;
@@ -495,13 +503,13 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             let changed = tx.execute(
                 "UPDATE member_runs SET last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
                 rusqlite::params![
-                    host.clock().wall_stamp(),
+                    clock.wall_stamp(),
                     expected_run.run_id,
                     expected_run.owner_epoch
                 ],
             )?;
             ensure(changed == 1, "submission health ownership changed")?;
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
             tx.commit().map_err(crate::error::CafleetError::from)
         })?;
         let input = attempt.request.clone();
@@ -514,13 +522,13 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         };
         let request = control_request(expected_run, &attempt.expiration, operation);
         held.validate_binding(&settings.database_url, expected_placement)?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         held.release()?;
         let reply = host.exchange(expected_run, &request, deadline.instant())?;
         let InputControlReply::Submission(reply) = reply else {
             return Err(error("ordinary submission requires a submission reply"));
         };
-        let recorded = find_submission(conn, &identity, attempt.request, deadline)?;
+        let recorded = find_submission(conn, &identity, attempt.request, deadline, clock.as_ref())?;
         context.input_id = recorded.as_ref().map(|input| input.input_id);
         let runner_owned = matches!(
             reply.status,
@@ -529,7 +537,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         let bookkeeping = Deadline::until(
             deadline
                 .instant()
-                .max(host.clock().now() + std::time::Duration::from_secs(1)),
+                .max(clock.now() + std::time::Duration::from_secs(1)),
         );
         let reacquired = held.reacquire_within(bookkeeping)?;
         if !reacquired && !runner_owned {
@@ -564,7 +572,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             ],
         )?;
         if !runner_owned {
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
         }
         Ok(reply)
     })();
@@ -642,12 +650,13 @@ fn reconcile_receipt_with_host(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<InputOperation, InputFailure> {
+    let clock = host.clock();
     let mut context = InputContext {
         input_id: (input_id > 0).then_some(input_id),
         ..InputContext::default()
     };
     let result = (|| {
-        let deadline = submission_deadline(conn, deadline)?;
+        let deadline = submission_deadline(conn, deadline, clock.as_ref())?;
         usage(input_id > 0, "positive reconciliation input ID required")?;
         usage(
             !evidence_ref.trim().is_empty(),
@@ -670,7 +679,7 @@ fn reconcile_receipt_with_host(
             } else {
                 crate::runtime::input_client::receipt_placement(&tx, &run)?
             };
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
             tx.commit()?;
             Ok((input, run, placement))
         })?;
@@ -680,7 +689,7 @@ fn reconcile_receipt_with_host(
         let placement = placement.ok_or_else(|| {
             error("receipt reconciliation requires the member's live runner; the input stays uncertain")
         })?;
-        let expiration = InputExpiration::capture(deadline.instant(), host.clock())?;
+        let expiration = InputExpiration::capture(deadline.instant(), clock.as_ref())?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("receipt pane input remained busy"))?;
@@ -694,14 +703,14 @@ fn reconcile_receipt_with_host(
                     input.same_identity(&original),
                     "receipt immutable input identity changed",
                 )?;
-                deadline.remaining()?;
+                deadline.remaining_at(clock.now())?;
                 tx.commit()?;
                 Ok(input)
             })
         };
         read_target(conn)?;
         host.health(&run, deadline.instant())?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         read_target(conn)?;
         let request =
             |action| control_request(&run, &expiration, InputControlOperation::Receipt(action));
@@ -714,7 +723,7 @@ fn reconcile_receipt_with_host(
                 if actual == input_id),
             "receipt query has no matching durable input identity",
         )?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         read_target(conn)?;
         let reconcile = request(ReceiptAction::Reconcile {
             input_id,
@@ -730,10 +739,10 @@ fn reconcile_receipt_with_host(
                 && settled.evidence_ref.as_deref() == Some(evidence_ref),
             "receipt settlement acknowledgment has no matching durable settlement",
         )?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         let retirement = request(ReceiptAction::Retire { input_id });
         host.exchange(&run, &retirement, deadline.instant())?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         let recorded = read_target(conn)?;
         ensure(recorded == settled, "receipt changed after retirement")?;
         Ok(recorded)
@@ -837,6 +846,7 @@ fn prepare_response(
     conn: &mut Connection,
     input: &PermissionRespondInput,
     deadline: Deadline,
+    clock: &dyn crate::time::Clock,
 ) -> Result<(RunRecord, RuntimeEventView)> {
     with_database_budget(conn, deadline, |conn| {
         let tx = conn.transaction()?;
@@ -854,7 +864,7 @@ fn prepare_response(
         )?;
         let original =
             crate::runtime::input::inspection_association(&tx, &run, &input.inspection())?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         tx.commit()?;
         Ok((run, original))
     })
@@ -884,19 +894,20 @@ pub(crate) fn respond_permission_with_host(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<PermissionResponseResult, InputFailure> {
+    let clock = host.clock();
     let context = response_context(input);
     let result = (|| {
         validate_respond(input)?;
-        let deadline = submission_deadline(conn, deadline)?;
-        let (run, original) = prepare_response(conn, input, deadline)?;
+        let deadline = submission_deadline(conn, deadline, clock.as_ref())?;
+        let (run, original) = prepare_response(conn, input, deadline, clock.as_ref())?;
         let placement =
             with_database_budget(conn, deadline, |conn| permission_placement(conn, &run))?;
-        let expiration = InputExpiration::capture(deadline.instant(), host.clock())?;
+        let expiration = InputExpiration::capture(deadline.instant(), clock.as_ref())?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
         let validate = |conn: &mut Connection| -> Result<()> {
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
             held.validate_binding(&settings.database_url, &placement)?;
             with_database_budget(conn, deadline, |conn| {
                 let tx = conn.transaction()?;
@@ -907,7 +918,7 @@ pub(crate) fn respond_permission_with_host(
                     same_association(&view, &original),
                     "permission response association changed",
                 )?;
-                deadline.remaining()?;
+                deadline.remaining_at(clock.now())?;
                 tx.commit().map_err(crate::error::CafleetError::from)
             })
         };
@@ -933,10 +944,10 @@ pub(crate) fn respond_permission_with_host(
                 input.event_id,
                 input.director_member_id,
             )?;
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
             tx.commit().map_err(crate::error::CafleetError::from)
         })?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         Ok(reply)
     })();
     result.map_err(|source| context.failure(source))
@@ -957,6 +968,7 @@ fn inspect_permission_with_host(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<PermissionInspection, InputFailure> {
+    let clock = host.clock();
     let mut context = InputContext {
         interaction_id: Some(input.interaction_id),
         ..InputContext::default()
@@ -972,7 +984,7 @@ fn inspect_permission_with_host(
             .all(|id| *id > 0),
             "positive permission request IDs are required",
         )?;
-        let deadline = submission_deadline(conn, deadline)?;
+        let deadline = submission_deadline(conn, deadline, clock.as_ref())?;
         let (run, placement, original) = with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction()?;
             tx.query_row(
@@ -994,16 +1006,16 @@ fn inspect_permission_with_host(
             let placement = permission_placement(&tx, &run)?;
             validate_submission_target(&tx, settings, &run, &placement)?;
             let view = crate::runtime::input::inspection_association(&tx, &run, input)?;
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
             tx.commit()?;
             Ok((run, placement, view))
         })?;
-        let expiration = InputExpiration::capture(deadline.instant(), host.clock())?;
+        let expiration = InputExpiration::capture(deadline.instant(), clock.as_ref())?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
         let validate = |conn: &mut Connection| -> Result<()> {
-            deadline.remaining()?;
+            deadline.remaining_at(clock.now())?;
             held.validate_binding(&settings.database_url, &placement)?;
             with_database_budget(conn, deadline, |conn| {
                 let tx = conn.transaction()?;
@@ -1013,7 +1025,7 @@ fn inspect_permission_with_host(
                     same_association(&view, &original),
                     "permission inspection association changed",
                 )?;
-                deadline.remaining()?;
+                deadline.remaining_at(clock.now())?;
                 tx.commit().map_err(crate::error::CafleetError::from)
             })
         };
@@ -1089,7 +1101,7 @@ fn inspect_permission_with_host(
                 "permission inspection answer rule is invalid",
             )?;
         }
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         Ok(*reply)
     })();
     result.map_err(|source| context.failure(source))
@@ -1251,8 +1263,8 @@ pub(crate) mod test_support {
     }
 
     impl InputCommandHost for NoLiveHost {
-        fn clock(&self) -> &dyn crate::time::Clock {
-            &crate::time::SystemClock
+        fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+            std::sync::Arc::new(crate::time::SystemClock)
         }
         fn lock(&mut self, _: &Settings, _: &Placement, _: Deadline) -> Result<Option<PaneLock>> {
             Err(self.refuse("lock"))
@@ -1814,8 +1826,8 @@ mod tests {
     }
 
     impl InputCommandHost for SocketHost {
-        fn clock(&self) -> &dyn crate::time::Clock {
-            &crate::time::SystemClock
+        fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+            std::sync::Arc::new(crate::time::SystemClock)
         }
         fn lock(
             &mut self,
@@ -2409,7 +2421,8 @@ mod tests {
                     &mut case.fixture.conn,
                     &identity,
                     &case.request,
-                    Deadline::until(Instant::now() + Duration::from_secs(1))
+                    Deadline::until(Instant::now() + Duration::from_secs(1)),
+                    &crate::time::SystemClock,
                 )
                 .unwrap(),
                 Some(case.row.clone())
@@ -2567,7 +2580,14 @@ mod tests {
         let identity = case.identity();
         let deadline = Deadline::until(Instant::now() + Duration::from_secs(2));
         assert_eq!(
-            find_submission(&mut case.fixture.conn, &identity, &case.request, deadline).unwrap(),
+            find_submission(
+                &mut case.fixture.conn,
+                &identity,
+                &case.request,
+                deadline,
+                &crate::time::SystemClock
+            )
+            .unwrap(),
             Some(case.row.clone())
         );
         let reads = Arc::new(AtomicUsize::new(0));
@@ -2589,7 +2609,13 @@ mod tests {
                 }
             }))
             .unwrap();
-        let denied = find_submission(&mut case.fixture.conn, &identity, &case.request, deadline);
+        let denied = find_submission(
+            &mut case.fixture.conn,
+            &identity,
+            &case.request,
+            deadline,
+            &crate::time::SystemClock,
+        );
         let removed = case
             .fixture
             .conn
@@ -2615,8 +2641,14 @@ mod tests {
                 "kind" => request.input_kind = InputKind::Exec,
                 _ => unreachable!(),
             }
-            let failure = find_submission(&mut case.fixture.conn, &identity, &request, deadline)
-                .expect_err("a reused key binds the original complete payload");
+            let failure = find_submission(
+                &mut case.fixture.conn,
+                &identity,
+                &request,
+                deadline,
+                &crate::time::SystemClock,
+            )
+            .expect_err("a reused key binds the original complete payload");
             assert!(!failure.source.to_string().contains(&request.literal));
             assert_eq!(failure.context.run_id, Some(case.fixture.run.run_id));
             assert_eq!(
@@ -2643,7 +2675,14 @@ mod tests {
             run_id: identity.run_id,
         };
         assert!(
-            find_submission(&mut case.fixture.conn, &foreign, &case.request, deadline).is_err()
+            find_submission(
+                &mut case.fixture.conn,
+                &foreign,
+                &case.request,
+                deadline,
+                &crate::time::SystemClock
+            )
+            .is_err()
         );
         case.assert_unchanged(changes);
         let missing = SubmitInput {
@@ -2652,9 +2691,15 @@ mod tests {
             literal: "missing input".into(),
         };
         assert!(
-            find_submission(&mut case.fixture.conn, &identity, &missing, deadline)
-                .unwrap()
-                .is_none()
+            find_submission(
+                &mut case.fixture.conn,
+                &identity,
+                &missing,
+                deadline,
+                &crate::time::SystemClock
+            )
+            .unwrap()
+            .is_none()
         );
         case.assert_unchanged(changes);
     }
@@ -2767,8 +2812,8 @@ mod tests {
     }
 
     impl InputCommandHost for LockTakingHost {
-        fn clock(&self) -> &dyn crate::time::Clock {
-            &crate::time::SystemClock
+        fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+            std::sync::Arc::new(crate::time::SystemClock)
         }
         fn lock(
             &mut self,
@@ -3209,6 +3254,7 @@ mod tests {
                 &identity,
                 &request,
                 Deadline::until(outer),
+                &crate::time::SystemClock,
             )
             .unwrap()
             .expect("actual committed receipt survives reply loss");

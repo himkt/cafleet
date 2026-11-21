@@ -32,9 +32,10 @@ pub(crate) fn press_member(
     member_id: i64,
     keys: &PressKeys,
     deadline: Deadline,
+    clock: &dyn crate::time::Clock,
 ) -> Result<KeyAcknowledgment, CafleetError> {
     deadline
-        .remaining()
+        .remaining_at(clock.now())
         .map_err(|cause| effect_error(member_id, cause, false))?;
     let (member, mux) = with_database_budget(conn, deadline, |conn| {
         let member = broker::active_member(conn, member_id)?;
@@ -42,7 +43,7 @@ pub(crate) fn press_member(
         Ok((member, mux))
     })
     .map_err(|cause| effect_error(member_id, cause, false))?;
-    press_member_with_mux(conn, settings, member, keys, deadline, &*mux)
+    press_member_with_mux(conn, settings, member, keys, deadline, &*mux, clock)
 }
 
 pub(crate) fn press_member_with_mux(
@@ -52,6 +53,7 @@ pub(crate) fn press_member_with_mux(
     keys: &PressKeys,
     deadline: Deadline,
     mux: &dyn Multiplexer,
+    clock: &dyn crate::time::Clock,
 ) -> Result<KeyAcknowledgment, CafleetError> {
     let member_id = member.member_id;
     let mut started = false;
@@ -75,7 +77,7 @@ pub(crate) fn press_member_with_mux(
                 })?;
         mux.validate_key_target(placement, deadline)
             .map_err(|cause| CafleetError::App(cause.to_string()))?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         let current = with_database_budget(conn, deadline, |conn| {
             broker::active_member(conn, member_id)
         })?;
@@ -88,7 +90,7 @@ pub(crate) fn press_member_with_mux(
             )));
         }
         locked.pane_lock(&settings.database_url)?;
-        deadline.remaining()?;
+        deadline.remaining_at(clock.now())?;
         mux.send_keys(pane_id, keys, deadline).map_err(|cause| {
             started = cause.submission_started();
             CafleetError::App(cause.to_string())
@@ -124,7 +126,15 @@ mod tests {
         mux: &dyn Multiplexer,
     ) -> Result<KeyAcknowledgment, CafleetError> {
         let member = crate::broker::active_member(conn, member_id).unwrap();
-        press_member_with_mux(conn, settings, member, keys, deadline, mux)
+        press_member_with_mux(
+            conn,
+            settings,
+            member,
+            keys,
+            deadline,
+            mux,
+            &crate::time::SystemClock,
+        )
     }
     use crate::runtime::test_support::Fixture;
     use crate::time::Deadline;
@@ -352,40 +362,158 @@ mod tests {
         )
     }
 
+    #[derive(Clone, Copy, Debug)]
+    enum Outcome {
+        Acknowledged,
+        PlacementChanged,
+        Expired,
+        NotDispatched,
+        Uncertain,
+    }
+
+    struct Case {
+        name: &'static str,
+        mode: Mode,
+        budget: Duration,
+        calls: usize,
+        writes: usize,
+        outcome: Outcome,
+    }
+
+    const CASES: &[Case] = &[
+        Case {
+            name: "success acknowledges the canonical keys without touching the run",
+            mode: Mode::Success,
+            budget: Duration::from_secs(2),
+            calls: 2,
+            writes: 1,
+            outcome: Outcome::Acknowledged,
+        },
+        Case {
+            name: "a placement change after metadata refuses before writing",
+            mode: Mode::ChangePlacement,
+            budget: Duration::from_secs(2),
+            calls: 1,
+            writes: 0,
+            outcome: Outcome::PlacementChanged,
+        },
+        Case {
+            name: "expiry during metadata refuses before writing",
+            mode: Mode::ExpireMetadata,
+            budget: Duration::from_millis(300),
+            calls: 1,
+            writes: 0,
+            outcome: Outcome::Expired,
+        },
+        Case {
+            name: "a prelaunch refusal reports zero effect",
+            mode: Mode::NotStarted,
+            budget: Duration::from_secs(2),
+            calls: 2,
+            writes: 1,
+            outcome: Outcome::NotDispatched,
+        },
+        Case {
+            name: "a started failure stays uncertain even for pane-gone stderr",
+            mode: Mode::StartedFailure,
+            budget: Duration::from_secs(2),
+            calls: 2,
+            writes: 1,
+            outcome: Outcome::Uncertain,
+        },
+    ];
+
     #[test]
-    fn press_entry_uses_the_outer_wrapped_placement_and_held_lock_under_one_deadline() {
-        let mut fixture = Fixture::new();
-        let until = Instant::now() + Duration::from_secs(2);
-        let (settings, probe, mux) = setup(&fixture, Mode::Success, until);
-        let before = crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        let value = press_loaded(
-            &mut fixture.conn,
-            &settings,
-            fixture.run.member_id,
-            &keys(),
-            Deadline::until(until),
-            &*mux,
-        )
-        .unwrap();
-        assert_eq!(value.member_id, fixture.run.member_id);
-        assert_eq!(value.pane_id, "%2");
-        assert_eq!(value.keys, ["Tab"]);
-        assert_eq!(probe.calls.borrow().len(), 2);
-        assert_eq!(probe.writes(), 1);
-        assert_eq!(
-            crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap(),
-            before
-        );
-        assert_eq!(
-            fixture
-                .conn
-                .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap(),
-            0
-        );
-        assert!(acquire_released(&settings.database_url, &probe.placement));
+    fn press_entry_outcomes_follow_the_multiplexer_and_release_the_pane_lock() {
+        for case in CASES {
+            let name = case.name;
+            let mut fixture = Fixture::new();
+            let until = Instant::now() + case.budget;
+            let (settings, probe, mux) = setup(&fixture, case.mode, until);
+            let member = fixture.run.member_id;
+            let before =
+                crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let result = press_loaded(
+                &mut fixture.conn,
+                &settings,
+                member,
+                &keys(),
+                Deadline::until(until),
+                &*mux,
+            );
+            assert_eq!(probe.calls.borrow().len(), case.calls, "{name}");
+            assert_eq!(probe.writes(), case.writes, "{name}");
+            match case.outcome {
+                Outcome::Acknowledged => {
+                    let value = result.unwrap_or_else(|cause| panic!("{name}: {cause}"));
+                    assert_eq!(value.member_id, member, "{name}");
+                    assert_eq!(value.pane_id, "%2", "{name}");
+                    assert_eq!(value.keys, ["Tab"], "{name}");
+                    assert_eq!(
+                        crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap(),
+                        before,
+                        "{name}"
+                    );
+                    assert_eq!(
+                        fixture
+                            .conn
+                            .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                                row.get::<_, i64>(0)
+                            })
+                            .unwrap(),
+                        0,
+                        "{name}"
+                    );
+                }
+                Outcome::PlacementChanged => {
+                    let cause = failure(result);
+                    assert_zero_effect(&cause, member);
+                    assert_eq!(
+                        primary(&cause).message(),
+                        format!("member {member} placement changed before key dispatch"),
+                        "{name}"
+                    );
+                }
+                Outcome::Expired => {
+                    let cause = failure(result);
+                    assert_zero_effect(&cause, member);
+                    assert!(
+                        matches!(primary(&cause), CafleetError::DeadlineExceeded),
+                        "{name}: {cause}"
+                    );
+                }
+                Outcome::NotDispatched => {
+                    let cause = failure(result);
+                    assert!(
+                        primary(&cause)
+                            .message()
+                            .contains("owned prelaunch refusal"),
+                        "{name}: {cause}"
+                    );
+                    assert_zero_effect(&cause, member);
+                }
+                Outcome::Uncertain => {
+                    let cause = failure(result);
+                    assert_eq!(cause.exit_code(), 1, "{name}");
+                    let text = cause.message();
+                    let primary_position = text
+                        .find("owned started failure")
+                        .expect("primary backend failure");
+                    let effect = format!(
+                        "key delivery to member {member} is uncertain; any prefix may have been handled. Inspect the pane before an explicit retry."
+                    );
+                    let effect_position = text.find(&effect).expect(name);
+                    assert!(primary_position < effect_position, "{name}");
+                    assert!(text.ends_with(&effect), "{name}");
+                    assert_eq!(text.matches(&effect).count(), 1, "{name}");
+                }
+            }
+            assert!(
+                acquire_released(&settings.database_url, &probe.placement),
+                "{name}: post-refusal pane lock is released: {}",
+                post_refusal_lock_diagnostic(&probe),
+            );
+        }
     }
 
     #[test]
@@ -431,95 +559,5 @@ mod tests {
         assert!(probe.calls.borrow().is_empty());
         drop(held);
         assert!(acquire_released(&settings.database_url, &probe.placement));
-    }
-
-    #[test]
-    fn press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata() {
-        for mode in [Mode::ChangePlacement, Mode::ExpireMetadata] {
-            let mut fixture = Fixture::new();
-            let budget = match mode {
-                Mode::ExpireMetadata => Duration::from_millis(300),
-                _ => Duration::from_secs(2),
-            };
-            let until = Instant::now() + budget;
-            let (settings, probe, mux) = setup(&fixture, mode, until);
-            let cause = failure(press_loaded(
-                &mut fixture.conn,
-                &settings,
-                fixture.run.member_id,
-                &keys(),
-                Deadline::until(until),
-                &*mux,
-            ));
-            assert_eq!(probe.calls.borrow().len(), 1);
-            assert_eq!(probe.writes(), 0);
-            assert_zero_effect(&cause, fixture.run.member_id);
-            match mode {
-                Mode::ChangePlacement => assert_eq!(
-                    primary(&cause).message(),
-                    format!(
-                        "member {} placement changed before key dispatch",
-                        fixture.run.member_id
-                    )
-                ),
-                Mode::ExpireMetadata => {
-                    assert!(matches!(primary(&cause), CafleetError::DeadlineExceeded))
-                }
-                _ => unreachable!(),
-            }
-            assert!(
-                acquire_released(&settings.database_url, &probe.placement),
-                "post-refusal pane lock is released: {}",
-                post_refusal_lock_diagnostic(&probe),
-            );
-        }
-    }
-
-    #[test]
-    fn press_entry_keeps_prelaunch_and_started_effects_distinct() {
-        for mode in [Mode::NotStarted, Mode::StartedFailure] {
-            let mut fixture = Fixture::new();
-            let until = Instant::now() + Duration::from_secs(2);
-            let (settings, probe, mux) = setup(&fixture, mode, until);
-            let cause = failure(press_loaded(
-                &mut fixture.conn,
-                &settings,
-                fixture.run.member_id,
-                &keys(),
-                Deadline::until(until),
-                &*mux,
-            ));
-            assert_eq!(probe.calls.borrow().len(), 2);
-            assert_eq!(probe.writes(), 1);
-            assert_eq!(cause.exit_code(), 1);
-            match mode {
-                Mode::NotStarted => {
-                    assert!(
-                        primary(&cause)
-                            .message()
-                            .contains("owned prelaunch refusal")
-                    );
-                    assert_zero_effect(&cause, fixture.run.member_id);
-                }
-                Mode::StartedFailure => {
-                    let text = cause.message();
-                    let primary_position = text
-                        .find("owned started failure")
-                        .expect("primary backend failure");
-                    let effect = format!(
-                        "key delivery to member {} is uncertain; any prefix may have been handled. Inspect the pane before an explicit retry.",
-                        fixture.run.member_id
-                    );
-                    let effect_position = text
-                        .find(&effect)
-                        .expect("started effects stay uncertain even for pane-gone stderr");
-                    assert!(primary_position < effect_position);
-                    assert!(text.ends_with(&effect));
-                    assert_eq!(text.matches(&effect).count(), 1);
-                }
-                _ => unreachable!(),
-            }
-            assert!(acquire_released(&settings.database_url, &probe.placement));
-        }
     }
 }

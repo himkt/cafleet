@@ -3466,10 +3466,9 @@ pub(crate) mod test_support {
         use crate::runtime::writer::WriterBoundary;
         use crate::runtime::writer::WriterHooks;
         use crate::runtime::writer::test_support::WriterFixture;
+        use crate::runtime::writer::test_support::YieldingClock;
         use crate::runtime::*;
         use crate::time::Clock;
-        use crate::time::ClockKind;
-        use crate::time::MonotonicSample;
         use crate::time::test_support::TestClock;
 
         /// Every scenario's shutdown unit, so a storage deadline lies 400 ms of virtual time out.
@@ -3520,31 +3519,6 @@ pub(crate) mod test_support {
                 runner.settle();
                 assert_eq!(runner.event_kinds(), self.events, "{}", self.name);
                 runner
-            }
-        }
-
-        /// The scenario clock as the event writer's thread sees it: the same virtual time, but its
-        /// idle sleeps yield instead of advancing, so only scenario steps move time.
-        struct WriterClock(Arc<TestClock>);
-
-        impl Clock for WriterClock {
-            fn now(&self) -> Instant {
-                self.0.now()
-            }
-            fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
-                self.0.wall_now()
-            }
-            fn monotonic_sample(&self) -> std::result::Result<MonotonicSample, CafleetError> {
-                self.0.monotonic_sample()
-            }
-            fn sleep(&self, _: Duration) {
-                std::thread::yield_now();
-            }
-            fn shutdown_unit(&self) -> Duration {
-                self.0.shutdown_unit()
-            }
-            fn kind(&self) -> ClockKind {
-                ClockKind::Deterministic
             }
         }
 
@@ -3663,7 +3637,10 @@ pub(crate) mod test_support {
                 let catalog = ProfileCatalog::bundled();
                 let native = native_screen(screen);
                 let clock = Arc::new(
-                    TestClock::starting_at(Instant::now()).with_shutdown_unit(SHUTDOWN_UNIT),
+                    TestClock::starting_at(
+                        Instant::now() + crate::runtime::test_support::VIRTUAL_LEAD,
+                    )
+                    .with_shutdown_unit(SHUTDOWN_UNIT),
                 );
                 let WriterFixture {
                     mut fixture,
@@ -3698,7 +3675,7 @@ pub(crate) mod test_support {
                     format!("sqlite:///{}", fixture.conn.path().unwrap()),
                     fixture.run.clone(),
                     lock.clone(),
-                    Arc::new(WriterClock(clock.clone())),
+                    Arc::new(YieldingClock(clock.clone())),
                     Arc::new(ScenarioWriterHooks),
                 )
                 .unwrap();
@@ -3880,7 +3857,10 @@ pub(crate) mod test_support {
                     if status.pending_count == 0 || status.diagnostic.is_some() {
                         return;
                     }
-                    assert!(Instant::now() < until, "the event writer settles: {status:?}");
+                    assert!(
+                        Instant::now() < until,
+                        "the event writer settles: {status:?}"
+                    );
                     std::thread::yield_now();
                 }
             }
@@ -3963,9 +3943,9 @@ pub(crate) mod test_support {
                     Pending::Sweep(_) => self.finish_sweep(
                         result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
                     ),
-                    Pending::Client(_) => self.replies.push(
-                        result.map(|reply| reply.expect("a completed input has a reply")),
-                    ),
+                    Pending::Client(_) => self
+                        .replies
+                        .push(result.map(|reply| reply.expect("a completed input has a reply"))),
                 }
             }
 
@@ -4022,7 +4002,12 @@ pub(crate) mod test_support {
                     Ok(Some(message)) => {
                         let reply = self
                             .coordinator
-                            .handle_preview(&mut self.fixture.conn, &message, &self.controller, deadline)
+                            .handle_preview(
+                                &mut self.fixture.conn,
+                                &message,
+                                &self.controller,
+                                deadline,
+                            )
                             .map_err(CafleetError::from);
                         match reply {
                             Ok(None) => self.pending = Some(Pending::Sweep(deadline)),
@@ -5764,11 +5749,7 @@ mod tests {
             assert_eq!(reply.status, SubmissionStatus::Accepted);
             assert_eq!(reply.stage, SubmissionStage::Submitted);
             assert!(
-                runner
-                    .clock
-                    .sleeps()
-                    .iter()
-                    .sum::<Duration>()
+                runner.clock.sleeps().iter().sum::<Duration>()
                     >= crate::runtime::input::STAGE_SETTLE,
                 "the staged write settles on the virtual clock"
             );

@@ -1501,8 +1501,25 @@ mod tests {
         storage::get_run(&fixture.conn, id).unwrap()
     }
 
-    fn assert_compensated(fixture: &Fixture, run: &RunRecord) {
-        let status = fixture
+    fn assert_compensated(fixture: &Fixture, run: &RunRecord, name: &str) {
+        assert_unlaunched(
+            fixture,
+            run,
+            MemberStatus::Deregistered,
+            RunStatus::Failed,
+            name,
+        );
+    }
+
+    /// The member and run rows end in these states and the launch descriptor is gone.
+    fn assert_unlaunched(
+        fixture: &Fixture,
+        run: &RunRecord,
+        member: MemberStatus,
+        status: RunStatus,
+        name: &str,
+    ) {
+        let recorded = fixture
             .conn
             .query_row(
                 "SELECT status FROM members WHERE member_id=?1",
@@ -1510,13 +1527,14 @@ mod tests {
                 |row| row.get::<_, MemberStatus>(0),
             )
             .unwrap();
-        assert_eq!(status, MemberStatus::Deregistered);
+        assert_eq!(recorded, member, "{name}");
         assert_eq!(
             storage::get_run(&fixture.conn, run.run_id).unwrap().status,
-            RunStatus::Failed
+            status,
+            "{name}"
         );
         let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id).unwrap();
-        assert!(!paths.descriptor.exists());
+        assert!(!paths.descriptor.exists(), "{name}");
     }
 
     fn count_registration_cleanup(conn: &mut Connection) -> Arc<AtomicUsize> {
@@ -1591,16 +1609,33 @@ mod tests {
         );
     }
 
+    struct VersionCase {
+        name: &'static str,
+        native: Option<&'static str>,
+        coverage: Coverage,
+    }
+
+    const VERSION_CASES: &[VersionCase] = &[
+        VersionCase {
+            name: "an unprobed native version records unknown coverage",
+            native: None,
+            coverage: Coverage::Unknown,
+        },
+        VersionCase {
+            name: "a probed tested native version records tested coverage",
+            native: Some("0.164.0"),
+            coverage: Coverage::Tested,
+        },
+    ];
+
     #[test]
     fn runner_creation_records_the_probed_version_and_coverage_on_the_pending_run() {
-        for (native, coverage) in [
-            (None, Coverage::Unknown),
-            (Some("0.164.0"), Coverage::Tested),
-        ] {
+        for case in VERSION_CASES {
+            let name = case.name;
             let mut fixture = Fixture::new();
             let (member, mut settings) = inputs(&fixture);
-            settings.native_version = native.map(str::to_owned);
-            settings.coverage = coverage;
+            settings.native_version = case.native.map(str::to_owned);
+            settings.coverage = case.coverage;
             let pending = register_pending_run(
                 &mut fixture.conn,
                 &member,
@@ -1608,18 +1643,22 @@ mod tests {
                 Instant::now() + Duration::from_secs(10),
             )
             .unwrap();
-            assert_eq!(pending.run.native_version.as_deref(), native);
-            assert_eq!(pending.run.coverage, coverage);
             let reread = storage::get_run(&fixture.conn, pending.run.run_id).unwrap();
-            assert_eq!(reread.native_version.as_deref(), native);
-            assert_eq!(reread.coverage, coverage);
+            for run in [&pending.run, &reread] {
+                assert_eq!(run.native_version.as_deref(), case.native, "{name}");
+                assert_eq!(run.coverage, case.coverage, "{name}");
+            }
         }
     }
+
+    /// How far preparation gets before it fails or unwinds: the stage names the case.
+    const PREPARATION_STAGES: &[&str] =
+        &["before-artifacts", "after-artifacts", "after-descriptor"];
 
     #[test]
     fn runner_creation_guard_covers_preparation_failure_before_artifacts_after_allocation_and_after_descriptor()
      {
-        for stage in ["before-artifacts", "after-artifacts", "after-descriptor"] {
+        for &stage in PREPARATION_STAGES {
             let (mut fixture, mut host, deadline) = launch_case();
             let (member, settings) = inputs(&fixture);
             let spec = fixture.spec();
@@ -1648,10 +1687,13 @@ mod tests {
                 Err(error) => error,
                 Ok(_) => panic!("{stage} must compensate"),
             };
-            assert!(error.message().contains("fixture preparation failure"));
-            assert_compensated(&fixture, &pending_run(&fixture));
-            assert!(host.calls.is_empty());
-            assert_eq!(host.spawn_count, 0);
+            assert!(
+                error.message().contains("fixture preparation failure"),
+                "{stage}: {error}"
+            );
+            assert_compensated(&fixture, &pending_run(&fixture), stage);
+            assert!(host.calls.is_empty(), "{stage}");
+            assert_eq!(host.spawn_count, 0, "{stage}");
         }
     }
 
@@ -1666,6 +1708,13 @@ mod tests {
             host.deadlines
                 .iter()
                 .all(|(_, recorded)| *recorded == deadline)
+        );
+        let allocated = pending_run(&fixture).member_id;
+        assert_eq!(outcome.member.member_id, allocated);
+        assert_eq!(outcome.member.name, "pending-worker");
+        assert_eq!(
+            host.pane_name.as_deref(),
+            Some(format!("{allocated} - pending-worker").as_str())
         );
         assert_eq!(outcome.run.status, RunStatus::Running);
         assert_eq!(outcome.run.owner_kind, OwnerKind::Runner);
@@ -1704,36 +1753,233 @@ mod tests {
         assert_eq!(host.calls, ["split", "prepared", "start"]);
     }
 
-    #[test]
-    fn runner_creation_names_the_split_pane_with_the_allocated_member_id_and_member_name() {
-        let (mut fixture, mut host, deadline) = launch_case();
-        let outcome = launch(&mut fixture, &mut host, deadline).unwrap();
-        let allocated = pending_run(&fixture).member_id;
-        assert_eq!(outcome.member.member_id, allocated);
-        assert_eq!(outcome.member.name, "pending-worker");
-        assert_eq!(
-            host.pane_name.as_deref(),
-            Some(format!("{allocated} - pending-worker").as_str())
-        );
+    /// One failed launch: the fault the host injects and everything the compensation must leave.
+    struct CompensationCase {
+        name: &'static str,
+        backend: &'static str,
+        fail: Option<&'static str>,
+        corrupt: Option<&'static str>,
+        publication: Option<PublicationFailure>,
+        delay: Duration,
+        cleanup_failure: bool,
+        registration_cleanup_fails: bool,
+        hermes_failure: Option<&'static str>,
+        calls: &'static [&'static str],
+        spawns: usize,
+        /// Text the first line of the error carries: the primary failure.
+        primary: &'static str,
+        /// Each appears exactly once in the complete error.
+        diagnostics: &'static [&'static str],
+        member: MemberStatus,
+        run_status: RunStatus,
+        cleanup_state: CleanupState,
     }
 
+    const COMPENSATION: CompensationCase = CompensationCase {
+        name: "",
+        backend: "codex",
+        fail: None,
+        corrupt: None,
+        publication: None,
+        delay: Duration::ZERO,
+        cleanup_failure: false,
+        registration_cleanup_fails: false,
+        hermes_failure: None,
+        calls: &[],
+        spawns: 0,
+        primary: "",
+        diagnostics: &[],
+        member: MemberStatus::Deregistered,
+        run_status: RunStatus::Failed,
+        cleanup_state: CleanupState::Complete,
+    };
+
+    const SPAWNED: &[&str] = &["split", "prepared", "start", "shutdown", "close"];
+    const UNSPAWNED: &[&str] = &["split", "prepared", "shutdown", "close"];
+
+    const COMPENSATION_CASES: &[CompensationCase] = &[
+        CompensationCase {
+            name: "a split failure compensates the registration without a pane",
+            fail: Some("split"),
+            calls: &["split"],
+            primary: "fixture split failure",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a prepare failure closes the owned pane",
+            fail: Some("prepared"),
+            calls: &["split", "prepared", "close"],
+            primary: "fixture prepared failure",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a spawn failure stops the runner and closes the pane",
+            fail: Some("start"),
+            calls: SPAWNED,
+            primary: "fixture start failure",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a stale prepared identity is rejected before starting a child",
+            corrupt: Some("prepared-nonce"),
+            calls: UNSPAWNED,
+            primary: "identity",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a lost started reply compensates one uncertain spawn",
+            fail: Some("started-reply"),
+            calls: SPAWNED,
+            spawns: 1,
+            primary: "fixture started reply lost after spawn",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a started reply with a stale epoch compensates one uncertain spawn",
+            corrupt: Some("started-epoch"),
+            calls: SPAWNED,
+            spawns: 1,
+            primary: "identity",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a started reply naming another child compensates one uncertain spawn",
+            corrupt: Some("started-child"),
+            calls: SPAWNED,
+            spawns: 1,
+            primary: "started reply lacks a matching completed native spawn",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "one handshake deadline expires after start and compensates the spawn",
+            delay: Duration::from_secs(4),
+            calls: SPAWNED,
+            spawns: 1,
+            primary: "deadline",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a missing placement at publication compensates the owned pane once",
+            publication: Some(PublicationFailure::Missing),
+            calls: UNSPAWNED,
+            primary: "placement",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a rejected publication compensates the owned pane once",
+            publication: Some(PublicationFailure::Rejected),
+            calls: UNSPAWNED,
+            primary: "fixture publication blocked",
+            diagnostics: &["fixture publication blocked"],
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a rejected publication keeps every combined cleanup error once",
+            publication: Some(PublicationFailure::Rejected),
+            cleanup_failure: true,
+            registration_cleanup_fails: true,
+            calls: UNSPAWNED,
+            primary: "fixture publication blocked",
+            diagnostics: &[
+                "fixture publication blocked",
+                "fixture owned-child cleanup failed",
+                "fixture pane cleanup failed",
+                "fixture database cleanup blocked",
+            ],
+            member: MemberStatus::Active,
+            run_status: RunStatus::Starting,
+            cleanup_state: CleanupState::Incomplete,
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a lost started reply keeps the primary failure and every owned cleanup diagnostic",
+            fail: Some("started-reply"),
+            cleanup_failure: true,
+            calls: SPAWNED,
+            spawns: 1,
+            primary: "fixture started reply lost after spawn",
+            diagnostics: &[
+                "fixture owned-child cleanup failed",
+                "fixture pane cleanup failed",
+            ],
+            cleanup_state: CleanupState::Incomplete,
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a hermes run whose child started settles its client before runner shutdown",
+            backend: "hermes",
+            fail: Some("started-reply"),
+            calls: &["split", "prepared", "start", "settle", "shutdown", "close"],
+            spawns: 1,
+            primary: "fixture started reply lost after spawn",
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a failed hermes settlement keeps its diagnostic and still fails the run",
+            backend: "hermes",
+            fail: Some("started-reply"),
+            hermes_failure: Some("fixture hermes settlement failed"),
+            calls: &["split", "prepared", "start", "settle", "shutdown", "close"],
+            spawns: 1,
+            primary: "fixture started reply lost after spawn",
+            diagnostics: &["fixture hermes settlement failed"],
+            cleanup_state: CleanupState::Incomplete,
+            ..COMPENSATION
+        },
+        CompensationCase {
+            name: "a hermes run whose spawn failed has no client to settle",
+            backend: "hermes",
+            fail: Some("start"),
+            calls: SPAWNED,
+            primary: "fixture start failure",
+            ..COMPENSATION
+        },
+    ];
+
     #[test]
-    fn runner_creation_missing_or_rejected_publication_compensates_the_owned_pane_once() {
-        for failure in [PublicationFailure::Missing, PublicationFailure::Rejected] {
+    fn runner_creation_failure_compensates_every_owned_effect_once() {
+        for case in COMPENSATION_CASES {
+            let name = case.name;
             let (mut fixture, mut host, deadline) = launch_case();
             let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
-            host.publication_failure = Some(failure);
-            let error = require_launch_error(launch(&mut fixture, &mut host, deadline));
-            assert_eq!(error.exit_code(), 1);
-            let expected = match failure {
-                PublicationFailure::Missing => "placement",
-                PublicationFailure::Rejected => "fixture publication blocked",
-            };
-            assert!(error.message().contains(expected), "{error}");
-            assert_eq!(host.calls, ["split", "prepared", "shutdown", "close"]);
-            assert_eq!(host.spawn_count, 0);
-            assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1);
-            assert_compensated(&fixture, &pending_run(&fixture));
+            if case.registration_cleanup_fails {
+                reject_registration_cleanup(&fixture.conn);
+            }
+            host.fail = case.fail;
+            host.corrupt = case.corrupt;
+            host.publication_failure = case.publication;
+            host.delay = case.delay;
+            host.cleanup_failure = case.cleanup_failure;
+            host.hermes_failure = case.hermes_failure;
+            let error = require_launch_error(launch_backend(
+                &mut fixture,
+                &mut host,
+                deadline,
+                case.backend,
+            ));
+            let text = error.message();
+            assert_eq!(error.exit_code(), 1, "{name}: {text}");
+            assert!(
+                text.lines().next().unwrap().contains(case.primary),
+                "{name}: {text}"
+            );
+            for diagnostic in case.diagnostics {
+                assert_eq!(text.matches(diagnostic).count(), 1, "{name}: {text}");
+            }
+            assert_eq!(host.calls, case.calls, "{name}");
+            assert_eq!(host.spawn_count, case.spawns, "{name}");
+            assert!(
+                host.deadlines
+                    .iter()
+                    .filter(|(phase, _)| *phase != "close")
+                    .all(|(_, recorded)| *recorded == deadline),
+                "{name}: {:?}",
+                host.deadlines
+            );
+            assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1, "{name}");
+            let run = pending_run(&fixture);
+            assert_unlaunched(&fixture, &run, case.member, case.run_status, name);
+            assert_eq!(run.cleanup_state, case.cleanup_state, "{name}");
         }
     }
 
@@ -1741,6 +1987,8 @@ mod tests {
     fn runner_creation_preserves_usage_exit_through_preparation_and_launch_cleanup() {
         for phase in ["preparation", "start"] {
             for cleanup_fails in [false, true] {
+                let name = format!("usage failure at {phase}, cleanup fails: {cleanup_fails}");
+                let name = name.as_str();
                 let (mut fixture, mut host, deadline) = launch_case();
                 let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
                 if cleanup_fails {
@@ -1766,90 +2014,51 @@ mod tests {
                     launch(&mut fixture, &mut host, deadline)
                 };
                 let error = require_launch_error(result);
-                assert_eq!(error.exit_code(), 2, "{error}");
+                assert_eq!(error.exit_code(), 2, "{name}: {error}");
                 assert!(
                     error.message().starts_with(&format!("fixture {phase}")),
-                    "{error}"
+                    "{name}: {error}"
                 );
                 assert_eq!(
                     error
                         .message()
                         .matches("fixture database cleanup blocked")
                         .count(),
-                    usize::from(cleanup_fails)
+                    usize::from(cleanup_fails),
+                    "{name}"
                 );
-                assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1);
-                assert_eq!(host.spawn_count, 0);
+                assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1, "{name}");
+                assert_eq!(host.spawn_count, 0, "{name}");
                 let run = pending_run(&fixture);
                 if cleanup_fails {
                     assert!(
                         crate::broker::get_member(&fixture.conn, run.member_id, run.fleet_id)
                             .unwrap()
-                            .is_some()
+                            .is_some(),
+                        "{name}"
                     );
                 } else {
-                    assert_compensated(&fixture, &run);
+                    assert_compensated(&fixture, &run, name);
                 }
-                assert_eq!(
-                    host.calls.iter().filter(|call| **call == "close").count(),
-                    usize::from(phase == "start")
-                );
-                assert_eq!(
-                    host.calls
-                        .iter()
-                        .filter(|call| **call == "shutdown")
-                        .count(),
-                    usize::from(phase == "start")
-                );
+                let expected_cleanup: &[&str] = if phase == "start" {
+                    &["shutdown", "close"]
+                } else {
+                    &[]
+                };
+                let cleanup: Vec<&str> = host
+                    .calls
+                    .iter()
+                    .copied()
+                    .filter(|call| ["shutdown", "close"].contains(call))
+                    .collect();
+                assert_eq!(cleanup, expected_cleanup, "{name}");
             }
         }
     }
 
     #[test]
-    fn runner_creation_preserves_publication_failure_and_combined_cleanup_errors_once() {
-        let (mut fixture, mut host, deadline) = launch_case();
-        let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
-        reject_registration_cleanup(&fixture.conn);
-        host.publication_failure = Some(PublicationFailure::Rejected);
-        host.cleanup_failure = true;
-        let error = require_launch_error(launch(&mut fixture, &mut host, deadline));
-        assert_eq!(error.exit_code(), 1);
-        let text = error.message();
-        assert!(
-            text.lines()
-                .next()
-                .unwrap()
-                .contains("fixture publication blocked"),
-            "{text}"
-        );
-        for diagnostic in [
-            "fixture publication blocked",
-            "fixture owned-child cleanup failed",
-            "fixture pane cleanup failed",
-            "fixture database cleanup blocked",
-        ] {
-            assert_eq!(text.matches(diagnostic).count(), 1, "{text}");
-        }
-        assert_eq!(host.calls, ["split", "prepared", "shutdown", "close"]);
-        assert_eq!(host.spawn_count, 0);
-        assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1);
-        let run = pending_run(&fixture);
-        assert!(
-            crate::broker::get_member(&fixture.conn, run.member_id, run.fleet_id)
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            !RuntimePaths::for_run(&run.database_identity_json, run.run_id)
-                .unwrap()
-                .descriptor
-                .exists()
-        );
-    }
-
-    #[test]
     fn runner_creation_unwind_during_preparation_compensates_registration_and_descriptor_once() {
-        for stage in ["before-artifacts", "after-artifacts", "after-descriptor"] {
+        for &stage in PREPARATION_STAGES {
             let (mut fixture, mut host, deadline) = launch_case();
             let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
             let (member, settings) = inputs(&fixture);
@@ -1876,10 +2085,10 @@ mod tests {
                 )
             }));
             assert!(unwound.is_err(), "{stage}");
-            assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1);
-            assert_compensated(&fixture, &pending_run(&fixture));
-            assert!(host.calls.is_empty());
-            assert_eq!(host.spawn_count, 0);
+            assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1, "{stage}");
+            assert_compensated(&fixture, &pending_run(&fixture), stage);
+            assert!(host.calls.is_empty(), "{stage}");
+            assert_eq!(host.spawn_count, 0, "{stage}");
         }
     }
 
@@ -1905,7 +2114,7 @@ mod tests {
             1
         );
         assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 1);
-        assert_compensated(&fixture, &pending_run(&fixture));
+        assert_compensated(&fixture, &pending_run(&fixture), phase);
     }
 
     #[test]
@@ -1916,81 +2125,6 @@ mod tests {
     #[test]
     fn runner_creation_unwind_after_spawn_stops_the_owned_child_and_closes_the_pane_once() {
         assert_launch_unwind_compensates("started");
-    }
-
-    #[test]
-    fn runner_creation_compensates_split_prepare_and_spawn_failures_without_leaking_registration() {
-        for phase in ["split", "prepared", "start"] {
-            let (mut fixture, mut host, deadline) = launch_case();
-            host.fail = Some(phase);
-            assert!(
-                launch(&mut fixture, &mut host, deadline).is_err(),
-                "{phase}"
-            );
-            assert_compensated(&fixture, &pending_run(&fixture));
-            assert_eq!(host.spawn_count, 0);
-            assert!(host.calls.iter().filter(|call| **call == "close").count() <= 1);
-            assert!(
-                host.calls
-                    .iter()
-                    .filter(|call| **call == "shutdown")
-                    .count()
-                    <= 1
-            );
-        }
-    }
-
-    #[test]
-    fn runner_creation_rejects_each_stale_prepared_identity_before_starting_a_child() {
-        let (mut fixture, mut host, deadline) = launch_case();
-        host.corrupt = Some("prepared-nonce");
-        assert!(launch(&mut fixture, &mut host, deadline).is_err());
-        assert_eq!(host.spawn_count, 0);
-        assert_compensated(&fixture, &pending_run(&fixture));
-    }
-
-    #[test]
-    fn runner_creation_lost_started_reply_or_mismatched_child_compensates_one_uncertain_spawn() {
-        for failure in ["started-reply", "started-epoch", "started-child"] {
-            let (mut fixture, mut host, deadline) = launch_case();
-            if failure == "started-reply" {
-                host.fail = Some(failure);
-            } else {
-                host.corrupt = Some(failure);
-            }
-            assert!(
-                launch(&mut fixture, &mut host, deadline).is_err(),
-                "{failure}"
-            );
-            assert_eq!(host.spawn_count, 1);
-            assert_eq!(
-                host.calls
-                    .iter()
-                    .filter(|call| **call == "shutdown")
-                    .count(),
-                1
-            );
-            assert_eq!(
-                host.calls.iter().filter(|call| **call == "close").count(),
-                1
-            );
-            assert_compensated(&fixture, &pending_run(&fixture));
-        }
-    }
-
-    #[test]
-    fn runner_creation_uses_one_handshake_deadline_and_compensates_a_post_start_timeout() {
-        let (mut fixture, mut host, deadline) = launch_case();
-        host.delay = Duration::from_secs(4);
-        assert!(launch(&mut fixture, &mut host, deadline).is_err());
-        assert_eq!(host.spawn_count, 1);
-        assert!(
-            host.deadlines
-                .iter()
-                .filter(|(phase, _)| *phase != "close")
-                .all(|(_, recorded)| *recorded == deadline)
-        );
-        assert_compensated(&fixture, &pending_run(&fixture));
     }
 
     #[test]
@@ -2009,78 +2143,6 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&messages[0].text).unwrap();
         assert_eq!(payload["kind"], "runner_exited");
         assert_eq!(payload["cause"]["exit_code"], 7);
-    }
-
-    #[test]
-    fn runner_creation_retains_the_primary_failure_and_all_owned_cleanup_diagnostics() {
-        let (mut fixture, mut host, deadline) = launch_case();
-        host.fail = Some("started-reply");
-        host.cleanup_failure = true;
-        let error = match launch(&mut fixture, &mut host, deadline) {
-            Err(error) => error,
-            Ok(_) => panic!("lost reply must fail"),
-        };
-        let text = error.message();
-        assert!(text.contains("started reply lost"));
-        assert!(text.contains("owned-child cleanup failed"));
-        assert!(text.contains("pane cleanup failed"));
-        assert_eq!(host.spawn_count, 1);
-        assert_eq!(
-            pending_run(&fixture).cleanup_state,
-            CleanupState::Incomplete
-        );
-    }
-
-    #[test]
-    fn hermes_creation_compensation_settles_a_started_client_before_runner_shutdown() {
-        for hermes_failure in [None, Some("fixture hermes settlement failed")] {
-            let (mut fixture, mut host, deadline) = launch_case();
-            host.fail = Some("started-reply");
-            host.hermes_failure = hermes_failure;
-            let error =
-                require_launch_error(launch_backend(&mut fixture, &mut host, deadline, "hermes"));
-            let text = error.message();
-            assert!(
-                text.lines().next().unwrap().contains("started reply lost"),
-                "{text}"
-            );
-            assert_eq!(
-                host.calls,
-                ["split", "prepared", "start", "settle", "shutdown", "close"]
-            );
-            let run = pending_run(&fixture);
-            match hermes_failure {
-                None => assert_compensated(&fixture, &run),
-                Some(failure) => {
-                    assert_eq!(text.matches(failure).count(), 1, "{text}");
-                    assert_eq!(
-                        storage::get_run(&fixture.conn, run.run_id).unwrap().status,
-                        RunStatus::Failed
-                    );
-                    assert!(
-                        !RuntimePaths::for_run(&run.database_identity_json, run.run_id)
-                            .unwrap()
-                            .descriptor
-                            .exists()
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn creation_compensation_settles_only_a_hermes_run_whose_child_started() {
-        for (backend, failure) in [("hermes", "start"), ("codex", "started-reply")] {
-            let (mut fixture, mut host, deadline) = launch_case();
-            host.fail = Some(failure);
-            require_launch_error(launch_backend(&mut fixture, &mut host, deadline, backend));
-            assert!(
-                !host.calls.contains(&"settle"),
-                "{backend} {failure}: {:?}",
-                host.calls
-            );
-            assert_compensated(&fixture, &pending_run(&fixture));
-        }
     }
 
     #[test]
@@ -2110,7 +2172,7 @@ mod tests {
             .is_err()
         );
         let run = pending_run(&fixture);
-        assert_compensated(&fixture, &run);
+        assert_compensated(&fixture, &run, "invalid spawn construction");
         let serialized=fixture.conn.query_row("SELECT permission_argv_json || COALESCE(cleanup_diagnostics_json,'') FROM member_runs WHERE run_id=?1",[run.run_id],|row|row.get::<_,String>(0)).unwrap();
         assert!(!serialized.contains(private));
         assert!(host.calls.is_empty());
@@ -2174,23 +2236,31 @@ mod tests {
             assert_eq!(
                 ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT)
                     .remaining_storage_at(until),
-                Duration::from_secs(4).saturating_sub(Duration::from_secs(offset))
+                Duration::from_secs(4).saturating_sub(Duration::from_secs(offset)),
+                "clipped {offset} s after start"
             );
             let clock =
                 ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT).clipped(until);
             assert_eq!(
                 clock.child_deadline(),
-                (start + Duration::from_secs(2)).min(until)
+                (start + Duration::from_secs(2)).min(until),
+                "clipped {offset} s after start"
             );
             assert_eq!(
                 clock.display_deadline(),
-                (start + Duration::from_secs(3)).min(until)
+                (start + Duration::from_secs(3)).min(until),
+                "clipped {offset} s after start"
             );
             assert_eq!(
                 clock.storage_deadline(),
-                (start + Duration::from_secs(4)).min(until)
+                (start + Duration::from_secs(4)).min(until),
+                "clipped {offset} s after start"
             );
-            assert_eq!(clock.remaining_storage_at(until), Duration::ZERO);
+            assert_eq!(
+                clock.remaining_storage_at(until),
+                Duration::ZERO,
+                "clipped {offset} s after start"
+            );
         }
         let past = start.checked_sub(Duration::from_secs(1)).unwrap();
         let clock = ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT).clipped(past);
@@ -2304,110 +2374,138 @@ mod tests {
         }
     }
 
-    #[test]
-    fn runner_shutdown_uses_one_clock_for_descendants_display_events_and_restoration() {
-        let start = Instant::now();
-        let mut host = Host::new(start);
-        host.native = None;
-        let outcome = shutdown(
-            &mut host,
-            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
-            Some(ChildExit::Code(7)),
-        );
-        assert_eq!(
-            host.calls.iter().map(|(call, _)| *call).collect::<Vec<_>>(),
-            [
-                "gate", "term", "drain", "kill", "close", "display", "events", "restore"
-            ]
-        );
-        assert_eq!(
-            host.deadlines,
-            [
-                ("drain", start + Duration::from_secs(2)),
-                ("display", start + Duration::from_secs(3)),
-                ("events", start + Duration::from_secs(4))
-            ]
-        );
-        for (name, time) in &host.calls {
-            if ["kill", "close"].contains(name) {
-                assert_eq!(*time, start + Duration::from_secs(2));
-            }
-        }
-        assert_eq!(outcome.native_exit, Some(ChildExit::Code(7)));
-        assert_eq!(outcome.cleanup_state, CleanupState::Complete);
+    /// One shutdown: the host's start and faults, the exit reported before shutdown, and the
+    /// calls and outcome the one original schedule must produce.
+    struct ShutdownCase {
+        name: &'static str,
+        host_starts_after: Duration,
+        drained: Option<ChildExit>,
+        fail: &'static [&'static str],
+        dropped: u64,
+        pending: u64,
+        gap: u64,
+        reported: Option<ChildExit>,
+        calls: &'static [&'static str],
+        native_exit: Option<ChildExit>,
+        cleanup_state: CleanupState,
+        diagnostics: &'static [&'static str],
     }
 
+    const EVERY_SHUTDOWN_CALL: &[&str] = &[
+        "gate", "term", "drain", "kill", "close", "display", "events", "restore",
+    ];
+
+    const SHUTDOWN_CASES: &[ShutdownCase] = &[
+        ShutdownCase {
+            name: "one clock bounds descendants, display, events and restoration",
+            host_starts_after: Duration::ZERO,
+            drained: None,
+            fail: &[],
+            dropped: 0,
+            pending: 0,
+            gap: 0,
+            reported: Some(ChildExit::Code(7)),
+            calls: EVERY_SHUTDOWN_CALL,
+            native_exit: Some(ChildExit::Code(7)),
+            cleanup_state: CleanupState::Complete,
+            diagnostics: &[],
+        },
+        ShutdownCase {
+            name: "every failure is collected and the terminal is still restored without an extra budget",
+            host_starts_after: Duration::ZERO,
+            drained: None,
+            fail: &[
+                "term", "drain", "kill", "close", "display", "events", "restore",
+            ],
+            dropped: 0,
+            pending: 0,
+            gap: 0,
+            reported: Some(ChildExit::Code(9)),
+            calls: EVERY_SHUTDOWN_CALL,
+            native_exit: Some(ChildExit::Code(9)),
+            cleanup_state: CleanupState::Incomplete,
+            diagnostics: &[
+                "fixture term failure",
+                "fixture drain failure",
+                "fixture kill failure",
+                "fixture close failure",
+                "fixture display failure",
+                "fixture events failure",
+                "fixture restore failure",
+            ],
+        },
+        ShutdownCase {
+            name: "display truncation, pending frames and unsaved gaps stay separate",
+            host_starts_after: Duration::ZERO,
+            drained: Some(ChildExit::Code(0)),
+            fail: &[],
+            dropped: 17,
+            pending: 2,
+            gap: 3,
+            reported: None,
+            calls: EVERY_SHUTDOWN_CALL,
+            native_exit: Some(ChildExit::Code(0)),
+            cleanup_state: CleanupState::Incomplete,
+            diagnostics: &[
+                "display truncated: 17 undelivered bytes",
+                "pending events=2 unsaved observation gap=3",
+            ],
+        },
+        ShutdownCase {
+            name: "a clock started before the current phase is never rebased",
+            host_starts_after: Duration::from_secs(3),
+            drained: None,
+            fail: &[],
+            dropped: 0,
+            pending: 0,
+            gap: 0,
+            reported: Some(ChildExit::Signal(15)),
+            calls: EVERY_SHUTDOWN_CALL,
+            native_exit: Some(ChildExit::Signal(15)),
+            cleanup_state: CleanupState::Complete,
+            diagnostics: &[],
+        },
+    ];
+
     #[test]
-    fn runner_shutdown_collects_each_failure_and_still_restores_terminal_without_an_extra_budget() {
-        let start = Instant::now();
-        let mut host = Host::new(start);
-        host.native = None;
-        host.fail = [
-            "term", "drain", "kill", "close", "display", "events", "restore",
-        ]
-        .into();
-        let outcome = shutdown(
-            &mut host,
-            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
-            Some(ChildExit::Code(9)),
-        );
-        assert_eq!(host.calls.last().unwrap().0, "restore");
-        assert_eq!(host.clock.now(), start + Duration::from_secs(4));
-        assert_eq!(outcome.native_exit, Some(ChildExit::Code(9)));
-        assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
-        for failure in &host.fail {
-            assert!(
-                outcome
-                    .diagnostics
-                    .iter()
-                    .any(|line| line.contains(failure)),
-                "{failure}"
+    fn runner_shutdown_follows_one_original_schedule_and_keeps_every_outcome() {
+        for case in SHUTDOWN_CASES {
+            let name = case.name;
+            let start = Instant::now();
+            let host_start = start + case.host_starts_after;
+            let mut host = Host::new(host_start);
+            host.native = case.drained;
+            host.fail = case.fail.iter().copied().collect();
+            host.dropped = case.dropped;
+            host.pending = case.pending;
+            host.gap = case.gap;
+            let outcome = shutdown(
+                &mut host,
+                ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
+                case.reported,
             );
+            let calls: Vec<_> = host.calls.iter().map(|(call, _)| *call).collect();
+            assert_eq!(calls, case.calls, "{name}");
+            assert_eq!(
+                host.deadlines,
+                [
+                    ("drain", start + Duration::from_secs(2)),
+                    ("display", start + Duration::from_secs(3)),
+                    ("events", start + Duration::from_secs(4))
+                ],
+                "{name}"
+            );
+            let child_deadline = (start + Duration::from_secs(2)).max(host_start);
+            for (call, time) in &host.calls {
+                if ["kill", "close"].contains(call) {
+                    assert_eq!(*time, child_deadline, "{name}: {call}");
+                }
+            }
+            assert_eq!(host.clock.now(), start + Duration::from_secs(4), "{name}");
+            assert_eq!(outcome.native_exit, case.native_exit, "{name}");
+            assert_eq!(outcome.cleanup_state, case.cleanup_state, "{name}");
+            assert_eq!(outcome.diagnostics, case.diagnostics, "{name}");
         }
-    }
-
-    #[test]
-    fn runner_shutdown_retains_display_truncation_pending_frames_and_unsaved_gaps_separately() {
-        let start = Instant::now();
-        let mut host = Host::new(start);
-        host.dropped = 17;
-        host.pending = 2;
-        host.gap = 3;
-        let outcome = shutdown(
-            &mut host,
-            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
-            None,
-        );
-        assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
-        assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
-        assert!(
-            outcome
-                .diagnostics
-                .iter()
-                .any(|line| line == "display truncated: 17 undelivered bytes")
-        );
-        assert!(
-            outcome
-                .diagnostics
-                .iter()
-                .any(|line| line == "pending events=2 unsaved observation gap=3")
-        );
-    }
-
-    #[test]
-    fn runner_shutdown_never_rebases_a_clock_that_was_started_before_the_current_phase() {
-        let start = Instant::now();
-        let mut host = Host::new(start + Duration::from_secs(3));
-        host.native = None;
-        let outcome = shutdown(
-            &mut host,
-            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
-            Some(ChildExit::Signal(15)),
-        );
-        assert_eq!(host.deadlines[0].1, start + Duration::from_secs(2));
-        assert_eq!(host.deadlines[2].1, start + Duration::from_secs(4));
-        assert_eq!(host.clock.now(), start + Duration::from_secs(4));
-        assert_eq!(outcome.native_exit, Some(ChildExit::Signal(15)));
     }
 
     #[test]
@@ -2421,9 +2519,16 @@ mod tests {
             (Some(ChildExit::Signal(15)), false, 143),
             (None, false, 1),
         ] {
-            assert_eq!(runner_exit_status(native, complete).unwrap(), expected);
+            assert_eq!(
+                runner_exit_status(native, complete).unwrap(),
+                expected,
+                "native {native:?}, cleanup complete: {complete}"
+            );
         }
-        assert!(runner_exit_status(None, true).is_err());
+        assert!(
+            runner_exit_status(None, true).is_err(),
+            "complete cleanup without a native exit"
+        );
     }
 
     #[test]
@@ -2577,11 +2682,6 @@ mod tests {
     }
 
     #[test]
-    fn runner_database_deadline_review_inner_unwind_restores_the_live_outer_cancellation_scope() {
-        assert_retired_inner_scope_preserves_outer(InnerOutcome::Panic);
-    }
-
-    #[test]
     fn runner_database_deadline_review_nested_later_deadline_keeps_the_earliest_outer_budget() {
         let mut fixture = Fixture::new();
         let started = Instant::now();
@@ -2597,13 +2697,26 @@ mod tests {
         assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
     }
 
+    #[derive(Clone, Copy)]
     enum InnerOutcome {
         Success,
         Panic,
     }
 
+    const INNER_OUTCOMES: &[(&str, InnerOutcome)] = &[
+        ("an inner scope that succeeds", InnerOutcome::Success),
+        ("an inner scope that unwinds", InnerOutcome::Panic),
+    ];
+
+    #[test]
+    fn runner_database_deadline_review_a_retired_inner_scope_restores_the_live_outer_scope() {
+        for &(name, outcome) in INNER_OUTCOMES {
+            assert_retired_inner_scope_preserves_outer(name, outcome);
+        }
+    }
+
     /// The inner scope retires with `outcome`; the outer scope still cancels its slow query.
-    fn assert_retired_inner_scope_preserves_outer(outcome: InnerOutcome) {
+    fn assert_retired_inner_scope_preserves_outer(name: &str, outcome: InnerOutcome) {
         let mut fixture = Fixture::new();
         let started = Instant::now();
         let outer_until = started + Duration::from_millis(400);
@@ -2612,7 +2725,7 @@ mod tests {
             match outcome {
                 InnerOutcome::Success => {
                     let inner = with_database_deadline(conn, inner_until, |_| Ok(7));
-                    assert_eq!(inner.unwrap(), 7);
+                    assert_eq!(inner.unwrap(), 7, "{name}");
                 }
                 InnerOutcome::Panic => {
                     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2626,7 +2739,8 @@ mod tests {
                     };
                     assert_eq!(
                         payload.downcast_ref::<DeadlinePanic>(),
-                        Some(&DeadlinePanic(195))
+                        Some(&DeadlinePanic(195)),
+                        "{name}"
                     );
                 }
             }
@@ -2636,18 +2750,17 @@ mod tests {
             assert_eq!(progress_checked_sum(conn)?, 50005000);
             sum(conn, SLOW_SUM)
         });
-        assert!(result.is_err());
+        assert!(result.is_err(), "{name}");
         assert!(
             started.elapsed() >= Duration::from_millis(350),
-            "{result:?}"
+            "{name}: {result:?}"
         );
-        assert!(started.elapsed() < Duration::from_millis(1250));
-        assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
-    }
-
-    #[test]
-    fn runner_database_deadline_review_inner_success_restores_the_live_outer_scope() {
-        assert_retired_inner_scope_preserves_outer(InnerOutcome::Success);
+        assert!(started.elapsed() < Duration::from_millis(1250), "{name}");
+        assert_eq!(
+            progress_checked_sum(&fixture.conn).unwrap(),
+            50005000,
+            "{name}"
+        );
     }
 
     mod window_layout {
@@ -2759,43 +2872,59 @@ mod tests {
             );
         }
 
-        #[test]
-        fn compensation_closes_the_spawned_pane_in_the_window_it_was_spawned_in() {
-            let (mut fixture, mut host, deadline) = launch_case();
-            host.fail = Some("prepared");
-            let (member, settings) = overflow_member(&fixture);
-            let error = require_launch_error(launch_member(
-                &mut fixture,
-                &mut host,
-                deadline,
-                &member,
-                &settings,
-            ));
-            assert!(
-                error.message().contains("fixture prepared failure"),
-                "{error}"
-            );
-            assert_eq!(host.closed, vec![fixture_pane()]);
-            assert_compensated(&fixture, &pending_run(&fixture));
+        struct OverflowFailure {
+            name: &'static str,
+            fail: &'static str,
+            closed: &'static [&'static str],
         }
 
+        const OVERFLOW_FAILURES: &[OverflowFailure] = &[
+            OverflowFailure {
+                name: "a prepare failure closes the pane in the window it was spawned in",
+                fail: "prepared",
+                closed: &["%9"],
+            },
+            OverflowFailure {
+                name: "a split failure spawned no pane to close",
+                fail: "split",
+                closed: &[],
+            },
+        ];
+
         #[test]
-        fn a_new_window_ordinal_stays_consumed_when_its_spawn_fails() {
-            let (mut fixture, mut host, deadline) = launch_case();
-            host.fail = Some("split");
-            let (member, settings) = overflow_member(&fixture);
-            assert_eq!(last_window_ordinal(&fixture), 0);
-            let error = require_launch_error(launch_member(
-                &mut fixture,
-                &mut host,
-                deadline,
-                &member,
-                &settings,
-            ));
-            assert!(error.message().contains("fixture split failure"), "{error}");
-            assert!(host.closed.is_empty(), "no pane was spawned");
-            assert_compensated(&fixture, &pending_run(&fixture));
-            assert_eq!(last_window_ordinal(&fixture), 1);
+        fn an_overflow_launch_failure_closes_only_its_spawned_pane_and_keeps_the_new_ordinal_consumed()
+         {
+            for case in OVERFLOW_FAILURES {
+                let name = case.name;
+                let (mut fixture, mut host, deadline) = launch_case();
+                host.fail = Some(case.fail);
+                let (member, settings) = overflow_member(&fixture);
+                assert_eq!(last_window_ordinal(&fixture), 0, "{name}");
+                let error = require_launch_error(launch_member(
+                    &mut fixture,
+                    &mut host,
+                    deadline,
+                    &member,
+                    &settings,
+                ));
+                assert!(
+                    error
+                        .message()
+                        .contains(&format!("fixture {} failure", case.fail)),
+                    "{name}: {error}"
+                );
+                let closed: Vec<SpawnedPane> = case
+                    .closed
+                    .iter()
+                    .map(|&pane_id| SpawnedPane {
+                        pane_id: pane_id.into(),
+                        window_id: FIXTURE_WINDOW.into(),
+                    })
+                    .collect();
+                assert_eq!(host.closed, closed, "{name}");
+                assert_compensated(&fixture, &pending_run(&fixture), name);
+                assert_eq!(last_window_ordinal(&fixture), 1, "{name}");
+            }
         }
 
         #[test]
