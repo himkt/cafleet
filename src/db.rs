@@ -580,7 +580,7 @@ pub(crate) mod test_support {
     pub(crate) fn migrated_conn(dir: &TempDir) -> Connection {
         let url = format!("sqlite:///{}", dir.path().join("broker.db").display());
         let mut conn = crate::db::connect(&url).unwrap();
-        crate::db::initialize(&mut conn).unwrap();
+        crate::db::initialize(&mut conn, &url).unwrap();
         conn
     }
 
@@ -820,7 +820,7 @@ mod tests {
 
     fn initialized_conn() -> Connection {
         let mut conn = connect("sqlite:///:memory:").unwrap();
-        initialize(&mut conn).unwrap();
+        initialize(&mut conn, "sqlite:///:memory:").unwrap();
         conn
     }
 
@@ -860,7 +860,7 @@ mod tests {
             "SELECT * FROM refinery_schema_history ORDER BY version",
         );
         for _ in 0..2 {
-            initialize(&mut conn).unwrap();
+            initialize(&mut conn, "sqlite:///:memory:").unwrap();
             assert_eq!(application_rows(&conn), before);
             assert_eq!(
                 rows(
@@ -882,12 +882,35 @@ mod tests {
                 .unwrap(),
             APPLICATION_ID
         );
+        let ledger = rows(
+            &conn,
+            "SELECT version, name, applied_on, checksum FROM refinery_schema_history",
+        );
+        assert_eq!(ledger.len(), 1, "the ledger holds one row: {ledger:?}");
+        let [
+            rusqlite::types::Value::Integer(1),
+            rusqlite::types::Value::Text(name),
+            rusqlite::types::Value::Text(applied_on),
+            rusqlite::types::Value::Text(checksum),
+        ] = ledger[0].as_slice()
+        else {
+            panic!("the ledger row is fully populated with version 1: {ledger:?}");
+        };
+        assert_eq!(name, "baseline");
+        assert!(
+            crate::time::parse_lenient(applied_on).is_some(),
+            "applied_on is a storage timestamp: {applied_on:?}"
+        );
         assert_eq!(
-            rows(&conn, "SELECT version, name FROM refinery_schema_history"),
-            vec![vec![
-                rusqlite::types::Value::Integer(1),
-                rusqlite::types::Value::Text("baseline".into())
-            ]]
+            checksum,
+            &crate::digest::sha256_hex(BASELINE_SQL.as_bytes())
+        );
+        assert!(
+            checksum.len() == 64
+                && checksum
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+            "checksum is 64 lowercase hex characters: {checksum:?}"
         );
         assert_eq!(
             rows(
@@ -935,31 +958,143 @@ mod tests {
         }
     }
 
-    fn assert_incompatible_and_untouched(name: &str, damage: impl FnOnce(&Connection)) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(name);
-        let url = format!("sqlite:///{}", path.display());
-        {
-            let mut conn = connect(&url).unwrap();
-            initialize(&mut conn).unwrap();
-            damage(&conn);
+    struct PreparedFile {
+        _dir: tempfile::TempDir,
+        path: std::path::PathBuf,
+        url: String,
+        bytes: Vec<u8>,
+    }
+
+    impl PreparedFile {
+        fn new(name: &str, prepare: impl FnOnce(&mut Connection, &str)) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(name);
+            let url = format!("sqlite:///{}", path.display());
+            {
+                let mut conn = connect(&url).unwrap();
+                prepare(&mut conn, &url);
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            Self {
+                _dir: dir,
+                path,
+                url,
+                bytes,
+            }
         }
-        let before = std::fs::read(&path).unwrap();
-        let conn = connect_read_only(&url).unwrap();
-        let state = crate::db::classify_selected_schema(&conn, &url);
+
+        fn incompatible_message(&self) -> String {
+            format!(
+                "database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
+                self.path.display()
+            )
+        }
+
+        fn assert_unchanged(&self, case: &str) {
+            assert_eq!(
+                std::fs::read(&self.path).unwrap(),
+                self.bytes,
+                "{case}: the file bytes are unchanged"
+            );
+        }
+    }
+
+    fn assert_incompatible_and_untouched(name: &str, damage: impl FnOnce(&Connection)) {
+        let file = PreparedFile::new(name, |conn, url| {
+            initialize(conn, url).unwrap();
+            damage(conn);
+        });
+        let conn = connect_read_only(&file.url).unwrap();
+        let state = crate::db::classify_selected_schema(&conn, &file.url);
         assert!(
-            matches!(&state, crate::db::SchemaState::Incompatible { path: shown } if shown == path.to_str().unwrap()),
+            matches!(&state, crate::db::SchemaState::Incompatible { path: shown } if shown == file.path.to_str().unwrap()),
             "{state:?}"
         );
         assert_eq!(
             state.require_current().unwrap_err().message(),
-            format!(
-                "database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
-                path.display()
-            )
+            file.incompatible_message()
         );
         drop(conn);
-        assert_eq!(std::fs::read(&path).unwrap(), before);
+        file.assert_unchanged(name);
+    }
+
+    struct OtherFileCase {
+        name: &'static str,
+        initialized: bool,
+        damage: &'static str,
+    }
+
+    const OTHER_FILE_CASES: [OtherFileCase; 4] = [
+        OtherFileCase {
+            name: "ledger-row-beyond-baseline",
+            initialized: true,
+            damage: "INSERT INTO refinery_schema_history(version, name, applied_on, checksum) VALUES(2, 'hermes_backend', 'applied', '0')",
+        },
+        OtherFileCase {
+            name: "ledger-row-deleted",
+            initialized: true,
+            damage: "DELETE FROM refinery_schema_history",
+        },
+        OtherFileCase {
+            name: "unrelated-table-without-ledger",
+            initialized: false,
+            damage: "CREATE TABLE unrelated(value TEXT)",
+        },
+        OtherFileCase {
+            name: "foreign-identity-without-tables",
+            initialized: false,
+            damage: "PRAGMA application_id=42",
+        },
+    ];
+
+    #[test]
+    fn initialization_refuses_every_other_file() {
+        for case in OTHER_FILE_CASES {
+            let file = PreparedFile::new(&format!("{}.db", case.name), |conn, url| {
+                if case.initialized {
+                    initialize(conn, url).unwrap();
+                }
+                conn.execute_batch(case.damage).unwrap();
+            });
+            let mut conn = connect(&file.url).unwrap();
+            let failure = initialize(&mut conn, &file.url)
+                .expect_err(&format!("{}: initialization refuses the file", case.name));
+            assert_eq!(
+                failure.message(),
+                file.incompatible_message(),
+                "{}: the refusal names the URL's path",
+                case.name
+            );
+            drop(conn);
+            file.assert_unchanged(case.name);
+        }
+    }
+
+    #[test]
+    fn concurrent_initialization_of_one_fresh_file_applies_the_baseline_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("sqlite:///{}", dir.path().join("fresh.db").display());
+        let barrier = std::sync::Barrier::new(2);
+        let results = std::thread::scope(|scope| {
+            let initializers = [0, 1].map(|_| {
+                scope.spawn(|| {
+                    let mut conn = connect(&url).unwrap();
+                    barrier.wait();
+                    initialize(&mut conn, &url)
+                })
+            });
+            initializers.map(|initializer| initializer.join().unwrap())
+        });
+        for (initializer, result) in results.iter().enumerate() {
+            assert!(result.is_ok(), "initializer {initializer}: {result:?}");
+        }
+        let conn = connect(&url).unwrap();
+        assert_eq!(
+            rows(&conn, "SELECT version, name FROM refinery_schema_history").len(),
+            1
+        );
+        assert_eq!(rows(&conn, "SELECT * FROM cafleet_database").len(), 1);
+        require_current(&conn).unwrap();
     }
 
     #[test]
@@ -1059,7 +1194,7 @@ mod tests {
     #[test]
     fn connection_pragmas_and_foreign_keys_protect_real_writes() {
         let mut conn = connect("sqlite:///:memory:").unwrap();
-        initialize(&mut conn).unwrap();
+        initialize(&mut conn, "sqlite:///:memory:").unwrap();
         assert!(conn.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(404, 'orphan', '', 'active', '')", []).is_err());
         conn.execute_batch("INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'valid', 'created'); INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES(1, 1, 'valid', '', 'active', 'registered');").unwrap();
         for (from, to) in [(404, 1), (1, 404)] {
@@ -1195,7 +1330,7 @@ mod tests {
     fn failed_baseline_initialization_rolls_back_identity_tables_and_ledger() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA max_page_count=1").unwrap();
-        assert!(initialize(&mut conn).is_err());
+        assert!(initialize(&mut conn, "sqlite:///:memory:").is_err());
         assert!(conn.is_autocommit());
         assert_eq!(
             conn.query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
@@ -1330,8 +1465,8 @@ mod tests {
             assert_eq!(original.len(), 32);
             assert!(original.bytes().all(|byte| byte.is_ascii_hexdigit()));
             assert_ne!(original, identity(&second.conn));
-            crate::db::initialize(&mut first.conn).unwrap();
             let url = format!("sqlite:///{}", first.conn.path().unwrap());
+            crate::db::initialize(&mut first.conn, &url).unwrap();
             assert_eq!(
                 identity(&crate::db::tests::connect(&url).unwrap()),
                 original
@@ -1706,7 +1841,7 @@ mod tests {
     fn classification_preserves_missing_current_identity_and_sql_causes() {
         let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
         assert_eq!(classify_schema(&conn).unwrap(), Classification::Missing);
-        crate::db::initialize(&mut conn).unwrap();
+        crate::db::initialize(&mut conn, "sqlite:///:memory:").unwrap();
         assert_eq!(classify_schema(&conn).unwrap(), Classification::Current);
         conn.execute_batch("PRAGMA application_id=1").unwrap();
         assert_eq!(

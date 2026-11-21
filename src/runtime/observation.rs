@@ -7045,7 +7045,7 @@ pub(crate) mod native_capture {
             };
             let mut conn = crate::db::connect(&case.database_url)?;
             with_database_deadline(&mut conn, case_until, |conn| {
-                crate::db::initialize(conn)?;
+                crate::db::initialize(conn, &case.database_url)?;
                 let fleet = crate::broker::fleets::create_fleet(
                     conn,
                     format!("native-{}", approved.id).as_str(),
