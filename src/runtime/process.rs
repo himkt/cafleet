@@ -149,12 +149,13 @@ fn group_members(group: i32) -> Result<Vec<i64>> {
             Err(cause) if cause.raw_os_error() == Some(nix::libc::ENOMEM) => continue,
             Err(cause) => return Err(io_error(cause)),
         };
+        let (records, partial) = buffer[..length].as_chunks::<KINFO_PROC_BYTES>();
         ensure(
-            length % KINFO_PROC_BYTES == 0,
+            partial.is_empty(),
             "kern.proc.pgrp returned a partial kinfo_proc record",
         )?;
-        return Ok(buffer[..length]
-            .chunks_exact(KINFO_PROC_BYTES)
+        return Ok(records
+            .iter()
             .map(|record| {
                 i64::from(i32::from_ne_bytes(
                     record[40..44].try_into().expect("four-byte p_pid"),
