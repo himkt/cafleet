@@ -2095,7 +2095,7 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 
 #### Host evidence and native-input authorization
 
-**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Director pending notices arrive through one native Monitor task (§ Role eligibility); the installed CAFleet skill's [Claude native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#claude-native-director-reception) owns discovery, invocation, renewal and evidence limits, and manual `poll` reception remains available when Monitor is unavailable or denied.
+**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Director pending notices arrive through one native Monitor task (§ Role eligibility); the installed CAFleet skill's [Claude native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#claude-native-director-reception) owns discovery, invocation, renewal and evidence limits. Monitor stops its command at `timeout_ms` (default 300,000 ms, cap 1,800,000 ms), so every start and renewal passes `timeout_ms` 1,800,000 with the 1,770-second `message listen` lease, and manual `poll` reception remains available when Monitor is unavailable or denied.
 
 Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
