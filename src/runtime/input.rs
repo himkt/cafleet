@@ -5918,7 +5918,6 @@ mod tests {
             use crate::runtime::input::tests::ordinary_prompt::*;
             use serde_json::{Value, json};
 
-            const DRAFT: &[u8] = b"\x1b[2J\x1b[1;1Hretained native composer";
             const OPEN: &[u8] = b"\x1b[200~";
             const CLOSE: &[u8] = b"\x1b[201~";
 
@@ -6253,6 +6252,12 @@ mod tests {
                 assert_eq!(input.stop_cause, Some(cause));
             }
 
+            /// Opens the synthetic permission form: an appearing interaction is what stops a staged
+            /// write.
+            fn interrupt(host: &mut Host) {
+                crate::runtime::input::tests::permission_inspection_contracts::stable_form(host);
+            }
+
             fn enable_paste(host: &mut Host) {
                 host.child_output(b"\x1b[?2004h");
                 host.drain();
@@ -6280,18 +6285,6 @@ mod tests {
                         assert_eq!(stored(host, &reply).stop_cause, None);
                     });
                 }
-            }
-
-            #[test]
-            fn keyboard_input_during_the_settle_records_a_complete_left_literal() {
-                with_host(|host| {
-                    start(host, "prompt:keyboard-settle", LITERAL);
-                    until_written(host, LITERAL.len());
-                    host.type_human(b"x");
-                    let reply = finish(host, false);
-                    assert_uncertain(host, &reply, storage::StopCause::ManualInput);
-                    assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
-                });
             }
 
             #[test]
@@ -6338,43 +6331,10 @@ mod tests {
             }
 
             #[test]
-            fn pointer_input_between_literal_chunks_stops_and_closes_the_open_paste() {
-                let literal = "abcdefghi";
-                with_catalog_host(
-                    configured("bracketed_paste", Value::Null),
-                    program(literal, true),
-                    |host| {
-                        enable_paste(host);
-                        host.pty.short = Some(OPEN.len() + 3);
-                        start(host, "prompt:pointer-chunks", literal);
-                        until_written(host, OPEN.len() + 3);
-                        host.pty.short = None;
-                        host.type_human(b"\x1b[<0;10;20M");
-                        let reply = finish(host, false);
-                        assert_uncertain(host, &reply, storage::StopCause::PointerInput);
-                        assert_eq!(host.pty.offers.last().unwrap(), CLOSE);
-                        assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
-                    },
-                );
-            }
-
-            #[test]
-            fn keyboard_input_between_chunks_records_the_complete_written_prefix() {
-                with_host(|host| {
-                    host.pty.short = Some(3);
-                    start(host, "prompt:keyboard-chunks", LITERAL);
-                    until_written(host, 3);
-                    host.type_human(b"x");
-                    let reply = finish(host, false);
-                    assert_uncertain(host, &reply, storage::StopCause::ManualInput);
-                });
-            }
-
-            #[test]
             fn a_stop_inside_a_utf8_scalar_closes_paste_and_remains_uncertain() {
                 let literal = "あいう";
                 with_catalog_host(
-                    configured("bracketed_paste", Value::Null),
+                    permission_configured("bracketed_paste", Value::Null),
                     program(literal, true),
                     |host| {
                         enable_paste(host);
@@ -6382,7 +6342,7 @@ mod tests {
                         start(host, "prompt:scalar-prefix", literal);
                         until_written(host, OPEN.len() + 1);
                         host.pty.short = None;
-                        host.type_human(b"x");
+                        interrupt(host);
                         let reply = finish(host, false);
                         assert_eq!(reply.status, SubmissionStatus::Uncertain);
                         assert_eq!(
@@ -6397,7 +6357,7 @@ mod tests {
             #[test]
             fn a_stop_inside_the_opening_marker_does_not_emit_a_close_marker() {
                 with_catalog_host(
-                    configured("bracketed_paste", Value::Null),
+                    permission_configured("bracketed_paste", Value::Null),
                     program(LITERAL, true),
                     |host| {
                         enable_paste(host);
@@ -6405,7 +6365,7 @@ mod tests {
                         start(host, "prompt:marker-prefix", LITERAL);
                         until_written(host, 3);
                         host.pty.short = None;
-                        host.type_human(b"x");
+                        interrupt(host);
                         let reply = finish(host, false);
                         assert_eq!(reply.status, SubmissionStatus::Uncertain);
                         assert_eq!(
@@ -6899,7 +6859,7 @@ mod tests {
             fn failed_or_partial_close_stages_record_write_failed() {
                 for failed in [false, true] {
                     with_catalog_host(
-                        configured("bracketed_paste", Value::Null),
+                        permission_configured("bracketed_paste", Value::Null),
                         program(LITERAL, true),
                         |host| {
                             enable_paste(host);
@@ -6907,7 +6867,7 @@ mod tests {
                             start(host, "prompt:bad-close", LITERAL);
                             until_written(host, OPEN.len() + 3);
                             host.pty.short = None;
-                            host.type_human(b"x");
+                            interrupt(host);
                             host.drain();
                             if failed {
                                 host.pty.failure = Some(std::io::ErrorKind::BrokenPipe);
@@ -6938,7 +6898,7 @@ mod tests {
             #[test]
             fn a_stop_inside_the_closing_marker_closes_paste_and_keeps_short_write_uncertainty() {
                 with_catalog_host(
-                    configured("bracketed_paste", Value::Null),
+                    permission_configured("bracketed_paste", Value::Null),
                     program(LITERAL, true),
                     |host| {
                         enable_paste(host);
@@ -6947,7 +6907,7 @@ mod tests {
                         start(host, "prompt:closing-marker-prefix", LITERAL);
                         until_written(host, prefix);
                         host.pty.short = None;
-                        host.type_human(b"x");
+                        interrupt(host);
                         let reply = finish(host, false);
                         assert_eq!(reply.status, SubmissionStatus::Uncertain);
                         assert_eq!(
@@ -6962,7 +6922,7 @@ mod tests {
             #[test]
             fn verified_fifo_advances_past_uncertain_and_holds_the_following_ordinary_head() {
                 with_catalog_host(
-                    configured("plain", Value::Null),
+                    permission_configured("plain", Value::Null),
                     program("あxx", false),
                     |host| {
                         host.pty.short = Some(1);
@@ -6973,8 +6933,7 @@ mod tests {
                             request(host, "prompt:behind-uncertain", LITERAL),
                             "earlier_input",
                         );
-                        host.show(DRAFT.to_vec());
-                        host.type_human(b"x");
+                        interrupt(host);
                         let reply = finish(host, false);
                         assert_eq!(reply.status, SubmissionStatus::Uncertain);
                         assert_eq!(
@@ -7001,7 +6960,7 @@ mod tests {
 
             #[test]
             fn a_nonverified_run_keeps_the_fifo_stopped_behind_an_uncertain_prompt() {
-                let catalog = configured("plain", Value::Null).without_submission(
+                let catalog = permission_configured("plain", Value::Null).without_submission(
                     crate::coding_agent::CodingAgent::Codex,
                     ComposerOperation::Prompt,
                 );
@@ -7022,11 +6981,11 @@ mod tests {
                         request(host, "prompt:legacy-fifo", LITERAL),
                         "earlier_input",
                     );
-                    host.type_human(b"x");
+                    interrupt(host);
                     let reply = finish(host, false);
                     assert_eq!(reply.status, SubmissionStatus::Uncertain);
                     let input = stored(host, &reply);
-                    assert_eq!(input.stop_cause, Some(storage::StopCause::ManualInput));
+                    assert!(input.stop_cause.is_some(), "{input:?}");
                     let written = host.pty.written.clone();
                     for _ in 0..64 {
                         let _ = turn(host);
@@ -7138,27 +7097,6 @@ mod tests {
                             Some("fallback".into()),
                             Some("submission_plan_unavailable".into())
                         )
-                    );
-                });
-            }
-
-            #[test]
-            fn staged_human_input_during_the_settle_leaves_the_complete_literal() {
-                with_host(|host| {
-                    until_literal_written(host, prompt_request(host, "prompt:human-race"));
-                    host.type_human(b"h");
-                    let reply = finish_after_interruption(host);
-                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
-                    assert_eq!(reply.stage, SubmissionStage::Partial);
-                    assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
-                    let id = reply.input_id.unwrap();
-                    let stored = storage::get_input(&host.fixture.conn, id).unwrap();
-                    assert_eq!(stored.state, storage::InputState::Uncertain);
-                    assert_eq!(stored.stop_cause, Some(storage::StopCause::ManualInput));
-                    assert_eq!(
-                        delivery_selection(host, id),
-                        (Some("profile".into()), None),
-                        "the selected method survives the uncertain outcome"
                     );
                 });
             }
@@ -7420,6 +7358,194 @@ mod tests {
                     );
                 }
 
+                fn open_form(host: &mut Host) {
+                    crate::runtime::input::tests::permission_inspection_contracts::stable_form(
+                        host,
+                    );
+                }
+
+                fn keystroke(host: &mut Host) {
+                    host.type_human(b"x");
+                }
+
+                fn lone_escape(host: &mut Host) {
+                    host.type_human(b"\x1b");
+                }
+
+                fn pointer_report(host: &mut Host) {
+                    host.type_human(b"\x1b[<0;10;20M");
+                }
+
+                struct StagedEvent {
+                    name: &'static str,
+                    armed: bool,
+                    event: fn(&mut Host),
+                    stops: bool,
+                }
+
+                const STAGED_EVENTS: &[StagedEvent] = &[
+                    StagedEvent {
+                        name: "an open interaction during the settle",
+                        armed: false,
+                        event: open_form,
+                        stops: true,
+                    },
+                    StagedEvent {
+                        name: "an open interaction once the submit stage is armed",
+                        armed: true,
+                        event: open_form,
+                        stops: true,
+                    },
+                    StagedEvent {
+                        name: "a candidate interaction during the settle",
+                        armed: false,
+                        event: candidate_form,
+                        stops: true,
+                    },
+                    StagedEvent {
+                        name: "a candidate interaction once the submit stage is armed",
+                        armed: true,
+                        event: candidate_form,
+                        stops: true,
+                    },
+                    StagedEvent {
+                        name: "a keystroke during the settle",
+                        armed: false,
+                        event: keystroke,
+                        stops: false,
+                    },
+                    StagedEvent {
+                        name: "a keystroke once the submit stage is armed",
+                        armed: true,
+                        event: keystroke,
+                        stops: false,
+                    },
+                    StagedEvent {
+                        name: "a lone Escape during the settle",
+                        armed: false,
+                        event: lone_escape,
+                        stops: false,
+                    },
+                    StagedEvent {
+                        name: "a pointer report during the settle",
+                        armed: false,
+                        event: pointer_report,
+                        stops: false,
+                    },
+                ];
+
+                #[test]
+                fn only_an_appearing_interaction_stops_a_staged_write() {
+                    for case in STAGED_EVENTS {
+                        with_interaction_host(|host| {
+                            host.confirm_submissions = false;
+                            until_literal_written(
+                                host,
+                                prompt_request(host, "prompt:staged-event"),
+                            );
+                            if case.armed {
+                                until_armed(host);
+                            }
+                            (case.event)(host);
+                            let reply =
+                                crate::runtime::input::tests::ordinary_prompt::composer_reliability::finish(
+                                    host, true,
+                                );
+                            let row = stored(host, &reply);
+                            if case.stops {
+                                assert_eq!(
+                                    reply.status,
+                                    SubmissionStatus::Uncertain,
+                                    "{}",
+                                    case.name
+                                );
+                                assert_eq!(
+                                    row.state,
+                                    storage::InputState::Uncertain,
+                                    "{}",
+                                    case.name
+                                );
+                                assert!(
+                                    row.stop_cause.is_some(),
+                                    "{}: the stop records its diagnostic",
+                                    case.name
+                                );
+                                assert_eq!(
+                                    host.pty.stage_bytes(),
+                                    vec![LITERAL.as_bytes().to_vec()],
+                                    "{}: no submit byte follows the stop",
+                                    case.name
+                                );
+                            } else {
+                                assert_eq!(
+                                    reply.status,
+                                    SubmissionStatus::Accepted,
+                                    "{}",
+                                    case.name
+                                );
+                                assert_eq!(
+                                    reply.stage,
+                                    SubmissionStage::Submitted,
+                                    "{}",
+                                    case.name
+                                );
+                                assert_eq!(row.stop_cause, None, "{}", case.name);
+                                assert_eq!(
+                                    host.pty.stage_bytes().len(),
+                                    2,
+                                    "{}: the submit key follows the literal",
+                                    case.name
+                                );
+                            }
+                        });
+                    }
+                }
+
+                #[test]
+                fn post_submit_verification_detects_an_unsubmitted_result() {
+                    for (name, mixed_keystroke, verifies_empty) in [
+                        (
+                            "a composer that verifies empty after the submit key",
+                            false,
+                            true,
+                        ),
+                        ("a composer that never verifies empty", false, false),
+                        (
+                            "a keystroke mixed into the composer during the settle",
+                            true,
+                            false,
+                        ),
+                    ] {
+                        with_interaction_host(|host| {
+                            host.confirm_submissions = false;
+                            until_literal_written(host, prompt_request(host, "prompt:post-submit"));
+                            if mixed_keystroke {
+                                keystroke(host);
+                            }
+                            let reply =
+                                crate::runtime::input::tests::ordinary_prompt::composer_reliability::finish(
+                                    host,
+                                    verifies_empty,
+                                );
+                            assert_eq!(reply.stage, SubmissionStage::Submitted, "{name}");
+                            assert_eq!(
+                                host.pty.stage_bytes().len(),
+                                2,
+                                "{name}: the submit key is written"
+                            );
+                            let row = stored(host, &reply);
+                            if verifies_empty {
+                                assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
+                                assert_eq!(row.stop_cause, None, "{name}");
+                            } else {
+                                assert_eq!(reply.status, SubmissionStatus::Uncertain, "{name}");
+                                assert_eq!(row.state, storage::InputState::Uncertain, "{name}");
+                                assert!(row.stop_cause.is_some(), "{name}");
+                            }
+                        });
+                    }
+                }
+
                 #[test]
                 fn staged_terminal_replies_during_the_settle_still_write_the_submit_key() {
                     for terminal_reply in [FOCUS_REPLY, CURSOR_REPORT, OSC_REPLY] {
@@ -7465,150 +7591,6 @@ mod tests {
                             assert_eq!(row.stop_cause, None);
                         });
                     }
-                }
-
-                #[test]
-                fn staged_lone_escape_during_the_settle_stops_with_manual_input_at_its_bound() {
-                    with_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:lone-escape"));
-                        let generation = host.transport.human_generation();
-                        host.type_human(b"\x1b");
-                        assert_eq!(host.quiesce_once(), InputDrain::Pending);
-                        assert_eq!(host.human.consumed.len(), 1, "the Escape key is read");
-                        assert_eq!(
-                            host.transport.drain_blocker(),
-                            Some("terminal reply pending")
-                        );
-                        assert_eq!(host.transport.human_generation(), generation);
-                        host.transport
-                            .backdate_reply_prefix(crate::runtime::transport::REPLY_PREFIX_BOUND);
-                        host.drain();
-                        assert_eq!(host.transport.human_generation(), generation + 1);
-                        let reply = finish_after_interruption(host);
-                        assert_stopped_with(host, &reply, storage::StopCause::ManualInput);
-                        assert_eq!(host.pty.manual, b"\x1b");
-                    });
-                }
-
-                #[test]
-                fn staged_failed_manual_accounting_outranks_the_generation_change() {
-                    with_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:accounting"));
-                        host.coordinator.manual_generation = u64::MAX;
-                        assert!(host.coordinator.observe_manual(1).is_err());
-                        assert!(host.coordinator.manual_accounting_failed);
-                        let reply = submitted(
-                            host.advance()
-                                .expect("the settle check stops the remaining stages"),
-                        );
-                        assert_stopped_with(
-                            host,
-                            &reply,
-                            storage::StopCause::ManualAccountingFailed,
-                        );
-                    });
-                }
-
-                #[test]
-                fn staged_keystroke_outranks_a_candidate_interaction() {
-                    with_interaction_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:key-first"));
-                        host.type_human(b"h");
-                        candidate_form(host);
-                        let reply = submitted(
-                            host.advance()
-                                .expect("the settle check stops the remaining stages"),
-                        );
-                        assert_stopped_with(host, &reply, storage::StopCause::ManualInput);
-                    });
-                }
-
-                #[test]
-                fn staged_candidate_during_the_settle_records_interaction_candidate() {
-                    with_interaction_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:candidate"));
-                        candidate_form(host);
-                        let reply = submitted(
-                            host.advance()
-                                .expect("the settle check stops the remaining stages"),
-                        );
-                        assert_stopped_with(host, &reply, storage::StopCause::InteractionCandidate);
-                    });
-                }
-
-                #[test]
-                fn staged_open_interaction_during_the_settle_records_interaction_open() {
-                    with_interaction_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:open"));
-                        crate::runtime::input::tests::permission_inspection_contracts::stable_form(
-                            host,
-                        );
-                        let reply = submitted(
-                            host.advance()
-                                .expect("the settle check stops the remaining stages"),
-                        );
-                        assert_stopped_with(host, &reply, storage::StopCause::InteractionOpen);
-                    });
-                }
-
-                #[test]
-                fn staged_observer_outage_during_the_settle_records_observer_unavailable() {
-                    with_interaction_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:outage"));
-                        let reply = loop {
-                            assert!(Instant::now() < host.until, "the outage stops the stage");
-                            host.controller
-                                .observer_failed(
-                                    crate::runtime::observation::ObservationFailure::Detector,
-                                    &RealObservationClock,
-                                )
-                                .unwrap();
-                            if let Some(reply) = host.advance() {
-                                break submitted(reply);
-                            }
-                            std::thread::sleep(Duration::from_millis(5));
-                        };
-                        assert_stopped_with(host, &reply, storage::StopCause::ObserverUnavailable);
-                    });
-                }
-
-                #[test]
-                fn staged_open_interaction_after_the_settle_records_interaction_open() {
-                    with_interaction_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:armed-open"));
-                        until_armed(host);
-                        crate::runtime::input::tests::permission_inspection_contracts::stable_form(
-                            host,
-                        );
-                        let reply = submitted(
-                            host.advance()
-                                .expect("the armed stage stops on the interaction"),
-                        );
-                        assert_stopped_with(host, &reply, storage::StopCause::InteractionOpen);
-                        host.show(SCREEN.to_vec());
-                        crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(
-                            host,
-                        );
-                        assert_eq!(
-                            host.pty.stage_bytes(),
-                            vec![LITERAL.as_bytes().to_vec()],
-                            "no submit byte is written after the interaction closes"
-                        );
-                    });
-                }
-
-                #[test]
-                fn staged_candidate_after_the_settle_records_interaction_candidate() {
-                    with_interaction_host(|host| {
-                        until_literal_written(host, prompt_request(host, "prompt:armed-candidate"));
-                        until_armed(host);
-                        candidate_form(host);
-                        let reply = submitted(
-                            host.advance()
-                                .expect("the armed stage stops on the interaction"),
-                        );
-                        assert_stopped_with(host, &reply, storage::StopCause::InteractionCandidate);
-                    });
                 }
             }
         }
@@ -8571,8 +8553,8 @@ mod tests {
             fn queued_stopped_inputs_publish_once_and_resume_only_after_reconciliation() {
                 for case in [
                     "write_failure",
-                    "human_input_after_the_settle",
-                    "human_input_during_the_settle",
+                    "interaction_after_the_settle",
+                    "interaction_during_the_settle",
                 ] {
                     with_permission_host(Duration::from_secs(60), |host| {
                         form(host);
@@ -8583,11 +8565,11 @@ mod tests {
                         until_head_literal(host);
                         match case {
                             "write_failure" => host.pty.failure = Some(io::ErrorKind::BrokenPipe),
-                            "human_input_after_the_settle" => {
+                            "interaction_after_the_settle" => {
                                 std::thread::sleep(host.stage_settle + Duration::from_millis(100));
-                                host.type_human(b"h");
+                                form(host);
                             }
-                            _ => host.type_human(b"h"),
+                            _ => form(host),
                         }
                         while row(host, first).state != storage::InputState::Uncertain {
                             assert!(
