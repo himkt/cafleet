@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 11/57 tasks complete
+**Progress**: 18/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -448,13 +448,13 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 3: Writer step bound
 
-- [ ] Add `SharedDeadline` and `with_shared_database_deadline` to `src/db.rs`, with `database_cancelled` and `remaining_database_wait` reading the shared value, plus their test <!-- completed: -->
-- [ ] Delete `WORK_SLICE`, `Worker::work_slice`, `Worker::work_deadline`, `Mailbox::work_deadline` and `WriterHooks::work_slice`, and move the mailbox deadline into a `SharedDeadline` <!-- completed: -->
-- [ ] Add `StepBound` (real-time `until`, shared shutdown deadline on the worker's clock, `check()`), run each receive and persist under it with `with_shared_database_deadline`, and make `finish` wait until `until + WRITER_JOIN_GRACE` before an unconditional join <!-- completed: -->
-- [ ] Change `WriterHooks::before` to take `&StepBound`, and end the `writer.rs` `Hooks` pause and the `service.rs` `block-persist` loop when `bound.check()` fails <!-- completed: -->
-- [ ] Remove `Hooks::on_virtual_time` and the `Hooks.work_slice` field in `writer.rs` and `InputFixtureWriterHooks::work_slice` in `input.rs`, pointing callers at `Hooks::default()` <!-- completed: -->
-- [ ] In `service.rs`, remove `synthetic_with_unhurried_writer`, `writer_work_slice_ms`, the `Hooks.work_slice` field and impl, the config parse and `ScenarioWriterHooks::work_slice`, and point callers at `synthetic` <!-- completed: -->
-- [ ] Add the virtual-jump, paused-hook join, held-lock persist and shutdown-interrupt tests, the last two on the real-clock `start` helper <!-- completed: -->
+- [x] Add `SharedDeadline` and `with_shared_database_deadline` to `src/db.rs`, with `database_cancelled` and `remaining_database_wait` reading the shared value, plus their test <!-- completed: 2026-11-21T14:20 -->
+- [x] Delete `WORK_SLICE`, `Worker::work_slice`, `Worker::work_deadline`, `Mailbox::work_deadline` and `WriterHooks::work_slice`, and move the mailbox deadline into a `SharedDeadline` <!-- completed: 2026-11-21T14:20 -->
+- [x] Add `StepBound` (real-time `until`, shared shutdown deadline on the worker's clock, `check()`), run each receive and persist under it with `with_shared_database_deadline`, and make `finish` wait until `until + WRITER_JOIN_GRACE` before an unconditional join <!-- completed: 2026-11-21T14:20 -->
+- [x] Change `WriterHooks::before` to take `&StepBound`, and end the `writer.rs` `Hooks` pause and the `service.rs` `block-persist` loop when `bound.check()` fails <!-- completed: 2026-11-21T14:20 -->
+- [x] Remove `Hooks::on_virtual_time` and the `Hooks.work_slice` field in `writer.rs` and `InputFixtureWriterHooks::work_slice` in `input.rs`, pointing callers at `Hooks::default()` <!-- completed: 2026-11-21T14:20 -->
+- [x] In `service.rs`, remove `synthetic_with_unhurried_writer`, `writer_work_slice_ms`, the `Hooks.work_slice` field and impl, the config parse and `ScenarioWriterHooks::work_slice`, and point callers at `synthetic` <!-- completed: 2026-11-21T14:20 -->
+- [x] Add the virtual-jump, paused-hook join, held-lock persist and shutdown-interrupt tests, the last two on the real-clock `start` helper <!-- completed: 2026-11-21T14:20 -->
 
 ### Step 4: Failure classification and rejection
 

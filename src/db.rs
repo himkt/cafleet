@@ -337,11 +337,28 @@ enum ScopeKind {
     Cancellable,
 }
 
+/// A deadline another thread may lower while a database scope that reads it is running.
+pub(crate) type SharedDeadline = std::sync::Arc<std::sync::Mutex<Option<Instant>>>;
+
+fn shared_instant(shared: &SharedDeadline) -> Option<Instant> {
+    *shared.lock().expect("shared database deadline")
+}
+
 struct DatabaseWait {
     deadline: Deadline,
     completion: bool,
     /// Statements abort through the progress handler once this passes.
     cancellation: Option<Instant>,
+    shared: Option<SharedDeadline>,
+}
+
+impl DatabaseWait {
+    fn lowered(&self, until: Instant) -> Instant {
+        self.shared
+            .as_ref()
+            .and_then(shared_instant)
+            .map_or(until, |shared| until.min(shared))
+    }
 }
 
 #[derive(Default)]
@@ -414,7 +431,9 @@ fn remaining_database_wait() -> Option<Duration> {
         waits.frames[start..]
             .iter()
             .try_fold(Duration::MAX, |remaining, wait| {
-                wait.deadline.remaining().map(|left| remaining.min(left))
+                Deadline::until(wait.lowered(wait.deadline.instant()))
+                    .remaining()
+                    .map(|left| remaining.min(left))
             })
             .ok()
     })
@@ -426,7 +445,7 @@ fn database_cancelled() -> bool {
         let until = waits
             .frames
             .iter()
-            .filter_map(|frame| frame.cancellation)
+            .filter_map(|frame| frame.cancellation.map(|until| frame.lowered(until)))
             .min();
         Instant::now() >= until.expect("a progress handler has an owning cancellable scope")
     })
@@ -452,6 +471,7 @@ impl<'a> DatabaseBudget<'a> {
         conn: &'a mut Connection,
         deadline: Deadline,
         kind: ScopeKind,
+        shared: Option<&SharedDeadline>,
     ) -> Result<Self, CafleetError> {
         let identity = std::ptr::from_ref(conn).addr();
         DATABASE_WAITS.with(|waits| {
@@ -476,6 +496,7 @@ impl<'a> DatabaseBudget<'a> {
                 cancellation: (kind == ScopeKind::Cancellable).then(|| {
                     inherited.map_or(deadline.instant(), |until| until.min(deadline.instant()))
                 }),
+                shared: shared.cloned(),
             });
         });
         if kind == ScopeKind::Cancellable {
@@ -540,7 +561,7 @@ pub(crate) fn with_database_budget<T>(
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
     deadline.remaining()?;
-    scoped_database_budget(conn, deadline, ScopeKind::Wait, operation)
+    scoped_database_budget(conn, deadline, ScopeKind::Wait, None, operation)
 }
 
 /// Like [`with_database_budget`] until `until`, and statements also abort once it passes.
@@ -551,8 +572,30 @@ pub(crate) fn with_database_deadline<T>(
 ) -> Result<T, CafleetError> {
     let deadline = Deadline::until(until);
     deadline.remaining()?;
-    let value = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, operation)?;
+    let value = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, None, operation)?;
     deadline.remaining()?;
+    Ok(value)
+}
+
+/// Like [`with_database_deadline`], and the scope also ends once `shared`, which another thread
+/// may lower mid-statement, passes.
+pub(crate) fn with_shared_database_deadline<T>(
+    conn: &mut Connection,
+    until: Instant,
+    shared: &SharedDeadline,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    let effective =
+        || Deadline::until(shared_instant(shared).map_or(until, |lowered| until.min(lowered)));
+    effective().remaining()?;
+    let value = scoped_database_budget(
+        conn,
+        Deadline::until(until),
+        ScopeKind::Cancellable,
+        Some(shared),
+        operation,
+    )?;
+    effective().remaining()?;
     Ok(value)
 }
 
@@ -569,6 +612,7 @@ pub(crate) fn complete_database_budget<T>(
         conn,
         Deadline::until(deadline.instant().max(Instant::now() + COMPLETION_GRACE)),
         ScopeKind::Completion,
+        None,
         operation,
     )
 }
@@ -577,9 +621,10 @@ fn scoped_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
     kind: ScopeKind,
+    shared: Option<&SharedDeadline>,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
-    let mut budget = DatabaseBudget::new(conn, deadline, kind)?;
+    let mut budget = DatabaseBudget::new(conn, deadline, kind, shared)?;
     let result = operation(budget.conn);
     let restored = budget.restore().map_err(|error| {
         CafleetError::App(format!(

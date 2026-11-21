@@ -2,6 +2,8 @@ use crate::broker::runtime as storage;
 use crate::broker::runtime::ObservedTransition;
 use crate::broker::runtime::PersistenceMode;
 use crate::broker::runtime::RunRecord;
+use crate::db::SharedDeadline;
+use crate::db::with_shared_database_deadline;
 use crate::runtime::*;
 use rusqlite::Connection;
 use std::collections::VecDeque;
@@ -18,13 +20,37 @@ pub(crate) enum WriterBoundary {
     Persist,
 }
 
-pub(in crate::runtime) const WORK_SLICE: Duration = Duration::from_millis(100);
+/// Equal to the connection's busy timeout, so one worker step waits at most as long as one
+/// contended statement may.
+const WRITER_STEP_BOUND: Duration = Duration::from_secs(5);
+const WRITER_JOIN_GRACE: Duration = Duration::from_millis(50);
 
 #[cfg(test)]
 pub(crate) trait WriterHooks: Send + Sync {
-    fn before(&self, boundary: WriterBoundary, deadline: Instant) -> Result<()>;
-    fn work_slice(&self) -> Duration {
-        WORK_SLICE
+    fn before(&self, boundary: WriterBoundary, bound: &StepBound) -> Result<()>;
+}
+
+/// One worker step's limits: real time for the step itself, so a virtual-time jump never
+/// expires it, and the shutdown deadline on the worker's clock.
+pub(crate) struct StepBound {
+    until: Instant,
+    shutdown: SharedDeadline,
+    clock: Arc<dyn crate::time::Clock>,
+}
+impl StepBound {
+    fn new(shutdown: &SharedDeadline, clock: &Arc<dyn crate::time::Clock>) -> Self {
+        Self {
+            until: Instant::now() + WRITER_STEP_BOUND,
+            shutdown: shutdown.clone(),
+            clock: clock.clone(),
+        }
+    }
+    pub(crate) fn check(&self) -> Result<()> {
+        let shutdown = *self.shutdown.lock().expect("writer shutdown deadline");
+        if Instant::now() >= self.until || shutdown.is_some_and(|end| self.clock.now() >= end) {
+            return Err(CafleetError::DeadlineExceeded);
+        }
+        Ok(())
     }
 }
 
@@ -46,16 +72,15 @@ struct Mailbox {
     diagnostic: Option<String>,
     last_sequence: i64,
     stop: bool,
-    deadline: Option<Instant>,
+    deadline: SharedDeadline,
 }
 impl Mailbox {
     fn failure(&mut self, cause: &CafleetError) {
         self.gaps = self.gaps.checked_add(1).expect("writer gap count overflow");
         self.diagnostic = Some(cause.message().into_owned());
     }
-    fn work_deadline(&self, now: Instant, slice: Duration) -> Instant {
-        let local = now + slice;
-        self.deadline.map_or(local, |until| until.min(local))
+    fn deadline(&self) -> Option<Instant> {
+        *self.deadline.lock().expect("writer shutdown deadline")
     }
     fn success(&mut self) {
         self.diagnostic = None;
@@ -108,10 +133,7 @@ impl EventWriter {
         })?;
         let (sender, receiver) = mpsc::sync_channel(64);
         let mailbox = Arc::new(Mutex::new(Mailbox::default()));
-        #[cfg(not(test))]
-        let work_slice = WORK_SLICE;
-        #[cfg(test)]
-        let work_slice = hooks.work_slice();
+        let shutdown = mailbox.lock().expect("writer mailbox").deadline.clone();
         let worker = Worker {
             conn,
             run,
@@ -119,7 +141,7 @@ impl EventWriter {
             mailbox: mailbox.clone(),
             receiver,
             queue: VecDeque::new(),
-            work_slice,
+            shutdown,
             clock: clock.clone(),
             #[cfg(test)]
             hooks,
@@ -191,41 +213,32 @@ impl EventWriter {
         self.status().diagnostic
     }
     pub(crate) fn set_deadline(&mut self, until: Instant) {
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        state.deadline = Some(state.deadline.map_or(until, |old| old.min(until)));
+        let state = self.mailbox.lock().expect("writer mailbox");
+        let mut deadline = state.deadline.lock().expect("writer shutdown deadline");
+        *deadline = Some(deadline.map_or(until, |old| old.min(until)));
     }
     pub(crate) fn begin_shutdown(&mut self, until: Instant) {
         self.set_deadline(until);
         self.mailbox.lock().expect("writer mailbox").stop = true;
     }
+    /// Joins the worker once it finishes or the shutdown deadline plus a short grace passes; an
+    /// in-flight step aborts at the shutdown deadline, so the join returns.
     pub(crate) fn finish(&mut self, until: Instant) -> (u64, u64) {
         self.begin_shutdown(until);
         let until = self
             .mailbox
             .lock()
             .expect("writer mailbox")
-            .deadline
+            .deadline()
             .expect("shutdown deadline");
-        if let Some(thread) = self.thread.as_ref() {
-            while !thread.is_finished() && self.clock.now() < until {
-                nap_until(self.clock.as_ref(), until);
+        if let Some(thread) = self.thread.take() {
+            let join_by = until + WRITER_JOIN_GRACE;
+            while !thread.is_finished() && self.clock.now() < join_by {
+                nap_until(self.clock.as_ref(), join_by);
             }
+            thread.join().expect("writer processing is panic-free");
         }
-        if self
-            .thread
-            .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished)
-        {
-            self.thread
-                .take()
-                .expect("writer thread")
-                .join()
-                .expect("writer processing is panic-free");
-        }
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        if self.thread.is_some() && state.diagnostic.is_none() {
-            state.failure(&CafleetError::DeadlineExceeded);
-        }
+        let state = self.mailbox.lock().expect("writer mailbox");
         let unsaved = if state.diagnostic.is_some() {
             state.gaps
         } else {
@@ -240,7 +253,7 @@ impl Drop for EventWriter {
             .mailbox
             .lock()
             .expect("writer mailbox")
-            .deadline
+            .deadline()
             .unwrap_or_else(|| self.clock.now() + Duration::from_secs(4));
         self.finish(until);
     }
@@ -253,7 +266,7 @@ struct Worker {
     mailbox: Arc<Mutex<Mailbox>>,
     receiver: mpsc::Receiver<Box<ObservedTransition>>,
     queue: VecDeque<Box<ObservedTransition>>,
-    work_slice: Duration,
+    shutdown: SharedDeadline,
     clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
@@ -265,7 +278,7 @@ impl Worker {
         loop {
             {
                 let state = self.mailbox.lock().expect("writer mailbox");
-                if state.deadline.is_some_and(|end| self.clock.now() >= end) {
+                if state.deadline().is_some_and(|end| self.clock.now() >= end) {
                     break;
                 }
                 if state.stop && state.pending == 0 {
@@ -293,29 +306,23 @@ impl Worker {
         }
     }
     fn step(&mut self) -> Result<()> {
-        if !self.receive()? {
+        let bound = StepBound::new(&self.shutdown, &self.clock);
+        if !self.receive(&bound)? {
             return Ok(());
         }
-        self.persist_front()
-    }
-    fn work_deadline(&self) -> Instant {
-        self.mailbox
-            .lock()
-            .expect("writer mailbox")
-            .work_deadline(self.clock.now(), self.work_slice)
+        self.persist_front(&bound)
     }
     /// Returns `false` when a test hook ends this pass before any persistence.
-    fn receive(&mut self) -> Result<bool> {
+    fn receive(&mut self, bound: &StepBound) -> Result<bool> {
         while self.queue.len() < 64 {
-            let until = self.work_deadline();
             #[cfg(test)]
-            match self.hooks.before(WriterBoundary::Receive, until) {
+            match self.hooks.before(WriterBoundary::Receive, bound) {
                 Ok(()) => {}
                 Err(CafleetError::DeadlineExceeded) => return Ok(false),
                 Err(cause) => return Err(cause),
             }
 
-            check_deadline(self.clock.now(), until)?;
+            bound.check()?;
             match self.receiver.try_recv() {
                 Ok(transition) => self.queue.push_back(transition),
                 Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
@@ -323,15 +330,14 @@ impl Worker {
         }
         Ok(true)
     }
-    fn persist_front(&mut self) -> Result<()> {
+    fn persist_front(&mut self, bound: &StepBound) -> Result<()> {
         let Some(transition) = self.queue.front() else {
             return Ok(());
         };
-        let until = self.work_deadline();
         #[cfg(test)]
-        self.hooks.before(WriterBoundary::Persist, until)?;
+        self.hooks.before(WriterBoundary::Persist, bound)?;
 
-        with_database_deadline(&mut self.conn, until, |conn| {
+        with_shared_database_deadline(&mut self.conn, bound.until, &self.shutdown, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
             storage::persist_transition(conn, &self.run.owner(), transition, PersistenceMode::Live)
                 .map(|_| ())
