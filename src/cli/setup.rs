@@ -1,6 +1,9 @@
 use crate::assets::HermesSetup;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
+use crate::broker::runtime::RunRecord;
+use crate::cli::member::ObservationProbe;
+use crate::cli::member::probe_observation;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::SpawnProbe;
 use crate::coding_agent::hermes::HermesCli;
@@ -20,6 +23,8 @@ use crate::runtime::SystemProcessTable;
 use crate::runtime::control::CheckStatus;
 use crate::runtime::system::SystemProbe;
 use crate::runtime::system::SystemRunner;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::Args;
 use serde::Serialize;
 use serde_json::Value;
@@ -303,7 +308,7 @@ fn read_caller_pane(
 }
 
 /// Runs every check: the Hermes batch starts first and overlaps the multiplexer, database and
-/// OpenCode checks; rows keep their order.
+/// OpenCode checks, and the member probes overlap the backend checks; rows keep their order.
 pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
     let backends = resolve_backends(inputs.probe, inputs.home);
     let hermes = backends
@@ -320,9 +325,29 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
             scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline))
         });
         let mut checks = multiplexer_rows((inputs.caller)());
-        checks.push(database_row(inputs.settings, &database(inputs.settings)));
+        let (database_check, runs) = database(inputs.settings);
+        checks.push(database_check);
+        let probes: Vec<_> = runs
+            .into_iter()
+            .map(|run| {
+                scope.spawn(move || {
+                    let probe = probe_observation(&run, &crate::time::SystemClock);
+                    (run, probe)
+                })
+            })
+            .collect();
         let hermes_reading = || batch.map(crate::coding_agent::hermes::joined);
-        checks.extend(agent_checks(&backends, hermes_reading));
+        let agents = agent_checks(&backends, hermes_reading);
+        let now = Utc::now();
+        let database_url = inputs
+            .settings
+            .database_url_explicit
+            .then_some(inputs.settings.database_url.as_str());
+        checks.extend(probes.into_iter().map(|probe| {
+            let (run, probe) = probe.join().expect("a member probe thread completes");
+            member_runtime_check(run.member_id, &run, &probe, now, database_url)
+        }));
+        checks.extend(agents);
         Report { checks }
     })
 }
@@ -420,12 +445,101 @@ fn escape(detail: &str) -> String {
     detail.replace('\n', "\\n").replace('\r', "\\r")
 }
 
-fn database(settings: &Settings) -> SchemaState {
-    match crate::db::open_existing(&settings.database_url, true) {
-        Ok(Some(conn)) => db::classify_selected_schema(&conn, &settings.database_url),
-        Ok(None) => SchemaState::Missing,
-        Err(cause) => SchemaState::Unreachable { cause },
+/// The `database` row, and the runs that get member rows when that row is `ok`.
+fn database(settings: &Settings) -> (Check, Vec<RunRecord>) {
+    let conn = match crate::db::open_existing(&settings.database_url, true) {
+        Ok(Some(conn)) => conn,
+        Ok(None) => return (database_row(settings, &SchemaState::Missing), Vec::new()),
+        Err(cause) => {
+            return (
+                database_row(settings, &SchemaState::Unreachable { cause }),
+                Vec::new(),
+            );
+        }
+    };
+    let check = database_row(
+        settings,
+        &db::classify_selected_schema(&conn, &settings.database_url),
+    );
+    if check.status != CheckStatus::Ok {
+        return (check, Vec::new());
     }
+    match crate::broker::runtime::live_member_runs(&conn) {
+        Ok(runs) => (check, runs),
+        Err(cause) => (
+            Check::new("database", CheckStatus::Error, cause.to_string()),
+            Vec::new(),
+        ),
+    }
+}
+
+pub(crate) const DOCTOR_GAP_ERROR_AGE: Duration = Duration::from_secs(30);
+
+pub(crate) fn member_runtime_check(
+    member_id: i64,
+    run: &RunRecord,
+    probe: &ObservationProbe,
+    now: DateTime<Utc>,
+    database_url: Option<&str>,
+) -> Check {
+    let run_id = run.run_id;
+    let hint = || recovery_hint(member_id, database_url);
+    let (status, detail) = match probe {
+        ObservationProbe::Skipped => (
+            CheckStatus::Info,
+            format!("run={run_id} status={}: not probed", run.status.as_str()),
+        ),
+        ObservationProbe::Failed(cause) => (
+            CheckStatus::Error,
+            format!("run={run_id} health probe failed: {cause}; {}", hint()),
+        ),
+        ObservationProbe::Answered(None) => (
+            CheckStatus::Info,
+            format!("run={run_id} observation=pending"),
+        ),
+        ObservationProbe::Answered(Some(health)) => {
+            let observation = format!(
+                "run={run_id} observation={}",
+                health.eligibility.rendering()
+            );
+            if health.degraded {
+                let degraded = format!(
+                    "{observation} diagnostic={}",
+                    health
+                        .diagnostic
+                        .as_deref()
+                        .expect("validated degraded health names its diagnostic")
+                );
+                match health
+                    .gap_open_since
+                    .as_deref()
+                    .filter(|since| gap_age(since, now) > DOCTOR_GAP_ERROR_AGE)
+                {
+                    Some(since) => (
+                        CheckStatus::Error,
+                        format!("{degraded} gap_open_since={since}; {}", hint()),
+                    ),
+                    None => (CheckStatus::Warn, degraded),
+                }
+            } else {
+                (CheckStatus::Ok, observation)
+            }
+        }
+    };
+    Check::new(format!("member.{member_id}.runtime"), status, detail)
+}
+
+fn gap_age(since: &str, now: DateTime<Utc>) -> Duration {
+    let since =
+        crate::time::parse_lenient(since).expect("validated health carries an RFC 3339 gap start");
+    (now - since).to_std().unwrap_or(Duration::ZERO)
+}
+
+fn recovery_hint(member_id: i64, database_url: Option<&str>) -> String {
+    let suffix = database_url.map_or_else(String::new, |url| format!(" --database-url {url}"));
+    format!(
+        "inspect with 'cafleet member show {member_id} --json{suffix}'; if it does not recover, run 'cafleet member delete {member_id}{suffix}' and create a replacement member"
+    )
 }
 
 /// One backend's configuration base, skills directory and executable, each resolved once.

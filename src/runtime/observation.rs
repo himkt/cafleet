@@ -984,6 +984,8 @@ impl ObservationController {
             } else {
                 observer.diagnostic
             },
+            writer_diagnostic: state.diagnostic.as_deref().map(storage::diagnostic_text),
+            gap_open_since: self.gap.as_ref().map(|gap| gap.started_at.clone()),
         }
     }
     #[cfg(test)]
@@ -7557,6 +7559,25 @@ pub(crate) enum InputEligibility {
     ComposerEmpty,
     Hold(GateReason),
 }
+impl GateReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Candidate => "candidate",
+            Self::Interaction => "interaction",
+            Self::Unknown => "unknown",
+            Self::ObserverUnavailable => "observer_unavailable",
+            Self::Gap => "gap",
+        }
+    }
+}
+impl InputEligibility {
+    pub(crate) fn rendering(self) -> String {
+        match self {
+            Self::ComposerEmpty => "composer_empty".to_owned(),
+            Self::Hold(reason) => format!("hold:{}", reason.as_str()),
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TransitionDraft {
     pub(crate) run_id: i64,
@@ -7910,6 +7931,8 @@ pub(crate) struct ObservationHealth {
     pub(crate) gap_count: u64,
     pub(crate) degraded: bool,
     pub(crate) diagnostic: Option<String>,
+    pub(crate) writer_diagnostic: Option<String>,
+    pub(crate) gap_open_since: Option<String>,
 }
 
 impl ObservationHealth {
@@ -7919,15 +7942,32 @@ impl ObservationHealth {
             "health pending count exceeds capacity",
         )?;
         ensure(
-            serde_json::to_vec(self).map_err(io_error)?.len() <= 1024,
+            serde_json::to_vec(self).map_err(io_error)?.len() <= 2048,
             "health observation exceeds encoded limit",
         )?;
+        if let Some(text) = &self.writer_diagnostic {
+            ensure(
+                self.degraded && storage::is_diagnostic_text(text),
+                "invalid health writer diagnostic",
+            )?;
+        }
+        if let Some(started) = &self.gap_open_since {
+            ensure(
+                self.degraded && self.eligibility == InputEligibility::Hold(GateReason::Gap),
+                "health gap start outside a degraded gap hold",
+            )?;
+            wall_time(started)?;
+        }
         if let Some(code) = &self.diagnostic {
             ensure(
                 ObservationFailure::try_from(code.as_str()).is_ok(),
                 "invalid health diagnostic",
             )?;
         }
+        ensure(
+            !self.degraded || self.diagnostic.is_some(),
+            "degraded health omits its diagnostic",
+        )?;
         if self.eligibility == InputEligibility::ComposerEmpty {
             ensure(
                 self.visibility == Visibility::NotVisible

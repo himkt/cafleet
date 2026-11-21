@@ -2,6 +2,9 @@ use crate::broker;
 use crate::broker::MemberRecord;
 use crate::broker::NewPlacement;
 use crate::broker::runtime::DeliveryProjection;
+use crate::broker::runtime::RunRecord;
+use crate::broker::runtime::RunStatus;
+use crate::broker::runtime::RunnerDiagnosticEntry;
 use crate::cli::emit;
 use crate::cli::resolve_body;
 use crate::cli::resolve_command_body;
@@ -24,6 +27,7 @@ use crate::output::format_member_detail;
 use crate::output::format_member_exec;
 use crate::output::format_member_list;
 use crate::output::format_member_prompt;
+use crate::runtime::observation::ObservationHealth;
 use crate::runtime::system::SystemProbe;
 use crate::time;
 use chrono::DateTime;
@@ -35,6 +39,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -772,8 +777,96 @@ fn close_member_within(
 
 fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let member = crate::broker::members::active_member(conn, member_id)?;
-    let value = crate::output::json::member(&member);
-    emit(json, &value, || format_member_detail(&member))
+    let mut value = crate::output::json::member(&member);
+    let Some(snapshot) = &member.runtime else {
+        return emit(json, &value, || format_member_detail(&member));
+    };
+    let diagnostics = broker::runtime::latest_runner_diagnostics(conn, snapshot.run.run_id)?;
+    let probe = probe_observation(&snapshot.run, &time::SystemClock);
+    value["runtime"] = show_runtime(value["runtime"].take(), &probe, &diagnostics);
+    emit(json, &value, || {
+        format!(
+            "{}{}",
+            format_member_detail(&member),
+            observation_suffix(&probe)
+        )
+    })
+}
+
+const OBSERVATION_PROBE_DEADLINE: Duration = Duration::from_secs(1);
+
+pub(crate) enum ObservationProbe {
+    Skipped,
+    Answered(Option<ObservationHealth>),
+    Failed(String),
+}
+
+impl ObservationProbe {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Skipped => "skipped",
+            Self::Answered(_) => "answered",
+            Self::Failed(_) => "failed",
+        }
+    }
+}
+
+pub(crate) fn probe_observation(run: &RunRecord, clock: &dyn time::Clock) -> ObservationProbe {
+    if !matches!(run.status, RunStatus::Running | RunStatus::Degraded) {
+        return ObservationProbe::Skipped;
+    }
+    match crate::runtime::probe_health(run, clock.now() + OBSERVATION_PROBE_DEADLINE, clock) {
+        Ok(snapshot) => ObservationProbe::Answered(snapshot.observation),
+        Err(cause) => ObservationProbe::Failed(cause.message().into_owned()),
+    }
+}
+
+pub(crate) fn show_runtime(
+    mut runtime: Value,
+    probe: &ObservationProbe,
+    diagnostics: &[RunnerDiagnosticEntry],
+) -> Value {
+    let (observation, error) = match probe {
+        ObservationProbe::Answered(Some(health)) => (observation_json(health), Value::Null),
+        ObservationProbe::Failed(message) => (Value::Null, json!(message)),
+        ObservationProbe::Skipped | ObservationProbe::Answered(None) => (Value::Null, Value::Null),
+    };
+    let object = runtime
+        .as_object_mut()
+        .expect("a member's runtime renders as a JSON object");
+    object.insert("observation_probe".into(), json!(probe.as_str()));
+    object.insert("observation".into(), observation);
+    object.insert("observation_error".into(), error);
+    object.insert(
+        "diagnostics".into(),
+        diagnostics.iter().map(diagnostic_json).collect(),
+    );
+    runtime
+}
+
+fn observation_json(health: &ObservationHealth) -> Value {
+    json!({"visibility":health.visibility.as_str(),"eligibility":health.eligibility.rendering(),
+        "degraded":health.degraded,"diagnostic":health.diagnostic,
+        "writer_diagnostic":health.writer_diagnostic,"pending_count":health.pending_count,
+        "gap_count":health.gap_count,"gap_open_since":health.gap_open_since})
+}
+
+fn diagnostic_json(entry: &RunnerDiagnosticEntry) -> Value {
+    json!({"source":entry.source.as_str(),"message":entry.message,"first_at":entry.first_at,
+        "last_at":entry.last_at,"count":entry.count})
+}
+
+pub(crate) fn observation_suffix(probe: &ObservationProbe) -> String {
+    match probe {
+        ObservationProbe::Skipped => " observation=-".to_owned(),
+        ObservationProbe::Failed(_) => " observation=unavailable".to_owned(),
+        ObservationProbe::Answered(None) => " observation=pending".to_owned(),
+        ObservationProbe::Answered(Some(health)) => format!(
+            " observation={}{}",
+            health.eligibility.rendering(),
+            if health.degraded { " degraded" } else { "" }
+        ),
+    }
 }
 
 fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {

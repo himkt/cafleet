@@ -713,7 +713,7 @@ fn is_diagnostic_control(c: char) -> bool {
     c <= '\u{1f}' || c == '\u{7f}'
 }
 
-fn is_diagnostic_text(text: &str) -> bool {
+pub(crate) fn is_diagnostic_text(text: &str) -> bool {
     !text.is_empty()
         && text.len() <= DIAGNOSTIC_TEXT_LIMIT
         && text.trim() == text

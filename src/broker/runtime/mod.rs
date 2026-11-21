@@ -382,6 +382,28 @@ pub(crate) fn member_runtime(
     id.map(|id| runtime_snapshot(conn, id)).transpose()
 }
 
+/// The latest run of every active ordinary member whose run is not terminal, in member-ID order.
+pub(crate) fn live_member_runs(conn: &Connection) -> Result<Vec<RunRecord>, CafleetError> {
+    let run_ids: Vec<i64> = conn
+        .prepare(
+            "SELECT (SELECT MAX(r.run_id) FROM member_runs r WHERE r.member_id=m.member_id)
+             FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
+             WHERE m.status='active' AND f.director_member_id IS NOT m.member_id
+               AND EXISTS(SELECT 1 FROM member_runs r WHERE r.member_id=m.member_id)
+             ORDER BY m.member_id",
+        )?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut runs = Vec::with_capacity(run_ids.len());
+    for run_id in run_ids {
+        let run = get_run(conn, run_id)?;
+        if !run.status.terminal() {
+            runs.push(run);
+        }
+    }
+    Ok(runs)
+}
+
 stored_enum!(RunStatus, "member_runs.status", {
     Starting => "starting", Prepared => "prepared", Running => "running",
     Degraded => "degraded", Recovering => "recovering",

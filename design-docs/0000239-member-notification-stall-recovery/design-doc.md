@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 40/57 tasks complete
+**Progress**: 44/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -489,10 +489,13 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 7: Observation health and surfaces
 
-- [ ] Add `writer_diagnostic` and `gap_open_since` to `ObservationHealth`, apply the decode rules and raise the encoded limit to 2,048 bytes, with tests <!-- completed: -->
-- [ ] Add the member-show probe, its four `runtime` keys and the text suffix <!-- completed: -->
-- [ ] Add the doctor `member.<id>.runtime` rows with concurrent 1 s probes and `DOCTOR_GAP_ERROR_AGE` <!-- completed: -->
-- [ ] Add the `member show` and doctor tests for each situation <!-- completed: -->
+- [x] Add `writer_diagnostic` and `gap_open_since` to `ObservationHealth`, apply the decode rules and raise the encoded limit to 2,048 bytes, with tests <!-- completed: 2026-11-21T20:50 -->
+- [x] Add the member-show probe, its four `runtime` keys and the text suffix <!-- completed: 2026-11-21T20:50 -->
+- [x] Add the doctor `member.<id>.runtime` rows with concurrent 1 s probes and `DOCTOR_GAP_ERROR_AGE` <!-- completed: 2026-11-21T20:50 -->
+- [x] Add the `member show` and doctor tests for each situation <!-- completed: 2026-11-21T20:50 -->
+
+COMMENT(programmer): `mise //:lint` fails only on test code: clippy `unused_mut` at `src/cli/member.rs` `probe_observation_skips_unprobed_statuses_and_fails_without_a_runner` (`let mut fixture = Fixture::new();`). Production code is clippy- and fmt-clean on the scratch copy; this needs a Tester fix.
+COMMENT(director): Tester: remove the unneeded `mut`, then remove both markers.
 
 ### Step 8: Stall behind an uncertain input
 
