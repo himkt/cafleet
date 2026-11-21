@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 18/57 tasks complete
+**Progress**: 27/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -458,15 +458,15 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 4: Failure classification and rejection
 
-- [ ] Add `CafleetError::DatabaseIo`, its code mapping and `transient_storage`, with tests <!-- completed: -->
-- [ ] Add `diagnostic_text` with its tests <!-- completed: -->
-- [ ] Add `RuntimeCauseKind::EventRejected` and its cause validation in `src/broker/runtime/events.rs`, with tests <!-- completed: -->
-- [ ] Classify failures in the worker, and replace a permanently failing front transition with its rejection event within the same step, without `Mailbox::failure` <!-- completed: -->
-- [ ] Fence the writer when the replacement fails permanently <!-- completed: -->
-- [ ] Add `RetainReason` to `RetainedTransition`, skip `Mailbox::failure` for `EvidenceInvalid`, and replace an `EvidenceInvalid` refusal in `ObservationController::route` with no `delivery_pressure` call <!-- completed: -->
-- [ ] Add the replacement, transient-replacement, fence and sequence-slot writer tests, plus the controller rejection test <!-- completed: -->
-- [ ] Add `Step::FailPersist(bool)` and the `ScenarioWriterHooks` flag, move `an_event_storage_fault_holds_input_until_the_writer_persists_again` onto it and delete `EVENT_FAULT` <!-- completed: -->
-- [ ] Update the existing tests listed in § Testing <!-- completed: -->
+- [x] Add `CafleetError::DatabaseIo`, its code mapping and `transient_storage`, with tests <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `diagnostic_text` with its tests <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `RuntimeCauseKind::EventRejected` and its cause validation in `src/broker/runtime/events.rs`, with tests <!-- completed: 2026-11-21T14:35 -->
+- [x] Classify failures in the worker, and replace a permanently failing front transition with its rejection event within the same step, without `Mailbox::failure` <!-- completed: 2026-11-21T14:35 -->
+- [x] Fence the writer when the replacement fails permanently <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `RetainReason` to `RetainedTransition`, skip `Mailbox::failure` for `EvidenceInvalid`, and replace an `EvidenceInvalid` refusal in `ObservationController::route` with no `delivery_pressure` call <!-- completed: 2026-11-21T14:35 -->
+- [x] Add the replacement, transient-replacement, fence and sequence-slot writer tests, plus the controller rejection test <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `Step::FailPersist(bool)` and the `ScenarioWriterHooks` flag, move `an_event_storage_fault_holds_input_until_the_writer_persists_again` onto it and delete `EVENT_FAULT` <!-- completed: 2026-11-21T14:35 -->
+- [x] Update the existing tests listed in § Testing <!-- completed: 2026-11-21T14:35 -->
 
 ### Step 5: Silent archival of stale and duplicate delivery records
 

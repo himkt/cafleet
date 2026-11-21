@@ -617,6 +617,7 @@ fn validate_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
                 RuntimeCauseKind::StoragePressure
                     | RuntimeCauseKind::StorageRecovered
                     | RuntimeCauseKind::ObserverError
+                    | RuntimeCauseKind::EventRejected
             )
     );
     require(
@@ -624,6 +625,9 @@ fn validate_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
         "cause_json.kind",
         "cause does not match lifecycle event",
     )?;
+    if kind == RuntimeCauseKind::EventRejected {
+        return validate_rejection_cause(cause);
+    }
     let allowed: &[&str] = match kind {
         RuntimeCauseKind::NativeExit => &["kind", "exit_code", "exit_signal"],
         RuntimeCauseKind::StoragePressure
@@ -634,6 +638,7 @@ fn validate_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
         RuntimeCauseKind::CoverageUnknown
         | RuntimeCauseKind::MonitorLost
         | RuntimeCauseKind::RuntimePathMissing => &["kind"],
+        RuntimeCauseKind::EventRejected => unreachable!("validated by validate_rejection_cause"),
     };
     require(
         cause.keys().all(|key| allowed.contains(&key.as_str())),
@@ -666,6 +671,108 @@ fn validate_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
         )?;
     }
     Ok(())
+}
+
+const REJECTION_CAUSE_FIELDS: [&str; 4] =
+    ["kind", "rejected_kind", "rejected_observed_at", "error"];
+
+fn validate_rejection_cause(cause: &Map<String, Value>) -> Result<(), CafleetError> {
+    require(
+        cause.len() == REJECTION_CAUSE_FIELDS.len()
+            && REJECTION_CAUSE_FIELDS
+                .iter()
+                .all(|key| cause.contains_key(*key)),
+        "cause_json",
+        "an event_rejected cause has exactly its rejected kind, time and error",
+    )?;
+    require(
+        cause["rejected_kind"]
+            .as_str()
+            .is_some_and(|kind| RuntimeEventKind::try_from(kind).is_ok()),
+        "cause_json.rejected_kind",
+        "a runtime event kind required",
+    )?;
+    rfc3339(
+        cause["rejected_observed_at"]
+            .as_str()
+            .ok_or_else(|| invalid("cause_json.rejected_observed_at", "timestamp required"))?,
+        "cause_json.rejected_observed_at",
+    )?;
+    require(
+        cause["error"].as_str().is_some_and(is_diagnostic_text),
+        "cause_json.error",
+        "a sanitized diagnostic text required",
+    )
+}
+
+const DIAGNOSTIC_TEXT_LIMIT: usize = 512;
+
+fn is_diagnostic_control(c: char) -> bool {
+    c <= '\u{1f}' || c == '\u{7f}'
+}
+
+fn is_diagnostic_text(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= DIAGNOSTIC_TEXT_LIMIT
+        && text.trim() == text
+        && !text.chars().any(is_diagnostic_control)
+}
+
+/// A runner diagnostic as stored or transmitted: control characters become spaces, and the
+/// trimmed text keeps at most 512 bytes. Every caller's message starts with a fixed label.
+pub(crate) fn diagnostic_text(message: &str) -> String {
+    let replaced: String = message
+        .chars()
+        .map(|c| if is_diagnostic_control(c) { ' ' } else { c })
+        .collect();
+    let mut text = replaced.trim();
+    if text.len() > DIAGNOSTIC_TEXT_LIMIT {
+        let boundary = (0..=DIAGNOSTIC_TEXT_LIMIT)
+            .rev()
+            .find(|index| text.is_char_boundary(*index))
+            .expect("offset 0 is a character boundary");
+        text = text[..boundary].trim_end();
+    }
+    assert!(
+        !text.is_empty(),
+        "a runner diagnostic starts with a fixed label"
+    );
+    text.to_owned()
+}
+
+/// The run-level `runner_degraded` event that takes a never-persistable transition's sequence slot.
+pub(crate) fn event_rejected_transition(
+    run: &RunRecord,
+    rejected: &ObservedTransition,
+    screen_seq: u64,
+    cause: &CafleetError,
+    observed_at: &str,
+) -> Result<ObservedTransition, CafleetError> {
+    Ok(ObservedTransition {
+        run_id: rejected.run_id,
+        event_seq: rejected.event_seq,
+        episode_seq: None,
+        kind: RuntimeEventKind::RunnerDegraded,
+        classification: None,
+        observed_at: observed_at.to_owned(),
+        evidence_json: run_evidence(run, "runner-lifecycle", screen_seq)?,
+        close_reason: None,
+        cause_json: Some(json!({
+            "kind":RuntimeCauseKind::EventRejected.as_str(),
+            "rejected_kind":rejected.kind.as_str(),
+            "rejected_observed_at":rejected.observed_at,
+            "error":diagnostic_text(&cause.message()),
+        })),
+    })
+}
+
+/// Whether `transition` is a rejection event, which is never itself replaced.
+pub(crate) fn is_event_rejection(transition: &ObservedTransition) -> bool {
+    transition.kind == RuntimeEventKind::RunnerDegraded
+        && transition
+            .cause_json
+            .as_ref()
+            .is_some_and(|cause| cause["kind"] == RuntimeCauseKind::EventRejected.as_str())
 }
 
 fn apply_interaction(

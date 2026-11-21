@@ -122,7 +122,7 @@ CREATE TABLE member_runtime_events (
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
     notification_state TEXT NOT NULL CHECK(notification_state IN ('inbox','archived')),
     message_id INTEGER UNIQUE REFERENCES messages(message_id) ON DELETE RESTRICT,
-    archive_reason TEXT CHECK(archive_reason IS NULL OR archive_reason IN ('member_inactive','fleet_deleted','director_inactive')),
+    archive_reason TEXT CHECK(archive_reason IS NULL OR archive_reason IN ('member_inactive','fleet_deleted','director_inactive','head_not_ready','duplicate_delivery')),
     UNIQUE(run_id, event_seq),
     CHECK((notification_state = 'inbox' AND message_id IS NOT NULL AND archive_reason IS NULL) OR
           (notification_state = 'archived' AND message_id IS NULL AND archive_reason IS NOT NULL))

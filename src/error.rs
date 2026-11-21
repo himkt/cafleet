@@ -8,6 +8,8 @@ pub enum CafleetError {
     Usage(String),
     App(String),
     DatabaseBusy(String),
+    /// An SQLite I/O-class failure; it behaves like `App` except under `transient_storage`.
+    DatabaseIo(String),
     DeadlineExceeded,
     WithDiagnostics {
         cause: Box<CafleetError>,
@@ -35,8 +37,18 @@ impl CafleetError {
             Self::App(_)
             | Self::InvalidStoredValue { .. }
             | Self::DatabaseBusy(_)
+            | Self::DatabaseIo(_)
             | Self::DeadlineExceeded
             | Self::WithDiagnostics { .. } => Self::App(message),
+        }
+    }
+
+    /// Whether a storage attempt failing with this cause may succeed when retried unchanged.
+    pub(crate) fn transient_storage(&self) -> bool {
+        match self {
+            Self::WithDiagnostics { cause, .. } => cause.transient_storage(),
+            Self::DatabaseBusy(_) | Self::DeadlineExceeded | Self::DatabaseIo(_) => true,
+            Self::Usage(_) | Self::App(_) | Self::InvalidStoredValue { .. } => false,
         }
     }
 
@@ -58,6 +70,7 @@ impl CafleetError {
             CafleetError::Usage(_) => 2,
             CafleetError::App(_)
             | CafleetError::DatabaseBusy(_)
+            | CafleetError::DatabaseIo(_)
             | CafleetError::DeadlineExceeded
             | CafleetError::InvalidStoredValue { .. } => 1,
         }
@@ -70,7 +83,8 @@ impl CafleetError {
             }
             CafleetError::Usage(message)
             | CafleetError::App(message)
-            | CafleetError::DatabaseBusy(message) => Cow::Borrowed(message),
+            | CafleetError::DatabaseBusy(message)
+            | CafleetError::DatabaseIo(message) => Cow::Borrowed(message),
             CafleetError::DeadlineExceeded => Cow::Borrowed("operation exceeded its deadline"),
             CafleetError::InvalidStoredValue { field, value } => {
                 Cow::Owned(format!("invalid stored value for {field}: {value}"))
@@ -87,11 +101,19 @@ impl fmt::Display for CafleetError {
 
 impl From<rusqlite::Error> for CafleetError {
     fn from(e: rusqlite::Error) -> Self {
-        if matches!(
-            e.sqlite_error_code(),
-            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
-        ) {
-            return CafleetError::DatabaseBusy(format!("database error: {e}"));
+        match e.sqlite_error_code() {
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
+                return CafleetError::DatabaseBusy(format!("database error: {e}"));
+            }
+            Some(
+                rusqlite::ErrorCode::SystemIoFailure
+                | rusqlite::ErrorCode::DiskFull
+                | rusqlite::ErrorCode::CannotOpen
+                | rusqlite::ErrorCode::OutOfMemory
+                | rusqlite::ErrorCode::ReadOnly
+                | rusqlite::ErrorCode::FileLockingProtocolFailed,
+            ) => return CafleetError::DatabaseIo(format!("database error: {e}")),
+            _ => {}
         }
         if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &e
             && let Some(error) = source.downcast_ref::<CafleetError>()

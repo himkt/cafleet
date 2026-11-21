@@ -547,6 +547,26 @@ impl ObservationController {
                         pending.next_draft += 1;
                         self.next_event_seq += 1;
                     }
+                    Err(retained) if retained.reason == RetainReason::EvidenceInvalid => {
+                        assert!(
+                            !storage::is_event_rejection(&retained.transition),
+                            "a rejection event always carries valid run evidence"
+                        );
+                        let screen_seq = self
+                            .last_output
+                            .expect("an evidence refusal follows a validated screen");
+                        let replacement = storage::event_rejected_transition(
+                            &self.run,
+                            &retained.transition,
+                            screen_seq,
+                            &retained.cause,
+                            &now.observed_at,
+                        )?;
+                        self.pending
+                            .as_mut()
+                            .expect("the routed update is pending")
+                            .materialized = Some(replacement);
+                    }
                     Err(retained) => {
                         pending.materialized = Some(retained.transition);
                         self.pending_error = Some(retained.cause);
@@ -3796,6 +3816,7 @@ pub(crate) mod native_capture {
                 crate::runtime::service::RunnerDependencies {
                     catalog,
                     clock: Arc::new(SystemClockWithUnit(shutdown_unit)),
+                    diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
                     writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
                     capture: Some(port),
                     observation_hooks: None,
@@ -7415,6 +7436,7 @@ pub(crate) mod native_capture {
                         crate::runtime::service::RunnerDependencies {
                             catalog,
                             clock: Arc::new(crate::time::SystemClock),
+                            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
                             writer_hooks:
                                 crate::runtime::writer::test_support::default_writer_hooks(),
                             capture: Some(port),
@@ -7848,7 +7870,6 @@ pub(crate) fn materialize(draft: &TransitionDraft, sequence: i64) -> Result<Obse
             && draft.episode_seq.is_none_or(|seq| seq > 0),
         "valid transition identity required",
     )?;
-    storage::validate_evidence(&draft.evidence_json)?;
     wall_time(&draft.observed_at)?;
     Ok(ObservedTransition {
         run_id: draft.run_id,

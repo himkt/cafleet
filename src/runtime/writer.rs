@@ -60,10 +60,20 @@ pub(crate) struct WriterStatus {
     pub(crate) gap_count: u64,
     pub(crate) diagnostic: Option<String>,
 }
+/// Why `try_submit` refused a transition, which decides how the controller routes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetainReason {
+    EvidenceInvalid,
+    ChannelFull,
+    Stopped,
+    SequenceRegressed,
+    Fenced,
+}
 #[derive(Debug)]
 pub(crate) struct RetainedTransition {
     pub(crate) transition: ObservedTransition,
     pub(crate) cause: CafleetError,
+    pub(crate) reason: RetainReason,
 }
 #[derive(Default)]
 struct Mailbox {
@@ -72,12 +82,25 @@ struct Mailbox {
     diagnostic: Option<String>,
     last_sequence: i64,
     stop: bool,
+    fenced: bool,
     deadline: SharedDeadline,
 }
 impl Mailbox {
     fn failure(&mut self, cause: &CafleetError) {
         self.gaps = self.gaps.checked_add(1).expect("writer gap count overflow");
         self.diagnostic = Some(cause.message().into_owned());
+    }
+    fn fence(&mut self, cause: &CafleetError, discarded: u64) {
+        self.pending = self
+            .pending
+            .checked_sub(discarded)
+            .expect("discarded transitions were accepted");
+        self.gaps = self
+            .gaps
+            .checked_add(discarded)
+            .expect("writer gap count overflow");
+        self.diagnostic = Some(format!("event writer fenced: {}", cause.message()));
+        self.fenced = true;
     }
     fn deadline(&self) -> Option<Instant> {
         *self.deadline.lock().expect("writer shutdown deadline")
@@ -167,30 +190,39 @@ impl EventWriter {
         transition: ObservedTransition,
     ) -> std::result::Result<(), Box<RetainedTransition>> {
         let mut state = self.mailbox.lock().expect("writer mailbox");
-        let result = (|| -> Result<()> {
-            ensure(!state.stop, "event writer is stopped")?;
-            ensure(
-                transition.event_seq > state.last_sequence,
-                "accepted event sequence regressed",
-            )?;
-            storage::validate_evidence(&transition.evidence_json)?;
-            self.send(Box::new(transition.clone()))
-        })();
-        match result {
-            Ok(()) => {
-                state.pending = state
-                    .pending
-                    .checked_add(1)
-                    .expect("writer pending overflow");
-                assert!(state.pending <= 128, "bounded accepted writer capacity");
-                state.last_sequence = transition.event_seq;
-                Ok(())
-            }
-            Err(cause) => {
-                state.failure(&cause);
-                Err(Box::new(RetainedTransition { transition, cause }))
-            }
+        let refusal = if state.fenced {
+            Some((RetainReason::Fenced, error("event writer is fenced")))
+        } else if state.stop {
+            Some((RetainReason::Stopped, error("event writer is stopped")))
+        } else if transition.event_seq <= state.last_sequence {
+            Some((
+                RetainReason::SequenceRegressed,
+                error("accepted event sequence regressed"),
+            ))
+        } else if let Err(cause) = storage::validate_evidence(&transition.evidence_json) {
+            Some((RetainReason::EvidenceInvalid, cause))
+        } else if let Err(cause) = self.send(Box::new(transition.clone())) {
+            Some((RetainReason::ChannelFull, cause))
+        } else {
+            None
+        };
+        let Some((reason, cause)) = refusal else {
+            state.pending = state
+                .pending
+                .checked_add(1)
+                .expect("writer pending overflow");
+            assert!(state.pending <= 128, "bounded accepted writer capacity");
+            state.last_sequence = transition.event_seq;
+            return Ok(());
+        };
+        if !matches!(reason, RetainReason::EvidenceInvalid | RetainReason::Fenced) {
+            state.failure(&cause);
         }
+        Err(Box::new(RetainedTransition {
+            transition,
+            cause,
+            reason,
+        }))
     }
     #[cfg(test)]
     pub(crate) fn submit(&self, transition: ObservedTransition) -> Result<()> {
@@ -306,6 +338,9 @@ impl Worker {
         }
     }
     fn step(&mut self) -> Result<()> {
+        if self.mailbox.lock().expect("writer mailbox").fenced {
+            return Ok(());
+        }
         let bound = StepBound::new(&self.shutdown, &self.clock);
         if !self.receive(&bound)? {
             return Ok(());
@@ -330,10 +365,54 @@ impl Worker {
         }
         Ok(true)
     }
+    /// Persists the queue front. A permanent failure is replaced within this step by its rejection
+    /// event under a fresh bound, so it opens no gap; a rejection that fails permanently fences the
+    /// writer. A transient failure returns for the ordinary retry backoff.
     fn persist_front(&mut self, bound: &StepBound) -> Result<()> {
-        let Some(transition) = self.queue.front() else {
+        if self.queue.is_empty() {
             return Ok(());
+        }
+        let cause = match self.persist(bound) {
+            Ok(()) => return Ok(()),
+            Err(cause) if cause.transient_storage() => return Err(cause),
+            Err(cause) => cause,
         };
+        let front = self.queue.front().expect("a failed persist has a front");
+        if storage::is_event_rejection(front) {
+            self.fence(&cause);
+            return Ok(());
+        }
+        let screen_seq = front.evidence_json["screen_seq"]
+            .as_u64()
+            .expect("try_submit validated the front's evidence");
+        let replacement = match storage::event_rejected_transition(
+            &self.run,
+            front,
+            screen_seq,
+            &cause,
+            &self.clock.wall_stamp(),
+        ) {
+            Ok(replacement) => replacement,
+            Err(failure) => {
+                self.fence(&failure);
+                return Ok(());
+            }
+        };
+        **self
+            .queue
+            .front_mut()
+            .expect("a failed persist has a front") = replacement;
+        match self.persist(&StepBound::new(&self.shutdown, &self.clock)) {
+            Ok(()) => Ok(()),
+            Err(cause) if cause.transient_storage() => Err(cause),
+            Err(cause) => {
+                self.fence(&cause);
+                Ok(())
+            }
+        }
+    }
+    fn persist(&mut self, bound: &StepBound) -> Result<()> {
+        let transition = self.queue.front().expect("persist requires a front");
         #[cfg(test)]
         self.hooks.before(WriterBoundary::Persist, bound)?;
 
@@ -347,6 +426,19 @@ impl Worker {
         state.pending = state.pending.checked_sub(1).expect("accepted writer count");
         state.success();
         Ok(())
+    }
+    /// Discards every accepted transition, the channel's included, and accepts no more.
+    fn fence(&mut self, cause: &CafleetError) {
+        let mut state = self.mailbox.lock().expect("writer mailbox");
+        let mut discarded = self.queue.len();
+        self.queue.clear();
+        while self.receiver.try_recv().is_ok() {
+            discarded += 1;
+        }
+        state.fence(
+            cause,
+            u64::try_from(discarded).expect("bounded writer capacity"),
+        );
     }
 }
 

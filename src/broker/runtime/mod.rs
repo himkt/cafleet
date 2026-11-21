@@ -410,11 +410,12 @@ stored_enum!(RuntimeCauseKind, "cause.kind", {
     CoverageUnknown => "coverage_unknown", NativeExit => "native_exit",
     StoragePressure => "storage_pressure", StorageRecovered => "storage_recovered",
     ObserverError => "observer_error", MonitorLost => "monitor_lost",
-    RuntimePathMissing => "runtime_path_missing"
+    RuntimePathMissing => "runtime_path_missing", EventRejected => "event_rejected"
 });
 stored_enum!(NotificationState, "member_runtime_events.notification_state", { Inbox => "inbox", Archived => "archived" });
 stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", {
-    MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
+    MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive",
+    HeadNotReady => "head_not_ready", DuplicateDelivery => "duplicate_delivery"
 });
 stored_enum!(InputKind, "member_input_operations.kind", { Prompt => "prompt", Exec => "exec" });
 stored_enum!(InputState, "member_input_operations.state", {
