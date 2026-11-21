@@ -689,24 +689,6 @@ fn delete(
     json: bool,
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
-    delete_with_layout_wait(
-        conn,
-        settings,
-        member_id,
-        json,
-        deadline,
-        crate::pane_lock::LAYOUT_LOCK_WAIT,
-    )
-}
-
-pub(crate) fn delete_with_layout_wait(
-    conn: &mut Connection,
-    settings: &Settings,
-    member_id: i64,
-    json: bool,
-    deadline: crate::time::Deadline,
-    layout_wait: std::time::Duration,
-) -> Result<(), CafleetError> {
     let mut locked = lock_member_deletion(conn, settings, member_id, deadline)?;
     let pane_status = match &locked.value {
         DeleteAction::Deregistered(status) => status.to_string(),
@@ -719,7 +701,7 @@ pub(crate) fn delete_with_layout_wait(
                 &mut locked,
                 &*mux,
                 deadline,
-                layout_wait,
+                crate::pane_lock::LAYOUT_LOCK_WAIT,
             )?
         }
     };
