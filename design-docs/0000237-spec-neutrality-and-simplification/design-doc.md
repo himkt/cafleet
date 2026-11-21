@@ -510,9 +510,9 @@ Per TD-1 (a), `CLAUDE.md` § Tests is unchanged.
 
 | Measure | Step C1 baseline | Step C5 result |
 |---|---|---|
-| `mise //:test` wall time | 41.5 s (mean of three warm runs: 41.1, 42.3, 41.1 s; harness 39.2–40.3 s; 1594 passed, 10 ignored) | 35.0 s (mean of three warm runs: 35.1, 34.9, 35.0 s; harness 33.0–33.2 s; 1346 passed, 10 ignored) |
-| Production line coverage | 93.06 % (`mise //:coverage` TOTAL lines: 79,733, 5,531 missed) | 92.94 % (TOTAL lines: 79,996, 5,649 missed; −0.12 percentage points) |
-| Ledger rows kept / merged / dropped | — | 1,356 / 380 / 498 (2,234 rows; fix_commit rows: 56 kept, 12 merged as named cases, 31 dropped) |
+| `mise //:test` wall time | 41.5 s (mean of three warm runs: 41.1, 42.3, 41.1 s; harness 39.2–40.3 s; 1594 passed, 10 ignored) | 37.6 s at 21ea7be8 (mean of three warm runs: 35.8, 36.9, 40.2 s; harness 33.9–36.1 s; 1348 passed, 10 ignored) |
+| Production line coverage | 93.06 % (`mise //:coverage` TOTAL lines: 79,733, 5,531 missed) | 93.01 % at 21ea7be8 (TOTAL lines: 80,135, 5,600 missed; −0.05 percentage points) |
+| Ledger rows kept / merged / dropped | — | 1,358 / 388 / 491 (2,237 rows; fix_commit rows: 56 kept, 12 merged as named cases, 31 dropped) |
 
 ---
 
