@@ -4902,54 +4902,10 @@ fn combine_manual_progress<T>(progress: Result<T>, accounting: Result<()>) -> Re
     }
 }
 
-pub(crate) struct InputClockSample {
-    pub(crate) before: Instant,
-    pub(crate) monotonic_ns: u64,
-    pub(crate) after: Instant,
-}
-impl InputClockSample {
-    fn validate(&self) -> Result<()> {
-        ensure(self.before <= self.after, "input clock bracket is reversed")
-    }
-}
-
-pub(crate) trait InputDeadlineClock {
-    fn sample(&mut self) -> Result<InputClockSample>;
-}
-
-pub(crate) struct RealInputDeadlineClock;
-impl InputDeadlineClock for RealInputDeadlineClock {
-    fn sample(&mut self) -> Result<InputClockSample> {
-        let before = Instant::now();
-        let time = rustix::time::clock_gettime_dynamic(rustix::time::DynamicClockId::Known(
-            rustix::time::ClockId::Monotonic,
-        ))
-        .map_err(io_error)?;
-        let after = Instant::now();
-        let seconds = u64::try_from(time.tv_sec)
-            .map_err(|_| error("monotonic clock seconds must be nonnegative"))?;
-        let nanoseconds = u64::try_from(time.tv_nsec)
-            .map_err(|_| error("monotonic clock nanoseconds must be nonnegative"))?;
-        ensure(
-            nanoseconds < 1_000_000_000,
-            "monotonic clock nanoseconds exceed their range",
-        )?;
-        let monotonic_ns = seconds
-            .checked_mul(1_000_000_000)
-            .and_then(|value| value.checked_add(nanoseconds))
-            .ok_or_else(|| error("monotonic clock nanoseconds overflow"))?;
-        Ok(InputClockSample {
-            before,
-            monotonic_ns,
-            after,
-        })
-    }
-}
-
 pub(crate) struct InputExpiration(u64);
 impl InputExpiration {
-    pub(crate) fn capture(deadline: Instant, clock: &mut impl InputDeadlineClock) -> Result<Self> {
-        let sample = clock.sample()?;
+    pub(crate) fn capture(deadline: Instant, clock: &dyn crate::time::Clock) -> Result<Self> {
+        let sample = clock.monotonic_sample()?;
         sample.validate()?;
         let remaining = deadline
             .checked_duration_since(sample.after)
@@ -4967,9 +4923,9 @@ impl InputExpiration {
     pub(crate) fn receive(
         &self,
         admitted_at: Instant,
-        clock: &mut impl InputDeadlineClock,
+        clock: &dyn crate::time::Clock,
     ) -> Result<Instant> {
-        let sample = clock.sample()?;
+        let sample = clock.monotonic_sample()?;
         sample.validate()?;
         let remaining_ns = self
             .0
@@ -4996,7 +4952,7 @@ impl InputExpiration {
 pub(super) fn receive_input_expiration(
     expires_at_mono_ns: u64,
     admitted_at: Instant,
-    clock: &mut impl InputDeadlineClock,
+    clock: &dyn crate::time::Clock,
 ) -> Result<Instant> {
     InputExpiration(expires_at_mono_ns).receive(admitted_at, clock)
 }
@@ -5040,7 +4996,7 @@ mod tests {
                         .poll(
                             &self.transport.snapshot(),
                             &self.writer,
-                            &RealObservationClock,
+                            &crate::time::SystemClock,
                         )
                         .unwrap();
                     let health = self.controller.health(&self.writer);
@@ -5058,7 +5014,7 @@ mod tests {
                             &mut FakeDisplay::default(),
                             &mut self
                                 .controller
-                                .observer(&self.writer, &RealObservationClock),
+                                .observer(&self.writer, &crate::time::SystemClock),
                             self.until,
                         )
                         .unwrap(),
@@ -5106,7 +5062,7 @@ mod tests {
                             &mut human,
                             &mut pty,
                             &mut FakeDisplay::default(),
-                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
                             h.until,
                         )
                     })
@@ -5126,7 +5082,7 @@ mod tests {
                             &mut human,
                             &mut pty,
                             &mut FakeDisplay::default(),
-                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
                         )
                     })
                     .unwrap();
@@ -5145,7 +5101,7 @@ mod tests {
                             &mut human,
                             &mut pty,
                             &mut FakeDisplay::default(),
-                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
                         )
                     })
                     .unwrap();
@@ -5177,7 +5133,7 @@ mod tests {
                         &mut human,
                         &mut pty,
                         &mut FakeDisplay::default(),
-                        &mut h.controller.observer(&h.writer, &RealObservationClock),
+                        &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
                     )
                 });
                 let failure = match result {
@@ -5622,7 +5578,7 @@ mod tests {
                             &mut h.human,
                             &mut h.pty,
                             &mut h.output,
-                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
                         )
                         .unwrap();
                 }
@@ -7123,10 +7079,9 @@ mod tests {
                                     &mut host.human,
                                     &mut host.pty,
                                     &mut host.output,
-                                    &mut host.controller.observer(
-                                        &host.writer,
-                                        &crate::runtime::RealObservationClock,
-                                    ),
+                                    &mut host
+                                        .controller
+                                        .observer(&host.writer, &crate::time::SystemClock),
                                     expired(),
                                 )
                             },
@@ -8637,7 +8592,7 @@ mod tests {
                         host.controller
                             .observer_failed(
                                 crate::runtime::observation::ObservationFailure::Detector,
-                                &RealObservationClock,
+                                &crate::time::SystemClock,
                             )
                             .unwrap();
                         host.advance();
@@ -9617,7 +9572,7 @@ mod tests {
                             &fixture.run,
                             &transport.snapshot(),
                             &writer,
-                            &RealObservationClock,
+                            &crate::time::SystemClock,
                         )
                         .unwrap();
                     Self {
@@ -9726,7 +9681,7 @@ mod tests {
                         Instant::now() < until,
                         "original fixture construction deadline"
                     );
-                    let expires = InputExpiration::capture(until, &mut RealInputDeadlineClock)
+                    let expires = InputExpiration::capture(until, &crate::time::SystemClock)
                         .unwrap()
                         .monotonic_ns();
                     let HostProfile {
@@ -9859,7 +9814,7 @@ mod tests {
                             .poll(
                                 &self.transport.snapshot(),
                                 &self.writer,
-                                &RealObservationClock,
+                                &crate::time::SystemClock,
                             )
                             .unwrap();
                         let result = self
@@ -9871,7 +9826,7 @@ mod tests {
                                     &mut self.output,
                                     &mut self
                                         .controller
-                                        .observer(&self.writer, &RealObservationClock),
+                                        .observer(&self.writer, &crate::time::SystemClock),
                                     self.until,
                                 )
                             })
@@ -9947,7 +9902,7 @@ mod tests {
                             crate::runtime::receive_input_expiration(
                                 request.expires_at_mono_ns,
                                 Instant::now(),
-                                &mut crate::runtime::RealInputDeadlineClock,
+                                &crate::time::SystemClock,
                             )
                         })
                         .map(|received| received.min(deadline))
@@ -10046,7 +10001,7 @@ mod tests {
                                 &mut self.output,
                                 &mut self
                                     .controller
-                                    .observer(&self.writer, &crate::runtime::RealObservationClock),
+                                    .observer(&self.writer, &crate::time::SystemClock),
                                 self.until,
                             )
                         })
@@ -10700,7 +10655,7 @@ mod tests {
                 h.controller
                     .observer_failed(
                         crate::runtime::ObservationFailure::Parser,
-                        &crate::runtime::RealObservationClock,
+                        &crate::time::SystemClock,
                     )
                     .unwrap();
                 assert!(h.controller.current_request().is_none());
@@ -10883,9 +10838,7 @@ mod tests {
                             &mut h.human,
                             &mut h.pty,
                             &mut h.output,
-                            &mut h
-                                .controller
-                                .observer(&h.writer, &crate::runtime::RealObservationClock),
+                            &mut h.controller.observer(&h.writer, &crate::time::SystemClock),
                             h.until,
                         )
                     })
@@ -11981,7 +11934,7 @@ mod tests {
                         h.controller
                             .observer_failed(
                                 crate::runtime::ObservationFailure::Parser,
-                                &crate::runtime::RealObservationClock,
+                                &crate::time::SystemClock,
                             )
                             .unwrap();
                     }),
@@ -12833,7 +12786,7 @@ mod tests {
             .checked_add(Duration::from_nanos(nanos))
             .expect("the platform represents the fixed nanosecond fixture offset")
     }
-    fn captured(deadline: Instant, clock: &mut ScriptClock, expected: u64) -> InputExpiration {
+    fn captured(deadline: Instant, clock: &ScriptClock, expected: u64) -> InputExpiration {
         let expiration = InputExpiration::capture(deadline, clock).unwrap();
         assert_eq!(expiration.monotonic_ns(), expected);
         clock.consumed(1, 0);
@@ -12842,14 +12795,14 @@ mod tests {
     fn expiration(origin: Instant) -> InputExpiration {
         captured(
             ms(origin, 1000),
-            &mut ScriptClock::one(sample(origin, 9_000_000_000, origin)),
+            &ScriptClock::one(sample(origin, 9_000_000_000, origin)),
             EXPIRATION,
         )
     }
     fn received(
         expiration: &InputExpiration,
         admitted_at: Instant,
-        clock: &mut ScriptClock,
+        clock: &ScriptClock,
         expected: Instant,
     ) {
         assert_eq!(expiration.receive(admitted_at, clock).unwrap(), expected);
@@ -12859,75 +12812,73 @@ mod tests {
     #[test]
     fn clock_capture_uses_later_instant_remaining_without_bracket_extension() {
         let t = anchor();
-        let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 30)));
-        captured(ms(t, 100), &mut clock, 1_070_000_000);
+        let clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 30)));
+        captured(ms(t, 100), &clock, 1_070_000_000);
     }
 
     #[test]
     fn clock_capture_equal_bracket_preserves_one_nanosecond() {
         let t = anchor();
-        let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 10)));
-        captured(ns(ms(t, 10), 1), &mut clock, 1_000_000_001);
-        let mut origin = ScriptClock::one(sample(t, 0, t));
-        captured(ns(t, 1), &mut origin, 1);
+        let clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 10)));
+        captured(ns(ms(t, 10), 1), &clock, 1_000_000_001);
+        let origin = ScriptClock::one(sample(t, 0, t));
+        captured(ns(t, 1), &origin, 1);
     }
 
     #[test]
     fn clock_capture_accepts_exact_unsigned_expiration_upper_bound() {
         let t = anchor();
-        let mut clock = ScriptClock::one(sample(t, u64::MAX - 5, t));
-        captured(ns(t, 5), &mut clock, u64::MAX);
+        let clock = ScriptClock::one(sample(t, u64::MAX - 5, t));
+        captured(ns(t, 5), &clock, u64::MAX);
     }
 
     #[test]
     fn clock_capture_rejects_unsigned_expiration_overflow() {
         let t = anchor();
-        let mut clock = ScriptClock::one(sample(t, u64::MAX - 5, t));
-        one_failure(InputExpiration::capture(ns(t, 6), &mut clock), &clock, 0);
+        let clock = ScriptClock::one(sample(t, u64::MAX - 5, t));
+        one_failure(InputExpiration::capture(ns(t, 6), &clock), &clock, 0);
     }
 
     #[test]
     fn clock_capture_rejects_equal_or_expired_deadline_without_resampling() {
         for after_ms in [100, 101] {
             let t = anchor();
-            let mut clock = ScriptClock::new(vec![
+            let clock = ScriptClock::new(vec![
                 Ok(sample(ms(t, 90), 1_000_000_000, ms(t, after_ms))),
                 Ok(sample(t, 1_000_000_000, t)),
             ]);
-            one_failure(InputExpiration::capture(ms(t, 100), &mut clock), &clock, 1);
+            one_failure(InputExpiration::capture(ms(t, 100), &clock), &clock, 1);
         }
     }
 
     #[test]
     fn clock_capture_rejects_reversed_instant_bracket() {
         let t = anchor();
-        let mut clock = ScriptClock::one(sample(ms(t, 30), 1_000_000_000, ms(t, 10)));
-        one_failure(InputExpiration::capture(ms(t, 100), &mut clock), &clock, 0);
+        let clock = ScriptClock::one(sample(ms(t, 30), 1_000_000_000, ms(t, 10)));
+        one_failure(InputExpiration::capture(ms(t, 100), &clock), &clock, 0);
     }
 
     #[test]
     fn clock_capture_source_failure_consumes_one_sample_without_fallback() {
         let t = anchor();
-        let mut clock = ScriptClock::new(vec![Err(unavailable()), Ok(sample(t, 1_000_000_000, t))]);
-        one_failure(InputExpiration::capture(ms(t, 100), &mut clock), &clock, 1);
+        let clock = ScriptClock::new(vec![Err(unavailable()), Ok(sample(t, 1_000_000_000, t))]);
+        one_failure(InputExpiration::capture(ms(t, 100), &clock), &clock, 1);
     }
 
     #[test]
     fn clock_receive_uses_earlier_instant_for_conservative_deadline() {
         let t = anchor();
         let expiration = expiration(t);
-        let mut clock =
-            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
-        received(&expiration, t, &mut clock, ms(t, 3000));
+        let clock = ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
+        received(&expiration, t, &clock, ms(t, 3000));
     }
 
     #[test]
     fn clock_receive_caps_expiration_at_original_five_second_admission() {
         let t = anchor();
         let expiration = expiration(t);
-        let mut clock =
-            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 9_000_000_000, ms(t, 1100)));
-        received(&expiration, t, &mut clock, ms(t, 5000));
+        let clock = ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 9_000_000_000, ms(t, 1100)));
+        received(&expiration, t, &clock, ms(t, 5000));
     }
 
     #[test]
@@ -12935,8 +12886,8 @@ mod tests {
         for monotonic_ns in [EXPIRATION, EXPIRATION + 1] {
             let t = anchor();
             let expiration = expiration(t);
-            let mut clock = ScriptClock::one(sample(ms(t, 1000), monotonic_ns, ms(t, 1100)));
-            one_failure(expiration.receive(t, &mut clock), &clock, 0);
+            let clock = ScriptClock::one(sample(ms(t, 1000), monotonic_ns, ms(t, 1100)));
+            one_failure(expiration.receive(t, &clock), &clock, 0);
         }
     }
 
@@ -12945,12 +12896,12 @@ mod tests {
         for (before_ms, after_ms) in [(1000, 3000), (1000, 4000), (6000, 6100)] {
             let t = anchor();
             let expiration = expiration(t);
-            let mut clock = ScriptClock::one(sample(
+            let clock = ScriptClock::one(sample(
                 ms(t, before_ms),
                 EXPIRATION - 2_000_000_000,
                 ms(t, after_ms),
             ));
-            one_failure(expiration.receive(t, &mut clock), &clock, 0);
+            one_failure(expiration.receive(t, &clock), &clock, 0);
         }
     }
 
@@ -12958,38 +12909,37 @@ mod tests {
     fn clock_receive_rejects_reversed_instant_bracket() {
         let t = anchor();
         let expiration = expiration(t);
-        let mut clock =
-            ScriptClock::one(sample(ms(t, 2000), EXPIRATION - 2_000_000_000, ms(t, 1000)));
-        one_failure(expiration.receive(t, &mut clock), &clock, 0);
+        let clock = ScriptClock::one(sample(ms(t, 2000), EXPIRATION - 2_000_000_000, ms(t, 1000)));
+        one_failure(expiration.receive(t, &clock), &clock, 0);
     }
 
     #[test]
     fn clock_receive_source_failure_consumes_one_sample_without_fallback() {
         let t = anchor();
         let expiration = expiration(t);
-        let mut clock = ScriptClock::new(vec![
+        let clock = ScriptClock::new(vec![
             Err(unavailable()),
             Ok(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100))),
         ]);
-        one_failure(expiration.receive(t, &mut clock), &clock, 1);
+        one_failure(expiration.receive(t, &clock), &clock, 1);
     }
 
     #[test]
     fn clock_receive_reuses_immutable_expiration_without_phase_extension() {
         let t = anchor();
         let expiration = expiration(t);
-        let mut clock = ScriptClock::new(vec![
+        let clock = ScriptClock::new(vec![
             Ok(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100))),
             Ok(sample(ms(t, 2000), EXPIRATION - 1_000_000_000, ms(t, 2100))),
             Ok(sample(ms(t, 3000), EXPIRATION, ms(t, 3100))),
         ]);
-        assert_eq!(expiration.receive(t, &mut clock).unwrap(), ms(t, 3000));
+        assert_eq!(expiration.receive(t, &clock).unwrap(), ms(t, 3000));
         clock.consumed(1, 2);
         assert_eq!(expiration.monotonic_ns(), EXPIRATION);
-        assert_eq!(expiration.receive(t, &mut clock).unwrap(), ms(t, 3000));
+        assert_eq!(expiration.receive(t, &clock).unwrap(), ms(t, 3000));
         clock.consumed(2, 1);
         assert_eq!(expiration.monotonic_ns(), EXPIRATION);
-        assert!(expiration.receive(t, &mut clock).is_err());
+        assert!(expiration.receive(t, &clock).is_err());
         clock.consumed(3, 0);
         assert_eq!(expiration.monotonic_ns(), EXPIRATION);
     }
@@ -12998,8 +12948,8 @@ mod tests {
     fn clock_receive_preserves_positive_single_nanosecond() {
         let t = anchor();
         let expiration = expiration(t);
-        let mut clock = ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 1, ms(t, 1000)));
-        received(&expiration, t, &mut clock, ns(ms(t, 1000), 1));
+        let clock = ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 1, ms(t, 1000)));
+        received(&expiration, t, &clock, ns(ms(t, 1000), 1));
     }
 }
 
@@ -13023,30 +12973,47 @@ pub(crate) mod test_support {
     use std::collections::VecDeque;
 
     pub(crate) struct ScriptClock {
-        pub(crate) samples: VecDeque<Result<InputClockSample>>,
-        pub(crate) calls: usize,
+        samples: std::sync::Mutex<VecDeque<Result<crate::time::MonotonicSample>>>,
+        calls: std::sync::atomic::AtomicUsize,
     }
     impl ScriptClock {
-        pub(crate) fn new(samples: Vec<Result<InputClockSample>>) -> Self {
+        pub(crate) fn new(samples: Vec<Result<crate::time::MonotonicSample>>) -> Self {
             Self {
-                samples: samples.into(),
-                calls: 0,
+                samples: std::sync::Mutex::new(samples.into()),
+                calls: std::sync::atomic::AtomicUsize::new(0),
             }
         }
-        pub(crate) fn one(sample: InputClockSample) -> Self {
+        pub(crate) fn one(sample: crate::time::MonotonicSample) -> Self {
             Self::new(vec![Ok(sample)])
         }
         pub(crate) fn consumed(&self, calls: usize, remaining: usize) {
-            assert_eq!(self.calls, calls);
-            assert_eq!(self.samples.len(), remaining);
+            assert_eq!(self.calls.load(std::sync::atomic::Ordering::SeqCst), calls);
+            assert_eq!(self.samples.lock().unwrap().len(), remaining);
         }
     }
-    impl InputDeadlineClock for ScriptClock {
-        fn sample(&mut self) -> Result<InputClockSample> {
-            self.calls += 1;
+    impl crate::time::Clock for ScriptClock {
+        fn now(&self) -> Instant {
+            panic!("input expiration reads only paired monotonic samples")
+        }
+        fn wall_stamp(&self) -> String {
+            panic!("input expiration reads only paired monotonic samples")
+        }
+        fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.samples
+                .lock()
+                .unwrap()
                 .pop_front()
                 .expect("the operation consumes only its specified paired clock samples")
+        }
+        fn sleep(&self, _: Duration) {
+            panic!("input expiration never sleeps")
+        }
+        fn shutdown_unit(&self) -> Duration {
+            crate::time::SHUTDOWN_UNIT
+        }
+        fn kind(&self) -> crate::time::ClockKind {
+            crate::time::ClockKind::Deterministic
         }
     }
     pub(crate) fn anchor() -> Instant {
@@ -13059,8 +13026,12 @@ pub(crate) mod test_support {
             .checked_add(Duration::from_millis(millis))
             .expect("the platform represents the fixed millisecond fixture offset")
     }
-    pub(crate) fn sample(before: Instant, monotonic_ns: u64, after: Instant) -> InputClockSample {
-        InputClockSample {
+    pub(crate) fn sample(
+        before: Instant,
+        monotonic_ns: u64,
+        after: Instant,
+    ) -> crate::time::MonotonicSample {
+        crate::time::MonotonicSample {
             before,
             monotonic_ns,
             after,

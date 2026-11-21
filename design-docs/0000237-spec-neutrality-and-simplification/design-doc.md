@@ -18,7 +18,7 @@ Make `SPEC.md` an implementation-neutral contract from which any implementation 
 - [ ] `.claude/rules/documentation-maintenance.md` carries the SPEC neutrality rule, and `.claude/rules/code-quality.md` § Test placement carries the three § Rule changes bullets.
 - [ ] Every approved feature reduction (R1–R5, R7–R13, R16, R18, R19, R21) is implemented by its step among Steps B1–B13, B15 and B16 with its SPEC, docs, skills, DDL, catalog, code and tests removed or rewritten in the same step, and the behavior of every rejected candidate (R6, R14, R15, R17) and of the deferred R20 is unchanged.
 - [ ] Every Rust `#[test]` present at Step B0 has a ledger row (kept, merged into a named table test or scenario, or dropped with a reason); a test traced to a `fix:` commit keeps its case unless its fate is `dropped:feature removed (R<n>)` for an approved candidate.
-- [ ] Production code in `src/runtime/` and `src/broker/runtime/` reads time and sleeps only through the unified `time::Clock`; tests of that code use `TestClock`, and among them `std::thread::sleep` appears only in class-6 tests (real processes, PTYs, sockets or locks).
+- [ ] Production code in `src/runtime/` and `src/broker/runtime/` reads time and sleeps only through the unified `time::Clock`, except the SQL timestamps `src/broker/runtime/` writes with `time::now_stamp()`; tests of that code use `TestClock`, and among them `std::thread::sleep` appears only in class-6 tests (real processes, PTYs, sockets or locks).
 - [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass after each workstream.
 
 ---
@@ -467,7 +467,7 @@ These were never candidates: notice hold and ceiling (host queue caps), Director
 |---|---|
 | Test ledger | `test-ledger.tsv` (D13), generated in Step B0 from `mise //:test -- -- --list` with columns `test_path`, `file`, `fix_commit`, `fate`; Step C1 adds `class` (1–8 below). `fix_commit` is the first commit returned by `git log -S'fn <name>(' --reverse --format=%h%x09%s -- src`, kept only when its subject starts with `fix`; when `<name>` is defined in more than one file, the search is limited to the defining file and its predecessors from `git log --follow --name-only -- <file>`. `fate` is `keep`, `merged:<target test>` or `dropped:<reason>`. A row with a `fix_commit` keeps its case (as a named table row when merged), except fate `dropped:feature removed (R<n>)` for an approved candidate. |
 | Table-driven cases | One `#[test]` iterating a `const`/`static` array of named cases, asserting with the case name in the failure message; applied first to classes 3, 4, 5 and 8 below and to the 22 identical clusters. |
-| One runtime clock | Scope: every production read of `Instant::now`, `SystemTime::now`, `CLOCK_MONOTONIC` and `std::thread::sleep` in `src/runtime/` and `src/broker/runtime/`. `time::Clock` becomes `Send + Sync` and gains the capabilities of the other three abstractions (monotonic `Instant`, wall stamp, `CLOCK_MONOTONIC` sample bracket, sleep); the runtime dependency structs pass it to services, the observation controller, input deadlines and shutdown. `SystemClock` keeps today's calls, so the change is behavior-preserving. `time::test_support::TestClock` becomes thread-safe (`Mutex`/atomics instead of `Cell`/`RefCell`), advances virtually and records sleeps. In-scope files that sleep directly today, such as `src/runtime/system.rs` and `src/runtime/artifacts.rs`, call `Clock::sleep` instead. Code outside the scope (for example `src/cli/`, `src/broker/messaging.rs`, `src/delivery.rs`, `src/pane_lock.rs`, `src/db.rs`, `src/coding_agent/`) keeps its direct calls. |
+| One runtime clock | Scope: every production read of `Instant::now`, `SystemTime::now`, `CLOCK_MONOTONIC` and `std::thread::sleep` in `src/runtime/` and `src/broker/runtime/`, and the runtime's observation (`observed_at`) and lifecycle wall stamps; the SQL timestamps that `src/broker/runtime/` writes keep `time::now_stamp()`, and `db::with_database_deadline` keeps real time. `time::Clock` becomes `Send + Sync` and gains the capabilities of the other three abstractions (monotonic `Instant`, wall stamp, `CLOCK_MONOTONIC` sample bracket, sleep, the shutdown unit); `ShutdownClock` becomes a plain deadline value built from `Clock::now()` and `Clock::shutdown_unit()`; the runtime dependency structs pass it to services, the observation controller, input deadlines and shutdown. `SystemClock` keeps today's calls, so the change is behavior-preserving. `time::test_support::TestClock` becomes thread-safe (`Mutex`/atomics instead of `Cell`/`RefCell`), advances virtually and records sleeps. In-scope files that sleep directly today, such as `src/runtime/system.rs` and `src/runtime/artifacts.rs`, call `Clock::sleep` instead. Code outside the scope (for example `src/cli/`, `src/broker/messaging.rs`, `src/delivery.rs`, `src/pane_lock.rs`, `src/db.rs`, `src/coding_agent/`) keeps its direct calls. |
 | Runtime scenario harness | `#[cfg(test)] pub(crate) mod test_support` in `src/runtime/service.rs` (the file owning the runner loop): a `Scenario` builder with the existing fake PTY/display/input, a scripted native child that emits screens rendered from `assets/profiles/native/*.json` fixtures (inputs only), the fake multiplexer, a temporary SQLite file, `TestClock`, and SQLite fault plans from `db::test_support`. A scenario is data: screens fed, commands issued, expected events, rows and child bytes. Class-7 tests move to scenarios in the file that owns the asserted behavior. |
 | Real-time tests | Tests of in-scope code use `TestClock`; among them, `std::thread::sleep` and real deadlines remain only in class-6 tests that drive real processes, PTYs, sockets or locks. Tests of out-of-scope code exercise production code that keeps real time, so they may keep real-time sleeps, each with a bounded deadline. |
 | Deduplication | The 22 identical clusters collapse into table tests; the 22 shared-prefix groups (e.g. `runner_recovery_missing_path*`, `event_shape_regression_rejects*`) are reviewed for merging. |
@@ -510,8 +510,8 @@ Per TD-1 (a), `CLAUDE.md` § Tests is unchanged.
 
 | Measure | Step C1 baseline | Step C5 result |
 |---|---|---|
-| `mise //:test` wall time | — | — |
-| Production line coverage | — | — |
+| `mise //:test` wall time | 41.5 s (mean of three warm runs: 41.1, 42.3, 41.1 s; harness 39.2–40.3 s; 1594 passed, 10 ignored) | — |
+| Production line coverage | 93.06 % (`mise //:coverage` TOTAL lines: 79,733, 5,531 missed) | — |
 | Ledger rows kept / merged / dropped | — | — |
 
 ---
@@ -710,6 +710,17 @@ COMMENT(programmer): B16 production is in the tree (typecheck clean). Removed th
 - [x] Add § Coverage tooling to `mise.toml` and the coverage task to `docs/docs/contributing.md` <!-- completed: 2026-11-21T14:21 -->
 - [ ] Measure `mise //:test` wall time and `mise //:coverage` line coverage and record both in § Gate results <!-- completed: -->
 - [ ] Add the `class` column to every remaining ledger row <!-- completed: -->
+
+COMMENT(tester): C1 baselines are in § Gate results: `mise //:test` 41.5 s wall (three warm runs after a build; the harness reports 39.2–40.3 s), `mise //:coverage` 93.06 % lines (TOTAL 79,733 lines, 5,531 missed; the report counts every line of each file, inline test regions included). The ledger has a fifth column `class`, set on every live row; dropped and merged rows leave it empty. It now has 1,604 live rows, matching `mise //:test -- -- --list`, after adding 73 rows with an empty `fix_commit` for the tests written since Step B0 (new tests and merge targets), plus 497 dropped and 52 merged rows. Classes: 1 = 17, 2 = 238, 3 = 136, 4 = 302, 5 = 135, 6 = 125, 7 = 542, 8 = 109. Rules, first match wins (`.ledger/classify.py`):
+1. Class 1: test names about unwinding, drop order, poisoning, or a missing Debug/serialized representation.
+2. Class 6: `src/runtime/process.rs`, `src/runtime/system.rs` and `src/pane_lock.rs`, plus any test that spawns a real child, PTY, socket, re-executed test child or `ServiceFixture`.
+3. Class 3: `src/multiplexer/`.
+4. Class 4: `src/coding_agent/catalog.rs`, `src/coding_agent/detector.rs`, and the tracker, detector and bundled-fixture tests in `src/runtime/observation.rs`.
+5. Class 5: `src/runtime/transport.rs`.
+6. Class 2: `src/cli/`, `src/output/`, `src/assets.rs` and `src/config.rs`, except their runner-recovery and deletion-recovery tests, which are class 7.
+7. Class 7: `src/broker/`, `src/db.rs` and the rest of `src/runtime/`.
+8. Class 8: everything else.
+Step C4 may reclassify a row when it converts the test.
 
 ### Step C2: Rules and clock
 

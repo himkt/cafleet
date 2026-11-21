@@ -235,7 +235,7 @@ fn live_group_members(group: i32) -> Result<Vec<i64>> {
 
 pub(super) fn recover_descendants(
     run: &crate::broker::runtime::RunRecord,
-    clock: ShutdownClock,
+    clock: ShutdownDeadlines,
 ) -> Result<ShutdownOutcome> {
     let mut outcome = ShutdownOutcome::complete(None);
     let Some(child) = run.child_process()? else {
@@ -341,7 +341,7 @@ pub(crate) struct PtySession {
     exit: Option<ChildExit>,
     owned: BTreeMap<i64, ProcessIdentity>,
     group_closed: bool,
-    shutdown_clock: Option<ShutdownClock>,
+    shutdown_clock: Option<ShutdownDeadlines>,
 }
 impl PtySession {
     pub(crate) fn has_child(&self) -> bool {
@@ -435,7 +435,7 @@ impl PtySession {
                         .ok_or_else(|| error("native exit lacks code or signal"))?,
                 ),
             });
-            self.begin_shutdown(ShutdownClock::new(Instant::now()));
+            self.begin_shutdown(ShutdownDeadlines::starting_now(&crate::time::SystemClock));
         }
         Ok(self.exit)
     }
@@ -554,7 +554,7 @@ impl PtySession {
         }
         Ok(false)
     }
-    pub(crate) fn begin_shutdown(&mut self, clock: ShutdownClock) -> ShutdownClock {
+    pub(crate) fn begin_shutdown(&mut self, clock: ShutdownDeadlines) -> ShutdownDeadlines {
         let first = match self.shutdown_clock {
             Some(prior) if prior.child_deadline() <= clock.child_deadline() => prior,
             _ => clock,
@@ -562,7 +562,7 @@ impl PtySession {
         self.shutdown_clock = Some(first);
         first
     }
-    pub(crate) fn shutdown(&mut self, clock: ShutdownClock) -> ShutdownOutcome {
+    pub(crate) fn shutdown(&mut self, clock: ShutdownDeadlines) -> ShutdownOutcome {
         let clock = self.begin_shutdown(clock);
         let mut diagnostics = Vec::new();
         note(
@@ -662,7 +662,7 @@ impl PtyIo for PtySession {
 impl Drop for PtySession {
     fn drop(&mut self) {
         if self.child.is_some() && (self.exit.is_none() || self.master.is_some()) {
-            let outcome = self.shutdown(ShutdownClock::new(Instant::now()));
+            let outcome = self.shutdown(ShutdownDeadlines::starting_now(&crate::time::SystemClock));
             for diagnostic in outcome.diagnostics {
                 eprintln!("{diagnostic}");
             }
@@ -985,7 +985,10 @@ mod tests {
                 .expect("the prompting setuid helper is live");
             assert_eq!(session.owned.get(&pid), Some(&helper));
             assert_eq!(session.owned.get(&native.pid), Some(&native));
-            let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+            let outcome = session.shutdown(ShutdownDeadlines::starting_at(
+                Instant::now(),
+                crate::time::SHUTDOWN_UNIT,
+            ));
             assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
             assert!(outcome.native_exit.is_some(), "{outcome:?}");
             assert!(
@@ -1005,7 +1008,7 @@ mod tests {
 
         struct OwnedPty {
             session: PtySession,
-            clock: Option<ShutdownClock>,
+            clock: Option<ShutdownDeadlines>,
             cleaned: bool,
         }
 
@@ -1018,9 +1021,9 @@ mod tests {
                 }
             }
             fn stop(&mut self) -> ShutdownOutcome {
-                let clock = *self
-                    .clock
-                    .get_or_insert_with(|| ShutdownClock::new(Instant::now()));
+                let clock = *self.clock.get_or_insert_with(|| {
+                    ShutdownDeadlines::starting_at(Instant::now(), crate::time::SHUTDOWN_UNIT)
+                });
                 let outcome = self.session.shutdown(clock);
                 self.cleaned = outcome.cleanup_state == CleanupState::Complete;
                 outcome
@@ -1208,8 +1211,9 @@ mod tests {
             let process = owned.session.spawn(&spec).unwrap();
             read_until(&mut owned.session, &["ready"]);
             let start = Instant::now();
-            owned.clock = Some(ShutdownClock::new(
+            owned.clock = Some(ShutdownDeadlines::starting_at(
                 start.checked_sub(Duration::from_millis(1700)).unwrap(),
+                crate::time::SHUTDOWN_UNIT,
             ));
             let outcome = owned.stop();
             assert!(start.elapsed() < Duration::from_millis(4750));
@@ -1258,8 +1262,9 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let start = Instant::now();
-            owned.clock = Some(ShutdownClock::new(
+            owned.clock = Some(ShutdownDeadlines::starting_at(
                 start.checked_sub(Duration::from_millis(1700)).unwrap(),
+                crate::time::SHUTDOWN_UNIT,
             ));
             let outcome = owned.stop();
             let elapsed = start.elapsed();
@@ -1384,7 +1389,8 @@ mod tests {
                 owned: pinned.iter().cloned().map(|p| (p.pid, p)).collect(),
                 group_closed: false,
                 shutdown_clock: Some(
-                    ShutdownClock::new(origin).clipped(origin + Duration::from_millis(900)),
+                    ShutdownDeadlines::starting_at(origin, crate::time::SHUTDOWN_UNIT)
+                        .clipped(origin + Duration::from_millis(900)),
                 ),
             };
             session.native = Some(identity(A));
@@ -1805,7 +1811,10 @@ mod tests {
                     ProcessIdentity::read(native.pid).unwrap().is_some(),
                     "a live leader is not reaped"
                 );
-                let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+                let outcome = session.shutdown(ShutdownDeadlines::starting_at(
+                    Instant::now(),
+                    crate::time::SHUTDOWN_UNIT,
+                ));
                 assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
                 assert_reaped(&native);
             }
@@ -2129,8 +2138,8 @@ mod tests {
             run
         }
 
-        fn clock() -> ShutdownClock {
-            ShutdownClock::with_unit(Instant::now(), Duration::from_millis(100))
+        fn clock() -> ShutdownDeadlines {
+            ShutdownDeadlines::starting_at(Instant::now(), Duration::from_millis(100))
         }
 
         fn group_leader() -> (std::process::Child, ProcessIdentity) {

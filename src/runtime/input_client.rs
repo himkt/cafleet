@@ -22,7 +22,7 @@ impl<'a> PreparedSubmission<'a> {
     pub(crate) fn new(
         request: &'a SubmitInput,
         deadline: Instant,
-        clock: &mut impl InputDeadlineClock,
+        clock: &dyn crate::time::Clock,
     ) -> Result<Self> {
         Ok(Self {
             request,
@@ -433,7 +433,7 @@ fn prepare_submission_with_host<'a>(
             validate_submission_target(conn, settings, expected_run, expected_placement)
         })?;
         let attempt =
-            PreparedSubmission::new(request, deadline.instant(), &mut RealInputDeadlineClock)?;
+            PreparedSubmission::new(request, deadline.instant(), &crate::time::SystemClock)?;
         let held = host
             .lock(settings, expected_placement, deadline)?
             .ok_or_else(|| error("pane input remained busy before submission"))?;
@@ -673,7 +673,7 @@ fn reconcile_receipt_with_host(
         let placement = placement.ok_or_else(|| {
             error("receipt reconciliation requires the member's live runner; the input stays uncertain")
         })?;
-        let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
+        let expiration = InputExpiration::capture(deadline.instant(), &crate::time::SystemClock)?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("receipt pane input remained busy"))?;
@@ -884,7 +884,7 @@ pub(crate) fn respond_permission_with_host(
         let (run, original) = prepare_response(conn, input, deadline)?;
         let placement =
             with_database_budget(conn, deadline, |conn| permission_placement(conn, &run))?;
-        let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
+        let expiration = InputExpiration::capture(deadline.instant(), &crate::time::SystemClock)?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
@@ -991,7 +991,7 @@ fn inspect_permission_with_host(
             tx.commit()?;
             Ok((run, placement, view))
         })?;
-        let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
+        let expiration = InputExpiration::capture(deadline.instant(), &crate::time::SystemClock)?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
@@ -2440,12 +2440,9 @@ mod tests {
         let control_deadline = Instant::now() + Duration::from_secs(2);
         let run_before = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
         let records_before = health_records(&case.fixture.conn);
-        let control = PreparedSubmission::new(
-            &case.request,
-            control_deadline,
-            &mut crate::runtime::RealInputDeadlineClock,
-        )
-        .unwrap();
+        let control =
+            PreparedSubmission::new(&case.request, control_deadline, &crate::time::SystemClock)
+                .unwrap();
         let result = submit_wrapped_input_under_pane_lock_with_host(
             &mut case.fixture.conn,
             &case.settings,
@@ -2461,12 +2458,8 @@ mod tests {
         assert_eq!(result.input_id, Some(case.row.input_id));
 
         let original = Instant::now() + Duration::from_millis(100);
-        let expired_attempt = PreparedSubmission::new(
-            &case.request,
-            original,
-            &mut crate::runtime::RealInputDeadlineClock,
-        )
-        .unwrap();
+        let expired_attempt =
+            PreparedSubmission::new(&case.request, original, &crate::time::SystemClock).unwrap();
         std::thread::sleep(
             original.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
         );
@@ -2488,12 +2481,9 @@ mod tests {
                 &mut NoLiveHost::default(),
             );
             let expired_reads = reads.take();
-            let active_attempt = PreparedSubmission::new(
-                &case.request,
-                original_active,
-                &mut crate::runtime::RealInputDeadlineClock,
-            )
-            .unwrap();
+            let active_attempt =
+                PreparedSubmission::new(&case.request, original_active, &crate::time::SystemClock)
+                    .unwrap();
             let inherited = Deadline::until(Instant::now() + Duration::from_secs(2));
             let supplied = Deadline::until(Instant::now() + Duration::from_secs(3));
             let active = with_database_budget(&mut reads, inherited, |conn| {
@@ -2659,12 +2649,8 @@ mod tests {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "borrowed");
             let until = outer.min(Instant::now() + Duration::from_secs(10));
-            let attempt = PreparedSubmission::new(
-                &request,
-                until,
-                &mut crate::runtime::RealInputDeadlineClock,
-            )
-            .unwrap();
+            let attempt =
+                PreparedSubmission::new(&request, until, &crate::time::SystemClock).unwrap();
             let expiration = attempt.expiration.monotonic_ns();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
@@ -2806,12 +2792,8 @@ mod tests {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "lock-taken-after-reply");
             let until = outer.min(Instant::now() + Duration::from_secs(5));
-            let attempt = PreparedSubmission::new(
-                &request,
-                until,
-                &mut crate::runtime::RealInputDeadlineClock,
-            )
-            .unwrap();
+            let attempt =
+                PreparedSubmission::new(&request, until, &crate::time::SystemClock).unwrap();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
                 .unwrap();
@@ -2848,12 +2830,8 @@ mod tests {
             let request = ordinary(&run, "identity");
             let until = outer.min(Instant::now() + Duration::from_secs(2));
             let deadline = Deadline::until(until);
-            let attempt = PreparedSubmission::new(
-                &request,
-                until,
-                &mut crate::runtime::RealInputDeadlineClock,
-            )
-            .unwrap();
+            let attempt =
+                PreparedSubmission::new(&request, until, &crate::time::SystemClock).unwrap();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
                 .unwrap();

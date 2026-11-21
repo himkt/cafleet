@@ -26,23 +26,19 @@ pub(crate) enum ChildExit {
     Signal(i32),
 }
 
+/// The shutdown boundaries two, three and four units after `start`, each clipped to `limit`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ShutdownClock {
+pub(crate) struct ShutdownDeadlines {
     start: Instant,
     unit: Duration,
     limit: Option<Instant>,
 }
 
-impl ShutdownClock {
-    pub(crate) fn new(start: Instant) -> Self {
-        Self {
-            start,
-            unit: Duration::from_secs(1),
-            limit: None,
-        }
+impl ShutdownDeadlines {
+    pub(crate) fn starting_now(clock: &dyn crate::time::Clock) -> Self {
+        Self::starting_at(clock.now(), clock.shutdown_unit())
     }
-    #[cfg(test)]
-    pub(crate) fn with_unit(start: Instant, unit: Duration) -> Self {
+    pub(crate) fn starting_at(start: Instant, unit: Duration) -> Self {
         Self {
             start,
             unit,
@@ -165,7 +161,7 @@ pub(crate) trait ShutdownHost {
 
 pub(crate) fn shutdown(
     host: &mut impl ShutdownHost,
-    clock: ShutdownClock,
+    clock: ShutdownDeadlines,
     native: Option<ChildExit>,
 ) -> ShutdownOutcome {
     let mut outcome = ShutdownOutcome::complete(native);
@@ -389,7 +385,11 @@ pub(crate) trait LaunchHost {
         placement: &Placement,
         deadline: Instant,
     ) -> Result<Started>;
-    fn shutdown_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome>;
+    fn shutdown_owned(
+        &mut self,
+        run: &RunRecord,
+        clock: ShutdownDeadlines,
+    ) -> Result<ShutdownOutcome>;
     fn close_pane(&mut self, pane: &SpawnedPane, deadline: Instant) -> Result<()>;
     fn settle_hermes(
         &mut self,
@@ -409,7 +409,7 @@ pub(crate) struct LaunchOutcome {
 fn pending_failure(
     conn: &mut Connection,
     run: &RunRecord,
-    clock: ShutdownClock,
+    clock: ShutdownDeadlines,
     diagnostics: &[String],
 ) -> Result<()> {
     with_database_deadline(conn, clock.storage_deadline(), |conn| {
@@ -435,7 +435,7 @@ impl PendingGuard<'_> {
     fn rollback(
         &mut self,
         primary: CafleetError,
-        clock: ShutdownClock,
+        clock: ShutdownDeadlines,
         mut diagnostics: Vec<String>,
     ) -> CafleetError {
         self.armed = false;
@@ -461,7 +461,7 @@ impl Drop for PendingGuard<'_> {
         if self.armed {
             let cause = self.rollback(
                 error("pending creation was interrupted"),
-                ShutdownClock::new(Instant::now()),
+                ShutdownDeadlines::starting_now(&crate::time::SystemClock),
                 Vec::new(),
             );
             eprintln!("{cause}");
@@ -485,7 +485,11 @@ pub(crate) fn create_registered(
     let (mut artifacts, spawn) = match prepare(guard.conn, &pending) {
         Ok(value) => value,
         Err(cause) => {
-            return Err(guard.rollback(cause, ShutdownClock::new(host.now()), Vec::new()));
+            return Err(guard.rollback(
+                cause,
+                ShutdownDeadlines::starting_at(host.now(), crate::time::SHUTDOWN_UNIT),
+                Vec::new(),
+            ));
         }
     };
     launch_registered(
@@ -647,7 +651,7 @@ fn launch_registered(
             Some(payload),
         ),
     };
-    let clock = ShutdownClock::new(host.now());
+    let clock = ShutdownDeadlines::starting_at(host.now(), crate::time::SHUTDOWN_UNIT);
     let mut notes = Vec::new();
     match storage::get_run(guard.conn, pending.run.run_id) {
         Ok(current) if current.owner_kind == OwnerKind::Runner => {
@@ -784,7 +788,11 @@ impl LaunchHost for NativeLaunchHost<'_> {
             crate::time::Deadline::until(deadline),
         )
     }
-    fn shutdown_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome> {
+    fn shutdown_owned(
+        &mut self,
+        run: &RunRecord,
+        clock: ShutdownDeadlines,
+    ) -> Result<ShutdownOutcome> {
         if let Ok(value) = request(
             run,
             LifecycleRequest::shutdown(run),
@@ -1353,7 +1361,7 @@ mod tests {
         fn shutdown_owned(
             &mut self,
             run: &RunRecord,
-            clock: ShutdownClock,
+            clock: ShutdownDeadlines,
         ) -> Result<ShutdownOutcome, CafleetError> {
             self.calls.push("shutdown");
             assert_eq!(clock.storage_deadline(), self.now + Duration::from_secs(4));
@@ -2145,10 +2153,12 @@ mod tests {
         for offset in [0, 1, 2, 3, 4, 9] {
             let until = start + Duration::from_secs(offset);
             assert_eq!(
-                ShutdownClock::new(start).remaining_storage_at(until),
+                ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT)
+                    .remaining_storage_at(until),
                 Duration::from_secs(4).saturating_sub(Duration::from_secs(offset))
             );
-            let clock = ShutdownClock::new(start).clipped(until);
+            let clock =
+                ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT).clipped(until);
             assert_eq!(
                 clock.child_deadline(),
                 (start + Duration::from_secs(2)).min(until)
@@ -2164,7 +2174,7 @@ mod tests {
             assert_eq!(clock.remaining_storage_at(until), Duration::ZERO);
         }
         let past = start.checked_sub(Duration::from_secs(1)).unwrap();
-        let clock = ShutdownClock::new(start).clipped(past);
+        let clock = ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT).clipped(past);
         assert_eq!(clock.child_deadline(), past);
         assert_eq!(clock.display_deadline(), past);
         assert_eq!(clock.storage_deadline(), past);
@@ -2176,7 +2186,7 @@ mod tests {
         let start = Instant::now();
         let first = start + Duration::from_millis(2500);
         let second = start + Duration::from_millis(1500);
-        let clock = ShutdownClock::new(start)
+        let clock = ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT)
             .clipped(first)
             .clipped(start + Duration::from_secs(20));
         assert_eq!(clock.child_deadline(), start + Duration::from_secs(2));
@@ -2277,7 +2287,7 @@ mod tests {
         host.native = None;
         let outcome = shutdown(
             &mut host,
-            ShutdownClock::new(start),
+            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
             Some(ChildExit::Code(7)),
         );
         assert_eq!(
@@ -2314,7 +2324,7 @@ mod tests {
         .into();
         let outcome = shutdown(
             &mut host,
-            ShutdownClock::new(start),
+            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
             Some(ChildExit::Code(9)),
         );
         assert_eq!(host.calls.last().unwrap().0, "restore");
@@ -2339,7 +2349,11 @@ mod tests {
         host.dropped = 17;
         host.pending = 2;
         host.gap = 3;
-        let outcome = shutdown(&mut host, ShutdownClock::new(start), None);
+        let outcome = shutdown(
+            &mut host,
+            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
+            None,
+        );
         assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
         assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
         assert!(
@@ -2363,7 +2377,7 @@ mod tests {
         host.native = None;
         let outcome = shutdown(
             &mut host,
-            ShutdownClock::new(start),
+            ShutdownDeadlines::starting_at(start, crate::time::SHUTDOWN_UNIT),
             Some(ChildExit::Signal(15)),
         );
         assert_eq!(host.deadlines[0].1, start + Duration::from_secs(2));

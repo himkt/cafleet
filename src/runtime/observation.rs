@@ -19,16 +19,13 @@ pub(crate) struct ObservationMoment {
     pub(crate) monotonic: Instant,
     pub(crate) observed_at: String,
 }
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ObservationClockKind {
-    Real,
-    Deterministic,
-}
-pub(crate) trait ObservationClock: Send + Sync {
-    fn sample(&self) -> ObservationMoment;
-    #[cfg(test)]
-    fn kind(&self) -> ObservationClockKind;
+impl ObservationMoment {
+    pub(crate) fn sample(clock: &dyn crate::time::Clock) -> Self {
+        Self {
+            monotonic: clock.now(),
+            observed_at: clock.wall_stamp(),
+        }
+    }
 }
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,19 +46,6 @@ pub(crate) trait ObservationHooks: Send + Sync {
     fn before(&self, site: ObservationPhase, operation: ObservationOperation) -> Result<()>;
     fn order_shutdown_parsing_after_native_exit(&self, _deadline: Instant) -> bool {
         false
-    }
-}
-pub(crate) struct RealObservationClock;
-impl ObservationClock for RealObservationClock {
-    fn sample(&self) -> ObservationMoment {
-        ObservationMoment {
-            monotonic: Instant::now(),
-            observed_at: crate::time::now_stamp(),
-        }
-    }
-    #[cfg(test)]
-    fn kind(&self) -> ObservationClockKind {
-        ObservationClockKind::Real
     }
 }
 stored_enum!(ObservationFailure, "observation.diagnostic", {
@@ -195,7 +179,7 @@ pub(crate) struct ObservedContinuation {
 pub(crate) struct OrderedObservation<'a> {
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
-    clock: &'a dyn ObservationClock,
+    clock: &'a dyn crate::time::Clock,
     #[cfg(test)]
     phase: ObservationPhase,
 }
@@ -444,8 +428,8 @@ impl ObservationController {
                 .as_ref()
                 .is_some_and(|region| region.unchanged(screen))
     }
-    fn moment(&mut self, clock: &dyn ObservationClock) -> Result<ObservationMoment> {
-        let now = clock.sample();
+    fn moment(&mut self, clock: &dyn crate::time::Clock) -> Result<ObservationMoment> {
+        let now = ObservationMoment::sample(clock);
         ensure(
             self.last_time.is_none_or(|old| now.monotonic >= old),
             "observation clock regressed",
@@ -581,7 +565,7 @@ impl ObservationController {
         run: &RunRecord,
         current: &ScreenSnapshot,
         writer: &EventWriter,
-        clock: &dyn ObservationClock,
+        clock: &dyn crate::time::Clock,
     ) -> Result<()> {
         ensure(
             !self.started
@@ -614,7 +598,7 @@ impl ObservationController {
     pub(crate) fn observer<'a>(
         &'a mut self,
         writer: &'a EventWriter,
-        clock: &'a dyn ObservationClock,
+        clock: &'a dyn crate::time::Clock,
     ) -> OrderedObservation<'a> {
         OrderedObservation {
             controller: self,
@@ -628,7 +612,7 @@ impl ObservationController {
     pub(crate) fn observer_for<'a>(
         &'a mut self,
         writer: &'a EventWriter,
-        clock: &'a dyn ObservationClock,
+        clock: &'a dyn crate::time::Clock,
         phase: ObservationPhase,
     ) -> OrderedObservation<'a> {
         OrderedObservation {
@@ -643,7 +627,7 @@ impl ObservationController {
         screen: &ScreenSnapshot,
         now: &ObservationMoment,
         #[cfg(test)] phase: ObservationPhase,
-        #[cfg(test)] clock: &dyn ObservationClock,
+        #[cfg(test)] clock: &dyn crate::time::Clock,
     ) -> Result<Option<ScreenObservation>> {
         #[cfg(test)]
         {
@@ -673,7 +657,7 @@ impl ObservationController {
         &mut self,
         screen: &ScreenSnapshot,
         writer: &EventWriter,
-        clock: &dyn ObservationClock,
+        clock: &dyn crate::time::Clock,
         #[cfg(test)] phase: ObservationPhase,
     ) -> Result<()> {
         let now = self.moment(clock)?;
@@ -726,7 +710,7 @@ impl ObservationController {
         &mut self,
         current: &ScreenSnapshot,
         writer: &EventWriter,
-        clock: &dyn ObservationClock,
+        clock: &dyn crate::time::Clock,
     ) -> Result<ObservationStatus> {
         self.poll_at(
             current,
@@ -741,7 +725,7 @@ impl ObservationController {
         &mut self,
         current: &ScreenSnapshot,
         writer: &EventWriter,
-        clock: &dyn ObservationClock,
+        clock: &dyn crate::time::Clock,
         phase: ObservationPhase,
     ) -> Result<ObservationStatus> {
         self.poll_at(current, writer, clock, phase)
@@ -750,7 +734,7 @@ impl ObservationController {
         &mut self,
         current: &ScreenSnapshot,
         writer: &EventWriter,
-        clock: &dyn ObservationClock,
+        clock: &dyn crate::time::Clock,
         #[cfg(test)] phase: ObservationPhase,
     ) -> Result<ObservationStatus> {
         let now = self.moment(clock)?;
@@ -874,7 +858,7 @@ impl ObservationController {
         exit: ChildExit,
         current: &ScreenSnapshot,
         writer: &EventWriter,
-        clock: &dyn ObservationClock,
+        clock: &dyn crate::time::Clock,
     ) -> Result<()> {
         if let Some(old) = self.exit_recorded {
             ensure(old == exit, "native exit identity changed")?;
@@ -897,7 +881,7 @@ impl ObservationController {
     pub(crate) fn observer_failed(
         &mut self,
         reason: ObservationFailure,
-        clock: &dyn ObservationClock,
+        clock: &dyn crate::time::Clock,
     ) -> Result<()> {
         let now = self.moment(clock)?;
         self.gap(reason, &now)
@@ -1230,7 +1214,7 @@ pub(crate) mod native_capture {
     }
     struct CaptureState {
         identity: Option<ControlIdentity>,
-        clock_kind: ObservationClockKind,
+        clock_kind: crate::time::ClockKind,
         now: Instant,
         used: bool,
         closed: bool,
@@ -1373,7 +1357,7 @@ pub(crate) mod native_capture {
         )?;
         let state = Arc::new(Mutex::new(CaptureState {
             identity: None,
-            clock_kind: ObservationClockKind::Deterministic,
+            clock_kind: crate::time::ClockKind::Deterministic,
             now: Instant::now(),
             used: false,
             closed: false,
@@ -1420,7 +1404,7 @@ pub(crate) mod native_capture {
                 request.run_id == identity.run_id && request.owner_epoch == identity.owner_epoch,
                 "capture owner mismatch",
             )?;
-            let now = if state.clock_kind == ObservationClockKind::Real {
+            let now = if state.clock_kind == crate::time::ClockKind::Real {
                 Instant::now()
             } else {
                 state.now
@@ -1486,7 +1470,7 @@ pub(crate) mod native_capture {
             run: &RunRecord,
             placement: &Placement,
             spawn: &SpawnSpec,
-            clock: &dyn ObservationClock,
+            clock: &dyn crate::time::Clock,
         ) -> Result<()> {
             let producer = self
                 .service_producer
@@ -1500,7 +1484,7 @@ pub(crate) mod native_capture {
             placement: &Placement,
             spawn: &SpawnSpec,
             producer: NativeCaptureProducer,
-            clock: &dyn ObservationClock,
+            clock: &dyn crate::time::Clock,
         ) -> Result<()> {
             ensure(
                 self.prepared.is_none()
@@ -1560,14 +1544,14 @@ pub(crate) mod native_capture {
                 backend,
                 run.native_version.as_deref(),
             ));
-            let origin = clock.sample();
+            let origin = ObservationMoment::sample(clock);
             {
                 let mut state = self.state.lock().expect("capture mailbox");
                 state.now = origin.monotonic;
                 state.clock_kind = clock.kind();
             }
             self.source = Some(
-                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::output::json::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==ObservationClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
+                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::output::json::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==crate::time::ClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
             );
             self.producer_ref = Some(producer.reference.to_string_lossy().into_owned());
             self.origin = Some(origin);
@@ -1662,13 +1646,13 @@ pub(crate) mod native_capture {
             &mut self,
             screen: &ScreenSnapshot,
             trigger: CaptureTrigger,
-            clock: &dyn ObservationClock,
+            clock: &dyn crate::time::Clock,
         ) -> Result<()> {
             let request = self.state.lock().expect("capture mailbox").request.clone();
             let Some(request) = request else {
                 return Ok(());
             };
-            let start = clock.sample();
+            let start = ObservationMoment::sample(clock);
             {
                 let mut state = self.state.lock().expect("capture mailbox");
                 ensure(start.monotonic >= state.now, "capture clock regressed")?;
@@ -1693,7 +1677,7 @@ pub(crate) mod native_capture {
                 self.complete(&request, NativeCaptureStatus::Capacity);
                 return Ok(());
             };
-            let end = clock.sample();
+            let end = ObservationMoment::sample(clock);
             ensure(
                 end.monotonic >= start.monotonic,
                 "capture end clock regressed",
@@ -1719,7 +1703,7 @@ pub(crate) mod native_capture {
             screen: &ScreenSnapshot,
             trigger: CaptureTrigger,
             start: &ObservationMoment,
-            clock: &dyn ObservationClock,
+            clock: &dyn crate::time::Clock,
             deadline: Instant,
         ) -> Result<Option<(NativeCaptureSample, usize)>> {
             let limits = &self.limits;
@@ -1974,7 +1958,7 @@ pub(crate) mod native_capture {
                 }
             }
             let origin = self.origin.as_ref().expect("capture origin");
-            let end = clock.sample();
+            let end = ObservationMoment::sample(clock);
             let elapsed = |at: Instant| -> Result<u64> {
                 let duration = at
                     .checked_duration_since(origin.monotonic)
@@ -2009,8 +1993,8 @@ pub(crate) mod native_capture {
                 .ok_or_else(|| error("capture allocation overflow"))
         })
     }
-    fn capture_deadline(clock: &dyn ObservationClock, until: Instant) -> Result<()> {
-        check_deadline(clock.sample().monotonic, until)
+    fn capture_deadline(clock: &dyn crate::time::Clock, until: Instant) -> Result<()> {
+        check_deadline(ObservationMoment::sample(clock).monotonic, until)
     }
     fn color(color: vt100::Color) -> ProjectedColor {
         match color {
@@ -3742,6 +3726,27 @@ pub(crate) mod native_capture {
             schema_version: u32,
             masks: Vec<CaptureMask>,
         }
+        struct SystemClockWithUnit(Duration);
+        impl crate::time::Clock for SystemClockWithUnit {
+            fn now(&self) -> Instant {
+                crate::time::SystemClock.now()
+            }
+            fn wall_stamp(&self) -> String {
+                crate::time::SystemClock.wall_stamp()
+            }
+            fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
+                crate::time::SystemClock.monotonic_sample()
+            }
+            fn sleep(&self, duration: Duration) {
+                crate::time::SystemClock.sleep(duration)
+            }
+            fn shutdown_unit(&self) -> Duration {
+                self.0
+            }
+            fn kind(&self) -> crate::time::ClockKind {
+                crate::time::SystemClock.kind()
+            }
+        }
         pub(crate) fn run_native_capture_verification(config: &Path) -> Result<i32> {
             run_native_capture_verification_with_export_hooks(
                 config,
@@ -3789,11 +3794,10 @@ pub(crate) mod native_capture {
                 &config.descriptor_path,
                 crate::runtime::service::RunnerDependencies {
                     catalog,
-                    clock: Arc::new(RealObservationClock),
+                    clock: Arc::new(SystemClockWithUnit(shutdown_unit)),
                     writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
                     capture: Some(port),
                     observation_hooks: None,
-                    shutdown_unit,
                     preview_sweep: false,
                     stall_bound: Duration::from_secs(180),
                 },
@@ -5983,7 +5987,7 @@ pub(crate) mod native_capture {
             fn shutdown_owned(
                 &mut self,
                 run: &storage::RunRecord,
-                clock: ShutdownClock,
+                clock: ShutdownDeadlines,
             ) -> Result<ShutdownOutcome> {
                 self.inner
                     .shutdown_owned(run, clock.clipped(self.case_until))
@@ -6893,7 +6897,7 @@ pub(crate) mod native_capture {
                 0o600,
                 false,
             )?;
-            let sample = RealInputDeadlineClock.sample()?;
+            let sample = crate::time::Clock::monotonic_sample(&crate::time::SystemClock)?;
             let remaining = case
                 .expires_at_mono_ns
                 .checked_sub(sample.monotonic_ns)
@@ -7104,7 +7108,9 @@ pub(crate) mod native_capture {
                     Err(_) => (Some("owned post-start work unwound".into()), Value::Null),
                 };
                 let cleanup = catch_unwind(AssertUnwindSafe(|| {
-                    let clock = ShutdownClock::new(Instant::now()).clipped(case_until);
+                    let clock =
+                        ShutdownDeadlines::starting_at(Instant::now(), crate::time::SHUTDOWN_UNIT)
+                            .clipped(case_until);
                     let shutdown = driver_validate_run(conn, &launched)
                         .and_then(|current| host.shutdown_owned(&current, clock));
                     let pane = launched
@@ -7403,12 +7409,11 @@ pub(crate) mod native_capture {
                         &config.descriptor_path,
                         crate::runtime::service::RunnerDependencies {
                             catalog,
-                            clock: Arc::new(RealObservationClock),
+                            clock: Arc::new(crate::time::SystemClock),
                             writer_hooks:
                                 crate::runtime::writer::test_support::default_writer_hooks(),
                             capture: Some(port),
                             observation_hooks: Some(observer.clone()),
-                            shutdown_unit: Duration::from_secs(1),
                             preview_sweep: false,
                             stall_bound: Duration::from_secs(180),
                         },
@@ -8029,16 +8034,24 @@ pub(crate) mod test_support {
                 self.millis.store(millis, Ordering::Release);
             }
         }
-        impl ObservationClock for Clock {
-            fn sample(&self) -> ObservationMoment {
-                ObservationMoment {
-                    monotonic: self.origin
-                        + Duration::from_millis(self.millis.load(Ordering::Acquire)),
-                    observed_at: NOW.into(),
-                }
+        impl crate::time::Clock for Clock {
+            fn now(&self) -> Instant {
+                self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire))
             }
-            fn kind(&self) -> ObservationClockKind {
-                ObservationClockKind::Deterministic
+            fn wall_stamp(&self) -> String {
+                NOW.into()
+            }
+            fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
+                panic!("the observation fixture clock serves only observation moments")
+            }
+            fn sleep(&self, _: Duration) {
+                panic!("the observation fixture clock advances only through set")
+            }
+            fn shutdown_unit(&self) -> Duration {
+                crate::time::SHUTDOWN_UNIT
+            }
+            fn kind(&self) -> crate::time::ClockKind {
+                crate::time::ClockKind::Deterministic
             }
         }
         pub(crate) fn running(fixture: &mut WriterFixture, child: &ProcessIdentity) {
@@ -9267,7 +9280,7 @@ mod tests {
         fn started_controller(
             fixture: &mut WriterFixture,
             writer: &EventWriter,
-            clock: &dyn ObservationClock,
+            clock: &dyn crate::time::Clock,
             catalog: &ProfileCatalog,
         ) -> (ObservationController, TestChild, TerminalState) {
             let mut controller = ObservationController::new(&fixture.fixture.run, catalog).unwrap();
@@ -9446,16 +9459,24 @@ mod tests {
                     )
                 }
             }
-            impl ObservationClock for Timeline {
-                fn sample(&self) -> ObservationMoment {
-                    let millis = self.millis.load(Ordering::Acquire);
-                    ObservationMoment {
-                        monotonic: self.origin + Duration::from_millis(millis),
-                        observed_at: Self::timestamp(millis),
-                    }
+            impl crate::time::Clock for Timeline {
+                fn now(&self) -> Instant {
+                    self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire))
                 }
-                fn kind(&self) -> ObservationClockKind {
-                    ObservationClockKind::Deterministic
+                fn wall_stamp(&self) -> String {
+                    Self::timestamp(self.millis.load(Ordering::Acquire))
+                }
+                fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
+                    panic!("the timeline serves only observation moments")
+                }
+                fn sleep(&self, _: Duration) {
+                    panic!("the timeline advances only through its setter")
+                }
+                fn shutdown_unit(&self) -> Duration {
+                    crate::time::SHUTDOWN_UNIT
+                }
+                fn kind(&self) -> crate::time::ClockKind {
+                    crate::time::ClockKind::Deterministic
                 }
             }
 

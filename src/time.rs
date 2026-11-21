@@ -91,9 +91,42 @@ impl Deadline {
     }
 }
 
-pub(crate) trait Clock {
+/// The unit of the runner's two-, three- and four-unit shutdown boundaries.
+pub(crate) const SHUTDOWN_UNIT: Duration = Duration::from_secs(1);
+
+/// A `CLOCK_MONOTONIC` reading in nanoseconds, bracketed by two readings of [`Clock::now`].
+pub(crate) struct MonotonicSample {
+    pub(crate) before: Instant,
+    pub(crate) monotonic_ns: u64,
+    pub(crate) after: Instant,
+}
+
+impl MonotonicSample {
+    pub(crate) fn validate(&self) -> Result<(), CafleetError> {
+        if self.before <= self.after {
+            Ok(())
+        } else {
+            Err(CafleetError::App("input clock bracket is reversed".into()))
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClockKind {
+    Real,
+    Deterministic,
+}
+
+pub(crate) trait Clock: Send + Sync {
     fn now(&self) -> Instant;
+    /// The canonical storage form of the current wall time (see [`format_utc`]).
+    fn wall_stamp(&self) -> String;
+    fn monotonic_sample(&self) -> Result<MonotonicSample, CafleetError>;
     fn sleep(&self, duration: Duration);
+    fn shutdown_unit(&self) -> Duration;
+    #[cfg(test)]
+    fn kind(&self) -> ClockKind;
 }
 
 pub(crate) struct SystemClock;
@@ -103,48 +136,154 @@ impl Clock for SystemClock {
         Instant::now()
     }
 
+    fn wall_stamp(&self) -> String {
+        now_stamp()
+    }
+
+    fn monotonic_sample(&self) -> Result<MonotonicSample, CafleetError> {
+        let before = Instant::now();
+        let time = rustix::time::clock_gettime_dynamic(rustix::time::DynamicClockId::Known(
+            rustix::time::ClockId::Monotonic,
+        ))
+        .map_err(|cause| CafleetError::App(format!("member runtime: {cause}")))?;
+        let after = Instant::now();
+        let invalid = |message: &str| CafleetError::App(message.into());
+        let seconds = u64::try_from(time.tv_sec)
+            .map_err(|_| invalid("monotonic clock seconds must be nonnegative"))?;
+        let nanoseconds = u64::try_from(time.tv_nsec)
+            .map_err(|_| invalid("monotonic clock nanoseconds must be nonnegative"))?;
+        if nanoseconds >= 1_000_000_000 {
+            return Err(invalid("monotonic clock nanoseconds exceed their range"));
+        }
+        let monotonic_ns = seconds
+            .checked_mul(1_000_000_000)
+            .and_then(|value| value.checked_add(nanoseconds))
+            .ok_or_else(|| invalid("monotonic clock nanoseconds overflow"))?;
+        Ok(MonotonicSample {
+            before,
+            monotonic_ns,
+            after,
+        })
+    }
+
     fn sleep(&self, duration: Duration) {
         std::thread::sleep(duration);
+    }
+
+    fn shutdown_unit(&self) -> Duration {
+        SHUTDOWN_UNIT
+    }
+
+    #[cfg(test)]
+    fn kind(&self) -> ClockKind {
+        ClockKind::Real
     }
 }
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    use crate::error::CafleetError;
     use crate::time::Clock;
-    use std::cell::Cell;
-    use std::cell::RefCell;
+    use crate::time::ClockKind;
+    use crate::time::MonotonicSample;
+    use crate::time::SHUTDOWN_UNIT;
+    use chrono::TimeZone;
+    use std::sync::Mutex;
     use std::time::Duration;
     use std::time::Instant;
 
+    /// A virtual clock: time moves only through `advance`, `set_elapsed` and `sleep`, and each
+    /// sleep is recorded. Its wall time and `CLOCK_MONOTONIC` readings follow the same elapsed
+    /// time from fixed origins.
     pub(crate) struct TestClock {
         origin: Instant,
-        pub(crate) elapsed: Cell<Duration>,
-        pub(crate) sleeps: RefCell<Vec<Duration>>,
+        state: Mutex<TestClockState>,
     }
+
+    struct TestClockState {
+        elapsed: Duration,
+        sleeps: Vec<Duration>,
+        shutdown_unit: Duration,
+    }
+
+    /// The `CLOCK_MONOTONIC` reading at the clock's origin.
+    const MONOTONIC_ORIGIN: Duration = Duration::from_secs(1_000_000);
 
     impl TestClock {
         pub(crate) fn starting_at(origin: Instant) -> Self {
             Self {
                 origin,
-                elapsed: Cell::new(Duration::ZERO),
-                sleeps: RefCell::new(Vec::new()),
+                state: Mutex::new(TestClockState {
+                    elapsed: Duration::ZERO,
+                    sleeps: Vec::new(),
+                    shutdown_unit: SHUTDOWN_UNIT,
+                }),
             }
         }
 
+        pub(crate) fn with_shutdown_unit(self, unit: Duration) -> Self {
+            self.state().shutdown_unit = unit;
+            self
+        }
+
+        fn state(&self) -> std::sync::MutexGuard<'_, TestClockState> {
+            self.state.lock().expect("test clock state")
+        }
+
         pub(crate) fn advance(&self, duration: Duration) {
-            self.elapsed.set(self.elapsed.get() + duration);
+            let mut state = self.state();
+            state.elapsed += duration;
+        }
+
+        pub(crate) fn elapsed(&self) -> Duration {
+            self.state().elapsed
+        }
+
+        pub(crate) fn set_elapsed(&self, elapsed: Duration) {
+            self.state().elapsed = elapsed;
+        }
+
+        pub(crate) fn sleeps(&self) -> Vec<Duration> {
+            self.state().sleeps.clone()
         }
     }
 
     impl Clock for TestClock {
         fn now(&self) -> Instant {
-            self.origin + self.elapsed.get()
+            self.origin + self.elapsed()
+        }
+
+        fn wall_stamp(&self) -> String {
+            let origin = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+            crate::time::format_utc(
+                origin + chrono::Duration::from_std(self.elapsed()).expect("test elapsed fits"),
+            )
+        }
+
+        fn monotonic_sample(&self) -> Result<MonotonicSample, CafleetError> {
+            let elapsed = self.elapsed();
+            let now = self.origin + elapsed;
+            Ok(MonotonicSample {
+                before: now,
+                monotonic_ns: u64::try_from((MONOTONIC_ORIGIN + elapsed).as_nanos())
+                    .expect("test monotonic reading fits"),
+                after: now,
+            })
         }
 
         fn sleep(&self, duration: Duration) {
             assert!(!duration.is_zero(), "idle checks advance the clock");
-            self.sleeps.borrow_mut().push(duration);
-            self.advance(duration);
+            let mut state = self.state();
+            state.sleeps.push(duration);
+            state.elapsed += duration;
+        }
+
+        fn shutdown_unit(&self) -> Duration {
+            self.state().shutdown_unit
+        }
+
+        fn kind(&self) -> ClockKind {
+            ClockKind::Deterministic
         }
     }
 }

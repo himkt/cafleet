@@ -8,7 +8,6 @@ use crate::runtime::control::decode_service_request;
 use crate::runtime::control::encode_input_reply;
 use crate::runtime::input::InputCoordinator;
 use crate::runtime::input::InputServices;
-use crate::runtime::input::RealInputDeadlineClock;
 use crate::runtime::input::RequestTokenSource;
 use crate::runtime::input::receive_input_expiration;
 use crate::runtime::transport::TransportProgress;
@@ -144,18 +143,11 @@ struct NativeIo<'a> {
     transport: &'a mut Transport,
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
-    clock: &'a dyn ObservationClock,
-    #[cfg(test)]
-    shutdown_unit: Duration,
+    clock: &'a dyn crate::time::Clock,
 }
 impl NativeIo<'_> {
-    #[cfg(not(test))]
-    fn shutdown_clock(&self) -> ShutdownClock {
-        ShutdownClock::new(Instant::now())
-    }
-    #[cfg(test)]
-    fn shutdown_clock(&self) -> ShutdownClock {
-        ShutdownClock::with_unit(Instant::now(), self.shutdown_unit)
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+        ShutdownDeadlines::starting_now(self.clock)
     }
     fn quiesce(
         &mut self,
@@ -178,7 +170,7 @@ impl NativeIo<'_> {
         &mut self,
         native_exit: &mut Option<ChildExit>,
         before_exit: impl FnOnce(&ObservationController) -> Result<()>,
-    ) -> Result<Option<ShutdownClock>> {
+    ) -> Result<Option<ShutdownDeadlines>> {
         let Some(exit) = self.pty.try_wait()? else {
             return Ok(None);
         };
@@ -186,16 +178,16 @@ impl NativeIo<'_> {
         before_exit(self.controller)?;
         self.controller
             .child_exited(exit, &self.transport.snapshot(), self.writer, self.clock)?;
-        Ok(Some(self.shutdown_clock()))
+        Ok(Some(self.shutdown_deadlines()))
     }
 }
 
-fn input_deadline(request: &InputControlRequest, admitted_at: Instant) -> Result<Instant> {
-    receive_input_expiration(
-        request.expires_at_mono_ns,
-        admitted_at,
-        &mut RealInputDeadlineClock,
-    )
+fn input_deadline(
+    request: &InputControlRequest,
+    admitted_at: Instant,
+    clock: &dyn crate::time::Clock,
+) -> Result<Instant> {
+    receive_input_expiration(request.expires_at_mono_ns, admitted_at, clock)
 }
 impl RunnerLoop<'_> {
     fn inspect(
@@ -221,7 +213,7 @@ impl RunnerLoop<'_> {
         input: PermissionInspectInput,
         admitted_at: Instant,
     ) -> Result<InputControlReply> {
-        let deadline = input_deadline(request, admitted_at)?;
+        let deadline = input_deadline(request, admitted_at, self.native.clock)?;
         request.identity.validate(&self.run)?;
         let coordinator = self
             .coordinator
@@ -265,7 +257,7 @@ impl RunnerLoop<'_> {
         admitted_at: Instant,
         client_id: u64,
     ) -> Result<Option<InputControlReply>> {
-        let deadline = input_deadline(&request, admitted_at)?;
+        let deadline = input_deadline(&request, admitted_at, self.native.clock)?;
         let coordinator = self
             .coordinator
             .as_mut()
@@ -368,9 +360,9 @@ struct LiveShutdown<'a> {
     output: &'a mut NonblockingFile,
     raw: &'a mut RawTerminalGuard,
     writer: &'a mut EventWriter,
-    clock: ShutdownClock,
+    clock: ShutdownDeadlines,
     controller: &'a mut ObservationController,
-    observation_clock: &'a dyn ObservationClock,
+    observation_clock: &'a dyn crate::time::Clock,
     coordinator: Option<&'a mut InputCoordinator>,
 }
 impl LiveShutdown<'_> {
@@ -536,8 +528,7 @@ impl ShutdownHost for LiveShutdown<'_> {
 pub(crate) struct RunnerDependencies {
     #[cfg(test)]
     pub(crate) catalog: &'static crate::coding_agent::ProfileCatalog,
-    #[cfg(test)]
-    pub(crate) clock: Arc<dyn ObservationClock>,
+    pub(crate) clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
 
@@ -546,9 +537,6 @@ pub(crate) struct RunnerDependencies {
 
     #[cfg(test)]
     pub(crate) observation_hooks: Option<Arc<dyn ObservationHooks>>,
-
-    #[cfg(test)]
-    pub(crate) shutdown_unit: Duration,
 
     #[cfg(test)]
     pub(crate) preview_sweep: bool,
@@ -563,8 +551,7 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         RunnerDependencies {
             #[cfg(test)]
             catalog: crate::coding_agent::ProfileCatalog::bundled(),
-            #[cfg(test)]
-            clock: Arc::new(RealObservationClock),
+            clock: Arc::new(crate::time::SystemClock),
             #[cfg(test)]
             writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
 
@@ -573,9 +560,6 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 
             #[cfg(test)]
             observation_hooks: None,
-
-            #[cfg(test)]
-            shutdown_unit: Duration::from_secs(1),
 
             #[cfg(test)]
             preview_sweep: true,
@@ -588,31 +572,16 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 pub(crate) fn run_service(
     settings: &Settings,
     descriptor_path: &Path,
-    #[cfg_attr(
-        not(test),
-        expect(
-            unused_variables,
-            reason = "production dependencies carry only test seams"
-        )
-    )]
     services: RunnerDependencies,
 ) -> Result<i32> {
     #[cfg(test)]
     let mut services = services;
-    #[cfg(not(test))]
-    let shutdown_clock = || ShutdownClock::new(Instant::now());
-    #[cfg(test)]
-    let shutdown_unit = services.shutdown_unit;
-    #[cfg(test)]
-    let shutdown_clock = || ShutdownClock::with_unit(Instant::now(), shutdown_unit);
+    let observation_clock = services.clock.clone();
+    let shutdown_clock = || ShutdownDeadlines::starting_now(observation_clock.as_ref());
     #[cfg(not(test))]
     let catalog = crate::coding_agent::ProfileCatalog::bundled();
     #[cfg(test)]
     let catalog = services.catalog;
-    #[cfg(not(test))]
-    let observation_clock: Arc<dyn ObservationClock> = Arc::new(RealObservationClock);
-    #[cfg(test)]
-    let observation_clock = services.clock.clone();
 
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
@@ -711,8 +680,6 @@ pub(crate) fn run_service(
             controller: &mut controller,
             writer: &writer,
             clock: observation_clock.as_ref(),
-            #[cfg(test)]
-            shutdown_unit,
         },
         conn: &mut conn,
         original: &original,
@@ -917,14 +884,14 @@ struct RunnerLoop<'a> {
 }
 
 impl RunnerLoop<'_> {
-    fn shutdown_clock(&self) -> ShutdownClock {
-        self.native.shutdown_clock()
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+        self.native.shutdown_deadlines()
     }
 
-    fn serve(&mut self) -> Result<ShutdownClock> {
+    fn serve(&mut self) -> Result<ShutdownDeadlines> {
         loop {
             if self.terminate.load(Ordering::Acquire) {
-                return Ok(self.shutdown_clock());
+                return Ok(self.shutdown_deadlines());
             }
             if !self.started {
                 check_deadline(Instant::now(), self.handshake_deadline)?;
@@ -983,7 +950,7 @@ impl RunnerLoop<'_> {
         self.creator_connection == Some(client_id) && !self.started
     }
 
-    fn serve_client(&mut self, index: usize) -> Result<Option<ShutdownClock>> {
+    fn serve_client(&mut self, index: usize) -> Result<Option<ShutdownDeadlines>> {
         let client_id = self.clients[index].id;
         let requests = match self.clients[index].poll() {
             Ok(requests) => requests,
@@ -1014,7 +981,7 @@ impl RunnerLoop<'_> {
             let mut accepted_startup = false;
             let result = self.serve_lifecycle(client_id, &lifecycle, &mut accepted_startup);
             if self.shutdown_client == Some(client_id) {
-                return Ok(Some(self.shutdown_clock()));
+                return Ok(Some(self.shutdown_deadlines()));
             }
             let startup_failure = result
                 .as_ref()
@@ -1220,7 +1187,7 @@ impl RunnerLoop<'_> {
         .map_err(io_error)
     }
 
-    fn tick_running(&mut self) -> Result<ControlFlow<ShutdownClock, TransportProgress>> {
+    fn tick_running(&mut self) -> Result<ControlFlow<ShutdownDeadlines, TransportProgress>> {
         let selected = self.run.database_identity_json["canonical_path"]
             .as_str()
             .expect("validated database path");
@@ -1258,7 +1225,7 @@ impl RunnerLoop<'_> {
             .controller
             .poll(&native.transport.snapshot(), native.writer, native.clock)?;
         if progress.outer_eof {
-            return Ok(ControlFlow::Break(self.shutdown_clock()));
+            return Ok(ControlFlow::Break(self.shutdown_deadlines()));
         }
         if let Some(clock) = self.observe_exit()? {
             return Ok(ControlFlow::Break(clock));
@@ -1275,7 +1242,7 @@ impl RunnerLoop<'_> {
         Ok(ControlFlow::Continue(progress))
     }
 
-    fn observe_exit(&mut self) -> Result<Option<ShutdownClock>> {
+    fn observe_exit(&mut self) -> Result<Option<ShutdownDeadlines>> {
         let coordinator = started(&mut self.coordinator);
         let (conn, run_id) = (&mut *self.conn, self.run.run_id);
         self.native
@@ -1299,7 +1266,7 @@ impl RunnerLoop<'_> {
 
     /// Drives the in-flight immediate input to its reply: a client-owned attempt answers its
     /// client, and the runner's own sweep attempt settles without a reply.
-    fn complete_pending_input(&mut self) -> Result<Option<ShutdownClock>> {
+    fn complete_pending_input(&mut self) -> Result<Option<ShutdownDeadlines>> {
         let deadline = match (&self.pending_input_client, &self.pending_sweep) {
             (Some(client), None) => client.deadline,
             (None, Some(sweep)) => sweep.deadline,
@@ -1314,7 +1281,7 @@ impl RunnerLoop<'_> {
             Ok(InputDrain::Pending) => Ok(None),
             Ok(InputDrain::Quiescent) => {
                 if self.terminate.load(Ordering::Acquire) {
-                    return Ok(Some(self.shutdown_clock()));
+                    return Ok(Some(self.shutdown_deadlines()));
                 }
                 if let Some(clock) = self.observe_exit()? {
                     return Ok(Some(clock));
@@ -2368,9 +2335,9 @@ pub(crate) mod test_support {
             Ok(records)
         }
 
-        pub(crate) use crate::runtime::RealInputDeadlineClock as Clock;
+        pub(crate) use crate::time::SystemClock as Clock;
         pub(crate) fn expiration(until: Instant) -> u64 {
-            InputExpiration::capture(until, &mut Clock)
+            InputExpiration::capture(until, &Clock)
                 .unwrap()
                 .monotonic_ns()
         }
@@ -2829,7 +2796,10 @@ pub(crate) mod test_support {
             ) -> rusqlite::Result<Vec<Value>> {
                 loop {
                     assert!(
-                        Clock.sample().unwrap().monotonic_ns < expires,
+                        crate::time::Clock::monotonic_sample(&Clock)
+                            .unwrap()
+                            .monotonic_ns
+                            < expires,
                         "original owned native lifetime"
                     );
                     let result = (|| {
@@ -2849,7 +2819,9 @@ pub(crate) mod test_support {
                                 )
                             ) =>
                         {
-                            let now = Clock.sample().unwrap().monotonic_ns;
+                            let now = crate::time::Clock::monotonic_sample(&Clock)
+                                .unwrap()
+                                .monotonic_ns;
                             assert!(now < expires, "original owned native lifetime");
                             std::thread::sleep(
                                 Duration::from_millis(2).min(Duration::from_nanos(expires - now)),
@@ -2894,7 +2866,10 @@ pub(crate) mod test_support {
                 let mut form_mid_write_shown = false;
                 loop {
                     assert!(
-                        Clock.sample().unwrap().monotonic_ns < expires,
+                        crate::time::Clock::monotonic_sample(&Clock)
+                            .unwrap()
+                            .monotonic_ns
+                            < expires,
                         "original owned native lifetime"
                     );
                     let mut bytes = [0; 4096];
@@ -3011,18 +2986,6 @@ pub(crate) mod test_support {
             std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
         }
 
-        pub(crate) struct Clock;
-        impl ObservationClock for Clock {
-            fn sample(&self) -> ObservationMoment {
-                ObservationMoment {
-                    monotonic: Instant::now(),
-                    observed_at: crate::time::now_stamp(),
-                }
-            }
-            fn kind(&self) -> ObservationClockKind {
-                ObservationClockKind::Real
-            }
-        }
         pub(crate) struct Hooks {
             pub(crate) directory: std::path::PathBuf,
             pub(crate) work_slice: Duration,
@@ -3073,7 +3036,7 @@ pub(crate) mod test_support {
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
             let services = crate::runtime::service::RunnerDependencies {
                 catalog: Box::leak(Box::new(catalog)),
-                clock: Arc::new(Clock),
+                clock: Arc::new(crate::time::SystemClock),
                 writer_hooks: Arc::new(Hooks {
                     directory: config.parent().unwrap().to_path_buf(),
                     work_slice: match value.get("writer_work_slice_ms") {
@@ -3089,7 +3052,6 @@ pub(crate) mod test_support {
                     &value,
                     config.parent().unwrap(),
                 )?,
-                shutdown_unit: Duration::from_secs(1),
                 preview_sweep: match value.get("preview_sweep") {
                     None => false,
                     Some(enabled) => enabled.as_bool().expect("preview_sweep is a boolean"),
@@ -4883,7 +4845,6 @@ mod tests {
         }
     }
     mod input_admission_tests {
-        use crate::runtime::InputClockSample;
         use crate::runtime::control::AdmittedControlFrame;
         use crate::runtime::input::receive_input_expiration;
         use crate::runtime::service::*;
@@ -4992,15 +4953,15 @@ mod tests {
                 let actual = queue.pop_front().unwrap();
                 assert_eq!(actual.admitted_at(), expected);
                 let now = Instant::now();
-                let mut clock =
-                    crate::runtime::input::test_support::ScriptClock::one(InputClockSample {
+                let clock = crate::runtime::input::test_support::ScriptClock::one(
+                    crate::time::MonotonicSample {
                         before: now,
                         monotonic_ns: 1_000_000_000,
                         after: now,
-                    });
+                    },
+                );
                 let converted =
-                    receive_input_expiration(11_000_000_000, actual.admitted_at(), &mut clock)
-                        .unwrap();
+                    receive_input_expiration(11_000_000_000, actual.admitted_at(), &clock).unwrap();
                 assert_eq!(converted, actual.admitted_at() + Duration::from_secs(5));
                 clock.consumed(1, 0);
             }

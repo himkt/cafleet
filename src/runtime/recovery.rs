@@ -40,7 +40,11 @@ pub(crate) trait RecoveryHost {
         deadline: Instant,
     ) -> Result<ProcessEvidence>;
     fn health(&mut self, run: &RunRecord, deadline: Instant) -> Result<RecoveryHealth>;
-    fn cleanup_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome>;
+    fn cleanup_owned(
+        &mut self,
+        run: &RunRecord,
+        clock: ShutdownDeadlines,
+    ) -> Result<ShutdownOutcome>;
     fn unlink_descriptor(&mut self, path: &std::path::Path, deadline: Instant) -> Result<()> {
         unlink_descriptor_file(path, deadline)
     }
@@ -248,7 +252,7 @@ fn recover(
     borrowed: Option<BorrowedPane<'_>>,
     host: &mut impl RecoveryHost,
 ) -> Result<RecoveryCompletion> {
-    let clock = ShutdownClock::new(Instant::now()).clipped(until);
+    let clock = ShutdownDeadlines::starting_now(&crate::time::SystemClock).clipped(until);
     check_deadline(Instant::now(), until)?;
     ensure(member_id > 0, "positive recovery member ID required")?;
     let (run, pinned) = snapshot(conn, member_id, until)?;
@@ -379,7 +383,11 @@ impl RecoveryHost for NativeRecoveryHost {
             Err(cause) => Ok(RecoveryHealth::Unavailable(cause.message().into_owned())),
         }
     }
-    fn cleanup_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome> {
+    fn cleanup_owned(
+        &mut self,
+        run: &RunRecord,
+        clock: ShutdownDeadlines,
+    ) -> Result<ShutdownOutcome> {
         crate::runtime::process::recover_descendants(run, clock)
     }
 }
@@ -492,7 +500,7 @@ fn reconcile_retained_runtime(
     pinned: Option<Placement>,
     lock: Arc<RunLock>,
     host: &mut impl RecoveryHost,
-    clock: ShutdownClock,
+    clock: ShutdownDeadlines,
     until: Instant,
 ) -> Result<RecoveryCompletion> {
     let mut result = completion(run, RecoveryOutcome::Recovering)?;
@@ -639,7 +647,7 @@ fn perform(
     pinned: Option<&Placement>,
     lock: Arc<RunLock>,
     host: &mut impl RecoveryHost,
-    clock: ShutdownClock,
+    clock: ShutdownDeadlines,
     until: Instant,
 ) -> Result<()> {
     check_deadline(Instant::now(), until)?;
@@ -2239,7 +2247,7 @@ pub(crate) mod test_support {
         pub(crate) before_entry: Instant,
         pub(crate) after_entry: Option<Instant>,
         pub(crate) delay: Duration,
-        pub(crate) observed: Option<ShutdownClock>,
+        pub(crate) observed: Option<ShutdownDeadlines>,
     }
     pub(crate) struct UnlinkProbe {
         pub(crate) path: std::path::PathBuf,
@@ -2290,7 +2298,7 @@ pub(crate) mod test_support {
                 ..Self::new(deadline)
             }
         }
-        fn assert_entry_clock(&mut self, clock: ShutdownClock) {
+        fn assert_entry_clock(&mut self, clock: ShutdownDeadlines) {
             let until = self.deadline;
             let Some(probe) = &mut self.clock else {
                 return;
@@ -2371,7 +2379,7 @@ pub(crate) mod test_support {
         fn cleanup_owned(
             &mut self,
             _: &RunRecord,
-            clock: ShutdownClock,
+            clock: ShutdownDeadlines,
         ) -> TestResult<ShutdownOutcome> {
             self.assert_entry_clock(clock);
             assert!(clock.child_deadline() <= self.deadline);

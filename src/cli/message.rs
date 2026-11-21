@@ -881,7 +881,7 @@ mod tests {
         F: FnMut(Duration, usize) -> Result<InboxSnapshot, CafleetError>,
     {
         fn snapshot(&mut self, deadline: Deadline) -> Result<InboxSnapshot, CafleetError> {
-            let now = self.clock.elapsed.get();
+            let now = self.clock.elapsed();
             self.snapshots
                 .push((now, deadline.remaining_at(self.clock.now())?));
             assert!(
@@ -959,7 +959,7 @@ mod tests {
             if refuse {
                 if pending {
                     self.refused
-                        .push((self.clock.elapsed.get(), self.snapshot_ids.borrow().clone()));
+                        .push((self.clock.elapsed(), self.snapshot_ids.borrow().clone()));
                 }
                 return Ok(Delivery::Refused);
             }
@@ -967,7 +967,7 @@ mod tests {
                 self.notice_ids.push(self.snapshot_ids.borrow().clone());
             }
             self.records.push(record.clone());
-            self.delivered_at.push(self.clock.elapsed.get());
+            self.delivered_at.push(self.clock.elapsed());
             Ok(Delivery::Delivered)
         }
     }
@@ -1130,7 +1130,7 @@ mod tests {
             ]
         );
         assert_eq!(notices(&output), [vec![10]]);
-        assert_eq!(*clock.sleeps.borrow(), vec![Duration::from_secs(1); 3]);
+        assert_eq!(clock.sleeps(), vec![Duration::from_secs(1); 3]);
         assert_eq!(
             io.snapshots
                 .iter()
@@ -1310,7 +1310,7 @@ mod tests {
                         self.snapshots < 2_000,
                         "a held notice must allow idle sleeps"
                     );
-                    let now = self.clock.elapsed.get().as_secs();
+                    let now = self.clock.elapsed().as_secs();
                     while let Some((at, act)) = self.script.get(self.applied)
                         && *at <= now
                     {
@@ -1556,9 +1556,9 @@ mod tests {
             NEXT,
         )
         .unwrap();
-        assert_eq!(clock.elapsed.get(), Duration::from_millis(2500));
+        assert_eq!(clock.elapsed(), Duration::from_millis(2500));
         assert_eq!(
-            *clock.sleeps.borrow(),
+            clock.sleeps(),
             [
                 Duration::from_secs(1),
                 Duration::from_secs(1),
@@ -1595,7 +1595,7 @@ mod tests {
             NEXT,
         )
         .unwrap();
-        assert_eq!(clock.elapsed.get(), Duration::from_secs(8));
+        assert_eq!(clock.elapsed(), Duration::from_secs(8));
         assert_eq!(
             notices(&output),
             (0..8).map(|id| vec![id]).collect::<Vec<_>>(),
@@ -1693,7 +1693,7 @@ mod tests {
         let mut output = RecordingOutput::new(&clock);
         let mut io = ScriptedInbox::new(&clock, &output, |_, check| {
             assert_eq!(check, 1);
-            clock.elapsed.set(Duration::from_secs(2));
+            clock.set_elapsed(Duration::from_secs(2));
             Ok(open(Vec::new()))
         });
         assert!(matches!(
