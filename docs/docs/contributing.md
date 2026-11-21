@@ -15,7 +15,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 
 Broker queries return typed records; CLI presenters construct wire output. Shared diagnosis validates database identity and schema. Keep durable storage separate from synchronous notification, runner-owned preview retries, input ownership and multiplexer I/O. Required state fails at its read boundary. Preserve process pipe draining, owned-child cleanup, pane ownership compensation and layout cleanup.
 
-Every Rust test is an in-file unit test; [Test placement](https://github.com/himkt/cafleet/blob/main/.claude/rules/code-quality.md#test-placement) owns the convention.
+Every Rust test is an in-file unit test. Related cases form one table-driven test over a named case array; runner tests take time from the injected clock and use real time only when they drive real processes, PTYs, sockets or locks; and runner behavior is driven through the runtime scenario harness, which asserts events, rows and child bytes. [Test placement](https://github.com/himkt/cafleet/blob/main/.claude/rules/code-quality.md#test-placement) owns the convention.
 
 ## Development
 
@@ -33,7 +33,7 @@ mise //:install
 cafleet setup
 ```
 
-Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools, owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`. Run Rust validation with `mise //:test` and `mise //:lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use them.
+Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools, owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`. Run Rust validation with `mise //:test` and `mise //:lint`; `mise //:coverage` reports line coverage of the inline unit tests. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use them.
 
 ### Installing the skills from your checkout
 
