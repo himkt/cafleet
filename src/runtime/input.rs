@@ -372,8 +372,6 @@ struct ComposerDelivery {
     written_stages: usize,
     started: bool,
     settle_until: Option<Instant>,
-    manual_generation: Option<u64>,
-    pointer_generation: Option<u64>,
     stop: Option<ComposerStop>,
     stop_failure: Option<CafleetError>,
     verification: Option<PostSubmitVerification>,
@@ -434,13 +432,6 @@ fn interaction_cause(status: &ObservationStatus) -> storage::StopCause {
     } else {
         storage::StopCause::InteractionOpen
     }
-}
-
-fn blocker_cause(status: &ObservationStatus) -> Option<storage::StopCause> {
-    ordinary_blocker(status).map(|blocker| match blocker {
-        OrdinaryBlocker::Interaction => interaction_cause(status),
-        OrdinaryBlocker::ObserverUnavailable => storage::StopCause::ObserverUnavailable,
-    })
 }
 
 fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
@@ -2094,8 +2085,6 @@ impl InputCoordinator {
                     written_stages: 0,
                     started: false,
                     settle_until: None,
-                    manual_generation: None,
-                    pointer_generation: None,
                     stop: None,
                     stop_failure: None,
                     verification: None,
@@ -2313,8 +2302,6 @@ impl InputCoordinator {
                     written_stages: 0,
                     started: false,
                     settle_until: None,
-                    manual_generation: None,
-                    pointer_generation: None,
                     stop: None,
                     stop_failure: None,
                     verification: None,
@@ -3020,8 +3007,6 @@ impl InputCoordinator {
                 written_stages: 0,
                 started: false,
                 settle_until: None,
-                manual_generation: None,
-                pointer_generation: None,
                 stop: None,
                 stop_failure: None,
                 verification: None,
@@ -3485,14 +3470,6 @@ impl InputCoordinator {
             {
                 self.note_observer_obstacle(observation);
                 return Ok(None);
-            }
-            if let Some(composer) = &pending.composer() {
-                ensure(
-                    composer
-                        .manual_generation
-                        .is_none_or(|generation| generation == self.manual_generation),
-                    "human input arrived between composer stages",
-                )?;
             }
             if let Some(permission) = &pending.permission() {
                 let retained = self
@@ -4024,17 +4001,9 @@ impl InputCoordinator {
         };
         let literal_index = usize::from(composer.method == storage::DeliveryMethod::Fallback);
         let between_chunks = *next_stage == literal_index && *offset > 0;
-        let cause = if self.manual_accounting_failed {
-            Some(storage::StopCause::ManualAccountingFailed)
-        } else if composer.manual_generation != Some(self.manual_generation) {
-            Some(storage::StopCause::ManualInput)
-        } else if between_chunks && composer.pointer_generation != Some(self.pointer_generation) {
-            Some(storage::StopCause::PointerInput)
-        } else {
-            blocker_cause(&observation.status())
-        };
-        if cause.is_some() {
-            return Ok(cause);
+        let status = observation.status();
+        if let Some(OrdinaryBlocker::Interaction) = ordinary_blocker(&status) {
+            return Ok(Some(interaction_cause(&status)));
         }
         let remaining = pending.deadline.saturating_duration_since(Instant::now());
         if (between_chunks && remaining <= PASTE_CLOSE_RESERVE)
@@ -4295,14 +4264,6 @@ impl InputCoordinator {
             && let Some(composer) = self.pending.as_mut().and_then(PendingInput::composer_mut)
         {
             composer.started = true;
-            composer
-                .manual_generation
-                .get_or_insert(self.manual_generation);
-            if literal_stage {
-                composer
-                    .pointer_generation
-                    .get_or_insert(self.pointer_generation);
-            }
         }
         if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) && literal_stage {
             let next_bytes = self
@@ -4399,10 +4360,7 @@ impl InputCoordinator {
             let next = match stage {
                 SubmissionStage::Submitted => storage::InputState::Accepted,
                 SubmissionStage::ZeroBytes => storage::InputState::Ready,
-                SubmissionStage::Partial
-                | SubmissionStage::Unknown
-                | SubmissionStage::EscapeOnly
-                | SubmissionStage::LiteralComplete => {
+                SubmissionStage::Partial | SubmissionStage::Unknown => {
                     return self.record_uncertain(conn, id, stop_cause);
                 }
             };
@@ -4733,9 +4691,8 @@ impl InputCoordinator {
             .permission()
             .expect("a permission selection remains")
             .binding;
-        let stop_cause = if self.manual_accounting_failed {
-            storage::StopCause::ManualAccountingFailed
-        } else if self.manual_generation != binding.manual_generation
+        let stop_cause = if self.manual_accounting_failed
+            || self.manual_generation != binding.manual_generation
             || self.pointer_generation != binding.pointer_generation
         {
             storage::StopCause::ManualInput
@@ -8044,12 +8001,8 @@ mod tests {
             }
 
             pub(super) mod stall_watchdog {
-                use crate::pane_lock::PaneLock;
                 use crate::runtime::input::tests::ordinary_prompt::deferred_queue::*;
                 use serde_json::Value;
-                use serde_json::json;
-
-                const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.";
 
                 /// A head queued behind an interaction that has since closed, so no queue turn
                 /// has started it and no live gate holds it.
@@ -8074,26 +8027,6 @@ mod tests {
                         std::thread::sleep(Duration::from_millis(5));
                         host.drain();
                     }
-                }
-
-                pub(in crate::runtime::input) fn reserve_unrelated(
-                    host: &mut Host,
-                    key: &str,
-                ) -> i64 {
-                    let owner = host.fixture.run.owner();
-                    let input = storage::test_support::reserve_input(
-                        &mut host.fixture.conn,
-                        &owner,
-                        &storage::NewInput {
-                            operation_key: key.into(),
-                            kind: storage::InputKind::Prompt,
-                            payload_digest: "e".repeat(64),
-                            message_id: None,
-                        },
-                    )
-                    .unwrap();
-                    assert_eq!(input.state, storage::InputState::InProgress);
-                    input.input_id
                 }
 
                 fn await_stalled(host: &mut Host, head: i64) -> Value {
@@ -8125,33 +8058,20 @@ mod tests {
                     assert!(stalled_payloads(host, head).is_empty());
                 }
 
-                fn review_stalled_queue(host: &Host, head: i64) -> Value {
-                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
-                    json!({
-                        "kind":"review_stalled_queue",
-                        "instruction":REVIEW_STALLED_QUEUE,
-                        "inspect_argv":["cafleet","input","show",head.to_string(),"--json","--database-url",url],
-                    })
-                }
-
-                /// Backdates the head, runs housekeeping and checks the single published event.
-                pub(in crate::runtime::input) fn assert_stalled_by(
-                    host: &mut Host,
-                    head: i64,
-                    kind: &str,
-                    blocking: Option<i64>,
-                    detail: Value,
-                ) {
+                /// Backdates the head past the stall bound, runs housekeeping and checks the single
+                /// cause-free event that names the head, its wait start and one instruction.
+                pub(in crate::runtime::input) fn assert_stalled_once(host: &mut Host, head: i64) {
                     backdate_head_since(host, head);
                     housekeep(host);
                     let payload = await_stalled(host, head);
-                    assert_eq!(
-                        payload["cause"],
-                        json!({"kind":kind,"detail":detail}),
-                        "{payload}"
+                    assert_eq!(payload["input_id"], head, "{payload}");
+                    assert!(payload.get("blocking_input_id").is_none(), "{payload}");
+                    assert!(
+                        payload["director_action"]["instruction"]
+                            .as_str()
+                            .is_some_and(|instruction| !instruction.trim().is_empty()),
+                        "one instruction: {payload}"
                     );
-                    assert_eq!(payload["blocking_input_id"], json!(blocking), "{payload}");
-                    assert_eq!(payload["director_action"], review_stalled_queue(host, head));
                     let waiting = chrono::DateTime::parse_from_rfc3339(
                         payload["waiting_since"].as_str().unwrap(),
                     )
@@ -8171,216 +8091,30 @@ mod tests {
                     );
                 }
 
-                fn until_head_obstacle(host: &mut Host, obstacle: &str) {
-                    while host.coordinator.queue.front().unwrap().obstacle != obstacle {
-                        assert!(
-                            Instant::now() < host.until,
-                            "the queue turn records {obstacle}"
-                        );
-                        host.drain();
-                        host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
+                #[test]
+                fn a_queued_prompt_or_exec_head_publishes_one_stall_event_at_the_stall_bound() {
+                    for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
+                        with_permission_host(Duration::from_secs(20), |host| {
+                            let key = format!("{}:stalled-head", kind.as_str());
+                            let mut request = host.request(&key);
+                            let input = SubmitInput {
+                                operation_key: key,
+                                input_kind: kind,
+                                literal: LITERAL.into(),
+                            };
+                            request.operation = if kind == storage::InputKind::Exec {
+                                InputControlOperation::SubmitExec(input)
+                            } else {
+                                InputControlOperation::SubmitPrompt(input)
+                            };
+                            form(host);
+                            let head = queued(host, request, "interaction_open");
+                            close_observed(host);
+                            housekeep(host);
+                            assert_unpublished(host, head);
+                            assert_stalled_once(host, head);
+                        });
                     }
-                }
-
-                #[test]
-                fn a_head_no_listed_gate_explains_stalls_as_queue_turn_not_reached() {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let head = waiting_head(host, "prompt:unexplained");
-                        assert_stalled_by(host, head, "queue_turn_not_reached", None, Value::Null);
-                    });
-                }
-
-                #[test]
-                fn a_head_behind_an_in_flight_immediate_attempt_stalls_as_immediate_attempt() {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        assert!(
-                            host.handle(host.request("prompt:in-flight"))
-                                .unwrap()
-                                .is_none()
-                        );
-                        while host.pty.stages.is_empty() {
-                            assert!(Instant::now() < host.until, "the attempt starts writing");
-                            host.drain();
-                            assert!(host.advance().is_none());
-                            std::thread::sleep(Duration::from_millis(5));
-                        }
-                        let attempt = host.hooks.input_id();
-                        let head =
-                            queued(host, host.request("prompt:behind-attempt"), "earlier_input");
-                        assert_stalled_by(
-                            host,
-                            head,
-                            "immediate_attempt",
-                            Some(attempt),
-                            Value::Null,
-                        );
-                    });
-                }
-
-                #[test]
-                fn a_head_behind_a_pending_finalization_stalls_as_pending_finalization() {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
-                        form(host);
-                        let finalizing =
-                            queued(host, host.request("prompt:finalizing"), "interaction_open");
-                        let head = queued(
-                            host,
-                            host.request("prompt:behind-finalization"),
-                            "interaction_open",
-                        );
-                        close_observed(host);
-                        assert_eq!(
-                            host.coordinator.queue.pop_front().unwrap().input_id,
-                            finalizing
-                        );
-                        host.coordinator.finalization =
-                            Some(crate::runtime::input::PendingFinalization {
-                                input_id: finalizing,
-                                expected: storage::InputState::Ready,
-                                reason: "target_changed",
-                            });
-                        backdate_head_since(host, head);
-                        let mut outage = crate::db::connect(&url).unwrap();
-                        let exclusive = outage
-                            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
-                            .unwrap();
-                        housekeep(host);
-                        drop(exclusive);
-                        assert!(
-                            host.coordinator.finalization.is_some(),
-                            "storage kept the finalization retry outstanding"
-                        );
-                        let payload = await_stalled(host, head);
-                        assert_eq!(
-                            payload["cause"],
-                            json!({"kind":"pending_finalization","detail":null})
-                        );
-                        assert_eq!(payload["blocking_input_id"], finalizing);
-                        assert_eq!(payload["director_action"], review_stalled_queue(host, head));
-                    });
-                }
-
-                #[test]
-                fn a_head_behind_unresolved_inputs_names_the_lowest_unresolved_receipt() {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let head = waiting_head(host, "prompt:behind-unresolved");
-                        let first = reserve_unrelated(host, "prompt:first-unresolved");
-                        reserve_unrelated(host, "prompt:second-unresolved");
-                        assert_stalled_by(host, head, "unresolved_input", Some(first), Value::Null);
-                    });
-                }
-
-                #[test]
-                fn a_head_behind_a_pending_drain_stalls_as_drain_pending_with_its_blocker() {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let head = waiting_head(host, "prompt:behind-drain");
-                        host.type_human(b"\x1b");
-                        assert_eq!(host.quiesce_once(), InputDrain::Pending);
-                        host.coordinator.record_queue_drain(InputDrain::Pending);
-                        assert_stalled_by(
-                            host,
-                            head,
-                            "drain_pending",
-                            None,
-                            json!("terminal reply pending"),
-                        );
-                    });
-                }
-
-                #[test]
-                fn a_head_whose_queue_turn_met_a_busy_pane_lock_stalls_as_pane_input_busy() {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
-                        let head = waiting_head(host, "prompt:behind-busy-pane");
-                        let _held = PaneLock::try_acquire(&url, &host.placement())
-                            .unwrap()
-                            .unwrap();
-                        until_head_obstacle(host, "pane_input_busy");
-                        assert_stalled_by(host, head, "pane_input_busy", None, Value::Null);
-                    });
-                }
-
-                #[test]
-                fn a_head_whose_attempt_budget_cannot_fit_its_stages_stalls_as_delivery_budget_exhausted()
-                 {
-                    with_profile_host_until(
-                        crate::runtime::input::tests::ordinary_prompt::staged_delivery::permission_catalog(),
-                        encoded(),
-                        HostProfile {
-                            stage_settle: Duration::from_secs(6),
-                            ..HostProfile::metadata()
-                        },
-                        Instant::now() + Duration::from_secs(20),
-                        |host| {
-                            let head = waiting_head(host, "prompt:over-budget");
-                            for _ in 0..8 {
-                                host.drain();
-                                host.advance();
-                            }
-                            assert!(host.pty.offers.is_empty(), "the head never starts");
-                            assert_eq!(row(host, head).state, storage::InputState::Ready);
-                            assert_stalled_by(
-                                host,
-                                head,
-                                "delivery_budget_exhausted",
-                                None,
-                                Value::Null,
-                            );
-                        },
-                    );
-                }
-
-                #[test]
-                fn a_head_whose_housekeeping_read_met_a_storage_outage_stalls_as_storage_unavailable()
-                 {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
-                        let head = waiting_head(host, "prompt:behind-outage");
-                        let mut outage = crate::db::connect(&url).unwrap();
-                        let exclusive = outage
-                            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
-                            .unwrap();
-                        housekeep(host);
-                        drop(exclusive);
-                        assert_eq!(row(host, head).state, storage::InputState::Ready);
-                        assert_stalled_by(host, head, "storage_unavailable", None, Value::Null);
-                    });
-                }
-
-                #[test]
-                fn a_head_whose_queue_turn_failed_stalls_as_attempt_failed_with_the_bounded_error()
-                {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let head = waiting_head(host, "prompt:behind-failure");
-                        host.coordinator
-                            .record_attempt_failure(&CafleetError::App("é".repeat(200)));
-                        assert_stalled_by(
-                            host,
-                            head,
-                            "attempt_failed",
-                            None,
-                            json!("é".repeat(128)),
-                        );
-                    });
-                }
-
-                #[test]
-                fn a_live_cause_takes_precedence_over_a_recorded_obstacle() {
-                    with_permission_host(Duration::from_secs(20), |host| {
-                        let head = waiting_head(host, "prompt:live-and-recorded");
-                        host.coordinator
-                            .record_attempt_failure(&CafleetError::App("recorded".into()));
-                        let unresolved = reserve_unrelated(host, "prompt:live-unresolved");
-                        assert_stalled_by(
-                            host,
-                            head,
-                            "unresolved_input",
-                            Some(unresolved),
-                            Value::Null,
-                        );
-                    });
                 }
 
                 #[test]
@@ -8409,7 +8143,7 @@ mod tests {
                             .expect("the head's wait restarts when the interaction closes");
                         assert!(restarted.elapsed() < Duration::from_secs(10));
                         assert_unpublished(host, head);
-                        assert_stalled_by(host, head, "queue_turn_not_reached", None, Value::Null);
+                        assert_stalled_once(host, head);
                     });
                 }
 
@@ -8422,17 +8156,11 @@ mod tests {
                         let second =
                             queued(host, host.request("prompt:second-head"), "interaction_open");
                         close_observed(host);
-                        assert_stalled_by(host, first, "queue_turn_not_reached", None, Value::Null);
+                        assert_stalled_once(host, first);
                         cancel_queued(host, first);
                         housekeep(host);
                         assert_unpublished(host, second);
-                        assert_stalled_by(
-                            host,
-                            second,
-                            "queue_turn_not_reached",
-                            None,
-                            Value::Null,
-                        );
+                        assert_stalled_once(host, second);
                         assert_eq!(stalled_payloads(host, first).len(), 1);
                     });
                 }
@@ -9072,28 +8800,6 @@ mod tests {
                     row(host, input_id).state,
                     storage::InputState::Accepted | storage::InputState::Settled
                 )
-            }
-
-            #[test]
-            fn a_head_waiting_on_a_busy_composer_stalls_as_composer_busy() {
-                use crate::runtime::input::tests::ordinary_prompt::deferred_queue::stall_watchdog;
-                with_busy_host(busy_catalog(), encoded(), |host| {
-                    busy(host);
-                    let head =
-                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued(
-                            host,
-                            host.request("prompt:behind-draft"),
-                            "composer_busy",
-                        );
-                    hold_turns(host);
-                    stall_watchdog::assert_stalled_by(
-                        host,
-                        head,
-                        "composer_busy",
-                        None,
-                        serde_json::Value::Null,
-                    );
-                });
             }
 
             #[test]

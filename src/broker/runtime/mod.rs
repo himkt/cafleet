@@ -492,10 +492,9 @@ stored_enum!(test_values InputDisposition, "member_input_operations.disposition"
     Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain"
 });
 stored_enum!(StopCause, "member_input_operations.stop_cause", {
-    ManualInput => "manual_input", ManualAccountingFailed => "manual_accounting_failed",
-    PointerInput => "pointer_input",
+    ManualInput => "manual_input",
     InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
-    ObserverUnavailable => "observer_unavailable", DeadlineExpired => "deadline_expired",
+    DeadlineExpired => "deadline_expired",
     SubmitUnconfirmed => "submit_unconfirmed", ShortWrite => "short_write",
     WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
 });
@@ -505,11 +504,8 @@ impl StopCause {
         matches!(
             self,
             Self::ManualInput
-                | Self::ManualAccountingFailed
-                | Self::PointerInput
                 | Self::InteractionCandidate
                 | Self::InteractionOpen
-                | Self::ObserverUnavailable
                 | Self::DeadlineExpired
                 | Self::SubmitUnconfirmed
         )

@@ -156,10 +156,9 @@ CREATE TABLE member_input_operations (
         OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
             AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
-        OR (stop_cause IN ('manual_input','manual_accounting_failed','pointer_input',
-                          'interaction_candidate','interaction_open','observer_unavailable',
-                          'deadline_expired','submit_unconfirmed','short_write','write_failed',
-                          'runner_stopped')
+        OR (stop_cause IN ('interaction_open','interaction_candidate','submit_unconfirmed',
+                          'deadline_expired','short_write','write_failed','runner_stopped',
+                          'manual_input')
             AND state IN ('uncertain','settled'))),
     UNIQUE(run_id, operation_key),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))

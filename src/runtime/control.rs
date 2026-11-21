@@ -167,9 +167,7 @@ stored_enum!(SubmissionStatus, "submission.status", {
 });
 stored_enum!(SubmissionStage, "submission.stage", {
     ZeroBytes => "zero_bytes",
-    EscapeOnly => "escape_only",
     Partial => "partial",
-    LiteralComplete => "literal_complete",
     Submitted => "submitted",
     Unknown => "unknown",
 });

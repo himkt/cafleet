@@ -1,7 +1,7 @@
 # SPEC Neutrality, Test Simplification and Feature Reduction
 
 **Status**: Approved
-**Progress**: 26/83 tasks complete
+**Progress**: 28/83 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -364,9 +364,9 @@ Line numbers are `SPEC.md` at `005a42d8`; DDL references are table/column names 
 - DDL: `left_in_composer` disposition, `left_stage` and its 3 CHECKs, `CHECK(state != 'uncertain' OR stop_cause IS NULL OR stop_cause != 'submit_unconfirmed')`; reasons `redelivery`, `idle_timeout`.
 - Code: in `src/runtime/input.rs` (~800), the `left_in_composer` settlement and its successor insertion, the `idle_timeout` Escape fallback and the held composer go; composer verification and the staged-write stop stay; ~55 tests. Fixes d09d60af, 3fa83e8d.
 
-**R5 Interaction-only stops.** Staged writes check (no interaction, verified empty, quiescent), then write the literal, settle, submit and verify; only an appearing interaction stops a write, and the stop cause becomes a free-text diagnostic.
+**R5 Interaction-only stops.** Staged writes check (no interaction, verified empty, quiescent), then write the literal, settle, submit and verify; only an appearing interaction stops a write, and `stop_cause` keeps a reduced identifier set (`interaction_open`, `interaction_candidate`, `submit_unconfirmed`, `deadline_expired`, `short_write`, `write_failed`, `runner_stopped`, and `manual_input` for permission responses).
 - SPEC: §6.9 Stop cause (L4189–4210), stage vocabulary (L4187), pointer/keyboard consumer table (L3447–3455).
-- DDL: `stop_cause` enum CHECKs.
+- DDL: the `stop_cause` CHECK lists the reduced set.
 - Code: shared with R4 in `src/runtime/input.rs`. Designs 0000201 and 0000228; fix 310a86dc.
 
 **R7 Remove automatic-review annotations.**
@@ -588,8 +588,8 @@ Every step's docs-and-skills task edits the known hits it lists and every furthe
 
 ### Step B3: Interaction-only stops (R5)
 
-- [ ] `SPEC.md`: rewrite §6.9 Stop cause (L4189–4210) so a staged write checks no interaction, verified empty and quiescent, then writes, settles, submits and verifies, and only an appearing interaction stops it, recording its stop cause as a free-text diagnostic; reduce the stage vocabulary (L4187) and the pointer/keyboard consumer table (L3447–3455) to that rule; reduce the §8 `stop_cause` CHECKs to non-empty text on `uncertain` and `settled` rows <!-- completed: -->
-- [ ] Docs and skills (tokens `stop_cause`, `manual_input`, `manual_accounting_failed`, `pointer_input`, `interaction_candidate`, `observer_unavailable`, `submit_unconfirmed`): `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/roles/director.md`, `docs/docs/concepts/members.md` <!-- completed: -->
+- [x] `SPEC.md`: rewrite §6.9 Stop cause (L4189–4210) so a staged write checks no interaction, verified empty and quiescent, then writes, settles, submits and verifies, and only an appearing interaction stops it, recording its stop cause from the reduced identifier set; reduce the stage vocabulary (L4187) and the pointer/keyboard consumer table (L3447–3455) to that rule; reduce the §8 `stop_cause` CHECK to that set on `uncertain` and `settled` rows <!-- completed: 2026-11-21T10:58 -->
+- [x] Docs and skills (tokens `stop_cause`, `manual_input`, `manual_accounting_failed`, `pointer_input`, `interaction_candidate`, `observer_unavailable`, `submit_unconfirmed`): `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/roles/director.md`, `docs/docs/concepts/members.md` <!-- completed: 2026-11-21T10:58 -->
 - [ ] Code and tests: reduce the staged-write stop logic in `src/runtime/input.rs` to the rule above, with its DDL and tests; add a table test of the interaction stop and of post-submit detection of an unsubmitted result <!-- completed: -->
 
 ### Step B4: One stall signal (R3)
@@ -597,6 +597,8 @@ Every step's docs-and-skills task edits the known hits it lists and every furthe
 - [ ] `SPEC.md`: rewrite §6.9 Input delivery stalled event (L3705–3771) and the stall paragraph (L4010) as one `input_delivery_stalled` event, carrying `waiting_since` and one instruction, for the two cases of the R3 inventory: an unconsumed preview waiting the stall bound behind a non-empty or unverified composer (deduplicated by run plus `message_id`) and a queued prompt or exec head that has started no attempt within the stall bound (deduplicated by run plus input ID); delete the `cause.kind` values, `blocking_input_id`, `review_stalled_queue` and `review_stalled_input` <!-- completed: -->
 - [ ] Docs and skills (tokens `input_delivery_stalled`, `cause.kind`, `blocking_input_id`, `review_stalled_queue`, `review_stalled_input`): `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/roles/director.md`, `docs/docs/concepts/members.md` <!-- completed: -->
 - [ ] Code and tests: reduce `src/broker/runtime/events.rs` and the stall derivation in `src/runtime/input.rs` to the one event, with their tests; add a table test of the event's emission at the stall bound for a preview and for a queued prompt and exec head, each published once under its deduplication key <!-- completed: -->
+
+COMMENT(tester): The B4 tests are `a_queued_prompt_or_exec_head_publishes_one_stall_event_at_the_stall_bound` (prompt and exec heads, with the surviving `an_interaction_resets_the_head_wait_and_a_fresh_wait_publishes_after_it_closes` and `each_head_publishes_its_own_single_event`, all through `assert_stalled_once` in `src/runtime/input.rs` `stall_watchdog`) and `a_preview_behind_a_non_empty_composer_publishes_one_stall_event_at_the_stall_bound` in `src/runtime/service.rs` `preview_sweep`. They assert one `input_delivery_stalled` row per run plus input ID or message ID, with `waiting_since`, no `blocking_input_id` and a non-empty `director_action.instruction`; they assert no cause. The preview test needs one interface the code lacks: the service test harness writes `stall_bound_ms` into the runner's test configuration (beside `preview_sweep`), so the runner must take its stall bound from `RunnerDependencies` (for example a `stall_bound: Duration` field defaulting to 3 minutes), and `test_support` `run_configured` will map `stall_bound_ms` onto it once the field exists. These surviving `src/broker/runtime/events.rs` tests build stall transitions through `stalled_fixture` / `stalled_transition` with `blocking_input_id` and `cause`, and must change with the code task: `stalled_events_remain_readable_and_deduplicated_after_head_and_blocker_settlement`, `a_new_stalled_event_requires_its_head_to_be_ready_and_deferred`, `stalled_publication_rejects_self_and_permission_input_identities` and `stalled_event_readers_validate_the_historical_queued_method_and_reason`. Route them, and the `run_configured` mapping, to the Tester with the code task.
 
 ### Step B5: Remove automatic-review annotations (R7)
 
@@ -713,3 +715,4 @@ Every step's docs-and-skills task edits the known hits it lists and every furthe
 | 2026-11-21 | Reviewer round 3: receipt-less uncertain preview event (`input_id` null, run plus `message_id` dedup, live-only publication); FIFO-stop rule after an uncertain prompt or exec on every run replaces the held composer; sweep starts only on an empty, unstopped FIFO; stall event kept for queued prompt and exec heads; `submit_unconfirmed` CHECK and `message_id` removed in Step B2; pane-input runner step moved after Hermes settlement (now Step B15); D2 names both Workstream A test changes |
 | 2026-11-21 | Reviewer round 4: R4 user-visible consequence states that an uncertain prompt or exec holds back previews and queued input until `input reconcile` |
 | 2026-11-21 | Approved by the user |
+| 2026-11-21 | Step B3: stop_cause kept as a reduced identifier set (Director arbitration) |

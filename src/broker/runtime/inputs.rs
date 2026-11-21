@@ -1491,11 +1491,8 @@ mod tests {
             let owner = fixture.activate();
             for (index, cause) in [
                 StopCause::ManualInput,
-                StopCause::ManualAccountingFailed,
-                StopCause::PointerInput,
                 StopCause::InteractionCandidate,
                 StopCause::InteractionOpen,
-                StopCause::ObserverUnavailable,
                 StopCause::DeadlineExpired,
                 StopCause::ShortWrite,
                 StopCause::WriteFailed,

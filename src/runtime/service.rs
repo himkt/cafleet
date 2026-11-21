@@ -2697,6 +2697,26 @@ pub(crate) mod test_support {
             );
         }
 
+        /// A sweeping input service whose runner uses `stall_bound` in place of the
+        /// three-minute stall bound.
+        pub(crate) fn with_sweeping_input_service_stall_bound(
+            lifetime: Duration,
+            stall_bound: Duration,
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            with_input_service_lifetime(
+                lifetime,
+                false,
+                0,
+                |config| {
+                    config["preview_sweep"] = json!(true);
+                    config["stall_bound_ms"] = json!(stall_bound.as_millis());
+                },
+                composer_ready,
+                body,
+            );
+        }
+
         /// A sweeping input service whose catalog `configure_catalog` adjusts first.
         pub(crate) fn with_sweeping_input_service_catalog(
             lifetime: Duration,
@@ -4496,6 +4516,65 @@ mod tests {
                         lines(fixture)
                     );
                     assert_eq!(preview_results(fixture, message.message_id).len(), 1);
+                },
+            );
+        }
+
+        fn preview_stalls(fixture: &ServiceFixture, message_id: i64) -> Vec<Value> {
+            fixture
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.message_id')=?2 ORDER BY event_seq",
+                )
+                .unwrap()
+                .query_map(
+                    rusqlite::params![fixture.fixture.run.run_id, message_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+                .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                .collect()
+        }
+
+        #[test]
+        fn a_preview_behind_a_non_empty_composer_publishes_one_stall_event_at_the_stall_bound() {
+            let bound = Duration::from_secs(2);
+            with_sweeping_input_service_stall_bound(
+                Duration::from_secs(20),
+                bound,
+                |fixture, until| {
+                    manual(fixture, format!("{DRAFT_LINE}\r").as_bytes(), until);
+                    wait_composer_not_empty(fixture, until);
+                    let message = send(fixture, "stalled behind a human draft");
+                    std::thread::sleep(bound / 2);
+                    assert!(preview_stalls(fixture, message.message_id).is_empty());
+                    wait_for(
+                        until,
+                        "the waiting preview publishes its stall event",
+                        || !preview_stalls(fixture, message.message_id).is_empty(),
+                    );
+                    std::thread::sleep(SWEEP_WINDOW);
+                    let stalls = preview_stalls(fixture, message.message_id);
+                    assert_eq!(
+                        stalls.len(),
+                        1,
+                        "published once per run and message: {stalls:?}"
+                    );
+                    let stall = &stalls[0];
+                    assert_eq!(stall["message_id"], message.message_id, "{stall}");
+                    assert!(stall.get("blocking_input_id").is_none(), "{stall}");
+                    assert!(stall["waiting_since"].as_str().is_some(), "{stall}");
+                    assert!(
+                        stall["director_action"]["instruction"]
+                            .as_str()
+                            .is_some_and(|instruction| !instruction.trim().is_empty()),
+                        "one instruction: {stall}"
+                    );
+                    assert!(lines(fixture).is_empty(), "{:?}", lines(fixture));
+                    input_service_barrier(fixture, until);
+                    wait_delivered(fixture, &message, until);
+                    assert_eq!(preview_stalls(fixture, message.message_id).len(), 1);
                 },
             );
         }
