@@ -321,6 +321,7 @@ fn published_delivery(
         cause: result_stop_cause(&input, published.status),
         action: Value::Null,
         waiting_since: None,
+        archive: None,
         delivery: Some(published),
         stage: payload["stage"].clone(),
     })
@@ -367,6 +368,7 @@ fn preview_delivery(
         cause: Some(cause),
         action: Value::Null,
         waiting_since: None,
+        archive: None,
     })
 }
 
@@ -829,6 +831,8 @@ struct DeliveryFields {
     cause: Option<StopCause>,
     action: Value,
     waiting_since: Option<String>,
+    /// A record that commits as a silent archived row instead of notifying the Director.
+    archive: Option<ArchiveReason>,
 }
 
 fn action_database_args(conn: &Connection) -> Result<Vec<String>, CafleetError> {
@@ -846,8 +850,8 @@ fn action_database_args(conn: &Connection) -> Result<Vec<String>, CafleetError> 
     })
 }
 
-/// The fields of a stalled event: a queued ordinary head of this run, ready when first
-/// published, or a message addressed to the run's member.
+/// The fields of a stalled event: a queued ordinary head of this run, or a message addressed to
+/// the run's member. A new record whose head is no longer ready archives as `head_not_ready`.
 fn stalled_delivery(
     conn: &Connection,
     run: &RunRecord,
@@ -856,6 +860,7 @@ fn stalled_delivery(
 ) -> Result<DeliveryFields, CafleetError> {
     let input_id = record["input_id"].as_i64();
     let message_id = record["message_id"].as_i64();
+    let mut archive = None;
     match (input_id, message_id) {
         (Some(input_id), None) => {
             let input = get_input(conn, input_id)?;
@@ -864,11 +869,9 @@ fn stalled_delivery(
                 "input_id",
                 "a stalled head is a queued ordinary input of this run",
             )?;
-            require(
-                published || input.state == InputState::Ready,
-                "input_id",
-                "a new stalled head must be ready",
-            )?;
+            if !published && input.state != InputState::Ready {
+                archive = Some(ArchiveReason::HeadNotReady);
+            }
         }
         (None, Some(message_id)) => {
             let message = crate::broker::messaging::get_message(conn, message_id)?;
@@ -901,6 +904,7 @@ fn stalled_delivery(
         cause: None,
         waiting_since: Some(waiting_since),
         action,
+        archive,
     })
 }
 
@@ -1024,16 +1028,17 @@ pub(crate) fn persist_transition_in_transaction(
         "kind",
         "observer loss requires explicit recovery ownership",
     )?;
-    let archive_reason = historical_ownership(conn, run)?;
+    let historical_archive = historical_ownership(conn, run)?;
     require(
         mode == PersistenceMode::Recovery
-            || (archive_reason.is_none() && run.owner_kind == OwnerKind::Runner),
+            || (historical_archive.is_none() && run.owner_kind == OwnerKind::Runner),
         "notification_state",
         "live notification requires active runner ownership",
     )?;
-    if archive_reason.is_none() {
+    if historical_archive.is_none() {
         crate::broker::fleets::require_live_fleet(conn, run.fleet_id)?;
     }
+    let mut duplicate = false;
     let delivery_fields = if matches!(
         transition.kind,
         RuntimeEventKind::InputDeliveryResult | RuntimeEventKind::InputDeliveryStalled
@@ -1058,9 +1063,7 @@ pub(crate) fn persist_transition_in_transaction(
                 )
                 .optional()?,
         };
-        if let Some(id) = published {
-            return Ok((get_event(conn, id)?.event, false));
-        }
+        duplicate = published.is_some();
         if transition.kind == RuntimeEventKind::InputDeliveryStalled {
             Some(stalled_delivery(conn, run, record, false)?)
         } else if let Some(input_id) = record["input_id"].as_i64() {
@@ -1072,6 +1075,7 @@ pub(crate) fn persist_transition_in_transaction(
                 cause: result_stop_cause(&input, delivery.status),
                 action: Value::Null,
                 waiting_since: None,
+                archive: None,
                 delivery: Some(delivery),
                 stage: record["stage"].clone(),
             })
@@ -1081,6 +1085,14 @@ pub(crate) fn persist_transition_in_transaction(
     } else {
         None
     };
+    let archive_reason = historical_archive.or_else(|| {
+        let fields = delivery_fields.as_ref()?;
+        if duplicate {
+            Some(ArchiveReason::DuplicateDelivery)
+        } else {
+            fields.archive
+        }
+    });
     let latest = latest_event_seq(conn, run.run_id)?;
     require(
         transition.event_seq == latest.unwrap_or(0) + 1,
