@@ -2110,13 +2110,96 @@ mod tests {
             }
         }
 
+        fn message_count(conn: &rusqlite::Connection) -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+                .unwrap()
+        }
+
+        fn later_lifecycle(owner: &RunOwner, event_seq: i64) -> ObservedTransition {
+            ObservedTransition {
+                kind: RuntimeEventKind::RunnerDegraded,
+                cause_json: Some(
+                    json!({"kind":"storage_pressure","gap_count":1,"gap_started_at":NOW,"gap_ended_at":null}),
+                ),
+                ..native_exit(owner.run_id, event_seq)
+            }
+        }
+
+        /// Asserts `transition` committed as a silent archived row at its own sequence, reads back
+        /// as itself, retries idempotently and leaves the next sequence free.
+        fn assert_silent_archive(
+            fixture: &mut Fixture,
+            owner: &RunOwner,
+            transition: &ObservedTransition,
+            reason: ArchiveReason,
+            name: &str,
+        ) {
+            let messages = message_count(&fixture.conn);
+            let (event, inserted) = storage::persist_transition(
+                &mut fixture.conn,
+                owner,
+                transition,
+                PersistenceMode::Live,
+            )
+            .unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+            assert!(inserted, "{name}: the archived row is inserted");
+            assert_eq!(event.event_seq, transition.event_seq, "{name}");
+            assert_eq!(event.kind, transition.kind, "{name}");
+            assert_eq!(
+                event.notification_state,
+                NotificationState::Archived,
+                "{name}"
+            );
+            assert_eq!(event.message_id, None, "{name}");
+            assert_eq!(event.archive_reason, Some(reason), "{name}");
+            assert_eq!(
+                message_count(&fixture.conn),
+                messages,
+                "{name}: no inbox message"
+            );
+            let record = transition.cause_json.as_ref().unwrap();
+            for key in ["input_id", "message_id", "waiting_since"] {
+                assert_eq!(event.payload_json[key], record[key], "{name}: {key}");
+            }
+            let view = storage::get_event(&fixture.reopen(), event.event_id)
+                .unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+            assert_eq!(view.event, event, "{name}");
+            assert_eq!(
+                crate::broker::runtime::events::original(&view).unwrap(),
+                *transition,
+                "{name}: original reproduces the transition"
+            );
+            let before = durable_state(&fixture.reopen());
+            let (retried, inserted) = storage::persist_transition(
+                &mut fixture.conn,
+                owner,
+                transition,
+                PersistenceMode::Live,
+            )
+            .unwrap_or_else(|error| panic!("{name}: retry: {}", error.message()));
+            assert!(!inserted, "{name}: an idempotent retry compares equal");
+            assert_eq!(retried, event, "{name}");
+            assert_eq!(durable_state(&fixture.reopen()), before, "{name}");
+            let (next, inserted) = storage::persist_transition(
+                &mut fixture.conn,
+                owner,
+                &later_lifecycle(owner, transition.event_seq + 1),
+                PersistenceMode::Live,
+            )
+            .unwrap_or_else(|error| panic!("{name}: next: {}", error.message()));
+            assert!(inserted, "{name}: the next transition persists");
+            assert_eq!(next.event_seq, transition.event_seq + 1, "{name}");
+            assert_eq!(next.notification_state, NotificationState::Inbox, "{name}");
+        }
+
         #[test]
-        fn a_new_stalled_event_requires_its_head_to_be_ready_and_deferred() {
+        fn a_stalled_head_no_longer_ready_commits_a_silent_head_not_ready_row() {
             for state in [
                 InputState::InProgress,
                 InputState::Accepted,
                 InputState::Settled,
             ] {
+                let name = format!("{state:?}");
                 let (mut fixture, owner, head) = stalled_fixture();
                 storage::begin_deferred_attempt(
                     &mut fixture.conn,
@@ -2146,19 +2229,18 @@ mod tests {
                     .unwrap();
                 }
                 let transition = stalled_transition(&owner, head.input_id);
-                let before = durable_state(&fixture.reopen());
-                assert!(
-                    storage::persist_transition(
-                        &mut fixture.conn,
-                        &owner,
-                        &transition,
-                        PersistenceMode::Live
-                    )
-                    .is_err(),
-                    "{state:?}"
+                assert_silent_archive(
+                    &mut fixture,
+                    &owner,
+                    &transition,
+                    ArchiveReason::HeadNotReady,
+                    &name,
                 );
-                assert_eq!(durable_state(&fixture.reopen()), before);
             }
+        }
+
+        #[test]
+        fn a_new_stalled_event_rejects_a_head_without_deferred_metadata() {
             let (mut fixture, owner, _) = stalled_fixture();
             let head = fixture.input(&owner, "prompt:unselected-head", InputKind::Prompt);
             storage::record_input_state(
@@ -2180,6 +2262,106 @@ mod tests {
                 .is_err()
             );
             assert_eq!(durable_state(&fixture.reopen()), before);
+        }
+
+        enum Waiter {
+            Head,
+            HeadNoLongerReady,
+            Preview,
+        }
+
+        struct DuplicateCase {
+            name: &'static str,
+            waiter: Waiter,
+        }
+
+        const DUPLICATE_CASES: &[DuplicateCase] = &[
+            DuplicateCase {
+                name: "a repeated head record",
+                waiter: Waiter::Head,
+            },
+            DuplicateCase {
+                name: "a repeated head record after the head left ready",
+                waiter: Waiter::HeadNoLongerReady,
+            },
+            DuplicateCase {
+                name: "a repeated preview record",
+                waiter: Waiter::Preview,
+            },
+        ];
+
+        const LATER: &str = "2026-10-26T10:05:00.000000+00:00";
+
+        #[test]
+        fn a_duplicate_stalled_record_commits_a_silent_duplicate_delivery_row_at_its_sequence() {
+            for case in DUPLICATE_CASES {
+                let name = case.name;
+                let (mut fixture, owner, head) = stalled_fixture();
+                let (input_id, message_id) = match case.waiter {
+                    Waiter::Head | Waiter::HeadNoLongerReady => (json!(head.input_id), Value::Null),
+                    Waiter::Preview => {
+                        let preview = crate::broker::messaging::insert_message_validated(
+                            &fixture.conn,
+                            fixture.director,
+                            fixture.member,
+                            "stalled preview",
+                        )
+                        .unwrap();
+                        (Value::Null, json!(preview.message_id))
+                    }
+                };
+                let record = |waiting_since: &str| {
+                    json!({
+                        "kind":"input_delivery_stalled", "input_id":input_id,
+                        "message_id":message_id, "waiting_since":waiting_since,
+                    })
+                };
+                let first = ObservedTransition {
+                    cause_json: Some(record(NOW)),
+                    ..stalled_transition(&owner, head.input_id)
+                };
+                let (published, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &first,
+                    PersistenceMode::Live,
+                )
+                .unwrap_or_else(|error| panic!("{name}: first: {}", error.message()));
+                assert!(inserted, "{name}");
+                assert_eq!(
+                    published.notification_state,
+                    NotificationState::Inbox,
+                    "{name}"
+                );
+                if matches!(case.waiter, Waiter::HeadNoLongerReady) {
+                    storage::begin_deferred_attempt(
+                        &mut fixture.conn,
+                        &owner,
+                        head.input_id,
+                        DeliveryMethod::Profile,
+                        None,
+                    )
+                    .unwrap();
+                }
+                let repeat = ObservedTransition {
+                    event_seq: 2,
+                    observed_at: LATER.into(),
+                    cause_json: Some(record(LATER)),
+                    ..first.clone()
+                };
+                assert_silent_archive(
+                    &mut fixture,
+                    &owner,
+                    &repeat,
+                    ArchiveReason::DuplicateDelivery,
+                    name,
+                );
+                let view = storage::get_event(&fixture.reopen(), published.event_id).unwrap();
+                assert_eq!(
+                    view.event, published,
+                    "{name}: the first record is unchanged"
+                );
+            }
         }
 
         fn immediate_uncertain(fixture: &mut Fixture, owner: &RunOwner) -> InputOperation {
