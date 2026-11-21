@@ -2754,14 +2754,22 @@ mod tests {
     fn bytes(value: &Value) -> Vec<u8> {
         serde_json::to_vec(value).unwrap()
     }
+    #[track_caller]
     fn decoded(value: &Value) -> InputControlRequest {
-        decode_input_request(&bytes(value)).unwrap()
+        decode_input_request(&bytes(value))
+            .unwrap_or_else(|error| panic!("{value} decodes: {error}"))
     }
+    /// The decoder accepts `good` and refuses `bad`; a failure names the caller's line and the
+    /// refused case's bytes.
+    #[track_caller]
     fn rejection(good: &Value, bad: &[u8]) -> CafleetError {
         decoded(good);
         match decode_input_request(bad) {
             Err(error) => error,
-            Ok(_) => panic!("invalid original request rejects"),
+            Ok(_) => panic!(
+                "invalid original request rejects: {}",
+                String::from_utf8_lossy(bad)
+            ),
         }
     }
     fn prefix(value: &Value, fields: &str) -> Vec<u8> {
@@ -2809,14 +2817,20 @@ mod tests {
         result[field] = payload;
         json!({"protocol_version":1,"result":result})
     }
+    #[track_caller]
     fn decoded_reply(good: &Value, request: &Value) -> InputControlReply {
-        decode_input_reply(&bytes(good), &decoded(request)).unwrap()
+        decode_input_reply(&bytes(good), &decoded(request))
+            .unwrap_or_else(|error| panic!("{good} decodes for {request}: {error}"))
     }
+    /// The decoder accepts `good` and refuses `bad` for `request`; a failure names the caller's
+    /// line and the refused case's bytes.
+    #[track_caller]
     fn reject_reply(good: &Value, bad: &[u8], request: &Value) {
         decoded_reply(good, request);
         assert!(
             decode_input_reply(bad, &decoded(request)).is_err(),
-            "invalid original reply rejects"
+            "invalid original reply rejects: {}",
+            String::from_utf8_lossy(bad)
         );
     }
     fn assert_submission(actual: &SubmissionResult, expected: &Value) {

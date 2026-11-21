@@ -8257,69 +8257,344 @@ mod tests {
         value
     }
 
-    #[test]
-    fn runtime_episode_first_candidate_gates_before_the_100ms_opening_boundary() {
-        let origin = Instant::now();
-        let value = permission("write disposable.txt");
-        let mut tracker = tracker();
-        let first = tracker.observe(&value, origin, NOW).unwrap();
-        assert!(first.transitions.is_empty());
-        assert!(matches!(
-            first.eligibility,
-            InputEligibility::Hold(GateReason::Candidate)
-        ));
-        assert_eq!(
-            first.next_deadline,
-            Some(origin + Duration::from_millis(100))
-        );
-        assert!(
-            tracker
-                .observe(&value, origin + Duration::from_millis(99), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let stable = tracker
-            .observe(&value, origin + Duration::from_millis(100), NOW)
-            .unwrap();
-        assert_eq!(stable.transitions.len(), 1);
-        assert_eq!(stable.transitions[0].episode_seq, Some(1));
-        assert_eq!(
-            stable.transitions[0].kind,
-            RuntimeEventKind::InteractionOpened
-        );
-        assert!(matches!(
-            stable.eligibility,
-            InputEligibility::Hold(GateReason::Interaction)
-        ));
+    /// A screen an episode timeline shows the tracker; a `None` sequence keeps the fixture's own.
+    #[derive(Clone, Copy)]
+    enum Screen {
+        Permission(&'static str, Option<u64>),
+        ComposerEmpty(Option<u64>),
+        Unknown(u64),
     }
 
+    impl Screen {
+        fn observation(self) -> ScreenObservation {
+            let (value, sequence) = match self {
+                Screen::Permission(operation, sequence) => (permission(operation), sequence),
+                Screen::ComposerEmpty(sequence) => {
+                    (state_observation("composer_empty", true), sequence)
+                }
+                Screen::Unknown(sequence) => return unknown(sequence),
+            };
+            match sequence {
+                Some(sequence) => sequenced(value, sequence),
+                None => value,
+            }
+        }
+    }
+
+    /// One tracker call; times are milliseconds after the timeline's origin.
+    #[derive(Clone, Copy)]
+    enum Op {
+        Observe(Screen, u64),
+        /// Opens the screen's episode: its candidate at the origin, its opening at 100 ms.
+        Open(Screen),
+        Reset,
+        Finish,
+    }
+
+    /// What one call's update must show.
+    #[derive(Clone, Copy, Debug)]
+    enum Check {
+        Transitions(usize),
+        Hold(GateReason),
+        ComposerEmpty,
+        Deadline(u64),
+        /// The first transition opens this episode.
+        Opened(i64),
+        /// The first transition closes the episode for this reason.
+        Closed(InteractionCloseReason),
+        /// The call itself is refused.
+        Refused,
+    }
+
+    struct Step {
+        op: Op,
+        checks: &'static [Check],
+    }
+
+    const fn step(op: Op, checks: &'static [Check]) -> Step {
+        Step { op, checks }
+    }
+
+    struct Timeline {
+        name: &'static str,
+        steps: &'static [Step],
+    }
+
+    use Check::Transitions;
+    use Op::Observe;
+    use Screen::ComposerEmpty;
+    use Screen::Permission;
+
+    const DISPOSABLE: &str = "write disposable.txt";
+    const FIRST: &str = "write first.txt";
+    const OTHER: &str = "write other.txt";
+    const THIRD: &str = "write third.txt";
+
+    const EPISODE_TIMELINES: &[Timeline] = &[
+        Timeline {
+            name: "the first candidate gates before the 100 ms opening boundary",
+            steps: &[
+                step(
+                    Observe(Permission(DISPOSABLE, None), 0),
+                    &[
+                        Transitions(0),
+                        Check::Hold(GateReason::Candidate),
+                        Check::Deadline(100),
+                    ],
+                ),
+                step(Observe(Permission(DISPOSABLE, None), 99), &[Transitions(0)]),
+                step(
+                    Observe(Permission(DISPOSABLE, None), 100),
+                    &[
+                        Transitions(1),
+                        Check::Opened(1),
+                        Check::Hold(GateReason::Interaction),
+                    ],
+                ),
+            ],
+        },
+        Timeline {
+            name: "an incompatible initial candidate restarts stability",
+            steps: &[
+                step(Observe(Permission(FIRST, Some(1)), 0), &[]),
+                step(Observe(Permission(OTHER, Some(2)), 99), &[Transitions(0)]),
+                step(Observe(Permission(OTHER, Some(2)), 100), &[Transitions(0)]),
+                step(
+                    Observe(Permission(OTHER, Some(2)), 199),
+                    &[Transitions(1), Check::Opened(1)],
+                ),
+            ],
+        },
+        Timeline {
+            name: "a return to the original cancels the replacement and a third form restarts it",
+            steps: &[
+                step(Op::Open(Permission(FIRST, Some(1))), &[]),
+                step(Observe(Permission(OTHER, Some(2)), 200), &[]),
+                step(Observe(Permission(FIRST, Some(3)), 250), &[Transitions(0)]),
+                step(Observe(Permission(OTHER, Some(4)), 300), &[Transitions(0)]),
+                step(Observe(Permission(THIRD, Some(5)), 350), &[Transitions(0)]),
+                step(Observe(Permission(THIRD, Some(5)), 400), &[Transitions(0)]),
+                step(Observe(Permission(THIRD, Some(5)), 450), &[Transitions(2)]),
+            ],
+        },
+        Timeline {
+            name: "a verified composer stays held until the 250 ms episode closure",
+            steps: &[
+                step(Op::Open(Permission(DISPOSABLE, Some(1))), &[]),
+                step(
+                    Observe(ComposerEmpty(Some(2)), 200),
+                    &[
+                        Transitions(0),
+                        Check::Hold(GateReason::Interaction),
+                        Check::Deadline(450),
+                    ],
+                ),
+                step(
+                    Observe(ComposerEmpty(Some(2)), 449),
+                    &[Transitions(0), Check::Hold(GateReason::Interaction)],
+                ),
+                step(
+                    Observe(ComposerEmpty(Some(2)), 450),
+                    &[
+                        Transitions(1),
+                        Check::Closed(InteractionCloseReason::NotVisible),
+                        Check::ComposerEmpty,
+                    ],
+                ),
+            ],
+        },
+        Timeline {
+            name: "uncertainty interrupts the verified boundary",
+            steps: &[
+                step(Op::Open(Permission(DISPOSABLE, Some(1))), &[]),
+                step(Observe(ComposerEmpty(Some(2)), 200), &[]),
+                step(Observe(Screen::Unknown(3), 449), &[]),
+                step(Observe(ComposerEmpty(Some(4)), 450), &[Transitions(0)]),
+                step(Observe(ComposerEmpty(Some(4)), 699), &[Transitions(0)]),
+                step(Observe(ComposerEmpty(Some(4)), 700), &[Transitions(1)]),
+            ],
+        },
+        Timeline {
+            name: "identical requests are distinct only after a verified boundary",
+            steps: &[
+                step(Op::Open(Permission(DISPOSABLE, Some(1))), &[]),
+                step(
+                    Observe(Permission(DISPOSABLE, Some(2)), 200),
+                    &[Transitions(0)],
+                ),
+                step(Observe(ComposerEmpty(Some(3)), 300), &[]),
+                step(Observe(ComposerEmpty(Some(3)), 550), &[]),
+                step(
+                    Observe(Permission(DISPOSABLE, Some(4)), 600),
+                    &[Transitions(0)],
+                ),
+                step(
+                    Observe(Permission(DISPOSABLE, Some(4)), 700),
+                    &[Transitions(1), Check::Opened(2)],
+                ),
+            ],
+        },
+        Timeline {
+            name: "a gap reset restarts an uncommitted candidate",
+            steps: &[
+                step(Observe(Permission(DISPOSABLE, None), 0), &[]),
+                step(Op::Reset, &[]),
+                step(
+                    Observe(Permission(DISPOSABLE, None), 5000),
+                    &[Transitions(0)],
+                ),
+                step(
+                    Observe(Permission(DISPOSABLE, None), 5100),
+                    &[Transitions(1)],
+                ),
+            ],
+        },
+        Timeline {
+            name: "a gap reset restarts closure debounce and keeps the active episode held",
+            steps: &[
+                step(Op::Open(Permission(DISPOSABLE, Some(1))), &[]),
+                step(Observe(ComposerEmpty(Some(2)), 200), &[]),
+                step(Op::Reset, &[]),
+                step(
+                    Observe(ComposerEmpty(Some(2)), 5000),
+                    &[Transitions(0), Check::Hold(GateReason::Interaction)],
+                ),
+                step(
+                    Observe(ComposerEmpty(Some(2)), 5249),
+                    &[Transitions(0), Check::Hold(GateReason::Interaction)],
+                ),
+                step(
+                    Observe(ComposerEmpty(Some(2)), 5250),
+                    &[Transitions(1), Check::ComposerEmpty],
+                ),
+            ],
+        },
+        Timeline {
+            name: "finish closes the active episode once with process exit",
+            steps: &[
+                step(Op::Open(Permission(DISPOSABLE, None)), &[]),
+                step(
+                    Op::Finish,
+                    &[
+                        Transitions(1),
+                        Check::Closed(InteractionCloseReason::ProcessExited),
+                    ],
+                ),
+                step(Op::Finish, &[Transitions(0)]),
+            ],
+        },
+        Timeline {
+            name: "an empty composer gates input without allocating rows",
+            steps: &[step(
+                Observe(ComposerEmpty(None), 0),
+                &[Transitions(0), Check::ComposerEmpty],
+            )],
+        },
+        Timeline {
+            name: "an unknown screen holds input without allocating rows",
+            steps: &[step(
+                Observe(Screen::Unknown(1), 0),
+                &[Check::Hold(GateReason::Unknown)],
+            )],
+        },
+        Timeline {
+            name: "a regressing output sequence is refused",
+            steps: &[
+                step(Observe(Permission(DISPOSABLE, Some(2)), 0), &[]),
+                step(
+                    Observe(Permission(DISPOSABLE, Some(1)), 100),
+                    &[Check::Refused],
+                ),
+            ],
+        },
+    ];
+
     #[test]
-    fn runtime_episode_incompatible_initial_candidate_restarts_stability() {
-        let origin = Instant::now();
-        let a = sequenced(permission("write first.txt"), 1);
-        let b = sequenced(permission("write other.txt"), 2);
-        let mut tracker = tracker();
-        tracker.observe(&a, origin, NOW).unwrap();
+    fn runtime_episode_timelines_open_hold_and_close_on_their_boundaries() {
         assert!(
-            tracker
-                .observe(&b, origin + Duration::from_millis(99), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
+            EpisodeTracker::new(0).is_err(),
+            "a tracker numbering episodes from zero is refused"
         );
-        assert!(
-            tracker
-                .observe(&b, origin + Duration::from_millis(100), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let result = tracker
-            .observe(&b, origin + Duration::from_millis(199), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(result.transitions[0].episode_seq, Some(1));
+        for timeline in EPISODE_TIMELINES {
+            let name = timeline.name;
+            let origin = Instant::now();
+            let mut tracker = tracker();
+            for (index, step) in timeline.steps.iter().enumerate() {
+                let result = match step.op {
+                    Observe(screen, millis) => tracker.observe(
+                        &screen.observation(),
+                        origin + Duration::from_millis(millis),
+                        NOW,
+                    ),
+                    Op::Open(screen) => Ok(open(&mut tracker, &screen.observation(), origin)),
+                    Op::Reset => {
+                        tracker
+                            .reset_observation()
+                            .unwrap_or_else(|cause| panic!("{name}: step {index}: {cause}"));
+                        assert!(step.checks.is_empty(), "{name}: a reset yields no update");
+                        continue;
+                    }
+                    Op::Finish => tracker.finish(NOW),
+                };
+                if step
+                    .checks
+                    .iter()
+                    .any(|check| matches!(check, Check::Refused))
+                {
+                    assert!(result.is_err(), "{name}: step {index} is refused");
+                    continue;
+                }
+                let update = result.unwrap_or_else(|cause| panic!("{name}: step {index}: {cause}"));
+                for check in step.checks {
+                    let context = format!("{name}: step {index}: {check:?}");
+                    match *check {
+                        Transitions(count) => {
+                            assert_eq!(update.transitions.len(), count, "{context}")
+                        }
+                        Check::Hold(reason) => assert!(
+                            matches!(update.eligibility, InputEligibility::Hold(actual) if actual == reason),
+                            "{context}: {:?}",
+                            update.eligibility
+                        ),
+                        Check::ComposerEmpty => assert!(
+                            matches!(update.eligibility, InputEligibility::ComposerEmpty),
+                            "{context}: {:?}",
+                            update.eligibility
+                        ),
+                        Check::Deadline(millis) => assert_eq!(
+                            update.next_deadline,
+                            Some(origin + Duration::from_millis(millis)),
+                            "{context}"
+                        ),
+                        Check::Opened(episode) => {
+                            assert_eq!(
+                                update.transitions[0].kind,
+                                RuntimeEventKind::InteractionOpened,
+                                "{context}"
+                            );
+                            assert_eq!(
+                                update.transitions[0].episode_seq,
+                                Some(episode),
+                                "{context}"
+                            );
+                        }
+                        Check::Closed(reason) => {
+                            assert_eq!(
+                                update.transitions[0].kind,
+                                RuntimeEventKind::InteractionClosed,
+                                "{context}"
+                            );
+                            assert_eq!(
+                                update.transitions[0].close_reason,
+                                Some(reason),
+                                "{context}"
+                            );
+                        }
+                        Check::Refused => unreachable!("{context}: handled before the update"),
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -8397,156 +8672,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_return_to_original_cancels_replacement_and_third_form_restarts_it() {
-        let origin = Instant::now();
-        let a = sequenced(permission("write first.txt"), 1);
-        let b = sequenced(permission("write other.txt"), 2);
-        let mut tracker = tracker();
-        open(&mut tracker, &a, origin);
-        tracker
-            .observe(&b, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        assert!(
-            tracker
-                .observe(
-                    &sequenced(permission("write first.txt"), 3),
-                    origin + Duration::from_millis(250),
-                    NOW
-                )
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(
-                    &sequenced(permission("write other.txt"), 4),
-                    origin + Duration::from_millis(300),
-                    NOW
-                )
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let c = sequenced(permission("write third.txt"), 5);
-        assert!(
-            tracker
-                .observe(&c, origin + Duration::from_millis(350), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&c, origin + Duration::from_millis(400), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert_eq!(
-            tracker
-                .observe(&c, origin + Duration::from_millis(450), NOW)
-                .unwrap()
-                .transitions
-                .len(),
-            2
-        );
-    }
-
-    #[test]
-    fn runtime_episode_verified_composer_remains_held_until_the_250ms_episode_closure() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        open(
-            &mut tracker,
-            &sequenced(permission("write disposable.txt"), 1),
-            origin,
-        );
-        let empty = sequenced(state_observation("composer_empty", true), 2);
-        let first = tracker
-            .observe(&empty, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        assert!(first.transitions.is_empty());
-        assert!(matches!(empty.kind, ObservationKind::ComposerEmpty));
-        assert!(matches!(
-            first.eligibility,
-            InputEligibility::Hold(GateReason::Interaction)
-        ));
-        assert_eq!(
-            first.next_deadline,
-            Some(origin + Duration::from_millis(450))
-        );
-        let before = tracker
-            .observe(&empty, origin + Duration::from_millis(449), NOW)
-            .unwrap();
-        assert!(before.transitions.is_empty());
-        assert!(matches!(
-            before.eligibility,
-            InputEligibility::Hold(GateReason::Interaction)
-        ));
-        let closed = tracker
-            .observe(&empty, origin + Duration::from_millis(450), NOW)
-            .unwrap();
-        assert_eq!(closed.transitions.len(), 1);
-        assert_eq!(
-            closed.transitions[0].kind,
-            RuntimeEventKind::InteractionClosed
-        );
-        assert_eq!(
-            closed.transitions[0].close_reason,
-            Some(InteractionCloseReason::NotVisible)
-        );
-        assert!(matches!(
-            closed.eligibility,
-            InputEligibility::ComposerEmpty
-        ));
-    }
-
-    #[test]
-    fn runtime_episode_uncertainty_interrupts_the_verified_boundary() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        open(
-            &mut tracker,
-            &sequenced(permission("write disposable.txt"), 1),
-            origin,
-        );
-        tracker
-            .observe(
-                &sequenced(state_observation("composer_empty", true), 2),
-                origin + Duration::from_millis(200),
-                NOW,
-            )
-            .unwrap();
-        tracker
-            .observe(&unknown(3), origin + Duration::from_millis(449), NOW)
-            .unwrap();
-        let empty = sequenced(state_observation("composer_empty", true), 4);
-        assert!(
-            tracker
-                .observe(&empty, origin + Duration::from_millis(450), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&empty, origin + Duration::from_millis(699), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert_eq!(
-            tracker
-                .observe(&empty, origin + Duration::from_millis(700), NOW)
-                .unwrap()
-                .transitions
-                .len(),
-            1
-        );
-    }
-
-    #[test]
     fn runtime_episode_equivalent_redraw_schedules_no_refresh_and_no_opening() {
         let origin = Instant::now();
         let mut tracker = tracker();
@@ -8573,167 +8698,6 @@ mod tests {
             assert!(update.transitions.is_empty());
             assert!(matches!(update.visibility, Visibility::Visible));
         }
-    }
-
-    #[test]
-    fn runtime_episode_identical_requests_are_distinct_only_after_a_verified_boundary() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        let first = sequenced(permission("write disposable.txt"), 1);
-        open(&mut tracker, &first, origin);
-        assert!(
-            tracker
-                .observe(
-                    &sequenced(permission("write disposable.txt"), 2),
-                    origin + Duration::from_millis(200),
-                    NOW
-                )
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let empty = sequenced(state_observation("composer_empty", true), 3);
-        tracker
-            .observe(&empty, origin + Duration::from_millis(300), NOW)
-            .unwrap();
-        tracker
-            .observe(&empty, origin + Duration::from_millis(550), NOW)
-            .unwrap();
-        let second = sequenced(permission("write disposable.txt"), 4);
-        assert!(
-            tracker
-                .observe(&second, origin + Duration::from_millis(600), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let opened = tracker
-            .observe(&second, origin + Duration::from_millis(700), NOW)
-            .unwrap();
-        assert_eq!(opened.transitions.len(), 1);
-        assert_eq!(opened.transitions[0].episode_seq, Some(2));
-    }
-
-    #[test]
-    fn runtime_episode_gap_reset_restarts_an_uncommitted_candidate() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        let value = permission("write disposable.txt");
-        tracker.observe(&value, origin, NOW).unwrap();
-        tracker.reset_observation().unwrap();
-        assert!(
-            tracker
-                .observe(&value, origin + Duration::from_secs(5), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert_eq!(
-            tracker
-                .observe(&value, origin + Duration::from_millis(5100), NOW)
-                .unwrap()
-                .transitions
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn runtime_episode_gap_reset_restarts_closure_debounce_and_keeps_the_active_episode_held() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        open(
-            &mut tracker,
-            &sequenced(permission("write disposable.txt"), 1),
-            origin,
-        );
-        let empty = sequenced(state_observation("composer_empty", true), 2);
-        tracker
-            .observe(&empty, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        tracker.reset_observation().unwrap();
-        let fresh = tracker
-            .observe(&empty, origin + Duration::from_secs(5), NOW)
-            .unwrap();
-        assert!(fresh.transitions.is_empty());
-        assert!(matches!(
-            fresh.eligibility,
-            InputEligibility::Hold(GateReason::Interaction)
-        ));
-        let before = tracker
-            .observe(&empty, origin + Duration::from_millis(5249), NOW)
-            .unwrap();
-        assert!(before.transitions.is_empty());
-        assert!(matches!(
-            before.eligibility,
-            InputEligibility::Hold(GateReason::Interaction)
-        ));
-        let closed = tracker
-            .observe(&empty, origin + Duration::from_millis(5250), NOW)
-            .unwrap();
-        assert_eq!(closed.transitions.len(), 1);
-        assert!(matches!(
-            closed.eligibility,
-            InputEligibility::ComposerEmpty
-        ));
-    }
-
-    #[test]
-    fn runtime_episode_finish_closes_the_active_episode_once_with_process_exit() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        open(&mut tracker, &permission("write disposable.txt"), origin);
-        let closed = tracker.finish(NOW).unwrap();
-        assert_eq!(closed.transitions.len(), 1);
-        assert_eq!(
-            closed.transitions[0].close_reason,
-            Some(InteractionCloseReason::ProcessExited)
-        );
-        assert!(tracker.finish(NOW).unwrap().transitions.is_empty());
-    }
-
-    #[test]
-    fn runtime_episode_noninteraction_states_gate_independently_without_allocating_rows() {
-        let result = tracker()
-            .observe(
-                &state_observation("composer_empty", true),
-                Instant::now(),
-                NOW,
-            )
-            .unwrap();
-        assert!(result.transitions.is_empty());
-        assert!(matches!(
-            result.eligibility,
-            InputEligibility::ComposerEmpty
-        ));
-        let result = tracker().observe(&unknown(1), Instant::now(), NOW).unwrap();
-        assert!(matches!(
-            result.eligibility,
-            InputEligibility::Hold(GateReason::Unknown)
-        ));
-    }
-
-    #[test]
-    fn runtime_episode_rejects_regressing_output_sequences_and_invalid_identity() {
-        assert!(EpisodeTracker::new(0).is_err());
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        tracker
-            .observe(
-                &sequenced(permission("write disposable.txt"), 2),
-                origin,
-                NOW,
-            )
-            .unwrap();
-        assert!(
-            tracker
-                .observe(
-                    &sequenced(permission("write disposable.txt"), 1),
-                    origin + Duration::from_millis(100),
-                    NOW
-                )
-                .is_err()
-        );
     }
 
     #[test]

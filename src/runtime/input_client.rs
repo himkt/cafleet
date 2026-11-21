@@ -3306,63 +3306,73 @@ mod tests {
         }
 
         #[test]
-        fn input_failure_without_context_preserves_the_complete_source_category() {
-            for cause in causes() {
-                let converted: CafleetError = InputContext::default().failure(cause.clone()).into();
-                assert_eq!(
-                    std::mem::discriminant(&converted),
-                    std::mem::discriminant(&cause)
-                );
-                assert_eq!(converted.exit_code(), cause.exit_code());
-                assert_eq!(converted.message(), cause.message());
-            }
-        }
-
-        #[test]
-        fn input_failure_context_preserves_cause_and_escapes_ordered_key_metadata() {
-            let key = "fixture:key\nwith\"quotes\"\\tail";
-            for original in causes() {
-                let context = InputContext {
-                    run_id: Some(29),
-                    interaction_id: Some(17),
-                    input_id: Some(31),
-                    operation_key: Some(key.into()),
-                };
-                let converted: CafleetError = context.failure(original.clone()).into();
-                assert_eq!(converted.exit_code(), original.exit_code());
-                let CafleetError::WithDiagnostics { cause, diagnostics } = converted else {
-                    panic!("known identities retain the source with context")
-                };
-                assert_eq!(
-                    std::mem::discriminant(cause.as_ref()),
-                    std::mem::discriminant(&original)
-                );
-                assert_eq!(cause.message(), original.message());
-                assert_eq!(diagnostics.len(), 1);
-                let context = &diagnostics[0];
-                let positions = ["run_id", "interaction_id", "input_id", "operation_key"]
-                    .map(|name| context.find(name).expect("known context field"));
-                assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-                assert!(context.contains(&serde_json::to_string(key).unwrap()));
-                assert!(!context.contains('\n'));
-            }
-        }
-
-        #[test]
-        fn input_failure_context_omits_unknown_optional_identities() {
-            let context = InputContext {
-                interaction_id: Some(17),
-                ..InputContext::default()
-            };
-            let converted: CafleetError = context.failure(CafleetError::DeadlineExceeded).into();
-            let CafleetError::WithDiagnostics { cause, diagnostics } = converted else {
-                panic!("one known identity is represented explicitly")
-            };
-            assert!(matches!(*cause, CafleetError::DeadlineExceeded));
-            assert_eq!(diagnostics.len(), 1);
-            assert!(diagnostics[0].contains("interaction_id"));
-            for absent in ["run_id", "input_id", "operation_key"] {
-                assert!(!diagnostics[0].contains(absent));
+        fn input_failure_context_wraps_the_source_with_only_its_known_identities() {
+            const KEY: &str = "fixture:key\nwith\"quotes\"\\tail";
+            type Build = fn() -> InputContext;
+            let cases: [(&str, Build, &[&str]); 3] = [
+                ("no known identity", InputContext::default, &[]),
+                (
+                    "every identity",
+                    || InputContext {
+                        run_id: Some(29),
+                        interaction_id: Some(17),
+                        input_id: Some(31),
+                        operation_key: Some(KEY.into()),
+                    },
+                    &["run_id", "interaction_id", "input_id", "operation_key"],
+                ),
+                (
+                    "one identity",
+                    || InputContext {
+                        interaction_id: Some(17),
+                        ..InputContext::default()
+                    },
+                    &["interaction_id"],
+                ),
+            ];
+            for (name, context, known) in cases {
+                for original in causes() {
+                    let converted: CafleetError = context().failure(original.clone()).into();
+                    assert_eq!(converted.exit_code(), original.exit_code(), "{name}");
+                    if known.is_empty() {
+                        assert_eq!(
+                            std::mem::discriminant(&converted),
+                            std::mem::discriminant(&original),
+                            "{name}"
+                        );
+                        assert_eq!(converted.message(), original.message(), "{name}");
+                        continue;
+                    }
+                    let CafleetError::WithDiagnostics { cause, diagnostics } = converted else {
+                        panic!("{name}: known identities retain the source with context")
+                    };
+                    assert_eq!(
+                        std::mem::discriminant(cause.as_ref()),
+                        std::mem::discriminant(&original),
+                        "{name}"
+                    );
+                    assert_eq!(cause.message(), original.message(), "{name}");
+                    assert_eq!(diagnostics.len(), 1, "{name}");
+                    let text = &diagnostics[0];
+                    let positions: Vec<usize> = known
+                        .iter()
+                        .map(|field| text.find(field).expect("known context field"))
+                        .collect();
+                    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{name}");
+                    for absent in ["run_id", "interaction_id", "input_id", "operation_key"]
+                        .iter()
+                        .filter(|field| !known.contains(field))
+                    {
+                        assert!(!text.contains(absent), "{name}: {absent}");
+                    }
+                    if known.contains(&"operation_key") {
+                        assert!(
+                            text.contains(&serde_json::to_string(KEY).unwrap()),
+                            "{name}"
+                        );
+                    }
+                    assert!(!text.contains('\n'), "{name}");
+                }
             }
         }
     }
@@ -3506,26 +3516,25 @@ mod tests {
 
         #[test]
         fn durable_outcome_reports_the_recorded_cause_as_the_uncertain_reason() {
-            let cause = storage::StopCause::ShortWrite;
-            let input = uncertain(Some(cause));
-            assert_eq!(
-                durable_outcome(&input),
-                Some((
-                    SubmissionStatus::Uncertain,
-                    SubmissionStage::Unknown,
-                    Some(cause.as_str().to_owned())
-                ))
-            );
-        }
-
-        #[test]
-        fn durable_outcome_reports_no_reason_for_a_causeless_in_progress_receipt() {
-            let input = uncertain(None);
-            assert_eq!(input.state, InputState::InProgress);
-            assert_eq!(
-                durable_outcome(&input),
-                Some((SubmissionStatus::Uncertain, SubmissionStage::Unknown, None))
-            );
+            const CASES: &[(&str, Option<storage::StopCause>)] = &[
+                ("a recorded cause", Some(storage::StopCause::ShortWrite)),
+                ("a causeless in-progress receipt", None),
+            ];
+            for &(name, cause) in CASES {
+                let input = uncertain(cause);
+                if cause.is_none() {
+                    assert_eq!(input.state, InputState::InProgress, "{name}");
+                }
+                assert_eq!(
+                    durable_outcome(&input),
+                    Some((
+                        SubmissionStatus::Uncertain,
+                        SubmissionStage::Unknown,
+                        cause.map(|cause| cause.as_str().to_owned())
+                    )),
+                    "{name}"
+                );
+            }
         }
 
         #[test]

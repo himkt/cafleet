@@ -2587,59 +2587,64 @@ mod tests {
         }
 
         #[test]
-        fn input_delivery_result_reader_accepts_the_receipt_cause_on_an_uncertain_result() {
-            let mut fixture = Fixture::new();
-            let (event, _, payload) = uncertain_result(&mut fixture, Some("short_write"));
-            let view = storage::get_event(&fixture.conn, event.event_id)
-                .unwrap_or_else(|error| panic!("{}", error.message()));
-            assert_eq!(view.event.payload_json, payload);
-            assert_eq!(
-                view.event.payload_json["cause"],
-                json!({"kind":"short_write"})
-            );
-            assert_eq!(
-                crate::broker::runtime::events::original(&view)
-                    .unwrap()
-                    .cause_json,
-                Some(
-                    json!({"kind":"input_delivery_result","input_id":payload["input_id"],"stage":"unknown","cause":{"kind":"short_write"}})
-                )
-            );
-        }
-
-        #[test]
-        fn input_delivery_result_reader_accepts_an_absent_cause_for_a_causeless_receipt() {
-            let mut fixture = Fixture::new();
-            let (event, _, payload) = uncertain_result(&mut fixture, None);
-            let view = storage::get_event(&fixture.conn, event.event_id)
-                .unwrap_or_else(|error| panic!("{}", error.message()));
-            assert!(view.event.payload_json.get("cause").is_none());
-            let mut forged = payload;
-            forged["cause"] = json!({"kind":"write_failed"});
-            replace_public_payload(&mut fixture.conn, &event, forged);
-            assert!(
-                storage::get_event(&fixture.conn, event.event_id).is_err(),
-                "a cause the receipt never recorded is rejected"
-            );
-        }
-
-        #[test]
-        fn input_delivery_result_reader_rejects_a_cause_that_disagrees_with_the_receipt() {
-            let mut fixture = Fixture::new();
-            let (event, _, payload) = uncertain_result(&mut fixture, Some("short_write"));
-            let mut mismatched = payload.clone();
-            mismatched["cause"] = json!({"kind":"write_failed"});
-            let mut missing = payload.clone();
-            missing.as_object_mut().unwrap().remove("cause");
-            for (label, forged) in [("mismatched cause", mismatched), ("missing cause", missing)] {
-                replace_public_payload(&mut fixture.conn, &event, forged);
-                assert!(
-                    storage::get_event(&fixture.conn, event.event_id).is_err(),
-                    "{label}"
+        fn input_delivery_result_reader_requires_the_payload_cause_to_match_the_receipt() {
+            const CASES: &[(&str, Option<&str>, Option<&str>, bool)] = &[
+                (
+                    "the receipt cause on an uncertain result",
+                    Some("short_write"),
+                    Some("short_write"),
+                    true,
+                ),
+                (
+                    "a cause that disagrees with the receipt",
+                    Some("short_write"),
+                    Some("write_failed"),
+                    false,
+                ),
+                (
+                    "a missing cause the receipt recorded",
+                    Some("short_write"),
+                    None,
+                    false,
+                ),
+                ("an absent cause for a causeless receipt", None, None, true),
+                (
+                    "a cause the receipt never recorded",
+                    None,
+                    Some("write_failed"),
+                    false,
+                ),
+            ];
+            for &(name, receipt, payload_cause, accepted) in CASES {
+                let mut fixture = Fixture::new();
+                let (event, _, recorded) = uncertain_result(&mut fixture, receipt);
+                let mut payload = recorded.clone();
+                match payload_cause {
+                    Some(cause) => payload["cause"] = json!({ "kind": cause }),
+                    None => {
+                        payload.as_object_mut().unwrap().remove("cause");
+                    }
+                }
+                replace_public_payload(&mut fixture.conn, &event, payload.clone());
+                let read = storage::get_event(&fixture.conn, event.event_id);
+                if !accepted {
+                    assert!(read.is_err(), "{name}");
+                    continue;
+                }
+                let view = read.unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+                assert_eq!(view.event.payload_json, payload, "{name}");
+                let mut cause = json!({"kind":"input_delivery_result","input_id":payload["input_id"],"stage":"unknown"});
+                if let Some(kind) = payload_cause {
+                    cause["cause"] = json!({ "kind": kind });
+                }
+                assert_eq!(
+                    crate::broker::runtime::events::original(&view)
+                        .unwrap()
+                        .cause_json,
+                    Some(cause),
+                    "{name}"
                 );
             }
-            replace_public_payload(&mut fixture.conn, &event, payload);
-            storage::get_event(&fixture.conn, event.event_id).unwrap();
         }
     }
 }

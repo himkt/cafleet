@@ -1563,7 +1563,8 @@ mod tests {
         #[test]
         fn hermes_setup_fails_into_the_resolved_base_without_a_usable_config_path() {
             const DEADLINE: &str = "did not finish within its deadline";
-            let cases: [(&str, fn(&mut FakeHermes), &str); 3] = [
+            type ConfigPathCase = (&'static str, fn(&mut FakeHermes), &'static str);
+            let cases: [ConfigPathCase; 3] = [
                 (
                     "unavailable config path",
                     |fake| {

@@ -2649,43 +2649,6 @@ pub(crate) mod test_support {
             with_configured_input_service(true, exit_code, body);
         }
 
-        /// The only input service whose runner sweeps pending previews; `lifetime` replaces
-        /// the default ten-second deadline for behavior that spans several retry intervals.
-        pub(crate) fn with_sweeping_input_service(
-            lifetime: Duration,
-            detecting: bool,
-            body: impl FnOnce(&mut ServiceFixture, Instant),
-        ) {
-            with_input_service_lifetime(
-                lifetime,
-                detecting,
-                0,
-                |config| config["preview_sweep"] = json!(true),
-                composer_ready,
-                body,
-            );
-        }
-
-        /// A sweeping input service whose runner uses `stall_bound` in place of the
-        /// three-minute stall bound.
-        pub(crate) fn with_sweeping_input_service_stall_bound(
-            lifetime: Duration,
-            stall_bound: Duration,
-            body: impl FnOnce(&mut ServiceFixture, Instant),
-        ) {
-            with_input_service_lifetime(
-                lifetime,
-                false,
-                0,
-                |config| {
-                    config["preview_sweep"] = json!(true);
-                    config["stall_bound_ms"] = json!(stall_bound.as_millis());
-                },
-                composer_ready,
-                body,
-            );
-        }
-
         /// A sweeping input service whose catalog `configure_catalog` adjusts first.
         pub(crate) fn with_sweeping_input_service_catalog(
             lifetime: Duration,
@@ -3070,12 +3033,7 @@ pub(crate) mod test_support {
                     None => false,
                     Some(enabled) => enabled.as_bool().expect("preview_sweep is a boolean"),
                 },
-                stall_bound: match value.get("stall_bound_ms") {
-                    None => Duration::from_secs(180),
-                    Some(ms) => Duration::from_millis(
-                        ms.as_u64().expect("stall_bound_ms is a millisecond count"),
-                    ),
-                },
+                stall_bound: Duration::from_secs(180),
             };
             crate::runtime::service::run_service(settings, descriptor, services)
         }
@@ -3491,27 +3449,62 @@ pub(crate) mod test_support {
                 key: &'static str,
                 literal: &'static str,
             },
+            /// A control client submits this exec under the operation key.
+            Exec {
+                key: &'static str,
+                literal: &'static str,
+            },
+            /// A control client reconciles the uncertain receipt of the operation key as
+            /// submitted.
+            Reconcile(&'static str),
             /// The Director sends the member a message with this body.
             Message(&'static str),
+            /// The Director sends the member a message the member has already consumed.
+            Consumed(&'static str),
+            /// Another writer takes the member's pane input lock.
+            HoldPane,
+            ReleasePane,
             Arm(FaultPlan),
             Clear(FaultPlan),
         }
 
         /// A scenario as data: the native screen the child starts on, the screen it redraws after
-        /// each submit key, the steps, and the runtime event kinds the run records, in order.
+        /// each submit key, the screen it draws once the bytes written to it contain a marker,
+        /// the steps, and the runtime event kinds the run records, in order.
         pub(crate) struct Scenario {
             pub(crate) name: &'static str,
             pub(crate) screen: &'static str,
             pub(crate) redraw: Option<&'static str>,
+            pub(crate) interrupt: Option<Interrupt>,
             pub(crate) steps: &'static [Step],
             pub(crate) events: &'static [&'static str],
+        }
+
+        /// The native child draws `screen` once, as soon as the bytes written to it contain
+        /// `marker`.
+        #[derive(Clone, Copy)]
+        pub(crate) struct Interrupt {
+            pub(crate) marker: &'static str,
+            pub(crate) screen: &'static str,
         }
 
         impl Scenario {
             /// Runs every step and asserts the recorded event kinds, returning the finished runner
             /// for further row and byte assertions.
             pub(crate) fn run(&self) -> Runner {
+                self.run_with(|_| {})
+            }
+
+            /// Like [`Scenario::run`], with `configure` applied to the started runner first.
+            pub(crate) fn run_with(&self, configure: impl FnOnce(&mut Runner)) -> Runner {
                 let mut runner = Runner::new(self.screen, self.redraw);
+                runner.child.interrupt = self.interrupt.map(|interrupt| {
+                    (
+                        interrupt.marker.as_bytes().to_vec(),
+                        screen_bytes(interrupt.screen),
+                    )
+                });
+                configure(&mut runner);
                 runner.settle();
                 for step in self.steps {
                     runner.step(*step);
@@ -3541,6 +3534,7 @@ pub(crate) mod test_support {
             screens: FakeInput,
             pub(crate) written: Vec<u8>,
             redraw: Option<(Vec<u8>, Vec<u8>)>,
+            interrupt: Option<(Vec<u8>, Vec<u8>)>,
         }
 
         impl NativeChild {
@@ -3559,7 +3553,14 @@ pub(crate) mod test_support {
         impl PtyIo for NativeChild {
             fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                 self.written.extend_from_slice(bytes);
-                if let Some((submit, screen)) = &self.redraw
+                if self.interrupt.as_ref().is_some_and(|(marker, _)| {
+                    self.written
+                        .windows(marker.len())
+                        .any(|window| window == marker.as_slice())
+                }) {
+                    let (_, screen) = self.interrupt.take().expect("the armed interrupt");
+                    self.screens.chunks.push_back(screen);
+                } else if let Some((submit, screen)) = &self.redraw
                     && self.written.ends_with(submit)
                 {
                     self.screens.chunks.push_back(screen.clone());
@@ -3623,6 +3624,7 @@ pub(crate) mod test_support {
             pub(crate) child: NativeChild,
             pub(crate) display: FakeDisplay,
             pub(crate) replies: Vec<std::result::Result<InputControlReply, CafleetError>>,
+            pub(crate) held_pane: Option<crate::pane_lock::PaneLock>,
             pending: Option<Pending>,
             preview_sweep: PreviewSweep,
             deferred_retry: DeferredRetry,
@@ -3736,6 +3738,7 @@ pub(crate) mod test_support {
                     screens: FakeInput::default(),
                     written: Vec::new(),
                     redraw,
+                    interrupt: None,
                 };
                 child.draw(screen_bytes(screen));
                 Self {
@@ -3750,6 +3753,7 @@ pub(crate) mod test_support {
                     child,
                     display: FakeDisplay::default(),
                     replies: Vec::new(),
+                    held_pane: None,
                     pending: None,
                     preview_sweep: PreviewSweep::default(),
                     deferred_retry: DeferredRetry::default(),
@@ -3773,11 +3777,57 @@ pub(crate) mod test_support {
                             literal: literal.into(),
                         }))
                     }
+                    Step::Exec { key, literal } => {
+                        self.submit(InputControlOperation::SubmitExec(SubmitInput {
+                            operation_key: key.into(),
+                            input_kind: storage::InputKind::Exec,
+                            literal: literal.into(),
+                        }))
+                    }
+                    Step::Reconcile(key) => {
+                        let input =
+                            storage::find_input(&self.fixture.conn, self.fixture.run.run_id, key)
+                                .unwrap()
+                                .unwrap_or_else(|| panic!("{key} has a receipt"));
+                        self.submit(InputControlOperation::Receipt(ReceiptAction::Reconcile {
+                            input_id: input.input_id,
+                            expected: storage::InputState::Uncertain,
+                            disposition: storage::InputDisposition::Submitted,
+                            evidence_ref: "audit:pane-shows-the-input".into(),
+                        }))
+                    }
                     Step::Message(body) => {
-                        let run = &self.fixture.run;
-                        let (director, member) = (run.director_member_id, run.member_id);
-                        crate::broker::send_message(&mut self.fixture.conn, director, member, body)
+                        self.send(body);
+                    }
+                    Step::Consumed(body) => {
+                        let message = self.send(body);
+                        self.fixture
+                            .conn
+                            .execute(
+                                "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                                [message.message_id],
+                            )
                             .unwrap();
+                    }
+                    Step::HoldPane => {
+                        assert!(self.held_pane.is_none(), "one held pane lock");
+                        let url = format!("sqlite:///{}", self.fixture.conn.path().unwrap());
+                        let placement = crate::broker::get_member(
+                            &self.fixture.conn,
+                            self.fixture.run.member_id,
+                            self.fixture.run.fleet_id,
+                        )
+                        .unwrap()
+                        .unwrap()
+                        .placement;
+                        self.held_pane = Some(
+                            crate::pane_lock::PaneLock::try_acquire(&url, &placement)
+                                .unwrap()
+                                .expect("the member's pane input lock is free"),
+                        );
+                    }
+                    Step::ReleasePane => {
+                        self.held_pane.take().expect("a held pane lock");
                     }
                     Step::Arm(plan) => plan.arm(&mut self.fixture.conn),
                     Step::Clear(plan) => plan.clear(&mut self.fixture.conn),
@@ -3806,6 +3856,7 @@ pub(crate) mod test_support {
                     if self.clock.elapsed() >= until {
                         return;
                     }
+                    self.skip_idle_turns(self.clock.now() + (until - self.clock.elapsed()));
                     self.turn();
                 }
                 panic!("{duration:?} of virtual time passes within {TURN_LIMIT} turns");
@@ -3845,6 +3896,41 @@ pub(crate) mod test_support {
                 );
                 if !pause.is_zero() {
                     clock.sleep(pause);
+                }
+            }
+
+            /// Moves the clock to the next turn that can do work, or to `limit`, while nothing is
+            /// in flight: the turns in between read no bytes and reach no timer.
+            fn skip_idle_turns(&mut self, limit: Instant) {
+                let idle = self.pending.is_none()
+                    && !self.coordinator.has_deferred_work()
+                    && self.child.screens.chunks.is_empty()
+                    && self.human.chunks.is_empty()
+                    && self.transport.pending_input_bytes() == 0
+                    && !self.controller.has_pending();
+                if !idle {
+                    return;
+                }
+                let now = self.clock.now();
+                let sweep = self
+                    .preview_sweep
+                    .next_at
+                    .into_iter()
+                    .chain(self.preview_sweep.backoff_until)
+                    .max()
+                    .unwrap_or(now);
+                let wake = [
+                    Some(sweep),
+                    self.queue_housekeeping_at,
+                    self.controller.status().next_deadline,
+                ]
+                .into_iter()
+                .flatten()
+                .chain([limit])
+                .min()
+                .expect("the limit bounds every wake");
+                if wake > now {
+                    self.clock.advance(wake - now);
                 }
             }
 
@@ -4050,6 +4136,71 @@ pub(crate) mod test_support {
                     | SubmissionStatus::Rejected
                     | SubmissionStatus::Uncertain => {}
                 }
+            }
+
+            fn send(&mut self, body: &str) -> crate::broker::MessageRecord {
+                let run = &self.fixture.run;
+                let (director, member) = (run.director_member_id, run.member_id);
+                crate::broker::send_message(&mut self.fixture.conn, director, member, body).unwrap()
+            }
+
+            /// The preview line the sweep types for the message with this body.
+            pub(crate) fn preview_line(&self, body: &str) -> String {
+                let message = self.message(body);
+                crate::runtime::preview::canonical_preview_line(&message)
+            }
+
+            pub(crate) fn message(&self, body: &str) -> crate::broker::MessageRecord {
+                let id: i64 = self
+                    .fixture
+                    .conn
+                    .query_row(
+                        "SELECT message_id FROM messages WHERE text=?1",
+                        [body],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or_else(|cause| panic!("message {body:?}: {cause}"));
+                crate::broker::get_message(&self.fixture.conn, id).unwrap()
+            }
+
+            /// How many times the child received `text`.
+            pub(crate) fn typed(&self, text: &str) -> usize {
+                String::from_utf8_lossy(&self.child.written)
+                    .matches(text)
+                    .count()
+            }
+
+            /// The byte offset of the first `text` the child received.
+            pub(crate) fn typed_at(&self, text: &str) -> usize {
+                String::from_utf8_lossy(&self.child.written)
+                    .find(text)
+                    .unwrap_or_else(|| panic!("the child received {text:?}"))
+            }
+
+            pub(crate) fn notified(&self, body: &str) -> bool {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT notified_at IS NOT NULL FROM messages WHERE text=?1",
+                        [body],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            pub(crate) fn payloads(&self, kind: &str) -> Vec<serde_json::Value> {
+                self.fixture
+                    .conn
+                    .prepare(
+                        "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind=?2 ORDER BY event_seq",
+                    )
+                    .unwrap()
+                    .query_map(rusqlite::params![self.fixture.run.run_id, kind], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .unwrap()
+                    .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                    .collect()
             }
 
             pub(crate) fn event_kinds(&self) -> Vec<String> {
@@ -4794,13 +4945,6 @@ mod tests {
             }
         }
 
-        fn wait_delivered(fixture: &mut ServiceFixture, message: &MessageRecord, until: Instant) {
-            wait_input_service_record(fixture, &line(message), until);
-            wait_for(until, "the delivered preview is stamped", || {
-                notified_at(fixture, message.message_id).is_some()
-            });
-        }
-
         /// The receipt-free delivery results the run published for `message_id`.
         fn preview_results(fixture: &ServiceFixture, message_id: i64) -> Vec<Value> {
             fixture
@@ -4817,47 +4961,6 @@ mod tests {
                 .unwrap()
                 .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
                 .collect()
-        }
-
-        fn pane_lock(fixture: &ServiceFixture) -> crate::pane_lock::PaneLock {
-            let run = &fixture.fixture.run;
-            let placement =
-                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
-                    .unwrap()
-                    .unwrap()
-                    .placement;
-            let url = format!("sqlite:///{}", fixture.fixture.conn.path().unwrap());
-            crate::pane_lock::PaneLock::try_acquire(&url, &placement)
-                .unwrap()
-                .expect("the test takes the member's free pane input lock")
-        }
-
-        fn wait_interaction_open(fixture: &ServiceFixture, until: Instant) {
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            loop {
-                assert!(Instant::now() < until, "the detected interaction opens");
-                let health = NativeInputHost.health(&run, until).unwrap();
-                let observation = health.observation.as_ref().unwrap();
-                if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
-                    && observation.pending_count == 0
-                {
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
-        }
-
-        fn wait_composer_not_empty(fixture: &mut ServiceFixture, until: Instant) {
-            loop {
-                assert!(Instant::now() < until, "the composer stops verifying empty");
-                let health = fixture.health();
-                if health.observation.as_ref().is_some_and(|observation| {
-                    observation.eligibility != InputEligibility::ComposerEmpty
-                }) {
-                    return;
-                }
-                pause(until);
-            }
         }
 
         /// Types `barrier` and waits for its journal line, which also carries any literal the
@@ -4900,223 +5003,6 @@ mod tests {
         }
 
         #[test]
-        fn the_next_sweep_types_unnotified_previews_oldest_first_into_a_verified_empty_composer() {
-            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
-                let first = send(fixture, "first swept preview");
-                let second = send(fixture, "second swept preview");
-                wait_delivered(fixture, &first, until);
-                wait_delivered(fixture, &second, until);
-                input_service_barrier(fixture, until);
-                assert_eq!(
-                    lines(fixture),
-                    [line(&first), line(&second), "barrier".to_owned()],
-                    "each preview is typed once, oldest first"
-                );
-            });
-        }
-
-        #[test]
-        fn a_consumed_message_is_never_selected() {
-            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
-                let run = fixture.fixture.run.clone();
-                let tx = fixture
-                    .fixture
-                    .conn
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .unwrap();
-                let consumed = crate::broker::messaging::insert_message_validated(
-                    &tx,
-                    run.director_member_id,
-                    run.member_id,
-                    "consumed before any sweep",
-                )
-                .unwrap();
-                tx.execute(
-                    "UPDATE messages SET status_state='completed' WHERE message_id=?1",
-                    [consumed.message_id],
-                )
-                .unwrap();
-                tx.commit().unwrap();
-                let later = send(fixture, "pending after the consumed message");
-                wait_delivered(fixture, &later, until);
-                input_service_barrier(fixture, until);
-                assert_eq!(notified_at(fixture, consumed.message_id), None);
-                assert_eq!(lines(fixture), [line(&later), "barrier".to_owned()]);
-            });
-        }
-
-        #[test]
-        fn a_non_empty_composer_blocks_delivery_until_it_verifies_empty() {
-            with_sweeping_input_service(Duration::from_secs(15), false, |fixture, until| {
-                manual(fixture, format!("{DRAFT_LINE}\r").as_bytes(), until);
-                wait_composer_not_empty(fixture, until);
-                let message = send(fixture, "behind a human draft");
-                std::thread::sleep(SWEEP_WINDOW);
-                assert!(lines(fixture).is_empty(), "{:?}", lines(fixture));
-                assert_eq!(notified_at(fixture, message.message_id), None);
-                input_service_barrier(fixture, until);
-                wait_delivered(fixture, &message, until);
-                assert_eq!(lines(fixture), ["barrier".to_owned(), line(&message)]);
-            });
-        }
-
-        #[test]
-        fn a_held_pane_lock_defers_the_sweep_with_zero_bytes_until_it_is_free() {
-            with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
-                let held = pane_lock(fixture);
-                let message = send(fixture, "swept behind a held pane lock");
-                std::thread::sleep(SWEEP_WINDOW);
-                assert!(input_service_records(fixture).is_empty());
-                assert_eq!(notified_at(fixture, message.message_id), None);
-                drop(held);
-                wait_delivered(fixture, &message, until);
-                assert_eq!(typed_count(fixture, &line(&message)), 1);
-                pane_lock(fixture);
-            });
-        }
-
-        #[test]
-        fn a_retried_head_is_delivered_before_a_newer_message() {
-            with_sweeping_input_service(Duration::from_secs(45), false, |fixture, until| {
-                let held = pane_lock(fixture);
-                let head = send(fixture, "head behind a busy pane");
-                let newer = send(fixture, "newer message");
-                std::thread::sleep(SWEEP_WINDOW);
-                assert!(input_service_records(fixture).is_empty());
-                drop(held);
-                wait_delivered(fixture, &head, until);
-                wait_delivered(fixture, &newer, until);
-                assert_eq!(lines(fixture), [line(&head), line(&newer)]);
-            });
-        }
-
-        /// Holds the synthetic native child stopped, so an attempt already written stays in
-        /// flight until the guard resumes it.
-        struct StoppedNative(nix::unistd::Pid);
-
-        impl StoppedNative {
-            fn stop(fixture: &ServiceFixture) -> Self {
-                let identity: ProcessIdentity = serde_json::from_slice(
-                    &std::fs::read(
-                        fixture
-                            .fixture
-                            ._dir
-                            .path()
-                            .join("service-input-native-identity.json"),
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-                let pid = nix::unistd::Pid::from_raw(i32::try_from(identity.pid).unwrap());
-                nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGSTOP).unwrap();
-                Self(pid)
-            }
-        }
-
-        impl Drop for StoppedNative {
-            fn drop(&mut self) {
-                nix::sys::signal::kill(self.0, nix::sys::signal::Signal::SIGCONT).unwrap();
-            }
-        }
-
-        #[test]
-        fn a_control_request_arriving_during_a_sweep_attempt_queues_behind_it() {
-            with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
-                let stopped = StoppedNative::stop(fixture);
-                let head = send(fixture, "in flight while the native is stopped");
-                std::thread::sleep(Duration::from_millis(1500));
-                let (queued, queued_reply) = submit(
-                    fixture,
-                    "prompt:behind-the-sweep",
-                    "control request behind the sweep",
-                    InputKind::Prompt,
-                    until.min(Instant::now() + Duration::from_secs(10)),
-                );
-                assert_eq!(queued.status, SubmissionStatus::Queued, "{queued_reply}");
-                drop(stopped);
-                wait_input_service_record(fixture, "control request behind the sweep", until);
-                let typed = lines(fixture);
-                assert!(typed[0].contains(&line(&head)), "{typed:?}");
-                assert_eq!(
-                    typed
-                        .iter()
-                        .filter(|typed| **typed == "control request behind the sweep")
-                        .count(),
-                    1,
-                    "{typed:?}"
-                );
-            });
-        }
-
-        #[test]
-        fn a_queued_prompt_is_written_before_the_sweep_starts_when_an_interaction_closes() {
-            with_sweeping_input_service(Duration::from_secs(20), true, |fixture, until| {
-                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
-                wait_interaction_open(fixture, until);
-                let (queued, queued_reply) = submit(
-                    fixture,
-                    "prompt:behind-the-form",
-                    "prompt queued behind the form",
-                    InputKind::Prompt,
-                    until.min(Instant::now() + Duration::from_secs(10)),
-                );
-                assert_eq!(queued.status, SubmissionStatus::Queued, "{queued_reply}");
-                let message = send(fixture, "pending behind the form");
-                std::thread::sleep(SWEEP_WINDOW);
-                assert!(lines(fixture).is_empty(), "{:?}", lines(fixture));
-                manual(fixture, b"barrier\r", until);
-                wait_delivered(fixture, &message, until);
-                assert_eq!(
-                    lines(fixture),
-                    [
-                        "barrier".to_owned(),
-                        "prompt queued behind the form".to_owned(),
-                        line(&message)
-                    ]
-                );
-            });
-        }
-
-        #[test]
-        fn an_uncertain_preview_is_typed_again_once_the_composer_is_verified_empty() {
-            with_sweeping_input_service(Duration::from_secs(30), true, |fixture, until| {
-                let message = send(fixture, &format!("retried preview {FORM_MID_WRITE}"));
-                wait_for(until, "the stopped preview publishes its result", || {
-                    !preview_results(fixture, message.message_id).is_empty()
-                });
-                assert_eq!(notified_at(fixture, message.message_id), None);
-                clear_with_barrier(fixture, until);
-                wait_delivered(fixture, &message, until);
-                assert_eq!(
-                    typed_count(fixture, &line(&message)),
-                    2,
-                    "the stopped literal and its retry: {:?}",
-                    lines(fixture)
-                );
-            });
-        }
-
-        #[test]
-        fn an_uncertain_preview_publishes_one_delivery_result_without_an_input_id() {
-            with_sweeping_input_service(Duration::from_secs(30), true, |fixture, until| {
-                let message = send(fixture, &format!("uncertain preview {FORM_MID_WRITE}"));
-                wait_for(until, "the stopped preview publishes its result", || {
-                    !preview_results(fixture, message.message_id).is_empty()
-                });
-                clear_with_barrier(fixture, until);
-                wait_delivered(fixture, &message, until);
-                std::thread::sleep(SWEEP_WINDOW);
-                let results = preview_results(fixture, message.message_id);
-                assert_eq!(results.len(), 1, "{results:?}");
-                let result = &results[0];
-                assert_eq!(result["input_id"], Value::Null, "{result}");
-                assert_eq!(result["message_id"], message.message_id, "{result}");
-                assert_eq!(result["delivery"]["status"], "uncertain", "{result}");
-                assert_eq!(result["director_action"], Value::Null, "{result}");
-            });
-        }
-
-        #[test]
         fn an_unverified_run_stamps_an_uncertain_preview_before_publishing_it_and_never_retypes_it()
         {
             with_sweeping_input_service_catalog(
@@ -5141,65 +5027,6 @@ mod tests {
                         lines(fixture)
                     );
                     assert_eq!(preview_results(fixture, message.message_id).len(), 1);
-                },
-            );
-        }
-
-        fn preview_stalls(fixture: &ServiceFixture, message_id: i64) -> Vec<Value> {
-            fixture
-                .fixture
-                .conn
-                .prepare(
-                    "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.message_id')=?2 ORDER BY event_seq",
-                )
-                .unwrap()
-                .query_map(
-                    rusqlite::params![fixture.fixture.run.run_id, message_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap()
-                .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
-                .collect()
-        }
-
-        #[test]
-        fn a_preview_behind_a_non_empty_composer_publishes_one_stall_event_at_the_stall_bound() {
-            let bound = Duration::from_secs(2);
-            with_sweeping_input_service_stall_bound(
-                Duration::from_secs(20),
-                bound,
-                |fixture, until| {
-                    manual(fixture, format!("{DRAFT_LINE}\r").as_bytes(), until);
-                    wait_composer_not_empty(fixture, until);
-                    let message = send(fixture, "stalled behind a human draft");
-                    std::thread::sleep(bound / 2);
-                    assert!(preview_stalls(fixture, message.message_id).is_empty());
-                    wait_for(
-                        until,
-                        "the waiting preview publishes its stall event",
-                        || !preview_stalls(fixture, message.message_id).is_empty(),
-                    );
-                    std::thread::sleep(SWEEP_WINDOW);
-                    let stalls = preview_stalls(fixture, message.message_id);
-                    assert_eq!(
-                        stalls.len(),
-                        1,
-                        "published once per run and message: {stalls:?}"
-                    );
-                    let stall = &stalls[0];
-                    assert_eq!(stall["message_id"], message.message_id, "{stall}");
-                    assert!(stall.get("blocking_input_id").is_none(), "{stall}");
-                    assert!(stall["waiting_since"].as_str().is_some(), "{stall}");
-                    assert!(
-                        stall["director_action"]["instruction"]
-                            .as_str()
-                            .is_some_and(|instruction| !instruction.trim().is_empty()),
-                        "one instruction: {stall}"
-                    );
-                    assert!(lines(fixture).is_empty(), "{:?}", lines(fixture));
-                    input_service_barrier(fixture, until);
-                    wait_delivered(fixture, &message, until);
-                    assert_eq!(preview_stalls(fixture, message.message_id).len(), 1);
                 },
             );
         }
@@ -5264,14 +5091,6 @@ mod tests {
                 exec < preview,
                 "the FIFO drains before the sweep: {typed:?}"
             );
-        }
-
-        #[test]
-        fn an_uncertain_prompt_stops_queued_input_and_the_sweep_until_reconciled_on_a_verified_run()
-        {
-            with_sweeping_input_service(Duration::from_secs(40), true, |fixture, until| {
-                uncertain_prompt_stops_the_fifo_and_the_sweep(fixture, until);
-            });
         }
 
         #[test]
@@ -5688,6 +5507,7 @@ mod tests {
                     name: "an idle composer records nothing",
                     screen: IDLE,
                     redraw: None,
+                    interrupt: None,
                     steps: &[Step::Run(Duration::from_secs(2))],
                     events: &[],
                 },
@@ -5695,6 +5515,7 @@ mod tests {
                     name: "an approval form opens an interaction that a later screen closes",
                     screen: STATUS,
                     redraw: None,
+                    interrupt: None,
                     steps: &[
                         Step::Screen(APPROVAL),
                         Step::Run(Duration::from_secs(1)),
@@ -5716,6 +5537,7 @@ mod tests {
                 name: "typing",
                 screen: IDLE,
                 redraw: None,
+                interrupt: None,
                 steps: &[Step::Type(b"typed by hand")],
                 events: &[],
             };
@@ -5732,6 +5554,7 @@ mod tests {
                 name: "prompt",
                 screen: IDLE,
                 redraw: Some(IDLE),
+                interrupt: None,
                 steps: &[
                     Step::Prompt {
                         key: "scenario:prompt",
@@ -5756,32 +5579,327 @@ mod tests {
             assert_eq!(runner.finish(), (0, 0));
         }
 
+        const DRAFT: &str = "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1";
+        const MID_WRITE: Interrupt = Interrupt {
+            marker: "FORM_MID_WRITE",
+            screen: APPROVAL,
+        };
+        /// Longer than two sweep intervals, so a sweep that could deliver would have done so.
+        const SWEEP_WINDOW: Duration = Duration::from_millis(2500);
+
+        fn submission(reply: &Result<InputControlReply>) -> &SubmissionResult {
+            match reply {
+                Ok(InputControlReply::Submission(submission)) => submission,
+                Ok(_) => panic!("a submission reply"),
+                Err(cause) => panic!("a submission reply, got {cause}"),
+            }
+        }
+
         #[test]
-        fn the_sweep_types_a_stored_message_into_the_empty_composer_and_stamps_it() {
-            const PREVIEW: Scenario = Scenario {
-                name: "preview",
+        fn the_sweep_types_each_pending_preview_once_oldest_first_and_stamps_it() {
+            const SWEEP: Scenario = Scenario {
+                name: "oldest first",
                 screen: IDLE,
                 redraw: Some(IDLE),
+                interrupt: None,
                 steps: &[
-                    Step::Message("scenario preview"),
+                    Step::Consumed("consumed before any sweep"),
+                    Step::Message("first swept preview"),
+                    Step::Message("second swept preview"),
                     Step::Run(Duration::from_secs(3)),
                 ],
                 events: &[],
             };
-            let mut runner = PREVIEW.run();
-            let notified: Option<String> = runner
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT notified_at FROM messages WHERE to_member_id=?1",
-                    [runner.fixture.run.member_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(notified.is_some(), "the delivered preview is stamped");
-            let typed = String::from_utf8_lossy(&runner.child.written).into_owned();
-            assert!(typed.contains("scenario preview"), "{typed:?}");
+            let mut runner = SWEEP.run();
+            let first = runner.preview_line("first swept preview");
+            let second = runner.preview_line("second swept preview");
+            assert_eq!(runner.typed(&first), 1);
+            assert_eq!(runner.typed(&second), 1);
+            assert!(runner.typed_at(&first) < runner.typed_at(&second));
+            assert!(runner.notified("first swept preview"));
+            assert!(runner.notified("second swept preview"));
+            assert_eq!(runner.typed("consumed before any sweep"), 0);
+            assert!(!runner.notified("consumed before any sweep"));
             assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn an_obstacle_defers_the_sweep_with_zero_bytes_until_it_clears() {
+            const CASES: &[Scenario] = &[
+                Scenario {
+                    name: "a non-empty composer blocks delivery until it verifies empty",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::Screen(DRAFT),
+                        Step::Run(Duration::from_millis(100)),
+                        Step::Message("blocked preview"),
+                        Step::Run(SWEEP_WINDOW),
+                    ],
+                    events: &[],
+                },
+                Scenario {
+                    name: "a held pane lock defers the sweep until it is free",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::HoldPane,
+                        Step::Message("blocked preview"),
+                        Step::Run(SWEEP_WINDOW),
+                    ],
+                    events: &[],
+                },
+            ];
+            for scenario in CASES {
+                let name = scenario.name;
+                let mut runner = scenario.run();
+                assert!(runner.child.written.is_empty(), "{name}");
+                assert!(!runner.notified("blocked preview"), "{name}");
+                match runner.held_pane {
+                    Some(_) => runner.step(Step::ReleasePane),
+                    None => runner.step(Step::Screen(IDLE)),
+                }
+                runner.step(Step::Run(Duration::from_secs(10)));
+                let line = runner.preview_line("blocked preview");
+                assert_eq!(runner.typed(&line), 1, "{name}");
+                assert!(runner.notified("blocked preview"), "{name}");
+                assert_eq!(runner.finish(), (0, 0), "{name}");
+            }
+        }
+
+        #[test]
+        fn a_retried_head_is_delivered_before_a_newer_message() {
+            const RETRY: Scenario = Scenario {
+                name: "retried head",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::HoldPane,
+                    Step::Message("head behind a busy pane"),
+                    Step::Message("newer message"),
+                    Step::Run(SWEEP_WINDOW),
+                    Step::ReleasePane,
+                    Step::Run(Duration::from_secs(10)),
+                ],
+                events: &[],
+            };
+            let mut runner = RETRY.run();
+            let head = runner.preview_line("head behind a busy pane");
+            let newer = runner.preview_line("newer message");
+            assert_eq!(runner.typed(&head), 1);
+            assert_eq!(runner.typed(&newer), 1);
+            assert!(runner.typed_at(&head) < runner.typed_at(&newer));
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn a_control_prompt_queues_behind_an_in_flight_sweep_or_an_open_interaction() {
+            const CASES: &[Scenario] = &[
+                Scenario {
+                    name: "a prompt arriving during a sweep attempt queues behind it",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::Message("ahead of the prompt"),
+                        Step::Run(Duration::from_millis(1250)),
+                        Step::Prompt {
+                            key: "prompt:queued",
+                            literal: "queued control prompt",
+                        },
+                    ],
+                    events: &[],
+                },
+                Scenario {
+                    name: "a prompt queued behind a form is written before the sweep",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::Screen(APPROVAL),
+                        Step::Run(Duration::from_secs(1)),
+                        Step::Prompt {
+                            key: "prompt:queued",
+                            literal: "queued control prompt",
+                        },
+                        Step::Message("behind the prompt"),
+                        Step::Run(SWEEP_WINDOW),
+                    ],
+                    events: &["interaction_opened"],
+                },
+            ];
+            for (index, scenario) in CASES.iter().enumerate() {
+                let name = scenario.name;
+                let mut runner = scenario.run();
+                let reply = runner.replies.last().expect("the prompt replies");
+                assert_eq!(submission(reply).status, SubmissionStatus::Queued, "{name}");
+                assert_eq!(runner.typed("queued control prompt"), 0, "{name}");
+                if index == 1 {
+                    runner.step(Step::Screen(IDLE));
+                }
+                runner.step(Step::Run(Duration::from_secs(5)));
+                assert_eq!(runner.typed("queued control prompt"), 1, "{name}");
+                let (first, second) = if index == 0 {
+                    (
+                        runner.preview_line("ahead of the prompt"),
+                        "queued control prompt".to_owned(),
+                    )
+                } else {
+                    (
+                        "queued control prompt".to_owned(),
+                        runner.preview_line("behind the prompt"),
+                    )
+                };
+                assert_eq!(runner.typed(&first), 1, "{name}");
+                assert_eq!(runner.typed(&second), 1, "{name}");
+                assert!(runner.typed_at(&first) < runner.typed_at(&second), "{name}");
+                runner.finish();
+            }
+        }
+
+        #[test]
+        fn an_uncertain_preview_publishes_one_receipt_free_result_and_is_typed_again_once_verified_empty()
+         {
+            const UNCERTAIN: Scenario = Scenario {
+                name: "uncertain preview",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: Some(MID_WRITE),
+                steps: &[
+                    Step::Message("retried preview FORM_MID_WRITE"),
+                    Step::Run(Duration::from_secs(3)),
+                ],
+                events: &["input_delivery_result"],
+            };
+            let mut runner = UNCERTAIN.run();
+            let body = "retried preview FORM_MID_WRITE";
+            let line = runner.preview_line(body);
+            let message_id = runner.message(body).message_id;
+            let results: Vec<_> = runner
+                .payloads("input_delivery_result")
+                .into_iter()
+                .filter(|result| result["message_id"] == message_id)
+                .collect();
+            assert_eq!(results.len(), 1, "{results:?}");
+            assert_eq!(results[0]["input_id"], serde_json::Value::Null);
+            assert_eq!(results[0]["delivery"]["status"], "uncertain");
+            assert_eq!(results[0]["director_action"], serde_json::Value::Null);
+            assert!(!runner.notified(body));
+            runner.step(Step::Screen(IDLE));
+            runner.step(Step::Run(Duration::from_secs(5)));
+            assert_eq!(runner.typed(&line), 2, "the stopped literal and its retry");
+            assert!(runner.notified(body));
+            assert_eq!(
+                runner
+                    .payloads("input_delivery_result")
+                    .iter()
+                    .filter(|result| result["message_id"] == message_id)
+                    .count(),
+                1,
+                "the retry publishes no further result"
+            );
+            runner.finish();
+        }
+
+        #[test]
+        fn a_preview_behind_a_non_empty_composer_publishes_one_stall_event_at_the_stall_bound() {
+            const BOUND: Duration = Duration::from_secs(2);
+            const STALLED: Scenario = Scenario {
+                name: "stalled preview",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Screen(DRAFT),
+                    Step::Run(Duration::from_millis(100)),
+                    Step::Message("stalled behind a human draft"),
+                    Step::Run(Duration::from_secs(1)),
+                ],
+                events: &[],
+            };
+            let mut runner = STALLED.run_with(|runner| runner.coordinator.set_stall_bound(BOUND));
+            assert!(runner.payloads("input_delivery_stalled").is_empty());
+            runner.step(Step::Run(BOUND + SWEEP_WINDOW));
+            let stalls = runner.payloads("input_delivery_stalled");
+            assert_eq!(
+                stalls.len(),
+                1,
+                "published once per run and message: {stalls:?}"
+            );
+            let stall = &stalls[0];
+            assert_eq!(
+                stall["message_id"],
+                runner.message("stalled behind a human draft").message_id
+            );
+            assert!(stall.get("blocking_input_id").is_none(), "{stall}");
+            assert!(stall["waiting_since"].as_str().is_some(), "{stall}");
+            assert!(
+                stall["director_action"]["instruction"]
+                    .as_str()
+                    .is_some_and(|instruction| !instruction.trim().is_empty()),
+                "one instruction: {stall}"
+            );
+            assert!(runner.child.written.is_empty());
+            runner.step(Step::Screen(IDLE));
+            runner.step(Step::Run(Duration::from_secs(5)));
+            assert!(runner.notified("stalled behind a human draft"));
+            assert_eq!(runner.payloads("input_delivery_stalled").len(), 1);
+            runner.finish();
+        }
+
+        #[test]
+        fn an_uncertain_prompt_stops_queued_input_and_the_sweep_until_reconciled() {
+            const STOPPED: Scenario = Scenario {
+                name: "uncertain prompt",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: Some(MID_WRITE),
+                steps: &[
+                    Step::Prompt {
+                        key: "prompt:stopped-mid-write",
+                        literal: "stopped prompt FORM_MID_WRITE",
+                    },
+                    Step::Run(Duration::from_secs(3)),
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Exec {
+                        key: "exec:behind-the-uncertain-prompt",
+                        literal: "printf behind",
+                    },
+                    Step::Message("preview behind the uncertain prompt"),
+                    Step::Run(SWEEP_WINDOW),
+                ],
+                events: &[
+                    "input_delivery_result",
+                    "interaction_opened",
+                    "interaction_closed",
+                ],
+            };
+            let mut runner = STOPPED.run();
+            assert_eq!(
+                submission(&runner.replies[0]).status,
+                SubmissionStatus::Uncertain
+            );
+            assert_eq!(
+                submission(&runner.replies[1]).status,
+                SubmissionStatus::Queued
+            );
+            assert_eq!(runner.typed("printf behind"), 0);
+            let line = runner.preview_line("preview behind the uncertain prompt");
+            assert_eq!(runner.typed(&line), 0);
+            assert!(!runner.notified("preview behind the uncertain prompt"));
+            runner.step(Step::Reconcile("prompt:stopped-mid-write"));
+            runner.step(Step::Run(Duration::from_secs(10)));
+            assert_eq!(runner.typed("printf behind"), 1);
+            assert_eq!(runner.typed(&line), 1);
+            assert!(
+                runner.typed_at("printf behind") < runner.typed_at(&line),
+                "the FIFO drains before the sweep"
+            );
+            runner.finish();
         }
 
         #[test]
@@ -5790,6 +5908,7 @@ mod tests {
                 name: "event fault",
                 screen: STATUS,
                 redraw: None,
+                interrupt: None,
                 steps: &[
                     Step::Arm(EVENT_FAULT),
                     Step::Screen(APPROVAL),

@@ -9690,6 +9690,7 @@ mod tests {
                 confirmed_bytes: usize,
                 expires: u64,
                 pub(crate) clock: Arc<TestClock>,
+                tracks_real_time: bool,
             }
 
             impl Host {
@@ -9840,6 +9841,7 @@ mod tests {
                         confirmed_bytes: 0,
                         expires,
                         clock,
+                        tracks_real_time: clock_lead.is_zero(),
                     };
                     host.drain();
                     if composer_selected {
@@ -9879,8 +9881,22 @@ mod tests {
                         self.confirmation_frame = bytes;
                     }
                 }
+                /// On a host whose clock starts at real time, moves virtual time up to real time, so
+                /// a storage deadline derived from it is never already past on the real-time
+                /// database budget.
+                fn catch_up(&self) {
+                    if !self.tracks_real_time {
+                        return;
+                    }
+                    let origin = self.clock.now() - self.clock.elapsed();
+                    let real = Instant::now().saturating_duration_since(origin);
+                    if real > self.clock.elapsed() {
+                        self.clock.set_elapsed(real);
+                    }
+                }
                 pub(crate) fn drain(&mut self) {
                     loop {
+                        self.catch_up();
                         assert!(
                             self.clock.now() < self.until,
                             "actual fixture becomes healthy and quiescent within its original deadline"
@@ -9933,6 +9949,7 @@ mod tests {
                 pub(crate) fn try_advance(
                     &mut self,
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+                    self.catch_up();
                     let ordinary = self
                         .coordinator
                         .pending

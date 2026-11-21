@@ -1211,19 +1211,6 @@ mod tests {
         }
     }
 
-    mod unpublished_relationships {
-        use crate::runtime::recovery::test_support::relationships::*;
-        #[test]
-        fn runner_recovery_missing_path_zero_event_takeover_refuses_actual_member_fleet_change_atomically()
-         {
-            refusal(Stage::MissingPathTakeover);
-        }
-        #[test]
-        fn runner_recovery_valid_historical_missing_path_zero_event_bookkeeping_keeps_history() {
-            historical_control(Stage::MissingPathTakeover);
-        }
-    }
-
     use std::io::Write;
 
     use std::sync::Arc;
@@ -1422,18 +1409,6 @@ mod tests {
                 owned_bytes(&case) == bytes,
                 "expiry preserves the selected descriptor"
             );
-        }
-    }
-
-    mod finalization_relationships {
-        use crate::runtime::recovery::test_support::relationships::*;
-        #[test]
-        fn runner_recovery_finalization_refuses_actual_member_fleet_change_atomically() {
-            refusal(Stage::Finalization);
-        }
-        #[test]
-        fn runner_recovery_valid_historical_lifecycle_change_allows_finalization() {
-            historical_control(Stage::Finalization);
         }
     }
 
@@ -1642,17 +1617,25 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_standalone_cleanup_uses_original_entry_clock_after_wait() {
-            clock_case(false, Duration::from_secs(7), Duration::from_millis(150));
-        }
-
-        #[test]
-        fn runner_recovery_borrowed_cleanup_keeps_entry_clock_and_original_outer_cap() {
-            clock_case(
-                true,
-                Duration::from_millis(3300),
-                Duration::from_millis(150),
-            );
+        fn runner_recovery_cleanup_keeps_its_entry_clock_after_a_wait() {
+            const CASES: &[(&str, bool, Duration, Duration)] = &[
+                (
+                    "standalone cleanup uses its original entry clock",
+                    false,
+                    Duration::from_secs(7),
+                    Duration::from_millis(150),
+                ),
+                (
+                    "borrowed cleanup keeps the entry clock and the original outer cap",
+                    true,
+                    Duration::from_millis(3300),
+                    Duration::from_millis(150),
+                ),
+            ];
+            for &(name, borrowed, budget, wait) in CASES {
+                eprintln!("case: {name}");
+                clock_case(borrowed, budget, wait);
+            }
         }
     }
 
@@ -1779,13 +1762,15 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_same_owner_completion_before_ordinary_takeover_has_zero_effects() {
-            immediate_completion(false, false, RunStatus::Exited);
-        }
-
-        #[test]
-        fn runner_recovery_same_owner_completion_before_missing_path_takeover_has_zero_effects() {
-            immediate_completion(true, false, RunStatus::Failed);
+        fn runner_recovery_same_owner_completion_before_takeover_has_zero_effects() {
+            const CASES: &[(&str, bool, RunStatus)] = &[
+                ("before an ordinary takeover", false, RunStatus::Exited),
+                ("before a missing-path takeover", true, RunStatus::Failed),
+            ];
+            for &(name, missing_path, status) in CASES {
+                eprintln!("case: {name}");
+                immediate_completion(missing_path, false, status);
+            }
         }
 
         #[test]
@@ -1871,13 +1856,15 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_ordinary_completion_is_rechecked_after_actual_write_lock_wait() {
-            completion_behind_write_lock(false, RunStatus::Exited);
-        }
-
-        #[test]
-        fn runner_recovery_missing_path_completion_is_rechecked_after_actual_write_lock_wait() {
-            completion_behind_write_lock(true, RunStatus::Lost);
+        fn runner_recovery_completion_is_rechecked_after_actual_write_lock_wait() {
+            const CASES: &[(&str, bool, RunStatus)] = &[
+                ("an ordinary completion", false, RunStatus::Exited),
+                ("a missing-path completion", true, RunStatus::Lost),
+            ];
+            for &(name, missing_path, status) in CASES {
+                eprintln!("case: {name}");
+                completion_behind_write_lock(missing_path, status);
+            }
         }
     }
 
@@ -1983,12 +1970,47 @@ mod tests {
     mod relationships {
         use crate::runtime::recovery::test_support::relationships::*;
         #[test]
-        fn runner_recovery_ordinary_takeover_refuses_actual_member_fleet_change_atomically() {
-            refusal(Stage::OrdinaryTakeover);
-        }
-        #[test]
-        fn runner_recovery_valid_historical_ordinary_takeover_keeps_truth_and_existing_inbox() {
-            historical_control(Stage::OrdinaryTakeover);
+        fn runner_recovery_refuses_a_member_fleet_change_and_keeps_valid_history_at_every_stage() {
+            const CASES: &[(&str, Stage, bool)] = &[
+                (
+                    "ordinary takeover refuses a member/fleet change",
+                    Stage::OrdinaryTakeover,
+                    true,
+                ),
+                (
+                    "ordinary takeover keeps valid history and its inbox",
+                    Stage::OrdinaryTakeover,
+                    false,
+                ),
+                (
+                    "zero-event missing-path takeover refuses a member/fleet change",
+                    Stage::MissingPathTakeover,
+                    true,
+                ),
+                (
+                    "zero-event missing-path bookkeeping keeps valid history",
+                    Stage::MissingPathTakeover,
+                    false,
+                ),
+                (
+                    "finalization refuses a member/fleet change",
+                    Stage::Finalization,
+                    true,
+                ),
+                (
+                    "a valid historical lifecycle change allows finalization",
+                    Stage::Finalization,
+                    false,
+                ),
+            ];
+            for &(name, stage, refused) in CASES {
+                eprintln!("case: {name}");
+                if refused {
+                    refusal(stage);
+                } else {
+                    historical_control(stage);
+                }
+            }
         }
     }
 
@@ -2059,31 +2081,26 @@ mod tests {
         }
 
         #[test]
-        fn a_running_owner_with_its_recorded_identity_is_alive() {
+        fn owner_process_evidence_follows_the_recorded_identity() {
             let observed = evidence(&ProcessIdentity::current().unwrap());
-            assert!(matches!(observed, ProcessEvidence::Alive), "{observed:?}");
-        }
-
-        #[test]
-        fn an_unreaped_zombie_owner_is_terminated() {
-            let (mut child, identity) = zombie();
-            let observed = evidence(&identity);
-            child.wait().unwrap();
             assert!(
-                matches!(observed, ProcessEvidence::Terminated),
-                "{observed:?}"
+                matches!(observed, ProcessEvidence::Alive),
+                "a running owner with its recorded identity is alive: {observed:?}"
             );
-        }
-
-        #[test]
-        fn a_reaped_owner_is_terminated() {
-            let (mut child, identity) = zombie();
-            child.wait().unwrap();
-            let observed = evidence(&identity);
-            assert!(
-                matches!(observed, ProcessEvidence::Terminated),
-                "{observed:?}"
-            );
+            for reaped in [false, true] {
+                let (mut child, identity) = zombie();
+                if reaped {
+                    child.wait().unwrap();
+                }
+                let observed = evidence(&identity);
+                if !reaped {
+                    child.wait().unwrap();
+                }
+                assert!(
+                    matches!(observed, ProcessEvidence::Terminated),
+                    "reaped={reaped}: {observed:?}"
+                );
+            }
         }
     }
 }
