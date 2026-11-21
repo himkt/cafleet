@@ -513,6 +513,7 @@ pub(crate) struct RunnerDependencies {
     #[cfg(test)]
     pub(crate) catalog: &'static crate::coding_agent::ProfileCatalog,
     pub(crate) clock: Arc<dyn crate::time::Clock>,
+    pub(crate) diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
     #[cfg(test)]
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
 
@@ -533,6 +534,7 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
             #[cfg(test)]
             catalog: crate::coding_agent::ProfileCatalog::bundled(),
             clock: Arc::new(crate::time::SystemClock),
+            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
             #[cfg(test)]
             writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
 
@@ -629,6 +631,7 @@ pub(crate) fn run_service(
     .map_err(io_error)?;
     listener.set_nonblocking(true).map_err(io_error)?;
     let mut controller = ObservationController::new(&run, catalog)?;
+    controller.share_diagnostics(services.diagnostics.clone());
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -647,6 +650,7 @@ pub(crate) fn run_service(
         clock.clone(),
         #[cfg(test)]
         services.writer_hooks.clone(),
+        services.diagnostics.clone(),
     )?;
     let terminate = Arc::new(AtomicBool::new(false));
     let resize = Arc::new(AtomicBool::new(false));
@@ -782,9 +786,13 @@ pub(crate) fn run_service(
     if let Some(cause) = writer.diagnostic() {
         outcome.fail(cause);
     }
+    let diagnostics = shutdown_diagnostics(&services.diagnostics, &outcome, &clock.wall_stamp());
     let persisted = with_database_deadline(&mut conn, deadlines.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
-        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
+        storage::write_runner_diagnostics(&tx, run.run_id, &diagnostics.0, diagnostics.1)?;
+        tx.commit()?;
         Ok(())
     });
     if let Err(cause) = persisted {
@@ -1119,7 +1127,7 @@ impl RunnerLoop<'_> {
             self.native.writer,
             self.native.clock,
         )?;
-        self.coordinator = Some(InputCoordinator::new(
+        let mut coordinator = InputCoordinator::new(
             self.conn,
             &self.run,
             self.lock.clone(),
@@ -1133,7 +1141,9 @@ impl RunnerLoop<'_> {
                 hooks: crate::runtime::input::test_support::default_input_hooks(),
             },
             self.handshake_deadline,
-        )?);
+        )?;
+        coordinator.share_diagnostics(self.native.writer.diagnostics().clone());
+        self.coordinator = Some(coordinator);
         serde_json::to_value(Started {
             identity: ControlIdentity::from_run(&self.run),
             runner: self.process.clone(),
@@ -1236,6 +1246,36 @@ impl RunnerLoop<'_> {
                 publish_stopped_results(coordinator, conn, run_id, controller, clock)
             })
     }
+}
+
+/// Every runner diagnostic still buffered once the event writer finished, followed by one
+/// `shutdown` entry per outcome diagnostic, with the buffer's dropped count.
+fn shutdown_diagnostics(
+    diagnostics: &crate::runtime::diagnostics::RunnerDiagnostics,
+    outcome: &ShutdownOutcome,
+    at: &str,
+) -> (Vec<RunnerDiagnosticEntry>, u64) {
+    let (mut entries, dropped) = diagnostics.drain();
+    entries.extend(
+        outcome
+            .diagnostics
+            .iter()
+            .map(|diagnostic| RunnerDiagnosticEntry {
+                source: RunnerDiagnosticSource::Shutdown,
+                message: diagnostic_text(diagnostic),
+                first_at: at.to_owned(),
+                last_at: at.to_owned(),
+                count: 1,
+            }),
+    );
+    (entries, dropped)
+}
+
+fn record_sweep_failure(coordinator: &InputCoordinator, cause: &CafleetError) {
+    coordinator.record_diagnostic(
+        RunnerDiagnosticSource::PreviewSweep,
+        &format!("preview sweep: {}", cause.message()),
+    );
 }
 
 /// The sweep's read snapshot: the run's member is an active ordinary member whose recorded run
@@ -1396,6 +1436,7 @@ impl InputTurns {
         match self.pending.take().expect("an attempt is in flight") {
             PendingAttempt::Sweep { .. } => {
                 self.finish_sweep(
+                    coordinator,
                     result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
                     io.clock().now(),
                 );
@@ -1433,7 +1474,10 @@ impl InputTurns {
             if coordinator.deferred_failed() {
                 return Err(failure);
             }
-            eprintln!("member runtime: deferred input: {}", failure.message());
+            coordinator.record_diagnostic(
+                RunnerDiagnosticSource::DeferredInput,
+                &format!("deferred input: {}", failure.message()),
+            );
         }
         Ok(())
     }
@@ -1453,7 +1497,10 @@ impl InputTurns {
             if coordinator.deferred_failed() {
                 return Err(failure);
             }
-            eprintln!("member runtime: queue housekeeping: {}", failure.message());
+            coordinator.record_diagnostic(
+                RunnerDiagnosticSource::QueueHousekeeping,
+                &format!("queue housekeeping: {}", failure.message()),
+            );
         }
         Ok(())
     }
@@ -1481,13 +1528,15 @@ impl InputTurns {
                     .map_err(CafleetError::from);
                 match reply {
                     Ok(None) => self.pending = Some(PendingAttempt::Sweep { deadline }),
-                    Ok(Some(reply)) => self.finish_sweep(Ok(reply), io.clock().now()),
-                    Err(cause) => self.finish_sweep(Err(cause), io.clock().now()),
+                    Ok(Some(reply)) => {
+                        self.finish_sweep(coordinator, Ok(reply), io.clock().now());
+                    }
+                    Err(cause) => self.finish_sweep(coordinator, Err(cause), io.clock().now()),
                 }
             }
             Ok(None) => {}
             Err(cause) => {
-                eprintln!("member runtime: preview sweep: {}", cause.message());
+                record_sweep_failure(coordinator, &cause);
                 self.preview_sweep.back_off(io.clock().now());
             }
         }
@@ -1496,12 +1545,17 @@ impl InputTurns {
 
     /// Feeds a completed sweep attempt's outcome to the run-wide backoff: a submitted preview
     /// resets it, and a transient obstacle arms it.
-    fn finish_sweep(&mut self, reply: Result<InputControlReply>, now: Instant) {
+    fn finish_sweep(
+        &mut self,
+        coordinator: &InputCoordinator,
+        reply: Result<InputControlReply>,
+        now: Instant,
+    ) {
         let submission = match reply {
             Ok(InputControlReply::Submission(submission)) => submission,
             Ok(_) => unreachable!("a preview submission replies with a submission"),
             Err(cause) => {
-                eprintln!("member runtime: preview sweep: {}", cause.message());
+                record_sweep_failure(coordinator, &cause);
                 self.preview_sweep.back_off(now);
                 return;
             }

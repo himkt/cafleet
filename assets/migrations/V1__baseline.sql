@@ -153,6 +153,18 @@ CREATE TABLE member_input_operations (
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
 
+CREATE TABLE member_runner_diagnostics (
+    diagnostic_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
+    source TEXT NOT NULL CHECK(source IN ('event_writer','observation','deferred_input','queue_housekeeping','preview_sweep','input_result','permission_answer','shutdown')),
+    message TEXT NOT NULL CHECK(length(trim(message)) > 0 AND length(CAST(message AS BLOB)) <= 512),
+    first_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    count INTEGER NOT NULL CHECK(count > 0),
+    UNIQUE(run_id, source, message)
+);
+CREATE INDEX idx_member_runner_diagnostics_recent ON member_runner_diagnostics(run_id, last_at);
+
 CREATE TABLE refinery_schema_history (
     version INT4 PRIMARY KEY,
     name VARCHAR(255),

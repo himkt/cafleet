@@ -417,6 +417,114 @@ stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", 
     MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive",
     HeadNotReady => "head_not_ready", DuplicateDelivery => "duplicate_delivery"
 });
+stored_enum!(RunnerDiagnosticSource, "member_runner_diagnostics.source", {
+    EventWriter => "event_writer", Observation => "observation",
+    DeferredInput => "deferred_input", QueueHousekeeping => "queue_housekeeping",
+    PreviewSweep => "preview_sweep", InputResult => "input_result",
+    PermissionAnswer => "permission_answer", Shutdown => "shutdown"
+});
+
+/// One deduplicated runner diagnostic: its source, sanitized message, first and last times and
+/// repeat count.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RunnerDiagnosticEntry {
+    pub(crate) source: RunnerDiagnosticSource,
+    pub(crate) message: String,
+    pub(crate) first_at: String,
+    pub(crate) last_at: String,
+    pub(crate) count: i64,
+}
+
+const RUNNER_DIAGNOSTIC_ROWS_PER_RUN: i64 = 256;
+const LATEST_RUNNER_DIAGNOSTICS: i64 = 5;
+
+fn upsert_runner_diagnostic(
+    tx: &Connection,
+    run_id: i64,
+    entry: &RunnerDiagnosticEntry,
+) -> Result<(), CafleetError> {
+    tx.execute(
+        "INSERT INTO member_runner_diagnostics(run_id,source,message,first_at,last_at,count)
+         VALUES(?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(run_id,source,message) DO UPDATE SET last_at=excluded.last_at,count=count+excluded.count",
+        params![
+            run_id,
+            entry.source.as_str(),
+            entry.message,
+            entry.first_at,
+            entry.last_at,
+            entry.count
+        ],
+    )?;
+    Ok(())
+}
+
+/// Stores `entries`, one overflow row for `dropped` entries, and prunes the run to its newest rows.
+pub(crate) fn write_runner_diagnostics(
+    tx: &Connection,
+    run_id: i64,
+    entries: &[RunnerDiagnosticEntry],
+    dropped: u64,
+) -> Result<(), CafleetError> {
+    for entry in entries {
+        upsert_runner_diagnostic(tx, run_id, entry)?;
+    }
+    if dropped > 0 {
+        let at = crate::time::now_stamp();
+        upsert_runner_diagnostic(
+            tx,
+            run_id,
+            &RunnerDiagnosticEntry {
+                source: RunnerDiagnosticSource::EventWriter,
+                message: format!("diagnostic buffer overflow: {dropped} entries dropped"),
+                first_at: at.clone(),
+                last_at: at,
+                count: 1,
+            },
+        )?;
+    }
+    tx.execute(
+        "DELETE FROM member_runner_diagnostics WHERE run_id=?1 AND diagnostic_id NOT IN (
+             SELECT diagnostic_id FROM member_runner_diagnostics WHERE run_id=?1
+             ORDER BY last_at DESC, diagnostic_id DESC LIMIT ?2)",
+        params![run_id, RUNNER_DIAGNOSTIC_ROWS_PER_RUN],
+    )?;
+    Ok(())
+}
+
+/// Writes runner diagnostics in one ownership-validated immediate transaction of the live owner.
+pub(crate) fn persist_runner_diagnostics(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    entries: &[RunnerDiagnosticEntry],
+    dropped: u64,
+) -> Result<(), CafleetError> {
+    owned_transaction(conn, owner, |tx, run| {
+        write_runner_diagnostics(tx, run.run_id, entries, dropped)
+    })
+}
+
+/// The run's newest runner diagnostics, newest `last_at` then `diagnostic_id` first.
+pub(crate) fn latest_runner_diagnostics(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<Vec<RunnerDiagnosticEntry>, CafleetError> {
+    conn.prepare(
+        "SELECT source,message,first_at,last_at,count FROM member_runner_diagnostics
+         WHERE run_id=?1 ORDER BY last_at DESC, diagnostic_id DESC LIMIT ?2",
+    )?
+    .query_map(params![run_id, LATEST_RUNNER_DIAGNOSTICS], |row| {
+        Ok(RunnerDiagnosticEntry {
+            source: row.get(0)?,
+            message: row.get(1)?,
+            first_at: row.get(2)?,
+            last_at: row.get(3)?,
+            count: row.get(4)?,
+        })
+    })?
+    .collect::<rusqlite::Result<_>>()
+    .map_err(CafleetError::from)
+}
 stored_enum!(InputKind, "member_input_operations.kind", { Prompt => "prompt", Exec => "exec" });
 stored_enum!(InputState, "member_input_operations.state", {
     Ready => "ready", InProgress => "in_progress", Accepted => "accepted",

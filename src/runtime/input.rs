@@ -178,6 +178,7 @@ pub(crate) struct InputCoordinator {
     bracketed_paste: bool,
     stall_bound: Duration,
     preview_wait: Option<PreviewWait>,
+    diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
 }
 
 /// The sweep's selected preview while the composer holds it; the stall watchdog runs from `since`.
@@ -2555,9 +2556,12 @@ impl InputCoordinator {
         }) {
             Ok(operation) => operation,
             Err(cause) if storage_failure(&cause) => {
-                eprintln!(
-                    "member runtime: input {input_id} result is pending storage: {}",
-                    cause.message()
+                self.record_diagnostic(
+                    storage::RunnerDiagnosticSource::InputResult,
+                    &format!(
+                        "input {input_id} result is pending storage: {}",
+                        cause.message()
+                    ),
                 );
                 self.finalization = Some(PendingFinalization {
                     input_id,
@@ -4418,10 +4422,13 @@ impl InputCoordinator {
     }
 
     fn log_answer_failure(&self, selection: &PermissionSelection, cause: &CafleetError) {
-        eprintln!(
-            "member runtime: permission answer for interaction {} is uncertain: {}",
-            selection.request.interaction_id,
-            cause.message()
+        self.record_diagnostic(
+            storage::RunnerDiagnosticSource::PermissionAnswer,
+            &format!(
+                "permission answer for interaction {} is uncertain: {}",
+                selection.request.interaction_id,
+                cause.message()
+            ),
         );
     }
 
@@ -4534,16 +4541,10 @@ impl InputCoordinator {
             }
             Ok(operation) => {
                 if let Err(cause) = self.finish_deferred(observation, &operation) {
-                    eprintln!(
-                        "member runtime: input {id} result is pending recovery: {}",
-                        cause.message()
-                    );
+                    self.record_pending_recovery(id, &cause);
                 }
             }
-            Err(cause) => eprintln!(
-                "member runtime: input {id} result is pending recovery: {}",
-                cause.message()
-            ),
+            Err(cause) => self.record_pending_recovery(id, &cause),
         }
     }
 
@@ -4912,7 +4913,28 @@ impl InputCoordinator {
             bracketed_paste: false,
             stall_bound: STALL_BOUND,
             preview_wait: None,
+            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
         })
+    }
+    /// Records input diagnostics into the runner's shared buffer, which the event writer flushes.
+    pub(crate) fn share_diagnostics(
+        &mut self,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    ) {
+        self.diagnostics = diagnostics;
+    }
+    pub(crate) fn record_diagnostic(&self, source: storage::RunnerDiagnosticSource, message: &str) {
+        self.diagnostics
+            .record(source, message, &self.services.clock.wall_stamp());
+    }
+    fn record_pending_recovery(&self, input_id: i64, cause: &CafleetError) {
+        self.record_diagnostic(
+            storage::RunnerDiagnosticSource::InputResult,
+            &format!(
+                "input {input_id} result is pending recovery: {}",
+                cause.message()
+            ),
+        );
     }
 
     pub(super) fn progress_with_manual<T>(

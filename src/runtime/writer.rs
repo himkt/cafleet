@@ -2,8 +2,10 @@ use crate::broker::runtime as storage;
 use crate::broker::runtime::ObservedTransition;
 use crate::broker::runtime::PersistenceMode;
 use crate::broker::runtime::RunRecord;
+use crate::broker::runtime::RunnerDiagnosticSource;
 use crate::db::SharedDeadline;
 use crate::db::with_shared_database_deadline;
+use crate::runtime::diagnostics::RunnerDiagnostics;
 use crate::runtime::*;
 use rusqlite::Connection;
 use std::collections::VecDeque;
@@ -18,12 +20,15 @@ use std::time::Instant;
 pub(crate) enum WriterBoundary {
     Receive,
     Persist,
+    Flush,
 }
 
 /// Equal to the connection's busy timeout, so one worker step waits at most as long as one
 /// contended statement may.
 const WRITER_STEP_BOUND: Duration = Duration::from_secs(5);
 const WRITER_JOIN_GRACE: Duration = Duration::from_millis(50);
+const DIAGNOSTIC_FLUSH_BOUND: Duration = Duration::from_millis(500);
+const DIAGNOSTIC_FLUSH_RETRY: Duration = Duration::from_secs(1);
 
 #[cfg(test)]
 pub(crate) trait WriterHooks: Send + Sync {
@@ -39,8 +44,15 @@ pub(crate) struct StepBound {
 }
 impl StepBound {
     fn new(shutdown: &SharedDeadline, clock: &Arc<dyn crate::time::Clock>) -> Self {
+        Self::within(WRITER_STEP_BOUND, shutdown, clock)
+    }
+    fn within(
+        limit: Duration,
+        shutdown: &SharedDeadline,
+        clock: &Arc<dyn crate::time::Clock>,
+    ) -> Self {
         Self {
-            until: Instant::now() + WRITER_STEP_BOUND,
+            until: Instant::now() + limit,
             shutdown: shutdown.clone(),
             clock: clock.clone(),
         }
@@ -84,13 +96,22 @@ struct Mailbox {
     stop: bool,
     fenced: bool,
     deadline: SharedDeadline,
+    diagnostics: RunnerDiagnostics,
 }
 impl Mailbox {
-    fn failure(&mut self, cause: &CafleetError) {
+    fn failure(&mut self, cause: &CafleetError, at: &str) {
         self.gaps = self.gaps.checked_add(1).expect("writer gap count overflow");
-        self.diagnostic = Some(cause.message().into_owned());
+        let message = cause.message().into_owned();
+        if self.diagnostic.as_deref() != Some(message.as_str()) {
+            self.diagnostics.record(
+                RunnerDiagnosticSource::EventWriter,
+                &format!("event writer: {message}"),
+                at,
+            );
+        }
+        self.diagnostic = Some(message);
     }
-    fn fence(&mut self, cause: &CafleetError, discarded: u64) {
+    fn fence(&mut self, cause: &CafleetError, discarded: u64, at: &str) {
         self.pending = self
             .pending
             .checked_sub(discarded)
@@ -99,7 +120,10 @@ impl Mailbox {
             .gaps
             .checked_add(discarded)
             .expect("writer gap count overflow");
-        self.diagnostic = Some(format!("event writer fenced: {}", cause.message()));
+        let diagnostic = format!("event writer fenced: {}", cause.message());
+        self.diagnostics
+            .record(RunnerDiagnosticSource::EventWriter, &diagnostic, at);
+        self.diagnostic = Some(diagnostic);
         self.fenced = true;
     }
     fn deadline(&self) -> Option<Instant> {
@@ -114,6 +138,7 @@ pub(crate) struct EventWriter {
     mailbox: Arc<Mutex<Mailbox>>,
     thread: Option<std::thread::JoinHandle<()>>,
     clock: Arc<dyn crate::time::Clock>,
+    diagnostics: RunnerDiagnostics,
 }
 impl EventWriter {
     pub(crate) fn start(
@@ -121,12 +146,14 @@ impl EventWriter {
         run: RunRecord,
         lock: Arc<RunLock>,
         clock: Arc<dyn crate::time::Clock>,
+        diagnostics: RunnerDiagnostics,
     ) -> Result<Self> {
         Self::start_worker(
             database_url,
             run,
             lock,
             clock,
+            diagnostics,
             #[cfg(test)]
             crate::runtime::writer::test_support::default_writer_hooks(),
         )
@@ -139,8 +166,9 @@ impl EventWriter {
         lock: Arc<RunLock>,
         clock: Arc<dyn crate::time::Clock>,
         hooks: Arc<dyn WriterHooks>,
+        diagnostics: RunnerDiagnostics,
     ) -> Result<Self> {
-        Self::start_worker(database_url, run, lock, clock, hooks)
+        Self::start_worker(database_url, run, lock, clock, diagnostics, hooks)
     }
 
     fn start_worker(
@@ -148,6 +176,7 @@ impl EventWriter {
         run: RunRecord,
         lock: Arc<RunLock>,
         clock: Arc<dyn crate::time::Clock>,
+        diagnostics: RunnerDiagnostics,
         #[cfg(test)] hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
         let mut conn = crate::db::connect(&database_url)?;
@@ -155,7 +184,10 @@ impl EventWriter {
             lock.validate(conn, &run.owner())
         })?;
         let (sender, receiver) = mpsc::sync_channel(64);
-        let mailbox = Arc::new(Mutex::new(Mailbox::default()));
+        let mailbox = Arc::new(Mutex::new(Mailbox {
+            diagnostics: diagnostics.clone(),
+            ..Mailbox::default()
+        }));
         let shutdown = mailbox.lock().expect("writer mailbox").deadline.clone();
         let worker = Worker {
             conn,
@@ -165,6 +197,8 @@ impl EventWriter {
             receiver,
             queue: VecDeque::new(),
             shutdown,
+            flush_next: clock.now(),
+            diagnostics: diagnostics.clone(),
             clock: clock.clone(),
             #[cfg(test)]
             hooks,
@@ -178,7 +212,12 @@ impl EventWriter {
             mailbox,
             thread: Some(thread),
             clock,
+            diagnostics,
         })
+    }
+    /// The runner diagnostics buffer this writer flushes.
+    pub(crate) fn diagnostics(&self) -> &RunnerDiagnostics {
+        &self.diagnostics
     }
     fn send(&self, transition: Box<ObservedTransition>) -> Result<()> {
         self.sender
@@ -216,7 +255,7 @@ impl EventWriter {
             return Ok(());
         };
         if !matches!(reason, RetainReason::EvidenceInvalid | RetainReason::Fenced) {
-            state.failure(&cause);
+            state.failure(&cause, &self.clock.wall_stamp());
         }
         Err(Box::new(RetainedTransition {
             transition,
@@ -299,6 +338,8 @@ struct Worker {
     receiver: mpsc::Receiver<Box<ObservedTransition>>,
     queue: VecDeque<Box<ObservedTransition>>,
     shutdown: SharedDeadline,
+    flush_next: Instant,
+    diagnostics: RunnerDiagnostics,
     clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
@@ -317,6 +358,7 @@ impl Worker {
                     break;
                 }
             }
+            self.flush_diagnostics();
             if self.clock.now() < next {
                 nap_until(self.clock.as_ref(), next);
                 continue;
@@ -327,7 +369,10 @@ impl Worker {
                     next = self.clock.now();
                 }
                 Err(cause) => {
-                    self.mailbox.lock().expect("writer mailbox").failure(&cause);
+                    self.mailbox
+                        .lock()
+                        .expect("writer mailbox")
+                        .failure(&cause, &self.clock.wall_stamp());
                     next = self.clock.now() + retry;
                     retry = (retry * 2).min(Duration::from_secs(2));
                 }
@@ -385,19 +430,25 @@ impl Worker {
         let screen_seq = front.evidence_json["screen_seq"]
             .as_u64()
             .expect("try_submit validated the front's evidence");
-        let replacement = match storage::event_rejected_transition(
-            &self.run,
-            front,
-            screen_seq,
-            &cause,
-            &self.clock.wall_stamp(),
-        ) {
-            Ok(replacement) => replacement,
-            Err(failure) => {
-                self.fence(&failure);
-                return Ok(());
-            }
-        };
+        let at = self.clock.wall_stamp();
+        self.diagnostics.record(
+            RunnerDiagnosticSource::EventWriter,
+            &format!(
+                "event writer rejected {} event {}: {}",
+                front.kind.as_str(),
+                front.event_seq,
+                cause.message()
+            ),
+            &at,
+        );
+        let replacement =
+            match storage::event_rejected_transition(&self.run, front, screen_seq, &cause, &at) {
+                Ok(replacement) => replacement,
+                Err(failure) => {
+                    self.fence(&failure);
+                    return Ok(());
+                }
+            };
         **self
             .queue
             .front_mut()
@@ -438,7 +489,42 @@ impl Worker {
         state.fence(
             cause,
             u64::try_from(discarded).expect("bounded writer capacity"),
+            &self.clock.wall_stamp(),
         );
+    }
+    /// Writes buffered runner diagnostics once the retry time arrives. A flush never records a
+    /// writer failure, so it cannot open an observation gap.
+    fn flush_diagnostics(&mut self) {
+        if self.clock.now() < self.flush_next || !self.diagnostics.pending() {
+            return;
+        }
+        let (entries, dropped) = self.diagnostics.drain();
+        let bound = StepBound::within(DIAGNOSTIC_FLUSH_BOUND, &self.shutdown, &self.clock);
+        match self.write_diagnostics(&bound, &entries, dropped) {
+            Ok(()) => self.flush_next = self.clock.now(),
+            Err(cause) => {
+                if cause.transient_storage() {
+                    self.diagnostics.restore(entries, dropped);
+                } else {
+                    self.diagnostics.discard(&entries, dropped);
+                }
+                self.flush_next = self.clock.now() + DIAGNOSTIC_FLUSH_RETRY;
+            }
+        }
+    }
+    fn write_diagnostics(
+        &mut self,
+        bound: &StepBound,
+        entries: &[storage::RunnerDiagnosticEntry],
+        dropped: u64,
+    ) -> Result<()> {
+        #[cfg(test)]
+        self.hooks.before(WriterBoundary::Flush, bound)?;
+
+        with_shared_database_deadline(&mut self.conn, bound.until, &self.shutdown, |conn| {
+            self.lock.validate(conn, &self.run.owner())?;
+            storage::persist_runner_diagnostics(conn, &self.run.owner(), entries, dropped)
+        })
     }
 }
 

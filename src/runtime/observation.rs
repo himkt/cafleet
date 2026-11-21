@@ -108,6 +108,7 @@ pub(crate) struct ObservationController {
     unplanned_question_episode: Option<i64>,
     pending_error: Option<CafleetError>,
     delivery_results: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
+    diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
     #[cfg(test)]
     capture: Option<native_capture::NativeCapturePort>,
     #[cfg(test)]
@@ -251,11 +252,20 @@ impl ObservationController {
             unplanned_question_episode: None,
             pending_error: None,
             delivery_results: std::sync::Mutex::default(),
+            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
             #[cfg(test)]
             capture: None,
             #[cfg(test)]
             observation_hooks: None,
         })
+    }
+    /// Records gap openings into the runner's shared diagnostics buffer, which the event writer
+    /// flushes; until called, they go to a buffer of this controller alone.
+    pub(crate) fn share_diagnostics(
+        &mut self,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    ) {
+        self.diagnostics = diagnostics;
     }
     /// Queues a deferred input's first result for publication on the next poll, once per input.
     pub(crate) fn publish_delivery_result(&self, record: serde_json::Value) {
@@ -506,6 +516,13 @@ impl ObservationController {
                 .checked_add(1)
                 .ok_or_else(|| error("terminal observation loss overflow"))?;
             return Ok(());
+        }
+        if self.gap.is_none() {
+            self.diagnostics.record(
+                storage::RunnerDiagnosticSource::Observation,
+                &format!("observation gap opened: {}", reason.as_str()),
+                &now.observed_at,
+            );
         }
         let gap = self.gap.get_or_insert_with(|| PendingGap {
             started_at: now.observed_at.clone(),

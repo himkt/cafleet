@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 32/57 tasks complete
+**Progress**: 40/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -475,17 +475,17 @@ The Permanent phase queues its second prompt behind an open interaction, because
 - [x] Make `persist_transition_in_transaction` commit a delivery whose `archive` is set as a silent archived row at `transition.event_seq` (`notification_state='archived'`, NULL `message_id`, no inbox message) <!-- completed: 2026-11-21T14:41 -->
 - [x] Make the delivery dedup branch build the delivery fields and commit a `duplicate_delivery` archived row returned as inserted, with `duplicate_delivery` taking precedence over `head_not_ready` and both applying only when `historical_ownership` supplies no archive reason, per § Duplicate delivery records <!-- completed: 2026-11-21T14:41 -->
 - [x] Add the `events.rs` tests for `head_not_ready` archival and, for the head and preview dedup queries, a duplicate committing a `duplicate_delivery` row at its `event_seq`, its idempotent retry comparing equal and the next transition persisting <!-- completed: 2026-11-21T14:41 -->
-- [ ] Add the `service.rs` scenario where an interaction restarts a head's stall watch, the head stalls again, the second record commits as `duplicate_delivery` and later events still persist <!-- completed: -->
+- [x] Add the `service.rs` scenario where an interaction restarts a head's stall watch, the head stalls again, the second record commits as `duplicate_delivery` and later events still persist <!-- completed: 2026-11-21T14:56 -->
 
 ### Step 6: Runner diagnostics
 
-- [ ] Add `member_runner_diagnostics` and its index to `assets/migrations/V1__baseline.sql` before `refinery_schema_history` <!-- completed: -->
-- [ ] Add the storage upsert/prune and latest-5 read functions under `src/broker/runtime/` <!-- completed: -->
-- [ ] Add the shared `RunnerDiagnostics` buffer with 32-entry overflow accounting <!-- completed: -->
-- [ ] Record every source site in § Runner diagnostics through it, keeping the `eprintln!` copy <!-- completed: -->
-- [ ] Flush from the event worker per § Runner diagnostics, including its bound, `flush_next` and outcome rules <!-- completed: -->
-- [ ] Write the `shutdown` rows in the cleanup UPDATE transaction <!-- completed: -->
-- [ ] Add the buffer, flush, dedup, prune and shutdown tests <!-- completed: -->
+- [x] Add `member_runner_diagnostics` and its index to `assets/migrations/V1__baseline.sql` before `refinery_schema_history` <!-- completed: 2026-11-21T14:56 -->
+- [x] Add the storage upsert/prune and latest-5 read functions under `src/broker/runtime/` <!-- completed: 2026-11-21T14:56 -->
+- [x] Add the shared `RunnerDiagnostics` buffer with 32-entry overflow accounting <!-- completed: 2026-11-21T14:56 -->
+- [x] Record every source site in § Runner diagnostics through it, keeping the `eprintln!` copy <!-- completed: 2026-11-21T14:56 -->
+- [x] Flush from the event worker per § Runner diagnostics, including its bound, `flush_next` and outcome rules <!-- completed: 2026-11-21T14:56 -->
+- [x] Write the `shutdown` rows in the cleanup UPDATE transaction <!-- completed: 2026-11-21T14:56 -->
+- [x] Add the buffer, flush, dedup, prune and shutdown tests <!-- completed: 2026-11-21T14:56 -->
 
 ### Step 7: Observation health and surfaces
 
