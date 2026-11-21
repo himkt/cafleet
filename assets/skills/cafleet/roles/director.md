@@ -302,7 +302,7 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 1. Complete [Required reading](#required-reading) and the supplied host rules, then resolve each member's backend/model/effort before writing its prompt.
 2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn multiplexer` caller-pane line is resolved at step 3 by [Director pane identification](#director-pane-identification). Preserve the user's host continuation controls as supplied.
 3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs; every later command targets the recorded placement. When it refuses the Director pane, follow [Director pane identification](#director-pane-identification). With a custom database, pass `--database-url <url>` on every command, this one included.
-4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin or extension tool. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
+4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin or extension tool. Pass the recipe's complete invocation, including every host tool deadline it sets (Claude Monitor `timeout_ms`), on this arm and on every renewal or replacement. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 6. Receive each member's ready and record it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
 7. Keep native reception active and follow [Director wake](#director-wake) for the fleet's lifetime; [Shutdown](#shutdown) ends it through fleet deletion.
@@ -333,13 +333,14 @@ Run one persistent receiver through your backend's reception recipe in [coding-a
 
 #### Receiver recovery
 
-Retain pending messages across recovery. Repeated receiver failures require diagnosis; each replacement requires observed termination and a fresh successful broker health/inbox check. *Manual reads* are manual `poll --json` within host permissions at your wake points, recorded under [Director wake](#director-wake) step 4. After a session or context loss between a poll and its record, treat every in-flight assignment as overdue: capture member panes and artifacts, recover each body a member's send output names with `message show MESSAGE_ID --json`, and otherwise ask the member through the broker to restate its status.
+Retain pending messages across recovery. Every renewal and replacement uses the backend recipe's complete invocation, including its host tool deadline. Repeated receiver failures require diagnosis; each replacement requires observed termination and a fresh successful broker health/inbox check. *Manual reads* are manual `poll --json` within host permissions at your wake points, recorded under [Director wake](#director-wake) step 4. After a session or context loss between a poll and its record, treat every in-flight assignment as overdue: capture member panes and artifacts, recover each body a member's send output names with `message show MESSAGE_ID --json`, and otherwise ask the member through the broker to restate its status.
 
 | Observed state | Director response |
 |---|---|
 | Live handle, empty read | Retain the handle and read it again when appropriate |
 | Clean `closed` with `timeout` | Establish task exit, then renew while the fleet exists |
 | `member_inactive` / `fleet_deleted` | Retire the handle; resume only with an explicitly established new task/identity |
+| Host tool timeout before a `closed` record | The invocation's host deadline is shorter than the lease; replace the receiver with the recipe's complete invocation and its deadline |
 | Unexpected EOF, failed native call or receiver exit | Inspect output/exit, then replace the receiver |
 | Fatal database/schema error | Surface the cause, and restart only after the repair it names is authorized and complete |
 | Truncated output or incomplete JSONL | Preserve complete records and run one `message poll --json`, which returns every unpolled message whatever the notice carried |
