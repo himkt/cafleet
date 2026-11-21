@@ -3110,6 +3110,13 @@ pub(crate) mod test_support {
                 boundary: WriterBoundary,
                 bound: &crate::runtime::writer::StepBound,
             ) -> Result<(), CafleetError> {
+                if matches!(boundary, WriterBoundary::Flush)
+                    && self.directory.join("fail-flush").exists()
+                {
+                    return Err(CafleetError::DatabaseBusy(
+                        "owned synthetic flush busy".into(),
+                    ));
+                }
                 if matches!(boundary, WriterBoundary::Persist)
                     && self.directory.join("fail-persist").exists()
                 {
@@ -3147,9 +3154,21 @@ pub(crate) mod test_support {
                 .map_err(io_error)?;
             let catalog = crate::coding_agent::catalog::test_support::load(&value["catalog"])?;
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
+            let diagnostics = crate::runtime::diagnostics::RunnerDiagnostics::default();
+            if let Some(seeded) = value.get("seed_diagnostics") {
+                let stamp = crate::time::Clock::wall_stamp(&crate::time::SystemClock);
+                for index in 0..seeded.as_u64().expect("seed_diagnostics is an entry count") {
+                    diagnostics.record(
+                        crate::broker::runtime::RunnerDiagnosticSource::QueueHousekeeping,
+                        &format!("label: seeded {index:02}"),
+                        &stamp,
+                    );
+                }
+            }
             let services = crate::runtime::service::RunnerDependencies {
                 catalog: Box::leak(Box::new(catalog)),
                 clock: Arc::new(crate::time::SystemClock),
+                diagnostics,
                 writer_hooks: Arc::new(Hooks {
                     directory: config.parent().unwrap().to_path_buf(),
                 }),
@@ -4521,6 +4540,79 @@ mod tests {
                     "{diagnostic:?} has a shutdown row: {rows:?}"
                 );
             }
+        }
+
+        const SEEDED: u64 = 40;
+
+        fn seeded_unflushable(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            spec: &mut crate::runtime::SpawnSpec,
+        ) {
+            crate::runtime::service::test_support::observation_services::synthetic(fixture, spec);
+            let path = fixture._dir.path().join("observation-services.json");
+            let mut config: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            config["seed_diagnostics"] = serde_json::json!(SEEDED);
+            std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
+            crate::runtime::service::test_support::observation_services::private_write(
+                &fixture._dir.path().join("fail-flush"),
+                b"owned test gate",
+            );
+        }
+
+        #[test]
+        fn control_shutdown_writes_still_buffered_diagnostics_and_the_overflow_row() {
+            let mut fixture = ServiceFixture::configured(false, seeded_unflushable);
+            fixture.prepare();
+            fixture.publish();
+            fixture.fixture.conn.execute_batch("CREATE TRIGGER reject_review_running BEFORE UPDATE OF status ON member_runs WHEN NEW.status='running' BEGIN SELECT RAISE(ABORT,'fixture running persistence blocked'); END").unwrap();
+            assert_rejected(&fixture.start());
+            assert_eq!(fixture.wait().code(), Some(1));
+            let run_id = fixture.fixture.run.run_id;
+            let rows: Vec<(String, String, i64)> = fixture
+                .fixture
+                .conn
+                .prepare("SELECT source,message,count FROM member_runner_diagnostics WHERE run_id=?1 ORDER BY diagnostic_id")
+                .unwrap()
+                .query_map([run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            let seeded = |index: u64| format!("label: seeded {index:02}");
+            assert!(
+                rows.iter()
+                    .any(|(source, message, _)| source == "queue_housekeeping"
+                        && *message == seeded(SEEDED - 1)),
+                "the newest buffered entry is written at shutdown: {rows:?}"
+            );
+            for evicted in 0..8 {
+                assert!(
+                    !rows
+                        .iter()
+                        .any(|(_, message, _)| *message == seeded(evicted)),
+                    "seeded entry {evicted} was evicted from the 32-entry buffer: {rows:?}"
+                );
+            }
+            let overflow: Vec<u64> = rows
+                .iter()
+                .filter(|(source, _, _)| source == "event_writer")
+                .filter_map(|(_, message, _)| {
+                    message
+                        .strip_prefix("diagnostic buffer overflow: ")?
+                        .strip_suffix(" entries dropped")?
+                        .parse()
+                        .ok()
+                })
+                .collect();
+            let [dropped] = overflow.as_slice() else {
+                panic!("one overflow row: {rows:?}");
+            };
+            assert!(*dropped >= 8, "{rows:?}");
+            assert!(
+                rows.iter().any(|(source, _, _)| source == "shutdown"),
+                "the outcome diagnostics are written alongside: {rows:?}"
+            );
+            assert!(rows.len() <= 256);
         }
     }
 
