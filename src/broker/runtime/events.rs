@@ -2488,6 +2488,9 @@ mod tests {
             HeadNoLongerReady,
             Preview,
             Blocked,
+            PromptResult,
+            PromptResultAfterSettlement,
+            PreviewResult,
         }
 
         fn uncertain_blocker(fixture: &mut Fixture, owner: &RunOwner, key: &str) -> i64 {
@@ -2523,6 +2526,18 @@ mod tests {
             DuplicateCase {
                 name: "a repeated blocked record for the same blocker",
                 waiter: Waiter::Blocked,
+            },
+            DuplicateCase {
+                name: "a repeated prompt result",
+                waiter: Waiter::PromptResult,
+            },
+            DuplicateCase {
+                name: "a repeated prompt result after the input settles",
+                waiter: Waiter::PromptResultAfterSettlement,
+            },
+            DuplicateCase {
+                name: "a repeated preview result",
+                waiter: Waiter::PreviewResult,
             },
         ];
 
@@ -2776,9 +2791,19 @@ mod tests {
             for case in DUPLICATE_CASES {
                 let name = case.name;
                 let (mut fixture, owner, head) = stalled_fixture();
-                let (input_id, message_id, blocked_by) = match case.waiter {
+                let stalled =
+                    |input_id: Value, message_id: Value, blocked_by: Value| ObservedTransition {
+                        cause_json: Some(json!({
+                            "kind":"input_delivery_stalled", "input_id":input_id,
+                            "message_id":message_id, "blocked_by_input_id":blocked_by,
+                            "waiting_since":NOW,
+                        })),
+                        ..stalled_transition(&owner, head.input_id)
+                    };
+                let mut settled_result = None;
+                let first = match case.waiter {
                     Waiter::Head | Waiter::HeadNoLongerReady => {
-                        (json!(head.input_id), Value::Null, Value::Null)
+                        stalled(json!(head.input_id), Value::Null, Value::Null)
                     }
                     Waiter::Preview => {
                         let preview = crate::broker::messaging::insert_message_validated(
@@ -2788,23 +2813,38 @@ mod tests {
                             "stalled preview",
                         )
                         .unwrap();
-                        (Value::Null, json!(preview.message_id), Value::Null)
+                        stalled(Value::Null, json!(preview.message_id), Value::Null)
                     }
                     Waiter::Blocked => {
                         let blocker = uncertain_blocker(&mut fixture, &owner, "prompt:blocker");
-                        (Value::Null, Value::Null, json!(blocker))
+                        stalled(Value::Null, Value::Null, json!(blocker))
                     }
-                };
-                let record = |waiting_since: &str| {
-                    json!({
-                        "kind":"input_delivery_stalled", "input_id":input_id,
-                        "message_id":message_id, "blocked_by_input_id":blocked_by,
-                        "waiting_since":waiting_since,
-                    })
-                };
-                let first = ObservedTransition {
-                    cause_json: Some(record(NOW)),
-                    ..stalled_transition(&owner, head.input_id)
+                    Waiter::PromptResult | Waiter::PromptResultAfterSettlement => {
+                        let input = immediate_uncertain(&mut fixture, &owner);
+                        if matches!(case.waiter, Waiter::PromptResultAfterSettlement) {
+                            settled_result = Some(input.input_id);
+                        }
+                        stopped_result(&owner, input.input_id)
+                    }
+                    Waiter::PreviewResult => {
+                        let preview = crate::broker::messaging::insert_message_validated(
+                            &fixture.conn,
+                            fixture.director,
+                            fixture.member,
+                            "uncertain preview",
+                        )
+                        .unwrap();
+                        ObservedTransition {
+                            kind: RuntimeEventKind::InputDeliveryResult,
+                            cause_json: Some(storage::preview_delivery_result_cause(
+                                preview.message_id,
+                                DeliveryMethod::Profile,
+                                "unknown",
+                                StopCause::WriteFailed,
+                            )),
+                            ..native_exit(owner.run_id, 1)
+                        }
+                    }
                 };
                 let (published, inserted) = storage::persist_transition(
                     &mut fixture.conn,
@@ -2829,10 +2869,25 @@ mod tests {
                     )
                     .unwrap();
                 }
+                if let Some(input_id) = settled_result {
+                    storage::test_support::settle_input(
+                        &mut fixture.conn,
+                        &owner,
+                        input_id,
+                        InputState::Uncertain,
+                        InputDisposition::Submitted,
+                        "fixture:observed-native-result",
+                    )
+                    .unwrap();
+                }
+                let mut repeated = first.cause_json.clone().unwrap();
+                if first.kind == RuntimeEventKind::InputDeliveryStalled {
+                    repeated["waiting_since"] = json!(LATER);
+                }
                 let repeat = ObservedTransition {
                     event_seq: 2,
                     observed_at: LATER.into(),
-                    cause_json: Some(record(LATER)),
+                    cause_json: Some(repeated),
                     ..first.clone()
                 };
                 assert_silent_archive(

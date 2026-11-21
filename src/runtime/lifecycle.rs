@@ -2586,7 +2586,11 @@ mod tests {
             start + Duration::from_millis(80),
             |conn| sum(conn, SLOW_SUM),
         );
-        assert!(result.is_err());
+        let error = result.expect_err("the deadline cancels the long statement");
+        assert!(
+            error.transient_storage(),
+            "a statement cut off by its deadline is transient: {error:?}"
+        );
         assert!(start.elapsed() < Duration::from_millis(750));
         assert_eq!(sum(&fixture.conn, FAST_SUM).unwrap(), 50005000);
         assert_eq!(

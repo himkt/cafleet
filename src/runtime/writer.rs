@@ -842,6 +842,47 @@ mod tests {
                 );
             }
         }
+
+        #[test]
+        fn writer_keeps_a_statement_cut_off_by_the_shutdown_deadline_at_the_front_unrejected() {
+            let fixture = WriterFixture::new();
+            fixture
+                .fixture
+                .conn
+                .execute_batch(
+                    "CREATE TABLE slow_rows(value INTEGER);
+                     INSERT INTO slow_rows WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<2000) SELECT x FROM counter;
+                     CREATE TRIGGER slow_event_insert BEFORE INSERT ON member_runtime_events BEGIN SELECT count(*) FROM slow_rows a, slow_rows b, slow_rows c; END",
+                )
+                .unwrap();
+            let diagnostics = RunnerDiagnostics::default();
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start_with(&fixture, hooks.clone(), diagnostics.clone());
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            hooks.wait(WriterBoundary::Persist, 1);
+            std::thread::sleep(Duration::from_millis(100));
+            let started = Instant::now();
+            let (pending, _) = writer.finish(started + Duration::from_millis(200));
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < Duration::from_secs(1),
+                "the shutdown deadline interrupts the statement: {elapsed:?}"
+            );
+            assert_eq!(pending, 1, "the original stays accepted and unsaved");
+            assert_eq!(
+                hooks.state.lock().unwrap().calls[index(WriterBoundary::Persist)],
+                1,
+                "no replacement persist follows the interrupted original"
+            );
+            let (entries, _) = diagnostics.snapshot();
+            assert!(
+                entries
+                    .iter()
+                    .all(|entry| !entry.message.starts_with("event writer rejected")),
+                "an interrupted statement records no rejection: {entries:?}"
+            );
+            assert_eq!(committed(&fixture), 0, "no rejection event is persisted");
+        }
     }
 
     mod rejection {

@@ -2207,9 +2207,12 @@ mod tests {
                 );
                 let elapsed = started.elapsed();
                 lowering.join().unwrap();
+                let error = result.err().unwrap_or_else(|| {
+                    panic!("{name}: the lowered shared deadline aborts the wait")
+                });
                 assert!(
-                    result.is_err(),
-                    "{name}: the lowered shared deadline aborts the wait"
+                    error.transient_storage(),
+                    "{name}: a wait cut off by the shared deadline is transient: {error:?}"
                 );
                 assert!(
                     elapsed >= LOWER_AFTER - Duration::from_millis(10),
