@@ -9991,6 +9991,65 @@ mod tests {
                 writer.finish(deadline());
             }
         }
+
+        #[test]
+        fn controller_replaces_an_evidence_invalid_refusal_with_its_rejection_and_opens_no_gap() {
+            let mut fixture = WriterFixture::new();
+            configure(&mut fixture);
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start(&fixture, hooks);
+            let clock = fixture_clock();
+            let (mut controller, _child, terminal) =
+                started_controller(&mut fixture, &writer, &clock, &catalog());
+            let forged = TransitionDraft {
+                run_id: fixture.fixture.run.run_id,
+                episode_seq: None,
+                classification: None,
+                kind: RuntimeEventKind::CoverageUnknown,
+                observed_at: NOW.into(),
+                evidence_json: serde_json::json!({"forged": true}),
+                close_reason: None,
+                cause_json: Some(serde_json::json!({"kind":"coverage_unknown"})),
+            };
+            let update = controller.update(vec![forged]);
+            controller.retain(update).unwrap();
+            clock.set_elapsed(Duration::from_millis(100));
+            let status = controller
+                .poll(&terminal.snapshot(), &writer, &clock)
+                .unwrap();
+            assert_eq!(status.gap_count, 0, "{status:?}");
+            assert_eq!(status.diagnostic, None, "{status:?}");
+            assert!(!status.retained_transition, "{status:?}");
+            assert!(!controller.has_pending());
+            wait_until_within(Duration::from_secs(20), || {
+                committed(&fixture) == 1 && writer.status().pending_count == 0
+            });
+            let state = writer.status();
+            assert_eq!(state.diagnostic, None, "{state:?}");
+            assert_eq!(state.gap_count, 0, "{state:?}");
+            let event = event_at(&fixture, 1).event;
+            assert_eq!(event.kind, RuntimeEventKind::RunnerDegraded);
+            let cause = &event.payload_json["cause"];
+            assert_eq!(cause["kind"], "event_rejected");
+            assert_eq!(cause["rejected_kind"], "coverage_unknown");
+            assert_eq!(cause["rejected_observed_at"], NOW);
+            assert!(
+                cause["error"]
+                    .as_str()
+                    .is_some_and(|error| !error.is_empty()),
+                "{cause}"
+            );
+            assert_eq!(
+                event.payload_json["evidence"]["rule_id"],
+                "runner-lifecycle"
+            );
+            assert_eq!(
+                event.payload_json["evidence"]["screen_seq"],
+                terminal.snapshot().screen_seq
+            );
+            assert_eq!(controller.status().gap_count, 0);
+            writer.finish(deadline());
+        }
     }
 
     mod bundled_claude_auto_tracker {

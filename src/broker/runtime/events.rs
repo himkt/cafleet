@@ -2642,4 +2642,236 @@ mod tests {
             }
         }
     }
+
+    mod diagnostic_text_sanitizing {
+        use crate::broker::runtime::events::tests::*;
+
+        struct SanitizeCase {
+            name: &'static str,
+            input: String,
+            expected: String,
+        }
+
+        fn sanitize_cases() -> Vec<SanitizeCase> {
+            vec![
+                SanitizeCase {
+                    name: "plain text is unchanged",
+                    input: "event writer fenced: database error: constraint failed".into(),
+                    expected: "event writer fenced: database error: constraint failed".into(),
+                },
+                SanitizeCase {
+                    name: "each control character becomes a space",
+                    input: "label: a\nb\tc\rd\u{0}e\u{1f}f\u{7f}g".into(),
+                    expected: "label: a b c d e f g".into(),
+                },
+                SanitizeCase {
+                    name: "surrounding whitespace and control characters are trimmed",
+                    input: "\n  label: cause \t\r\n".into(),
+                    expected: "label: cause".into(),
+                },
+                SanitizeCase {
+                    name: "exactly 512 bytes are kept",
+                    input: format!("label: {}", "x".repeat(505)),
+                    expected: format!("label: {}", "x".repeat(505)),
+                },
+                SanitizeCase {
+                    name: "ASCII beyond 512 bytes is truncated to 512",
+                    input: format!("label: {}", "x".repeat(600)),
+                    expected: format!("label: {}", "x".repeat(505)),
+                },
+                SanitizeCase {
+                    name: "truncation keeps a UTF-8 boundary",
+                    input: format!("label: {}{}", "x".repeat(504), "é".repeat(4)),
+                    expected: format!("label: {}", "x".repeat(504)),
+                },
+            ]
+        }
+
+        #[test]
+        fn diagnostic_text_replaces_controls_trims_and_truncates_at_a_utf8_boundary() {
+            for case in sanitize_cases() {
+                let sanitized = diagnostic_text(&case.input);
+                assert_eq!(sanitized, case.expected, "{}", case.name);
+                assert!(sanitized.len() <= 512, "{}", case.name);
+                assert!(
+                    !sanitized.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}'),
+                    "{}",
+                    case.name
+                );
+                assert_eq!(
+                    diagnostic_text(&sanitized),
+                    sanitized,
+                    "{}: sanitizing is idempotent",
+                    case.name
+                );
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn diagnostic_text_asserts_a_non_empty_result() {
+            diagnostic_text(" \n\t\r ");
+        }
+    }
+
+    mod event_rejected_cause {
+        use crate::broker::runtime::events::tests::*;
+
+        fn rejected_cause() -> Value {
+            json!({
+                "kind":"event_rejected",
+                "rejected_kind":"input_delivery_result",
+                "rejected_observed_at":NOW,
+                "error":"database error: live injected rejection",
+            })
+        }
+
+        fn degraded(run_id: i64, cause: Value) -> ObservedTransition {
+            ObservedTransition {
+                kind: RuntimeEventKind::RunnerDegraded,
+                cause_json: Some(cause),
+                ..native_exit(run_id, 1)
+            }
+        }
+
+        #[test]
+        fn event_rejected_runner_degraded_persists_its_cause_and_round_trips() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let transition = degraded(owner.run_id, rejected_cause());
+            let (event, inserted) = storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &transition,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            assert!(inserted);
+            assert_eq!(event.kind, RuntimeEventKind::RunnerDegraded);
+            assert_eq!(event.event_seq, 1);
+            assert_eq!(event.payload_json["cause"], rejected_cause());
+            assert_eq!(event.payload_json["director_action"], Value::Null);
+            assert_eq!(event.payload_json["source"], "runner_lifecycle");
+            let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
+            assert_eq!(view.event.payload_json, event.payload_json);
+            assert_eq!(
+                crate::broker::runtime::events::original(&view).unwrap(),
+                transition
+            );
+            let (retried, inserted) = storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &transition,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            assert!(!inserted, "an idempotent retry compares equal");
+            assert_eq!(retried.event_id, event.event_id);
+        }
+
+        #[test]
+        fn event_rejected_cause_kind_is_named_event_rejected() {
+            assert_eq!(RuntimeCauseKind::EventRejected.as_str(), "event_rejected");
+            assert_eq!(
+                RuntimeCauseKind::try_from("event_rejected").unwrap(),
+                RuntimeCauseKind::EventRejected
+            );
+        }
+
+        #[test]
+        fn event_rejected_cause_validation_refuses_malformed_causes() {
+            type Forge = fn(&mut Value);
+            let cases: &[(&str, RuntimeEventKind, Forge)] = &[
+                (
+                    "another lifecycle event kind",
+                    RuntimeEventKind::CoverageUnknown,
+                    |_| {},
+                ),
+                (
+                    "an unknown cause key",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| cause["gap_count"] = json!(1),
+                ),
+                (
+                    "a missing rejected_kind",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| {
+                        cause.as_object_mut().unwrap().remove("rejected_kind");
+                    },
+                ),
+                (
+                    "a missing rejected_observed_at",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| {
+                        cause
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("rejected_observed_at");
+                    },
+                ),
+                (
+                    "a missing error",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| {
+                        cause.as_object_mut().unwrap().remove("error");
+                    },
+                ),
+                (
+                    "an invalid rejected_kind",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| cause["rejected_kind"] = json!("not_an_event_kind"),
+                ),
+                (
+                    "a non-string rejected_kind",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| cause["rejected_kind"] = json!(7),
+                ),
+                (
+                    "a non-RFC 3339 rejected_observed_at",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| cause["rejected_observed_at"] = json!("yesterday"),
+                ),
+                (
+                    "an empty error",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| cause["error"] = json!(""),
+                ),
+                (
+                    "an error with a control character",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| cause["error"] = json!("database error:\nconstraint failed"),
+                ),
+                (
+                    "an error longer than 512 bytes",
+                    RuntimeEventKind::RunnerDegraded,
+                    |cause| cause["error"] = json!(format!("label: {}", "x".repeat(506))),
+                ),
+                ("a null error", RuntimeEventKind::RunnerDegraded, |cause| {
+                    cause["error"] = Value::Null
+                }),
+            ];
+            for &(name, kind, forge) in cases {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let mut cause = rejected_cause();
+                forge(&mut cause);
+                let transition = ObservedTransition {
+                    kind,
+                    ..degraded(owner.run_id, cause)
+                };
+                let before = durable_state(&fixture.conn);
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live,
+                    )
+                    .is_err(),
+                    "{name}"
+                );
+                assert_eq!(durable_state(&fixture.conn), before, "{name}");
+            }
+        }
+    }
 }
