@@ -6026,7 +6026,11 @@ mod tests {
                 stall["message_id"],
                 runner.message("stalled behind a human draft").message_id
             );
-            assert!(stall.get("blocking_input_id").is_none(), "{stall}");
+            assert_eq!(
+                stall["blocked_by_input_id"],
+                serde_json::Value::Null,
+                "{stall}"
+            );
             assert!(stall["waiting_since"].as_str().is_some(), "{stall}");
             assert!(
                 stall["director_action"]["instruction"]
@@ -6058,11 +6062,21 @@ mod tests {
                         key: "prompt:restarted-stall",
                         literal: "head that stalls twice",
                     },
+                    Step::HoldPane,
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(1)),
                     Step::Screen(DRAFT),
+                    Step::Run(Duration::from_millis(500)),
+                    Step::ReleasePane,
                     Step::Run(Duration::from_secs(4)),
                     Step::Screen(APPROVAL),
                     Step::Run(Duration::from_secs(1)),
+                    Step::HoldPane,
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(1)),
                     Step::Screen(DRAFT),
+                    Step::Run(Duration::from_millis(500)),
+                    Step::ReleasePane,
                     Step::Run(Duration::from_secs(4)),
                     Step::Screen(APPROVAL),
                     Step::Run(Duration::from_secs(1)),

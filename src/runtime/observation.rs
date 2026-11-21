@@ -10112,6 +10112,25 @@ mod tests {
         }
 
         #[test]
+        fn publish_delivery_result_queues_blocked_records_per_blocker_and_drops_a_queued_repeat() {
+            let mut fixture = WriterFixture::new();
+            configure(&mut fixture);
+            let controller = ObservationController::new(&fixture.fixture.run, &catalog()).unwrap();
+            let blocked = |blocker: i64| serde_json::json!({"kind":"input_delivery_stalled","input_id":null,"message_id":null,"blocked_by_input_id":blocker,"waiting_since":NOW});
+            controller.publish_delivery_stalled(blocked(11));
+            controller.publish_delivery_stalled(blocked(12));
+            controller.publish_delivery_stalled(blocked(11));
+            let queued: Vec<serde_json::Value> = controller
+                .delivery_results
+                .lock()
+                .unwrap()
+                .iter()
+                .cloned()
+                .collect();
+            assert_eq!(queued, [blocked(11), blocked(12)]);
+        }
+
+        #[test]
         fn controller_replaces_an_evidence_invalid_refusal_with_its_rejection_and_opens_no_gap() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);

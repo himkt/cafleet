@@ -2165,7 +2165,7 @@ mod tests {
                 kind: RuntimeEventKind::InputDeliveryStalled,
                 cause_json: Some(json!({
                     "kind":"input_delivery_stalled", "input_id":head,
-                    "message_id":null, "waiting_since":NOW,
+                    "message_id":null, "blocked_by_input_id":null, "waiting_since":NOW,
                 })),
                 ..native_exit(owner.run_id, 1)
             }
@@ -2277,7 +2277,12 @@ mod tests {
                 "{name}: no inbox message"
             );
             let record = transition.cause_json.as_ref().unwrap();
-            for key in ["input_id", "message_id", "waiting_since"] {
+            for key in [
+                "input_id",
+                "message_id",
+                "blocked_by_input_id",
+                "waiting_since",
+            ] {
                 assert_eq!(event.payload_json[key], record[key], "{name}: {key}");
             }
             let view = storage::get_event(&fixture.reopen(), event.event_id)
@@ -2387,6 +2392,19 @@ mod tests {
             Head,
             HeadNoLongerReady,
             Preview,
+            Blocked,
+        }
+
+        fn uncertain_blocker(fixture: &mut Fixture, owner: &RunOwner, key: &str) -> i64 {
+            let input = fixture.input(owner, key, InputKind::Prompt);
+            storage::record_input_uncertain(
+                &mut fixture.conn,
+                owner,
+                input.input_id,
+                StopCause::WriteFailed,
+            )
+            .unwrap()
+            .input_id
         }
 
         struct DuplicateCase {
@@ -2407,7 +2425,254 @@ mod tests {
                 name: "a repeated preview record",
                 waiter: Waiter::Preview,
             },
+            DuplicateCase {
+                name: "a repeated blocked record for the same blocker",
+                waiter: Waiter::Blocked,
+            },
         ];
+
+        const RECONCILE_INSTRUCTION: &str = "Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.";
+
+        fn blocked_transition(
+            owner: &RunOwner,
+            event_seq: i64,
+            blocker: Value,
+        ) -> ObservedTransition {
+            ObservedTransition {
+                event_seq,
+                kind: RuntimeEventKind::InputDeliveryStalled,
+                cause_json: Some(json!({
+                    "kind":"input_delivery_stalled", "input_id":null, "message_id":null,
+                    "blocked_by_input_id":blocker, "waiting_since":NOW,
+                })),
+                ..native_exit(owner.run_id, event_seq)
+            }
+        }
+
+        #[test]
+        fn a_blocked_stalled_record_names_its_blocker_and_the_reconcile_action() {
+            for blocker_state in ["uncertain", "settled by a racing reconcile"] {
+                let (mut fixture, owner, _) = stalled_fixture();
+                let blocker = uncertain_blocker(&mut fixture, &owner, "prompt:blocker");
+                if blocker_state != "uncertain" {
+                    storage::test_support::settle_input(
+                        &mut fixture.conn,
+                        &owner,
+                        blocker,
+                        InputState::Uncertain,
+                        InputDisposition::Submitted,
+                        "audit:pane-shows-the-input",
+                    )
+                    .unwrap();
+                }
+                let transition = blocked_transition(&owner, 1, json!(blocker));
+                let (event, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap_or_else(|error| panic!("{blocker_state}: {}", error.message()));
+                assert!(inserted, "{blocker_state}");
+                assert_eq!(
+                    event.notification_state,
+                    NotificationState::Inbox,
+                    "{blocker_state}"
+                );
+                let payload = &event.payload_json;
+                let keys: Vec<&str> = payload
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect();
+                let position = |key: &str| keys.iter().position(|candidate| *candidate == key);
+                let ordered = [
+                    "input_id",
+                    "message_id",
+                    "blocked_by_input_id",
+                    "waiting_since",
+                ]
+                .map(|key| position(key).unwrap_or_else(|| panic!("{key} in {keys:?}")));
+                assert!(
+                    ordered.windows(2).all(|pair| pair[1] == pair[0] + 1),
+                    "{blocker_state}: the stalled keys are appended in order: {keys:?}"
+                );
+                assert_eq!(payload["input_id"], Value::Null, "{blocker_state}");
+                assert_eq!(payload["message_id"], Value::Null, "{blocker_state}");
+                assert_eq!(payload["blocked_by_input_id"], blocker, "{blocker_state}");
+                assert_eq!(payload["waiting_since"], NOW, "{blocker_state}");
+                let mut argv = vec![
+                    "cafleet".to_owned(),
+                    "input".into(),
+                    "show".into(),
+                    blocker.to_string(),
+                    "--json".into(),
+                ];
+                argv.extend([
+                    "--database-url".to_owned(),
+                    format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                ]);
+                assert_eq!(
+                    payload["director_action"],
+                    json!({"kind":"reconcile_uncertain_input","instruction":RECONCILE_INSTRUCTION,"inspect_argv":argv}),
+                    "{blocker_state}"
+                );
+                let view = storage::get_event(&fixture.reopen(), event.event_id)
+                    .unwrap_or_else(|error| panic!("{blocker_state}: {}", error.message()));
+                assert_eq!(
+                    crate::broker::runtime::events::original(&view).unwrap(),
+                    transition,
+                    "{blocker_state}: original rebuilds the 5-key record"
+                );
+            }
+        }
+
+        #[test]
+        fn blocked_records_naming_different_blockers_are_each_published() {
+            let (mut fixture, owner, _) = stalled_fixture();
+            let first = uncertain_blocker(&mut fixture, &owner, "prompt:first-blocker");
+            let second = uncertain_blocker(&mut fixture, &owner, "prompt:second-blocker");
+            for (sequence, blocker) in [(1, first), (2, second)] {
+                let (event, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &blocked_transition(&owner, sequence, json!(blocker)),
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(inserted);
+                assert_eq!(
+                    event.notification_state,
+                    NotificationState::Inbox,
+                    "{blocker}"
+                );
+                assert_eq!(event.archive_reason, None, "{blocker}");
+            }
+        }
+
+        #[test]
+        fn a_head_record_and_a_blocked_record_do_not_deduplicate_each_other() {
+            let (mut fixture, owner, head) = stalled_fixture();
+            let blocker = uncertain_blocker(&mut fixture, &owner, "prompt:blocker");
+            let (blocked, _) = storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &blocked_transition(&owner, 1, json!(blocker)),
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            let head_record = ObservedTransition {
+                event_seq: 2,
+                ..stalled_transition(&owner, head.input_id)
+            };
+            let (stalled_head, inserted) = storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &head_record,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            assert!(inserted);
+            for event in [blocked, stalled_head] {
+                assert_eq!(event.notification_state, NotificationState::Inbox);
+                assert_eq!(event.archive_reason, None);
+            }
+        }
+
+        #[test]
+        fn stalled_record_validation_requires_five_keys_and_exactly_one_named_waiter() {
+            type Forge = fn(&mut Value, i64, i64);
+            let cases: &[(&str, Forge)] = &[
+                ("a missing blocked_by_input_id key", |record, _, _| {
+                    record
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("blocked_by_input_id");
+                }),
+                ("an unknown key", |record, _, _| {
+                    record["blocking_input_id"] = json!(null)
+                }),
+                ("no named waiter", |record, _, _| {
+                    record["input_id"] = json!(null)
+                }),
+                ("a head and a blocker", |record, _, blocker| {
+                    record["blocked_by_input_id"] = json!(blocker)
+                }),
+                ("a preview and a blocker", |record, _, blocker| {
+                    record["input_id"] = json!(null);
+                    record["message_id"] = json!(1);
+                    record["blocked_by_input_id"] = json!(blocker);
+                }),
+                ("a non-positive blocker", |record, _, _| {
+                    record["input_id"] = json!(null);
+                    record["blocked_by_input_id"] = json!(0);
+                }),
+                ("a string blocker", |record, _, blocker| {
+                    record["input_id"] = json!(null);
+                    record["blocked_by_input_id"] = json!(blocker.to_string());
+                }),
+                ("a blocker that names no input", |record, _, blocker| {
+                    record["input_id"] = json!(null);
+                    record["blocked_by_input_id"] = json!(blocker + 1000);
+                }),
+            ];
+            for &(name, forge) in cases {
+                let (mut fixture, owner, head) = stalled_fixture();
+                let blocker = uncertain_blocker(&mut fixture, &owner, "prompt:blocker");
+                let mut transition = stalled_transition(&owner, head.input_id);
+                forge(
+                    transition.cause_json.as_mut().unwrap(),
+                    head.input_id,
+                    blocker,
+                );
+                let before = durable_state(&fixture.reopen());
+                assert!(
+                    storage::persist_transition(
+                        &mut fixture.conn,
+                        &owner,
+                        &transition,
+                        PersistenceMode::Live
+                    )
+                    .is_err(),
+                    "{name}"
+                );
+                assert_eq!(durable_state(&fixture.reopen()), before, "{name}");
+            }
+        }
+
+        #[test]
+        fn a_blocker_of_another_run_is_refused() {
+            let (mut fixture, owner, _) = stalled_fixture();
+            let member = crate::broker::members::test_support::register(
+                &mut fixture.conn,
+                fixture.fleet,
+                "other-worker",
+                Some("%4"),
+            );
+            let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
+            spec.launch_nonce = "b".repeat(64);
+            spec.runtime_path = spec.runtime_path.replace("/fixture/", "/other/");
+            let other = storage::test_support::create_run(&mut fixture.conn, &spec).unwrap();
+            fixture
+                .conn
+                .execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1", [other.run_id])
+                .unwrap();
+            let other = storage::get_run(&fixture.conn, other.run_id).unwrap();
+            let other_owner = other.owner();
+            let foreign = fixture.input(&other_owner, "prompt:foreign-blocker", InputKind::Prompt);
+            let before = durable_state(&fixture.reopen());
+            assert!(
+                storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &blocked_transition(&owner, 1, json!(foreign.input_id)),
+                    PersistenceMode::Live
+                )
+                .is_err()
+            );
+            assert_eq!(durable_state(&fixture.reopen()), before);
+        }
 
         const LATER: &str = "2026-10-26T10:05:00.000000+00:00";
 
@@ -2416,8 +2681,10 @@ mod tests {
             for case in DUPLICATE_CASES {
                 let name = case.name;
                 let (mut fixture, owner, head) = stalled_fixture();
-                let (input_id, message_id) = match case.waiter {
-                    Waiter::Head | Waiter::HeadNoLongerReady => (json!(head.input_id), Value::Null),
+                let (input_id, message_id, blocked_by) = match case.waiter {
+                    Waiter::Head | Waiter::HeadNoLongerReady => {
+                        (json!(head.input_id), Value::Null, Value::Null)
+                    }
                     Waiter::Preview => {
                         let preview = crate::broker::messaging::insert_message_validated(
                             &fixture.conn,
@@ -2426,13 +2693,18 @@ mod tests {
                             "stalled preview",
                         )
                         .unwrap();
-                        (Value::Null, json!(preview.message_id))
+                        (Value::Null, json!(preview.message_id), Value::Null)
+                    }
+                    Waiter::Blocked => {
+                        let blocker = uncertain_blocker(&mut fixture, &owner, "prompt:blocker");
+                        (Value::Null, Value::Null, json!(blocker))
                     }
                 };
                 let record = |waiting_since: &str| {
                     json!({
                         "kind":"input_delivery_stalled", "input_id":input_id,
-                        "message_id":message_id, "waiting_since":waiting_since,
+                        "message_id":message_id, "blocked_by_input_id":blocked_by,
+                        "waiting_since":waiting_since,
                     })
                 };
                 let first = ObservedTransition {

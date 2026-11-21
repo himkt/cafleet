@@ -1236,4 +1236,84 @@ mod tests {
             "a queued receipt with a selected method fails validation"
         );
     }
+
+    #[test]
+    fn first_uncertain_ordinary_input_returns_the_runs_lowest_uncertain_prompt_or_exec() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        assert_eq!(
+            storage::first_uncertain_ordinary_input(&fixture.conn, owner.run_id).unwrap(),
+            None,
+            "a run without input has no blocker"
+        );
+        let ready = fixture.input(&owner, "prompt:ready", InputKind::Prompt);
+        storage::record_input_state(
+            &mut fixture.conn,
+            &owner,
+            ready.input_id,
+            InputState::InProgress,
+            InputState::Ready,
+        )
+        .unwrap();
+        let settled = fixture.input(&owner, "exec:settled", InputKind::Exec);
+        storage::record_input_uncertain(
+            &mut fixture.conn,
+            &owner,
+            settled.input_id,
+            StopCause::WriteFailed,
+        )
+        .unwrap();
+        storage::test_support::settle_input(
+            &mut fixture.conn,
+            &owner,
+            settled.input_id,
+            InputState::Uncertain,
+            InputDisposition::NotSubmitted,
+            "audit:pane-shows-no-input",
+        )
+        .unwrap();
+        assert_eq!(
+            storage::first_uncertain_ordinary_input(&fixture.conn, owner.run_id).unwrap(),
+            None,
+            "ready and settled inputs are no blocker"
+        );
+        let mut uncertain = Vec::new();
+        for (key, kind) in [
+            ("exec:first-uncertain", InputKind::Exec),
+            ("prompt:second-uncertain", InputKind::Prompt),
+        ] {
+            let input = fixture.input(&owner, key, kind);
+            storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                StopCause::WriteFailed,
+            )
+            .unwrap();
+            uncertain.push(input.input_id);
+        }
+        assert_eq!(
+            storage::first_uncertain_ordinary_input(&fixture.conn, owner.run_id).unwrap(),
+            Some(uncertain[0])
+        );
+        storage::test_support::settle_input(
+            &mut fixture.conn,
+            &owner,
+            uncertain[0],
+            InputState::Uncertain,
+            InputDisposition::Submitted,
+            "audit:pane-shows-the-input",
+        )
+        .unwrap();
+        assert_eq!(
+            storage::first_uncertain_ordinary_input(&fixture.conn, owner.run_id).unwrap(),
+            Some(uncertain[1]),
+            "settling the first blocker exposes the next"
+        );
+        assert_eq!(
+            storage::first_uncertain_ordinary_input(&fixture.conn, owner.run_id + 1000).unwrap(),
+            None,
+            "another run's inputs are never its blocker"
+        );
+    }
 }

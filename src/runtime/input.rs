@@ -8160,7 +8160,7 @@ mod tests {
                     housekeep(host);
                     let payload = await_stalled(host, head);
                     assert_eq!(payload["input_id"], head, "{payload}");
-                    assert!(payload.get("blocking_input_id").is_none(), "{payload}");
+                    assert_eq!(payload["blocked_by_input_id"], Value::Null, "{payload}");
                     assert!(
                         payload["director_action"]["instruction"]
                             .as_str()
@@ -8257,6 +8257,267 @@ mod tests {
                         assert_unpublished(host, second);
                         assert_stalled_once(host, second);
                         assert_eq!(stalled_payloads(host, first).len(), 1);
+                    });
+                }
+
+                const RECONCILE_INSTRUCTION: &str = "Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.";
+
+                /// An uncertain prompt of the host's run, reserved and stopped outside the queue.
+                fn uncertain_blocker(host: &mut Host, key: &str) -> i64 {
+                    let owner = host.fixture.run.owner();
+                    let input = crate::broker::runtime::test_support::reserve_input(
+                        &mut host.fixture.conn,
+                        &owner,
+                        &storage::NewInput {
+                            operation_key: key.into(),
+                            kind: storage::InputKind::Prompt,
+                            payload_digest: "d".repeat(64),
+                        },
+                    )
+                    .unwrap();
+                    storage::record_input_uncertain(
+                        &mut host.fixture.conn,
+                        &owner,
+                        input.input_id,
+                        storage::StopCause::WriteFailed,
+                    )
+                    .unwrap()
+                    .input_id
+                }
+
+                fn settle_blocker(host: &mut Host, blocker: i64) {
+                    crate::broker::runtime::test_support::settle_input(
+                        &mut host.fixture.conn,
+                        &host.fixture.run.owner(),
+                        blocker,
+                        storage::InputState::Uncertain,
+                        storage::InputDisposition::Submitted,
+                        "audit:pane-shows-the-input",
+                    )
+                    .unwrap();
+                }
+
+                fn pending_preview(host: &mut Host, body: &str) -> i64 {
+                    crate::broker::messaging::insert_message_validated(
+                        &host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        body,
+                    )
+                    .unwrap()
+                    .message_id
+                }
+
+                fn blocked_rows(host: &Host, blocker: i64) -> Vec<(Value, String, Option<String>)> {
+                    host.fixture
+                        .conn
+                        .prepare(
+                            "SELECT payload_json,notification_state,archive_reason FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.blocked_by_input_id')=?2 ORDER BY event_seq",
+                        )
+                        .unwrap()
+                        .query_map(rusqlite::params![host.fixture.run.run_id, blocker], |row| {
+                            Ok((
+                                serde_json::from_str(&row.get::<_, String>(0)?).unwrap(),
+                                row.get(1)?,
+                                row.get(2)?,
+                            ))
+                        })
+                        .unwrap()
+                        .collect::<rusqlite::Result<_>>()
+                        .unwrap()
+                }
+
+                /// Moves the blocked wait's start past the three-minute stall bound.
+                fn backdate_blocked_since(host: &mut Host, blocker: i64) -> Instant {
+                    let since = host
+                        .clock
+                        .now()
+                        .checked_sub(Duration::from_secs(181))
+                        .expect("the host has run past the stall bound");
+                    let wait = host
+                        .coordinator
+                        .blocked_wait
+                        .as_mut()
+                        .expect("a blocked wait is recorded");
+                    assert_eq!(wait.blocker_input_id, blocker);
+                    wait.since = since;
+                    since
+                }
+
+                fn await_blocked(host: &mut Host, blocker: i64, count: usize) {
+                    loop {
+                        host.drain();
+                        if blocked_rows(host, blocker).len() >= count {
+                            return;
+                        }
+                        assert!(
+                            host.clock.now() < host.until,
+                            "the blocked wait publishes its record"
+                        );
+                        host.clock.advance(Duration::from_millis(5));
+                    }
+                }
+
+                /// Backdates the blocked wait, runs housekeeping and checks the record that names
+                /// the blocker, its wait start and the reconcile action, published once.
+                fn assert_blocked_once(host: &mut Host, blocker: i64, published: usize) {
+                    let since = backdate_blocked_since(host, blocker);
+                    housekeep(host);
+                    await_blocked(host, blocker, published);
+                    let rows = blocked_rows(host, blocker);
+                    let (payload, _, _) = rows.last().unwrap();
+                    assert_eq!(payload["input_id"], Value::Null, "{payload}");
+                    assert_eq!(payload["message_id"], Value::Null, "{payload}");
+                    assert_eq!(payload["blocked_by_input_id"], blocker, "{payload}");
+                    let waited = chrono::Duration::from_std(host.clock.now().duration_since(since))
+                        .expect("bounded stall wait");
+                    assert_eq!(
+                        payload["waiting_since"],
+                        crate::time::format_utc(host.clock.wall_now() - waited),
+                        "{payload}"
+                    );
+                    assert_eq!(
+                        payload["director_action"]["kind"], "reconcile_uncertain_input",
+                        "{payload}"
+                    );
+                    assert_eq!(
+                        payload["director_action"]["instruction"], RECONCILE_INSTRUCTION,
+                        "{payload}"
+                    );
+                    let argv = payload["director_action"]["inspect_argv"]
+                        .as_array()
+                        .expect("the reconcile action names its inspect command");
+                    assert_eq!(
+                        argv[..5],
+                        [
+                            serde_json::json!("cafleet"),
+                            serde_json::json!("input"),
+                            serde_json::json!("show"),
+                            serde_json::json!(blocker.to_string()),
+                            serde_json::json!("--json"),
+                        ],
+                        "{payload}"
+                    );
+                    assert!(host.coordinator.blocked_wait.as_ref().unwrap().stalled);
+                    housekeep(host);
+                    housekeep(host);
+                    settle_publications(host);
+                    assert_eq!(
+                        blocked_rows(host, blocker).len(),
+                        published,
+                        "the blocked wait publishes once per wait"
+                    );
+                }
+
+                #[test]
+                fn a_head_behind_an_uncertain_input_publishes_one_blocked_record_and_no_head_stall()
+                {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-uncertain");
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        housekeep(host);
+                        let wait = host
+                            .coordinator
+                            .blocked_wait
+                            .as_ref()
+                            .expect("a waiting head starts the blocked wait");
+                        assert_eq!(wait.blocker_input_id, blocker);
+                        assert!(!wait.stalled);
+                        assert_eq!(
+                            host.coordinator.queue.front().unwrap().head_since,
+                            None,
+                            "a blocker suspends the head's own watch"
+                        );
+                        assert!(blocked_rows(host, blocker).is_empty());
+                        assert_blocked_once(host, blocker, 1);
+                        let rows = blocked_rows(host, blocker);
+                        assert_eq!(rows[0].1, "inbox");
+                        assert_eq!(rows[0].2, None);
+                        assert!(
+                            stalled_payloads(host, head).is_empty(),
+                            "a blocked head publishes no review_stalled_delivery"
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_pending_preview_behind_an_uncertain_input_publishes_one_blocked_record() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        pending_preview(host, "preview behind the uncertain prompt");
+                        housekeep(host);
+                        assert_eq!(
+                            host.coordinator
+                                .blocked_wait
+                                .as_ref()
+                                .expect("a pending preview starts the blocked wait")
+                                .blocker_input_id,
+                            blocker
+                        );
+                        assert_blocked_once(host, blocker, 1);
+                    });
+                }
+
+                #[test]
+                fn a_blocked_wait_clears_without_a_waiter_and_restarts_for_the_same_blocker() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        housekeep(host);
+                        assert!(
+                            host.coordinator.blocked_wait.is_none(),
+                            "a blocker without a waiter starts no wait"
+                        );
+                        let head = waiting_head(host, "prompt:first-waiter");
+                        housekeep(host);
+                        assert_blocked_once(host, blocker, 1);
+                        cancel_queued(host, head);
+                        housekeep(host);
+                        assert!(
+                            host.coordinator.blocked_wait.is_none(),
+                            "the wait clears once no waiter remains"
+                        );
+                        waiting_head(host, "prompt:second-waiter");
+                        housekeep(host);
+                        let restarted = host
+                            .coordinator
+                            .blocked_wait
+                            .as_ref()
+                            .expect("a new waiter restarts the wait for the same blocker");
+                        assert_eq!(restarted.blocker_input_id, blocker);
+                        assert!(!restarted.stalled);
+                        assert!(
+                            host.clock.now().duration_since(restarted.since)
+                                < Duration::from_secs(10)
+                        );
+                        assert_blocked_once(host, blocker, 2);
+                        let rows = blocked_rows(host, blocker);
+                        assert_eq!((rows[0].1.as_str(), rows[0].2.as_deref()), ("inbox", None));
+                        assert_eq!(
+                            (rows[1].1.as_str(), rows[1].2.as_deref()),
+                            ("archived", Some("duplicate_delivery")),
+                            "the restarted wait's record is a silent duplicate"
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_settled_blocker_clears_the_wait_and_restarts_the_heads_own_watch() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-uncertain");
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        housekeep(host);
+                        assert!(host.coordinator.blocked_wait.is_some());
+                        assert_eq!(host.coordinator.queue.front().unwrap().head_since, None);
+                        settle_blocker(host, blocker);
+                        housekeep(host);
+                        assert!(host.coordinator.blocked_wait.is_none());
+                        assert!(
+                            host.coordinator.queue.front().unwrap().head_since.is_some(),
+                            "the head's ordinary watch starts afresh"
+                        );
+                        assert_unpublished(host, head);
+                        assert_stalled_once(host, head);
+                        assert!(blocked_rows(host, blocker).is_empty());
                     });
                 }
             }
