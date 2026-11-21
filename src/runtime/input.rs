@@ -147,6 +147,7 @@ pub(crate) trait InputHooks: Send + Sync {
 pub(crate) struct InputServices {
     pub(crate) catalog: ProfileCatalog,
     pub(crate) token_source: Box<dyn RequestTokenSource>,
+    pub(crate) clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     pub(crate) stage_settle: Duration,
     #[cfg(test)]
@@ -506,8 +507,9 @@ fn stalled_record(
     message_id: Option<i64>,
     since: Instant,
     now: Instant,
+    clock: &dyn crate::time::Clock,
 ) -> serde_json::Value {
-    let waiting_since = chrono::Utc::now()
+    let waiting_since = clock.wall_now()
         - chrono::Duration::from_std(now.duration_since(since)).expect("bounded stall wait");
     serde_json::json!({
         "kind":"input_delivery_stalled", "input_id":input_id, "message_id":message_id,
@@ -613,6 +615,7 @@ pub(crate) struct InputGuard<'a> {
     proof: Option<DrainedInput>,
     deadline: Instant,
     permit: GuardPermit,
+    clock: Arc<dyn crate::time::Clock>,
     exclusion: std::marker::PhantomData<(&'a mut InputCoordinator, std::rc::Rc<()>)>,
 }
 
@@ -633,7 +636,7 @@ impl InputGuard<'_> {
         )?;
         self.permit = GuardPermit::Rejected;
         self.deadline = self.deadline.min(deadline);
-        check_deadline(Instant::now(), self.deadline)?;
+        check_deadline(self.clock.now(), self.deadline)?;
         ensure(
             bytes == retained.bytes.as_ref(),
             "input bytes do not match the selected stage",
@@ -863,12 +866,12 @@ impl InputCoordinator {
         let result =
             (|| {
                 let deadline = bounded_by_inherited(conn, deadline);
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.services.clock.now(), deadline)?;
                 let view = with_database_deadline(conn, deadline, |conn| {
                     let tx = conn.transaction()?;
                     self.validate_live_run(&tx)?;
                     let view = inspection_association(&tx, &self.run, &input)?;
-                    check_deadline(Instant::now(), deadline)?;
+                    check_deadline(self.services.clock.now(), deadline)?;
                     tx.commit()?;
                     Ok(view)
                 })?;
@@ -969,7 +972,7 @@ impl InputCoordinator {
                 {
                     reason = Some("question has no tested answer".into());
                 }
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.services.clock.now(), deadline)?;
                 Ok(InputControlReply::Inspection(Box::new(
                     PermissionInspection {
                         event_id: view.event.event_id,
@@ -1070,7 +1073,7 @@ impl InputCoordinator {
                 settled.push(queued.input_id);
             }
         }
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(self.services.clock.now(), deadline)?;
         Ok(settled)
     }
     fn permission_blocker(&self, observation: &ObservationController) -> Option<String> {
@@ -1210,7 +1213,7 @@ impl InputCoordinator {
             .deadline;
         let waiting = || {
             ensure(
-                Instant::now() + GATE_FINALIZATION_RESERVE < deadline,
+                self.services.clock.now() + GATE_FINALIZATION_RESERVE < deadline,
                 "the next stage's gate did not hold before the response deadline",
             )
             .map(|()| StageGateProgress::Waiting)
@@ -1384,7 +1387,7 @@ impl InputCoordinator {
         };
         let result = (|| {
             let deadline = bounded_by_inherited(conn, deadline);
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.services.clock.now(), deadline)?;
             self.validate_respond_identity(&request, input)?;
             if let Some(reply) = self.answered_refusal(input) {
                 return Ok(Some(reply));
@@ -1439,7 +1442,7 @@ impl InputCoordinator {
                 let tx = conn.transaction()?;
                 self.validate_live(&tx)?;
                 self.validate_permission_association(&tx, &selection)?;
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.services.clock.now(), deadline)?;
                 tx.commit().map_err(crate::error::CafleetError::from)
             })?;
             if self.pending.is_some() {
@@ -1579,7 +1582,7 @@ impl InputCoordinator {
             .as_ref()
             .ok_or_else(|| error("input writer is absent"))?;
         let effective = bounded_by_inherited(conn, deadline.min(pending.deadline));
-        check_deadline(Instant::now(), effective)?;
+        check_deadline(self.services.clock.now(), effective)?;
         Ok(effective)
     }
 
@@ -1658,7 +1661,7 @@ impl InputCoordinator {
             return self.retire_received(conn, *input_id, deadline);
         }
         let deadline = bounded_by_inherited(conn, deadline);
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(self.services.clock.now(), deadline)?;
         let mut input_id = None;
         let mut operation_key = None;
         let result = (|| match action {
@@ -1685,7 +1688,7 @@ impl InputCoordinator {
                         )?;
                         InputControlReply::Receipt(ReceiptReply::Missing)
                     };
-                    check_deadline(Instant::now(), deadline)?;
+                    check_deadline(self.services.clock.now(), deadline)?;
                     tx.commit()?;
                     Ok(reply)
                 })
@@ -1734,7 +1737,7 @@ impl InputCoordinator {
                             evidence_ref,
                         )?
                     };
-                    check_deadline(Instant::now(), deadline)?;
+                    check_deadline(self.services.clock.now(), deadline)?;
                     tx.commit()?;
                     Ok(settled)
                 })?;
@@ -1742,7 +1745,7 @@ impl InputCoordinator {
                     retained.operation = AttemptRecord::Receipt(settled.clone());
                 }
                 self.queue.retain(|queued| queued.input_id != *id);
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.services.clock.now(), deadline)?;
                 Ok(InputControlReply::Receipt(ReceiptReply::Settled {
                     input_id: *id,
                 }))
@@ -1763,7 +1766,7 @@ impl InputCoordinator {
         deadline: Instant,
     ) -> Result<InputControlReply> {
         let deadline = bounded_by_inherited(conn, deadline);
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(self.services.clock.now(), deadline)?;
         let mut operation_key = None;
         let result = (|| {
             ensure(input_id > 0, "positive retirement input ID required")?;
@@ -1787,10 +1790,10 @@ impl InputCoordinator {
                         "retirement requires an unleased consumed attempt",
                     )?;
                 }
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.services.clock.now(), deadline)?;
                 tx.commit().map_err(crate::error::CafleetError::from)
             })?;
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.services.clock.now(), deadline)?;
             self.operations.remove(&AttemptKey::Receipt(input_id));
             Ok(InputControlReply::Receipt(ReceiptReply::Retired {
                 input_id,
@@ -1931,7 +1934,7 @@ impl InputCoordinator {
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
         let result = (|| {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.services.clock.now(), deadline)?;
             ensure(
                 message.to_member_id == self.run.member_id,
                 "a sweep preview addresses the run's member",
@@ -1981,7 +1984,7 @@ impl InputCoordinator {
                     DeliveryChoice::Ready(selection) => selection,
                 };
             if self.verified_composer(ComposerOperation::Prompt)
-                && deadline.saturating_duration_since(Instant::now())
+                && deadline.saturating_duration_since(self.services.clock.now())
                     < self.attempt_requirement(ComposerOperation::Prompt, stages.len())?
             {
                 return held("delivery_budget_exhausted");
@@ -2036,7 +2039,7 @@ impl InputCoordinator {
         let mut known_input_id = None;
         let mut known_key = None;
         let result = (|| {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.services.clock.now(), deadline)?;
             let mut expected = ControlIdentity::from_run(&self.run);
             ensure(
                 request.identity.owner_epoch > 0,
@@ -2133,7 +2136,8 @@ impl InputCoordinator {
                         }
                         DeliveryChoice::Ready(selection)
                             if self.verified_composer(composer_operation)
-                                && deadline.saturating_duration_since(Instant::now())
+                                && deadline
+                                    .saturating_duration_since(self.services.clock.now())
                                     < self.attempt_requirement(
                                         composer_operation,
                                         selection.2.len(),
@@ -2488,7 +2492,7 @@ impl InputCoordinator {
         expected: storage::InputState,
         reason: &'static str,
     ) -> Result<()> {
-        let finalization = Instant::now() + DEFERRED_FINALIZATION;
+        let finalization = self.services.clock.now() + DEFERRED_FINALIZATION;
         let operation = match with_database_deadline(conn, finalization, |conn| {
             storage::settle_zero_byte_deferred(conn, &self.run.owner(), input_id, expected, reason)
         }) {
@@ -2575,16 +2579,20 @@ impl InputCoordinator {
             }
         }
         let entries: Vec<i64> = self.queue.iter().map(|queued| queued.input_id).collect();
-        let read = with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
-            let mut sweep = Vec::with_capacity(entries.len());
-            for input_id in &entries {
-                sweep.push((*input_id, storage::get_input(&tx, *input_id)?.state));
-            }
-            let target = self.deferred_target(&tx)?;
-            tx.commit()?;
-            Ok((sweep, target))
-        });
+        let read = with_database_deadline(
+            conn,
+            self.services.clock.now() + DEFERRED_FINALIZATION,
+            |conn| {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                let mut sweep = Vec::with_capacity(entries.len());
+                for input_id in &entries {
+                    sweep.push((*input_id, storage::get_input(&tx, *input_id)?.state));
+                }
+                let target = self.deferred_target(&tx)?;
+                tx.commit()?;
+                Ok((sweep, target))
+            },
+        );
         let (sweep, target) = match read {
             Ok(read) => read,
             Err(cause) if storage_failure(&cause) => {
@@ -2623,7 +2631,7 @@ impl InputCoordinator {
     /// Publishes one `input_delivery_stalled` for a head that has started no attempt within the
     /// stall bound of becoming the head; time an interaction blocks it does not count.
     fn watch_head(&mut self, observation: &ObservationController) {
-        let now = Instant::now();
+        let now = self.services.clock.now();
         let interaction = matches!(
             ordinary_blocker(&observation.status()),
             Some(OrdinaryBlocker::Interaction)
@@ -2642,13 +2650,19 @@ impl InputCoordinator {
             return;
         }
         head.stalled = true;
-        observation.publish_delivery_stalled(stalled_record(Some(head.input_id), None, since, now));
+        observation.publish_delivery_stalled(stalled_record(
+            Some(head.input_id),
+            None,
+            since,
+            now,
+            self.services.clock.as_ref(),
+        ));
     }
 
     /// Publishes one `input_delivery_stalled` for the sweep's selected preview once the composer
     /// has held it for the stall bound.
     fn watch_preview(&mut self, observation: &ObservationController, message_id: i64) {
-        let now = Instant::now();
+        let now = self.services.clock.now();
         if self
             .preview_wait
             .as_ref()
@@ -2673,6 +2687,7 @@ impl InputCoordinator {
             Some(message_id),
             wait.since,
             now,
+            self.services.clock.as_ref(),
         ));
     }
 
@@ -2704,7 +2719,7 @@ impl InputCoordinator {
         };
         let (input_id, message_id, operation) =
             (head.input_id, head.request.message_id, head.operation);
-        let now = Instant::now();
+        let now = self.services.clock.now();
         let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
             self.deferred_target(conn)
         });
@@ -2958,7 +2973,7 @@ impl InputCoordinator {
         let composer_busy = !interaction
             && composer.requires_empty_composer()
             && !Self::composer_eligible(observation);
-        let now = Instant::now();
+        let now = self.services.clock.now();
         let expired = now >= pending.deadline;
         let requeue = interaction || composer_busy;
         if !requeue && !expired {
@@ -3036,7 +3051,9 @@ impl InputCoordinator {
         }
         let status = observation.status();
         let insufficient_budget = self.verified_composer(composer.operation)
-            && pending.deadline.saturating_duration_since(Instant::now())
+            && pending
+                .deadline
+                .saturating_duration_since(self.services.clock.now())
                 < self.attempt_requirement(composer.operation, composer.stages.len())?;
         let defer_reason = match ordinary_blocker(&status) {
             Some(OrdinaryBlocker::Interaction) => interaction_cause(&status).as_str(),
@@ -3286,16 +3303,16 @@ impl InputCoordinator {
             if let Some(selection) = &operation.permission() {
                 self.validate_permission_association(&tx, selection)?;
             }
-            check_deadline(Instant::now(), effective)?;
+            check_deadline(self.services.clock.now(), effective)?;
             tx.rollback().map_err(crate::error::CafleetError::from)
         });
         match result {
             Ok(()) => {
-                check_deadline(Instant::now(), effective)?;
+                check_deadline(self.services.clock.now(), effective)?;
                 Ok(WriteValidation::Ready)
             }
             Err(CafleetError::DatabaseBusy(_)) => {
-                check_deadline(Instant::now(), effective)?;
+                check_deadline(self.services.clock.now(), effective)?;
                 Ok(WriteValidation::Contended)
             }
             Err(cause) => Err(cause),
@@ -3396,7 +3413,7 @@ impl InputCoordinator {
                 self.note_deferred_obstacle("storage_unavailable");
                 return Ok(None);
             }
-            check_deadline(Instant::now(), effective)?;
+            check_deadline(self.services.clock.now(), effective)?;
             Ok(Some((id, proof, effective, output_seq)))
         })()?;
         let Some((id, proof, deadline, output_seq)) = result else {
@@ -3414,6 +3431,7 @@ impl InputCoordinator {
             proof: Some(proof),
             deadline,
             permit: GuardPermit::Fresh,
+            clock: self.services.clock.clone(),
             exclusion: std::marker::PhantomData,
         }))
     }
@@ -3435,10 +3453,11 @@ impl InputCoordinator {
                 && let Some(head) = self.queue.front()
             {
                 let input_id = head.input_id;
-                let reason =
-                    with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
-                        self.deferred_target(conn)
-                    });
+                let reason = with_database_deadline(
+                    conn,
+                    self.services.clock.now() + DEFERRED_FINALIZATION,
+                    |conn| self.deferred_target(conn),
+                );
                 match reason {
                     Ok(Some(reason)) => {
                         self.queue.pop_front();
@@ -3665,7 +3684,7 @@ impl InputCoordinator {
                         storage::get_input(&tx, input_id)? == expected,
                         "zero-byte selection receipt changed",
                     )?;
-                    let count = tx.execute("UPDATE member_input_operations SET delivery_method=?1,delivery_reason=?2,updated_at=?3 WHERE input_id=?4 AND state='in_progress'", rusqlite::params![method.as_str(),reason,crate::time::now_stamp(),input_id])?;
+                    let count = tx.execute("UPDATE member_input_operations SET delivery_method=?1,delivery_reason=?2,updated_at=?3 WHERE input_id=?4 AND state='in_progress'", rusqlite::params![method.as_str(),reason,self.services.clock.wall_stamp(),input_id])?;
                     ensure(
                         count == 1,
                         "zero-byte selection requires its in-progress receipt",
@@ -3721,7 +3740,7 @@ impl InputCoordinator {
                     let tx = conn.transaction()?;
                     self.validate_live(&tx)?;
                     self.validate_permission_association(&tx, selection)?;
-                    check_deadline(Instant::now(), effective)?;
+                    check_deadline(self.services.clock.now(), effective)?;
                     tx.commit().map_err(crate::error::CafleetError::from)
                 })?;
                 (AttemptKey::Answer, receipt_free_record(None))
@@ -3831,7 +3850,9 @@ impl InputCoordinator {
         if let Some(OrdinaryBlocker::Interaction) = ordinary_blocker(&status) {
             return Ok(Some(interaction_cause(&status)));
         }
-        let remaining = pending.deadline.saturating_duration_since(Instant::now());
+        let remaining = pending
+            .deadline
+            .saturating_duration_since(self.services.clock.now());
         if (between_chunks && remaining <= PASTE_CLOSE_RESERVE)
             || (*next_stage + 1 == stages.len()
                 && self.verified_composer(composer.operation)
@@ -3862,7 +3883,7 @@ impl InputCoordinator {
             .as_ref()
             .and_then(PendingInput::composer)
             .and_then(|composer| composer.settle_until)
-            .is_some_and(|until| Instant::now() < until)
+            .is_some_and(|until| self.services.clock.now() < until)
         {
             return Ok(None);
         }
@@ -4126,7 +4147,7 @@ impl InputCoordinator {
             let pending = self.pending.as_mut().expect("pending multistage response");
             if let Some(composer) = pending.composer_mut() {
                 composer.written_stages += 1;
-                composer.settle_until = Some(Instant::now() + settle);
+                composer.settle_until = Some(self.services.clock.now() + settle);
             }
             pending.bytes = next_bytes;
             pending.phase = InputPhase::AwaitBeforeWrite;
@@ -4138,7 +4159,7 @@ impl InputCoordinator {
             && self.verified_composer(composer.operation)
         {
             let verification = PostSubmitVerification {
-                until: Instant::now() + POST_SUBMIT_VERIFICATION,
+                until: self.services.clock.now() + POST_SUBMIT_VERIFICATION,
                 output_seq: transport.snapshot().screen_seq,
                 episode_seq: observation.active_episode_seq(),
             };
@@ -4448,7 +4469,7 @@ impl InputCoordinator {
             conn,
             id,
             storage::StopCause::WriteFailed,
-            Instant::now() + DEFERRED_FINALIZATION,
+            self.services.clock.now() + DEFERRED_FINALIZATION,
         ) {
             Ok(operation) if operation.state == storage::InputState::Uncertain => {
                 Self::publish_result(observation, id, stage, operation.stop_cause);
@@ -4483,10 +4504,10 @@ impl InputCoordinator {
             .expect("ordinary composer")
             .deferred
             .is_some();
-        let bookkeeping = if effective > Instant::now() {
+        let bookkeeping = if effective > self.services.clock.now() {
             effective
         } else {
-            Instant::now() + DEFERRED_FINALIZATION
+            self.services.clock.now() + DEFERRED_FINALIZATION
         };
         let operation = with_database_deadline(conn, bookkeeping, |conn| {
             self.validate_live_run(conn)?;
@@ -4543,6 +4564,7 @@ impl InputCoordinator {
             proof: None,
             deadline: effective,
             permit: GuardPermit::Fresh,
+            clock: self.services.clock.clone(),
             exclusion: std::marker::PhantomData,
         };
         let written = transport.write_programmatic(pty, PASTE_CLOSE, &mut guard, effective);
@@ -4647,7 +4669,7 @@ impl InputCoordinator {
             self.pending = None;
             return Ok(Some(InputControlReply::Submission(reply)));
         }
-        if Instant::now() >= verification.until {
+        if self.services.clock.now() >= verification.until {
             let stop = ComposerStop {
                 cause: storage::StopCause::SubmitUnconfirmed,
                 complete_prefix: true,
@@ -4671,7 +4693,12 @@ impl InputCoordinator {
             Ok(reply) => return Ok(reply),
             Err(source) => source,
         };
-        let source = self.record_immediate_write_failure(conn, observation, Instant::now(), source);
+        let source = self.record_immediate_write_failure(
+            conn,
+            observation,
+            self.services.clock.now(),
+            source,
+        );
         Err(InputFailure { source, context })
     }
 
@@ -4708,8 +4735,8 @@ impl InputCoordinator {
         pending.phase = InputPhase::Blocked;
         let stage = retained.stage;
         let bookkeeping = match self.effective_deadline(conn, deadline) {
-            Ok(effective) if effective > Instant::now() => effective,
-            _ => Instant::now() + DEFERRED_FINALIZATION,
+            Ok(effective) if effective > self.services.clock.now() => effective,
+            _ => self.services.clock.now() + DEFERRED_FINALIZATION,
         };
         let persisted = with_database_deadline(conn, bookkeeping, |conn| {
             self.validate_live_run(conn)?;
@@ -4785,7 +4812,7 @@ impl InputCoordinator {
                 "input coordinator runner generation mismatch",
             )?;
             lock.validate(&tx, &current.owner())?;
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(services.clock.now(), deadline)?;
             tx.commit()?;
             Ok(current)
         })?;
@@ -9188,6 +9215,7 @@ mod tests {
                 InputServices {
                     catalog,
                     token_source: Box::new(PanicTokens(purpose)),
+                    clock: Arc::new(crate::time::SystemClock),
                     hooks,
                     stage_settle,
                 }
@@ -9539,6 +9567,7 @@ mod tests {
                         format!("sqlite:///{}", writer_fixture.fixture.conn.path().unwrap()),
                         writer_fixture.fixture.run.clone(),
                         writer_fixture.lock.clone(),
+                        std::sync::Arc::new(crate::time::SystemClock),
                         Arc::new(InputFixtureWriterHooks),
                     )
                     .unwrap();
@@ -9566,7 +9595,9 @@ mod tests {
                     fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                     assert_eq!(fixture.run.status, storage::RunStatus::Running);
-                    let transport = Transport::new(size, limits).unwrap();
+                    let transport =
+                        Transport::new(size, limits, std::sync::Arc::new(crate::time::SystemClock))
+                            .unwrap();
                     controller
                         .started(
                             &fixture.run,
@@ -12995,7 +13026,7 @@ pub(crate) mod test_support {
         fn now(&self) -> Instant {
             panic!("input expiration reads only paired monotonic samples")
         }
-        fn wall_stamp(&self) -> String {
+        fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
             panic!("input expiration reads only paired monotonic samples")
         }
         fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {

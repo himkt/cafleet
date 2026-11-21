@@ -294,7 +294,7 @@ impl RunnerLoop<'_> {
 }
 
 impl Client {
-    fn poll(&mut self) -> Result<Vec<AdmittedControlFrame>> {
+    fn poll(&mut self, clock: &dyn crate::time::Clock) -> Result<Vec<AdmittedControlFrame>> {
         let mut requests = Vec::new();
         let mut bytes = [0; 4096];
         match self.stream.read(&mut bytes) {
@@ -303,7 +303,7 @@ impl Client {
                 self.closed = true;
             }
             Ok(count) => {
-                let observed_at = Instant::now();
+                let observed_at = clock.now();
                 requests = self.decoder.feed_admitted(&bytes[..count], observed_at)?;
             }
             Err(cause)
@@ -387,7 +387,7 @@ impl LiveShutdown<'_> {
         {
             return Ok(());
         }
-        while Instant::now() < deadline {
+        while self.observation_clock.now() < deadline {
             self.transport.prefetch_child_bytes(self.pty)?;
             if self.pty.try_wait()?.is_some() {
                 self.send_exit()?;
@@ -395,7 +395,7 @@ impl LiveShutdown<'_> {
                     return Ok(());
                 }
             }
-            nap_until(deadline);
+            nap_until(self.observation_clock, deadline);
         }
         Err(CafleetError::DeadlineExceeded)
     }
@@ -413,8 +413,8 @@ impl LiveShutdown<'_> {
     }
 }
 impl ShutdownHost for LiveShutdown<'_> {
-    fn now(&self) -> Instant {
-        Instant::now()
+    fn clock(&self) -> &dyn crate::time::Clock {
+        self.observation_clock
     }
     fn gate_programmatic_input(&mut self) {
         self.writer.set_deadline(self.clock.storage_deadline());
@@ -433,7 +433,7 @@ impl ShutdownHost for LiveShutdown<'_> {
         #[cfg(test)]
         self.await_native_exit_before_parsing(deadline)?;
 
-        while Instant::now() < deadline {
+        while self.observation_clock.now() < deadline {
             let mut tick = |transport: &mut Transport| {
                 #[cfg(test)]
                 let mut observer = self.controller.observer_for(
@@ -456,7 +456,7 @@ impl ShutdownHost for LiveShutdown<'_> {
             if !self.pty.survivors()? && progress.child_eof {
                 break;
             }
-            nap_until(deadline);
+            nap_until(self.observation_clock, deadline);
         }
         self.pty.try_wait()
     }
@@ -465,11 +465,11 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
     fn close_pty(&mut self) -> Result<()> {
         self.pty.close()?;
-        while Instant::now() < self.clock.storage_deadline() {
+        while self.observation_clock.now() < self.clock.storage_deadline() {
             if (self.pty.try_wait()?.is_some() || !self.pty.has_child()) && !self.pty.survivors()? {
                 break;
             }
-            nap_until(self.clock.storage_deadline());
+            nap_until(self.observation_clock, self.clock.storage_deadline());
         }
         self.send_exit()?;
         ensure(
@@ -482,9 +482,10 @@ impl ShutdownHost for LiveShutdown<'_> {
         )
     }
     fn flush_display_until(&mut self, deadline: Instant) -> Result<u64> {
-        while self.transport.pending_display_bytes() > 0 && Instant::now() < deadline {
+        while self.transport.pending_display_bytes() > 0 && self.observation_clock.now() < deadline
+        {
             self.transport.flush_display(self.output)?;
-            nap_until(deadline);
+            nap_until(self.observation_clock, deadline);
         }
         Ok(self.transport.discard_display_tail() as u64)
     }
@@ -496,12 +497,16 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
     fn finish_events_until(&mut self, deadline: Instant) -> Result<(u64, u64)> {
         self.send_exit()?;
-        if self.clock.remaining_storage_at(Instant::now()).is_zero() {
+        if self
+            .clock
+            .remaining_storage_at(self.observation_clock.now())
+            .is_zero()
+        {
             return Err(crate::error::CafleetError::DeadlineExceeded);
         }
-        while self.controller.has_pending() && Instant::now() < deadline {
+        while self.controller.has_pending() && self.observation_clock.now() < deadline {
             self.poll_shutdown()?;
-            nap_until(deadline);
+            nap_until(self.observation_clock, deadline);
         }
         let (pending, gap) = self.writer.finish(deadline);
         Ok((
@@ -597,12 +602,13 @@ pub(crate) fn run_service(
             .ok_or_else(|| error("run ownership lock is held"))?,
     );
     let process = ProcessIdentity::current()?;
-    let handshake_deadline = Instant::now() + Duration::from_secs(10);
+    let handshake_deadline = observation_clock.now() + Duration::from_secs(10);
     let owner = lock.transfer_to_runner_with_deadline(
         &mut conn,
         &original.owner(),
         process.clone(),
         handshake_deadline,
+        observation_clock.as_ref(),
     )?;
     let run = storage::get_run(&conn, owner.run_id)?;
     with_database_deadline(&mut conn, handshake_deadline, |conn| {
@@ -625,7 +631,7 @@ pub(crate) fn run_service(
         .as_file()
         .map_err(io_error)?;
     let initial_size = terminal_size(&terminal)?;
-    let mut pty = PtySession::prepare(initial_size)?;
+    let mut pty = PtySession::prepare(initial_size, observation_clock.clone())?;
     let mut raw = RawTerminalGuard::enter(&terminal)?;
     let mut input = NonblockingFile::new(&std::io::stdin())?;
     let mut output = NonblockingFile::new(&std::io::stdout())?;
@@ -636,6 +642,7 @@ pub(crate) fn run_service(
             display_bytes: 262144,
             bytes_per_tick: 16384,
         },
+        observation_clock.clone(),
     )?;
     let listener = UnixListener::bind(&artifacts.paths.control_socket).map_err(|cause| {
         error(format!(
@@ -664,6 +671,7 @@ pub(crate) fn run_service(
         settings.database_url.clone(),
         run.clone(),
         lock.clone(),
+        observation_clock.clone(),
         #[cfg(test)]
         services.writer_hooks.clone(),
     )?;
@@ -694,6 +702,7 @@ pub(crate) fn run_service(
         terminate: &terminate,
         resize: &resize,
         catalog,
+        clock: observation_clock.clone(),
         #[cfg(test)]
         capture: services.capture.take(),
         handshake_deadline,
@@ -744,7 +753,7 @@ pub(crate) fn run_service(
                     clock.storage_deadline(),
                     |conn| {
                         lock.validate(conn, &owner)?;
-                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
+                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![observation_clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
                         Ok(())
                     },
                 );
@@ -808,7 +817,7 @@ pub(crate) fn run_service(
     }
     let persisted = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
-        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
+        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,observation_clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
         Ok(())
     });
     if let Err(cause) = persisted {
@@ -818,12 +827,12 @@ pub(crate) fn run_service(
         && let Some(client) = clients.iter_mut().find(|client| client.id == id)
     {
         client.answer(serde_json::to_value(&outcome).map_err(io_error));
-        while !client.output.is_empty() && Instant::now() < clock.storage_deadline() {
+        while !client.output.is_empty() && observation_clock.now() < clock.storage_deadline() {
             if client.closed || client.flush().is_err() {
                 client.closed = true;
                 break;
             }
-            std::thread::sleep(Duration::from_millis(1));
+            observation_clock.sleep(Duration::from_millis(1));
         }
     }
     for diagnostic in &outcome.diagnostics {
@@ -864,6 +873,7 @@ struct RunnerLoop<'a> {
     terminate: &'a AtomicBool,
     resize: &'a AtomicBool,
     catalog: &'static crate::coding_agent::ProfileCatalog,
+    clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     capture: Option<crate::runtime::observation::native_capture::NativeCapturePort>,
     handshake_deadline: Instant,
@@ -894,7 +904,7 @@ impl RunnerLoop<'_> {
                 return Ok(self.shutdown_deadlines());
             }
             if !self.started {
-                check_deadline(Instant::now(), self.handshake_deadline)?;
+                check_deadline(self.native.clock.now(), self.handshake_deadline)?;
                 ensure(
                     self.creator.matches()?,
                     "creator disconnected before native start",
@@ -915,10 +925,10 @@ impl RunnerLoop<'_> {
             } else {
                 TransportProgress::default()
             };
-            std::thread::sleep(tick_sleep(
+            self.native.clock.sleep(tick_sleep(
                 &progress,
                 self.native.controller.status().next_deadline,
-                Instant::now(),
+                self.native.clock.now(),
             ));
         }
     }
@@ -952,7 +962,7 @@ impl RunnerLoop<'_> {
 
     fn serve_client(&mut self, index: usize) -> Result<Option<ShutdownDeadlines>> {
         let client_id = self.clients[index].id;
-        let requests = match self.clients[index].poll() {
+        let requests = match self.clients[index].poll(self.native.clock) {
             Ok(requests) => requests,
             Err(_) => {
                 self.clients[index].closed = true;
@@ -1074,7 +1084,7 @@ impl RunnerLoop<'_> {
         )?;
         self.handshake_deadline = self
             .handshake_deadline
-            .min(Instant::now() + Duration::from_millis(remaining));
+            .min(self.native.clock.now() + Duration::from_millis(remaining));
         self.creator_connection = Some(client_id);
         *accepted_startup = true;
         self.artifacts.remove_descriptor()?;
@@ -1130,7 +1140,7 @@ impl RunnerLoop<'_> {
         let child = self.native.pty.spawn(&self.descriptor.spawn)?;
         with_database_deadline(self.conn, self.handshake_deadline, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
-            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,crate::time::now_stamp(),self.run.run_id,self.run.owner_epoch])?;
+            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,self.native.clock.wall_stamp(),self.run.run_id,self.run.owner_epoch])?;
             ensure(changed == 1, "native spawn storage lost ownership")
         })?;
         self.run = storage::get_run(self.conn, self.run.run_id)?;
@@ -1155,6 +1165,7 @@ impl RunnerLoop<'_> {
             InputServices {
                 catalog: self.catalog.clone(),
                 token_source: Box::new(SystemRequestTokens),
+                clock: self.clock.clone(),
                 #[cfg(test)]
                 stage_settle: crate::runtime::input::STAGE_SETTLE,
                 #[cfg(test)]
@@ -1245,9 +1256,10 @@ impl RunnerLoop<'_> {
     fn observe_exit(&mut self) -> Result<Option<ShutdownDeadlines>> {
         let coordinator = started(&mut self.coordinator);
         let (conn, run_id) = (&mut *self.conn, self.run.run_id);
+        let clock = self.native.clock;
         self.native
             .observe_exit(&mut self.native_exit, |controller| {
-                publish_stopped_results(coordinator, conn, run_id, controller)
+                publish_stopped_results(coordinator, conn, run_id, controller, clock)
             })
     }
 
@@ -1327,12 +1339,12 @@ impl RunnerLoop<'_> {
             || !self.deferred_retry.due(
                 coordinator.deferred_attempt_writing(),
                 self.native.controller.status(),
-                Instant::now(),
+                self.native.clock.now(),
             )
         {
             return Ok(());
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = self.native.clock.now() + Duration::from_secs(5);
         let drained = self.native.quiesce(coordinator, deadline);
         if let Ok(InputDrain::Quiescent) = drained
             && !self.terminate.load(Ordering::Acquire)
@@ -1349,7 +1361,7 @@ impl RunnerLoop<'_> {
     }
 
     fn housekeep_queue(&mut self) -> Result<()> {
-        let now = Instant::now();
+        let now = self.native.clock.now();
         if self.queue_housekeeping_at.is_some_and(|at| now < at) {
             return Ok(());
         }
@@ -1367,7 +1379,7 @@ impl RunnerLoop<'_> {
     /// Delivers the member's oldest unnotified pending message, strictly oldest-first, when no
     /// ordinary attempt is active and the FIFO is empty.
     fn sweep_previews(&mut self) -> Result<()> {
-        let now = Instant::now();
+        let now = self.native.clock.now();
         self.preview_sweep
             .observe(self.native.controller.status().eligibility);
         if !started(&mut self.coordinator).sweep_may_start() || !self.preview_sweep.due(now) {
@@ -1380,7 +1392,7 @@ impl RunnerLoop<'_> {
             Ok(None) => {}
             Err(cause) => {
                 eprintln!("member runtime: preview sweep: {}", cause.message());
-                self.preview_sweep.back_off(Instant::now());
+                self.preview_sweep.back_off(self.native.clock.now());
             }
         }
         Ok(())
@@ -1400,7 +1412,7 @@ impl RunnerLoop<'_> {
     /// Feeds a completed sweep attempt's outcome to the run-wide backoff: a submitted preview
     /// resets it, and a transient obstacle arms it.
     fn finish_sweep(&mut self, reply: Result<InputControlReply>) {
-        let now = Instant::now();
+        let now = self.native.clock.now();
         let submission = match reply {
             Ok(InputControlReply::Submission(submission)) => submission,
             Ok(_) => unreachable!("a preview submission replies with a submission"),
@@ -1463,8 +1475,9 @@ fn publish_stopped_results(
     conn: &mut Connection,
     run_id: i64,
     controller: &ObservationController,
+    clock: &dyn crate::time::Clock,
 ) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = clock.now() + Duration::from_secs(1);
     coordinator.fence(deadline)?;
     let unpublished = with_database_deadline(conn, deadline, |conn| {
         storage::unpublished_delivery_results(conn, run_id)
@@ -2342,7 +2355,8 @@ pub(crate) mod test_support {
                 .monotonic_ns()
         }
         pub(crate) fn pause(until: Instant) {
-            crate::runtime::control::pause(until).expect("original owned service deadline");
+            crate::runtime::control::pause(until, &crate::time::SystemClock)
+                .expect("original owned service deadline");
         }
 
         /// `detecting` adds the synthetic permission-form detector, so `FORM_LINE` opens a
@@ -4884,7 +4898,7 @@ mod tests {
             let mut frames = Vec::new();
             while frames.len() < count {
                 assert!(Instant::now() < deadline, "bounded actual client polling");
-                frames.extend(client.poll().unwrap());
+                frames.extend(client.poll(&crate::time::SystemClock).unwrap());
                 std::thread::yield_now();
             }
             assert_eq!(frames.len(), count);
@@ -4899,7 +4913,7 @@ mod tests {
             client.decoder.finish().unwrap();
             send(peer, &[byte], deadline);
             let before = Instant::now();
-            assert!(client.poll().unwrap().is_empty());
+            assert!(client.poll(&crate::time::SystemClock).unwrap().is_empty());
             let after = Instant::now();
             assert!(
                 client.decoder.finish().is_err(),
@@ -4913,7 +4927,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(1);
             client.decoder.finish().unwrap();
             let empty_at = Instant::now();
-            assert!(client.poll().unwrap().is_empty());
+            assert!(client.poll(&crate::time::SystemClock).unwrap().is_empty());
             client.decoder.finish().unwrap();
             after(empty_at, deadline);
             let body = br#"{"protocol_version":1,"kind":"health"}"#;
@@ -4974,7 +4988,7 @@ mod tests {
             let (mut partial, mut peer) = pair();
             first(&mut partial, &mut peer, 0, deadline);
             peer.shutdown(Shutdown::Write).unwrap();
-            assert!(partial.poll().is_err());
+            assert!(partial.poll(&crate::time::SystemClock).is_err());
         }
     }
 }

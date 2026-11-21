@@ -1050,9 +1050,9 @@ pub(in crate::runtime) fn encode_input_reply(
     encode_reply(result)
 }
 
-pub(super) fn pause(deadline: Instant) -> Result<()> {
-    check_deadline(Instant::now(), deadline)?;
-    nap_until(deadline);
+pub(super) fn pause(deadline: Instant, clock: &dyn crate::time::Clock) -> Result<()> {
+    check_deadline(clock.now(), deadline)?;
+    nap_until(clock, deadline);
     Ok(())
 }
 pub(super) struct ControlClient {
@@ -1071,15 +1071,28 @@ impl ControlClient {
     pub(crate) fn stream_mut(&mut self) -> &mut UnixStream {
         &mut self.stream
     }
-    pub(super) fn connect(path: &Path, deadline: Instant) -> Result<Self> {
-        Self::connect_in_phase(path, deadline, EndpointPhase::Ready)
+    pub(super) fn connect(
+        path: &Path,
+        deadline: Instant,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<Self> {
+        Self::connect_in_phase(path, deadline, EndpointPhase::Ready, clock)
     }
 
-    pub(super) fn connect_starting(path: &Path, deadline: Instant) -> Result<Self> {
-        Self::connect_in_phase(path, deadline, EndpointPhase::Starting)
+    pub(super) fn connect_starting(
+        path: &Path,
+        deadline: Instant,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<Self> {
+        Self::connect_in_phase(path, deadline, EndpointPhase::Starting, clock)
     }
 
-    fn connect_in_phase(path: &Path, deadline: Instant, phase: EndpointPhase) -> Result<Self> {
+    fn connect_in_phase(
+        path: &Path,
+        deadline: Instant,
+        phase: EndpointPhase,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<Self> {
         use nix::sys::socket::AddressFamily;
         use nix::sys::socket::SockFlag;
         use nix::sys::socket::SockType;
@@ -1087,14 +1100,14 @@ impl ControlClient {
         use nix::sys::socket::connect;
         use nix::sys::socket::socket;
         loop {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             let meta = match std::fs::symlink_metadata(path) {
                 Ok(meta) => meta,
                 Err(cause)
                     if cause.kind() == ErrorKind::NotFound
                         && matches!(phase, EndpointPhase::Starting) =>
                 {
-                    pause(deadline)?;
+                    pause(deadline, clock)?;
                     continue;
                 }
                 Err(cause) => return Err(io_error(cause)),
@@ -1105,7 +1118,7 @@ impl ControlClient {
             )?;
             if meta.mode() & 0o777 != 0o600 {
                 if matches!(phase, EndpointPhase::Starting) {
-                    pause(deadline)?;
+                    pause(deadline, clock)?;
                     continue;
                 }
                 return Err(error("private control socket identity required"));
@@ -1134,11 +1147,11 @@ impl ControlClient {
                         decoder: ControlDecoder::new(),
                     });
                 }
-                Err(nix::errno::Errno::EAGAIN) => pause(deadline)?,
+                Err(nix::errno::Errno::EAGAIN) => pause(deadline, clock)?,
                 Err(nix::errno::Errno::ECONNREFUSED | nix::errno::Errno::ENOENT)
                     if matches!(phase, EndpointPhase::Starting) =>
                 {
-                    pause(deadline)?;
+                    pause(deadline, clock)?;
                 }
                 Err(cause) => return Err(io_error(cause)),
             }
@@ -1148,40 +1161,47 @@ impl ControlClient {
         &mut self,
         request: &LifecycleRequest,
         deadline: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<Value> {
         let bytes = encode_control_frame(&wire(request)?)?;
-        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let frame = self.exchange_bytes(&bytes, deadline, clock)?;
         decode_reply(frame.body())
     }
     pub(super) fn exchange_input(
         &mut self,
         request: &InputControlRequest,
         deadline: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<InputControlReply> {
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(clock.now(), deadline)?;
         let bytes = encode_input_request(request)?;
-        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let frame = self.exchange_bytes(&bytes, deadline, clock)?;
         let reply = decode_input_reply(frame.body(), request)?;
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(clock.now(), deadline)?;
         Ok(reply)
     }
-    fn exchange_bytes(&mut self, bytes: &[u8], deadline: Instant) -> Result<AdmittedControlFrame> {
+    fn exchange_bytes(
+        &mut self,
+        bytes: &[u8],
+        deadline: Instant,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<AdmittedControlFrame> {
         let mut offset = 0;
         while offset < bytes.len() {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             match self.stream.write(&bytes[offset..]) {
                 Ok(0) => return Err(error("control endpoint disconnected during write")),
                 Ok(count) => offset += count,
                 Err(cause)
                     if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
                 {
-                    pause(deadline)?
+                    pause(deadline, clock)?
                 }
                 Err(cause) => return Err(io_error(cause)),
             }
         }
         loop {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             let mut bytes = [0; 4096];
             match self.stream.read(&mut bytes) {
                 Ok(0) => {
@@ -1189,7 +1209,7 @@ impl ControlClient {
                     return Err(error("control endpoint disconnected before reply"));
                 }
                 Ok(count) => {
-                    let observed_at = Instant::now();
+                    let observed_at = clock.now();
                     let frames = self.decoder.feed_admitted(&bytes[..count], observed_at)?;
                     if !frames.is_empty() {
                         ensure(frames.len() == 1, "unexpected multiple control replies")?;
@@ -1200,7 +1220,7 @@ impl ControlClient {
                 Err(cause)
                     if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
                 {
-                    pause(deadline)?
+                    pause(deadline, clock)?
                 }
                 Err(cause) => return Err(io_error(cause)),
             }
@@ -1211,18 +1231,21 @@ pub(super) fn request(
     run: &RunRecord,
     request: LifecycleRequest,
     deadline: Instant,
+    clock: &dyn crate::time::Clock,
 ) -> Result<Value> {
     let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
-    ControlClient::connect(&paths.control_socket, deadline)?.exchange(&request, deadline)
+    ControlClient::connect(&paths.control_socket, deadline, clock)?
+        .exchange(&request, deadline, clock)
 }
 
 pub(crate) fn request_shutdown(
     conn: &mut rusqlite::Connection,
     run: &RunRecord,
     deadline: Instant,
+    clock: &dyn crate::time::Clock,
 ) -> Result<ShutdownOutcome> {
     validate_run_paths(conn, run)?;
-    let result = request(run, LifecycleRequest::shutdown(run), deadline)?;
+    let result = request(run, LifecycleRequest::shutdown(run), deadline, clock)?;
     let outcome: ShutdownOutcome = serde_json::from_value(result).map_err(io_error)?;
     let current = storage::get_run(conn, run.run_id)?;
     ensure(
@@ -1275,8 +1298,12 @@ impl HealthSnapshot {
         }
     }
 }
-pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-    let reply = request(run, LifecycleRequest::health(run), deadline)?;
+pub(crate) fn probe_health(
+    run: &RunRecord,
+    deadline: Instant,
+    clock: &dyn crate::time::Clock,
+) -> Result<HealthSnapshot> {
+    let reply = request(run, LifecycleRequest::health(run), deadline, clock)?;
     HealthSnapshot::decode(reply, run)
 }
 /// A doctor row's status, ordered by severity.
@@ -1891,7 +1918,7 @@ mod tests {
                             write_fixture_bytes(&mut stream, &[byte], deadline);
                         }
                     });
-                    let observed = probe_health(&run, deadline);
+                    let observed = probe_health(&run, deadline, &crate::time::SystemClock);
                     assert_eq!(observed.is_ok(), valid, "{observed:?}");
                     if let Ok(health) = observed {
                         assert_eq!(health.output_seq, 7);
@@ -2104,7 +2131,7 @@ mod tests {
             let until = Instant::now() + Duration::from_secs(1);
             let stop = AtomicBool::new(false);
             write_peer(&mut peer, response, &stop, until).unwrap();
-            let result = client.exchange_input(&request(fixture), until);
+            let result = client.exchange_input(&request(fixture), until, &crate::time::SystemClock);
             let actual = read_request(&mut peer, &stop, until).unwrap();
             (result, actual)
         }
@@ -2138,8 +2165,11 @@ mod tests {
                     })
                 },
                 || {
-                    client
-                        .exchange_input(&request(&fixture), Instant::now() + Duration::from_secs(1))
+                    client.exchange_input(
+                        &request(&fixture),
+                        Instant::now() + Duration::from_secs(1),
+                        &crate::time::SystemClock,
+                    )
                 },
             );
             accepted(result);
@@ -2170,7 +2200,8 @@ mod tests {
             let stop = AtomicBool::new(false);
             write_peer(&mut peer, &good[..good.len() - 1], &stop, until).unwrap();
             peer.shutdown(Shutdown::Write).unwrap();
-            let result = client.exchange_input(&request(&fixture), until);
+            let result =
+                client.exchange_input(&request(&fixture), until, &crate::time::SystemClock);
             let actual = read_request(&mut peer, &stop, until).unwrap();
             assert!(result.is_err());
             assert_eq!(actual, expected(&fixture));
@@ -2182,7 +2213,11 @@ mod tests {
             let expired = Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .unwrap();
-            assert!(client.exchange_input(&request(&fixture), expired).is_err());
+            assert!(
+                client
+                    .exchange_input(&request(&fixture), expired, &crate::time::SystemClock)
+                    .is_err()
+            );
             let mut byte = [0];
             let observation_deadline = Instant::now() + Duration::from_millis(100);
             loop {
@@ -2228,7 +2263,11 @@ mod tests {
                     })
                 },
                 || {
-                    let result = client.exchange_input(&request(&fixture), deadline);
+                    let result = client.exchange_input(
+                        &request(&fixture),
+                        deadline,
+                        &crate::time::SystemClock,
+                    );
                     returned = Some(Instant::now());
                     result
                 },
@@ -2343,8 +2382,13 @@ mod tests {
                     })
                 },
                 || {
-                    let mut client = ControlClient::connect(&path, deadline).unwrap();
-                    let result = client.exchange_input(&request(&fixture), deadline);
+                    let mut client =
+                        ControlClient::connect(&path, deadline, &crate::time::SystemClock).unwrap();
+                    let result = client.exchange_input(
+                        &request(&fixture),
+                        deadline,
+                        &crate::time::SystemClock,
+                    );
                     returned_at = Some(Instant::now());
                     returned_signal.store(true, Ordering::Release);
                     result
@@ -2416,7 +2460,11 @@ mod tests {
                     }
                 };
                 let started = Instant::now();
-                let result = probe_health(&endpoint.fixture.run, started + Duration::from_secs(1));
+                let result = probe_health(
+                    &endpoint.fixture.run,
+                    started + Duration::from_secs(1),
+                    &crate::time::SystemClock,
+                );
                 assert!(result.is_err(), "{result:?}");
                 assert!(started.elapsed() < Duration::from_millis(500));
                 if matches!(interval, StartupInterval::BeforePrivateMode) {
@@ -2440,7 +2488,14 @@ mod tests {
         let _server = SilentServer::start(&artifacts.paths.control_socket);
         let before = std::fs::read(fixture.conn.path().unwrap()).unwrap();
         let start = Instant::now();
-        assert!(probe_health(&fixture.run, start + Duration::from_millis(80)).is_err());
+        assert!(
+            probe_health(
+                &fixture.run,
+                start + Duration::from_millis(80),
+                &crate::time::SystemClock
+            )
+            .is_err()
+        );
         assert!(start.elapsed() < Duration::from_millis(750));
         assert_eq!(std::fs::read(fixture.conn.path().unwrap()).unwrap(), before);
     }

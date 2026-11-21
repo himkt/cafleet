@@ -556,7 +556,8 @@ pub(crate) fn create_with_layout_wait(
             ))
         })?
         .to_owned();
-    let mut host = runner::NativeLaunchHost::new(&*mux, &target.pane, &cwd_text);
+    let mut host =
+        runner::NativeLaunchHost::new(&*mux, &target.pane, &cwd_text, &crate::time::SystemClock);
     let created = runner::create_registered(
         conn,
         &pending,

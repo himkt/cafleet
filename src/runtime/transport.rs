@@ -86,6 +86,7 @@ pub(crate) struct Transport {
     drain_blocker: Option<String>,
     observation_fenced: bool,
     observation_remainder: Option<Vec<u8>>,
+    clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
     #[cfg(test)]
@@ -155,7 +156,11 @@ fn write_pending(
     Ok(count)
 }
 impl Transport {
-    pub(crate) fn new(size: TerminalSize, limits: TransportLimits) -> Result<Self> {
+    pub(crate) fn new(
+        size: TerminalSize,
+        limits: TransportLimits,
+        clock: Arc<dyn crate::time::Clock>,
+    ) -> Result<Self> {
         ensure(
             limits.input_bytes > 0 && limits.display_bytes > 0 && limits.bytes_per_tick > 0,
             "transport limits must be positive",
@@ -176,6 +181,7 @@ impl Transport {
             drain_blocker: None,
             observation_fenced: false,
             observation_remainder: None,
+            clock,
             #[cfg(test)]
             observation_hooks: None,
             #[cfg(test)]
@@ -347,12 +353,12 @@ impl Transport {
             .expect("input drain turn fits u64");
     }
     fn retain_human(&mut self, bytes: Vec<u8>) {
-        let classified = self.replies.feed(&bytes, Instant::now());
+        let classified = self.replies.feed(&bytes, self.clock.now());
         self.count_input(classified);
         self.input.extend(bytes);
     }
     fn expire_reply_prefix(&mut self) {
-        let classified = self.replies.expire(Instant::now());
+        let classified = self.replies.expire(self.clock.now());
         self.count_input(classified);
     }
     fn close_outer(&mut self) {
@@ -427,7 +433,7 @@ impl Transport {
         proof: &DrainedInput,
         deadline: Instant,
     ) -> Result<()> {
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(self.clock.now(), deadline)?;
         ensure(
             Arc::ptr_eq(&self.input_instance, &proof.instance)
                 && self.input_turn == proof.turn
@@ -462,7 +468,7 @@ impl Transport {
     ) -> Result<ProgrammaticWrite> {
         let effective = guard.begin_write(self, bytes, deadline)?;
         self.invalidate_input_drain();
-        check_deadline(Instant::now(), effective)?;
+        check_deadline(self.clock.now(), effective)?;
         guard.mark_io_possible();
         let result = pty.try_write(bytes);
         let recorded = guard.record_write_result(&result, bytes.len());
@@ -475,7 +481,7 @@ impl Transport {
                 Ok(_) => recording,
             });
         }
-        check_deadline(Instant::now(), effective)?;
+        check_deadline(self.clock.now(), effective)?;
         match result {
             Ok(count) if count == bytes.len() => Ok(ProgrammaticWrite::Complete { bytes: count }),
             Ok(0) => Err(error("native input write returned zero bytes")),
@@ -564,12 +570,13 @@ fn unsettled_health(health: &ObservationHealth) -> Option<String> {
 struct DeadlineObserver<'a, O> {
     inner: &'a mut O,
     deadline: Instant,
+    clock: &'a dyn crate::time::Clock,
 }
 impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
-        check_deadline(Instant::now(), self.deadline)?;
+        check_deadline(self.clock.now(), self.deadline)?;
         self.inner.observe(screen)?;
-        check_deadline(Instant::now(), self.deadline)
+        check_deadline(self.clock.now(), self.deadline)
     }
 
     fn input_health(&self) -> ObservationHealth {
@@ -577,9 +584,9 @@ impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
     }
 
     fn parser_failure(&mut self) -> Result<()> {
-        check_deadline(Instant::now(), self.deadline)?;
+        check_deadline(self.clock.now(), self.deadline)?;
         self.inner.parser_failure()?;
-        check_deadline(Instant::now(), self.deadline)
+        check_deadline(self.clock.now(), self.deadline)
     }
 }
 
@@ -594,7 +601,7 @@ impl Transport {
     ) -> Result<InputDrain> {
         self.invalidate_input_drain();
         self.drain_blocker = None;
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(self.clock.now(), deadline)?;
         let mut remaining = DrainBudget {
             human: self.limits.bytes_per_tick,
             child: self.limits.bytes_per_tick,
@@ -602,7 +609,7 @@ impl Transport {
             display: self.limits.bytes_per_tick,
         };
         for _ in 0..ROUND_LIMIT {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.clock.now(), deadline)?;
             self.expire_reply_prefix();
             let human_read = if self.outer_eof {
                 AvailableRead::Skipped
@@ -625,13 +632,13 @@ impl Transport {
                 AvailableRead::Eof => self.close_outer(),
                 _ => {}
             }
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.clock.now(), deadline)?;
             if remaining.manual > 0 && !self.input.is_empty() {
                 let written = write_pending(&mut self.input, remaining.manual, |bytes| {
                     pty.try_write(bytes)
                 })?;
                 remaining.manual -= written;
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.clock.now(), deadline)?;
             }
             if let Some(remainder) = self.observation_remainder.take() {
                 remaining.child = remaining
@@ -657,16 +664,16 @@ impl Transport {
                 AvailableRead::Eof => self.child_eof = true,
                 _ => {}
             }
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.clock.now(), deadline)?;
             if remaining.display > 0 && !self.display.is_empty() {
                 let written = write_pending(&mut self.display, remaining.display, |bytes| {
                     display.try_write(bytes)
                 })?;
                 remaining.display -= written;
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.clock.now(), deadline)?;
             }
             flush_nonblocking(display)?;
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(self.clock.now(), deadline)?;
             let ended = if interrupted {
                 Some("terminal input interrupted")
             } else if self.outer_eof {
@@ -691,12 +698,12 @@ impl Transport {
                     return Ok(self.pending("observation incomplete".into()));
                 }
                 let health = observer.input_health();
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.clock.now(), deadline)?;
                 if let Some(reason) = unsettled_health(&health) {
                     return Ok(self.pending(reason));
                 }
                 let output_seq = self.terminal.snapshot().screen_seq;
-                check_deadline(Instant::now(), deadline)?;
+                check_deadline(self.clock.now(), deadline)?;
                 self.input_drain = Some(DrainedInput {
                     instance: self.input_instance.clone(),
                     turn: self.input_turn,
@@ -738,7 +745,7 @@ impl Transport {
         observer: &mut impl ScreenObserver,
         deadline: Instant,
     ) -> Result<()> {
-        if let Err(cause) = check_deadline(Instant::now(), deadline) {
+        if let Err(cause) = check_deadline(self.clock.now(), deadline) {
             self.retain_observation_remainder(bytes);
             return Err(cause);
         }
@@ -753,12 +760,14 @@ impl Transport {
                 return Err(cause);
             }
         }
+        let clock = self.clock.clone();
         let mut bounded = DeadlineObserver {
             inner: observer,
             deadline,
+            clock: clock.as_ref(),
         };
         match self.observe_child_bytes(bytes, &mut bounded) {
-            Ok(()) => check_deadline(Instant::now(), deadline),
+            Ok(()) => check_deadline(self.clock.now(), deadline),
             Err(TerminalObservationError::Observer { cause, .. }) => Err(cause),
             Err(TerminalObservationError::Parser(cause)) => match bounded.parser_failure() {
                 Ok(()) => Err(cause),
@@ -1808,6 +1817,7 @@ mod tests {
                 display_bytes: display,
                 bytes_per_tick: bytes,
             },
+            std::sync::Arc::new(crate::time::SystemClock),
         )
         .unwrap()
     }
@@ -4369,6 +4379,7 @@ mod tests {
                 display_bytes: 64,
                 bytes_per_tick: 16,
             },
+            std::sync::Arc::new(crate::time::SystemClock),
         )
         .unwrap()
     }
@@ -4381,6 +4392,7 @@ mod tests {
                 display_bytes: 65536,
                 bytes_per_tick: 16384,
             },
+            std::sync::Arc::new(crate::time::SystemClock),
         )
         .unwrap()
     }
@@ -4856,7 +4868,12 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(
-                Transport::new(TerminalSize { rows: 24, cols: 80 }, limits).is_err(),
+                Transport::new(
+                    TerminalSize { rows: 24, cols: 80 },
+                    limits,
+                    std::sync::Arc::new(crate::time::SystemClock)
+                )
+                .is_err(),
                 "{field}"
             );
         }

@@ -146,7 +146,7 @@ pub(crate) fn note<T>(diagnostics: &mut Vec<String>, result: Result<T>) -> Optio
 }
 
 pub(crate) trait ShutdownHost {
-    fn now(&self) -> Instant;
+    fn clock(&self) -> &dyn crate::time::Clock;
     fn gate_programmatic_input(&mut self);
     fn term_verified_descendants(&mut self) -> Result<()>;
     fn drain_and_reap_until(&mut self, deadline: Instant) -> Result<Option<ChildExit>>;
@@ -202,7 +202,7 @@ pub(crate) fn shutdown(
     )
     .unwrap_or((0, 0));
     note(&mut outcome.diagnostics, host.restore_terminal());
-    if host.now() > clock.storage_deadline() {
+    if host.clock().now() > clock.storage_deadline() {
         outcome
             .diagnostics
             .push("shutdown exceeded its original storage deadline".into());
@@ -366,7 +366,7 @@ pub(crate) struct Started {
     pub(crate) child: ProcessIdentity,
 }
 pub(crate) trait LaunchHost {
-    fn now(&self) -> Instant;
+    fn clock(&self) -> &dyn crate::time::Clock;
     fn current_executable(&self) -> Result<PathBuf>;
     fn split_runner(
         &mut self,
@@ -411,11 +411,12 @@ fn pending_failure(
     run: &RunRecord,
     clock: ShutdownDeadlines,
     diagnostics: &[String],
+    time: &dyn crate::time::Clock,
 ) -> Result<()> {
     with_database_deadline(conn, clock.storage_deadline(), |conn| {
         ensure_same_database(conn, &run.database_identity_json)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute("UPDATE member_runs SET status='failed',ended_at=COALESCE(ended_at,?1),cleanup_state=?2,cleanup_diagnostics_json=?3 WHERE run_id=?4 AND launch_nonce=?5",params![crate::time::now_stamp(),if diagnostics.is_empty(){"complete"}else{"incomplete"},serde_json::to_string(diagnostics).map_err(io_error)?,run.run_id,run.launch_nonce])?;
+        tx.execute("UPDATE member_runs SET status='failed',ended_at=COALESCE(ended_at,?1),cleanup_state=?2,cleanup_diagnostics_json=?3 WHERE run_id=?4 AND launch_nonce=?5",params![time.wall_stamp(),if diagnostics.is_empty(){"complete"}else{"incomplete"},serde_json::to_string(diagnostics).map_err(io_error)?,run.run_id,run.launch_nonce])?;
         broker::members::deregister_member_rows(&tx, run.member_id)?;
         tx.commit().map_err(crate::error::CafleetError::from)
     })
@@ -437,6 +438,7 @@ impl PendingGuard<'_> {
         primary: CafleetError,
         clock: ShutdownDeadlines,
         mut diagnostics: Vec<String>,
+        time: &dyn crate::time::Clock,
     ) -> CafleetError {
         self.armed = false;
         let current = note(
@@ -448,7 +450,7 @@ impl PendingGuard<'_> {
             &mut diagnostics,
             remove_pending_descriptor(self.conn, &current),
         );
-        if let Err(cause) = pending_failure(self.conn, &current, clock, &diagnostics) {
+        if let Err(cause) = pending_failure(self.conn, &current, clock, &diagnostics, time) {
             diagnostics.push(cause.message().into_owned());
         }
         diagnostics
@@ -463,6 +465,7 @@ impl Drop for PendingGuard<'_> {
                 error("pending creation was interrupted"),
                 ShutdownDeadlines::starting_now(&crate::time::SystemClock),
                 Vec::new(),
+                &crate::time::SystemClock,
             );
             eprintln!("{cause}");
         }
@@ -487,8 +490,9 @@ pub(crate) fn create_registered(
         Err(cause) => {
             return Err(guard.rollback(
                 cause,
-                ShutdownDeadlines::starting_at(host.now(), crate::time::SHUTDOWN_UNIT),
+                ShutdownDeadlines::starting_now(host.clock()),
                 Vec::new(),
+                host.clock(),
             ));
         }
     };
@@ -514,7 +518,7 @@ fn launch_registered(
 ) -> Result<LaunchOutcome> {
     let mut pane = None;
     let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        check_deadline(host.now(), deadline)?;
+        check_deadline(host.clock().now(), deadline)?;
         let run = storage::get_run(guard.conn, pending.run.run_id)?;
         ensure(
             pending.paths.run_dir == artifacts.paths.run_dir,
@@ -563,9 +567,9 @@ fn launch_registered(
             &argv,
             deadline,
         )?);
-        check_deadline(host.now(), deadline)?;
+        check_deadline(host.clock().now(), deadline)?;
         let prepared = host.wait_prepared(&descriptor, deadline)?;
-        check_deadline(host.now(), deadline)?;
+        check_deadline(host.clock().now(), deadline)?;
         let current = with_database_deadline(guard.conn, deadline, |conn| {
             storage::get_run(conn, run.run_id)
         })?;
@@ -589,7 +593,7 @@ fn launch_registered(
                 broker::active_member_fleet(&tx, run.member_id)? == Some(run.fleet_id),
                 "pending member became inactive",
             )?;
-            let changed=tx.execute("UPDATE member_runs SET status='prepared',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='starting'",params![crate::time::now_stamp(),run.run_id,current.owner_epoch])?;
+            let changed=tx.execute("UPDATE member_runs SET status='prepared',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='starting'",params![host.clock().wall_stamp(),run.run_id,current.owner_epoch])?;
             ensure(changed == 1, "prepared publication lost run ownership")?;
             let spawned = pane.as_ref().expect("created pane");
             let changed = tx.execute(
@@ -612,7 +616,7 @@ fn launch_registered(
                 .ok_or_else(|| error("published placement vanished"))
         })?;
         let started = host.start(&prepared, &placement, deadline)?;
-        check_deadline(host.now(), deadline)?;
+        check_deadline(host.clock().now(), deadline)?;
         let current = with_database_deadline(guard.conn, deadline, |conn| {
             storage::get_run(conn, run.run_id)
         })?;
@@ -651,7 +655,7 @@ fn launch_registered(
             Some(payload),
         ),
     };
-    let clock = ShutdownDeadlines::starting_at(host.now(), crate::time::SHUTDOWN_UNIT);
+    let clock = ShutdownDeadlines::starting_now(host.clock());
     let mut notes = Vec::new();
     match storage::get_run(guard.conn, pending.run.run_id) {
         Ok(current) if current.owner_kind == OwnerKind::Runner => {
@@ -684,7 +688,7 @@ fn launch_registered(
             host.close_pane(&pane, clock.storage_deadline())
         });
     }
-    let failure = guard.rollback(primary, clock, notes);
+    let failure = guard.rollback(primary, clock, notes, host.clock());
     if let Some(payload) = unwind {
         eprintln!("{failure}");
         std::panic::resume_unwind(payload);
@@ -698,22 +702,29 @@ pub(crate) struct NativeLaunchHost<'a> {
     target: &'a PaneTarget,
     cwd: &'a str,
     client: Option<ControlClient>,
+    clock: &'a dyn crate::time::Clock,
 }
 
 impl<'a> NativeLaunchHost<'a> {
-    pub(crate) fn new(mux: &'a dyn Multiplexer, target: &'a PaneTarget, cwd: &'a str) -> Self {
+    pub(crate) fn new(
+        mux: &'a dyn Multiplexer,
+        target: &'a PaneTarget,
+        cwd: &'a str,
+        clock: &'a dyn crate::time::Clock,
+    ) -> Self {
         Self {
             mux,
             target,
             cwd,
             client: None,
+            clock,
         }
     }
 }
 
 impl LaunchHost for NativeLaunchHost<'_> {
-    fn now(&self) -> Instant {
-        Instant::now()
+    fn clock(&self) -> &dyn crate::time::Clock {
+        self.clock
     }
     fn current_executable(&self) -> Result<std::path::PathBuf> {
         std::env::current_exe().map_err(io_error)
@@ -738,16 +749,17 @@ impl LaunchHost for NativeLaunchHost<'_> {
             &descriptor.identity.database_identity_json,
             descriptor.identity.run_id,
         )?;
-        let mut client = ControlClient::connect_starting(&paths.control_socket, deadline)?;
+        let mut client =
+            ControlClient::connect_starting(&paths.control_socket, deadline, self.clock)?;
         let request = LifecycleRequest::Prepare {
             protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: descriptor.identity.clone(),
             remaining_ms: deadline
-                .saturating_duration_since(Instant::now())
+                .saturating_duration_since(self.clock.now())
                 .as_millis()
                 .min(10000) as u64,
         };
-        let result = client.exchange(&request, deadline)?;
+        let result = client.exchange(&request, deadline, self.clock)?;
         let prepared = serde_json::from_value(result).map_err(io_error)?;
         self.client = Some(client);
         Ok(prepared)
@@ -770,7 +782,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
                 .clone()
                 .expect("published placement carries the created pane"),
         };
-        let value = client.exchange(&request, deadline)?;
+        let value = client.exchange(&request, deadline, self.clock)?;
         serde_json::from_value(value).map_err(io_error)
     }
     fn settle_hermes(
@@ -797,6 +809,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
             run,
             LifecycleRequest::shutdown(run),
             clock.storage_deadline(),
+            self.clock,
         ) {
             return serde_json::from_value(value).map_err(io_error);
         }
@@ -807,8 +820,8 @@ impl LaunchHost for NativeLaunchHost<'_> {
                 nix::sys::signal::Signal::SIGTERM,
             )
             .map_err(io_error)?;
-            while runner.matches()? && Instant::now() < clock.storage_deadline() {
-                pause(clock.storage_deadline())?;
+            while runner.matches()? && self.clock.now() < clock.storage_deadline() {
+                pause(clock.storage_deadline(), self.clock)?;
             }
         }
         let mut notes=vec!["runner control shutdown unavailable; descendant cleanup requires explicit reconciliation".into()];
@@ -870,6 +883,7 @@ mod tests {
                 &mux,
                 &target,
                 "/readiness-fixture",
+                &crate::time::SystemClock,
             ));
             assert!(runner.events().is_empty(), "{:?}", runner.events());
             result
@@ -892,7 +906,7 @@ mod tests {
                 if finished.load(Ordering::Acquire) || Instant::now() >= deadline {
                     return None;
                 }
-                pause_until(deadline);
+                pause_until(&crate::time::SystemClock, deadline);
             }
         }
 
@@ -955,7 +969,7 @@ mod tests {
                         if finished.load(Ordering::Acquire) {
                             return (None, premature_connections);
                         }
-                        pause_until(ready_at);
+                        pause_until(&crate::time::SystemClock, ready_at);
                     }
                     match interval {
                         StartupInterval::Bound => {
@@ -1114,6 +1128,8 @@ mod tests {
     use crate::error::CafleetError;
     use crate::multiplexer::SpawnedPane;
     use crate::runtime::lifecycle::*;
+    use crate::time::Clock;
+    use crate::time::test_support::TestClock;
     use rusqlite::hooks::AuthAction;
     use rusqlite::hooks::AuthContext;
     use rusqlite::hooks::Authorization;
@@ -1133,7 +1149,7 @@ mod tests {
 
     struct LaunchFixtureHost {
         database_url: String,
-        now: Instant,
+        clock: TestClock,
         delay: Duration,
         calls: Vec<&'static str>,
         deadlines: Vec<(&'static str, Instant)>,
@@ -1157,7 +1173,7 @@ mod tests {
         fn new(fixture: &Fixture) -> Self {
             Self {
                 database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                now: Instant::now(),
+                clock: TestClock::starting_at(Instant::now()),
                 delay: Duration::ZERO,
                 calls: Vec::new(),
                 deadlines: Vec::new(),
@@ -1180,7 +1196,7 @@ mod tests {
         fn phase(&mut self, name: &'static str, deadline: Instant) -> Result<(), CafleetError> {
             self.calls.push(name);
             self.deadlines.push((name, deadline));
-            self.now += self.delay;
+            self.clock.advance(self.delay);
             if self.fail == Some(name) {
                 let message = format!("fixture {name} failure");
                 Err(if self.failure_is_usage {
@@ -1207,8 +1223,8 @@ mod tests {
     }
 
     impl LaunchHost for LaunchFixtureHost {
-        fn now(&self) -> Instant {
-            self.now
+        fn clock(&self) -> &dyn crate::time::Clock {
+            &self.clock
         }
         fn current_executable(&self) -> Result<PathBuf, CafleetError> {
             Ok("/absolute/cafleet".into())
@@ -1364,7 +1380,10 @@ mod tests {
             clock: ShutdownDeadlines,
         ) -> Result<ShutdownOutcome, CafleetError> {
             self.calls.push("shutdown");
-            assert_eq!(clock.storage_deadline(), self.now + Duration::from_secs(4));
+            assert_eq!(
+                clock.storage_deadline(),
+                self.clock.now() + Duration::from_secs(4)
+            );
             let conn = crate::db::connect(&self.database_url).unwrap();
             let current = storage::get_run(&conn, run.run_id).unwrap();
             assert_eq!(current.run_id, run.run_id);
@@ -1412,7 +1431,7 @@ mod tests {
     fn launch_case() -> (Fixture, LaunchFixtureHost, Instant) {
         let fixture = Fixture::new();
         let host = LaunchFixtureHost::new(&fixture);
-        let deadline = host.now + Duration::from_secs(10);
+        let deadline = host.clock.now() + Duration::from_secs(10);
         (fixture, host, deadline)
     }
 
@@ -2199,7 +2218,7 @@ mod tests {
     }
 
     struct Host {
-        now: Instant,
+        clock: TestClock,
         calls: Vec<(&'static str, Instant)>,
         deadlines: Vec<(&'static str, Instant)>,
         fail: BTreeSet<&'static str>,
@@ -2212,7 +2231,7 @@ mod tests {
     impl Host {
         fn new(now: Instant) -> Self {
             Self {
-                now,
+                clock: TestClock::starting_at(now),
                 calls: Vec::new(),
                 deadlines: Vec::new(),
                 fail: BTreeSet::new(),
@@ -2222,8 +2241,13 @@ mod tests {
                 gap: 0,
             }
         }
+        fn reach(&self, deadline: Instant) {
+            if let Some(remaining) = deadline.checked_duration_since(self.clock.now()) {
+                self.clock.advance(remaining);
+            }
+        }
         fn call(&mut self, name: &'static str) -> Result<(), CafleetError> {
-            self.calls.push((name, self.now));
+            self.calls.push((name, self.clock.now()));
             if self.fail.contains(name) {
                 Err(CafleetError::App(format!("fixture {name} failure")))
             } else {
@@ -2233,11 +2257,11 @@ mod tests {
     }
 
     impl ShutdownHost for Host {
-        fn now(&self) -> Instant {
-            self.now
+        fn clock(&self) -> &dyn crate::time::Clock {
+            &self.clock
         }
         fn gate_programmatic_input(&mut self) {
-            self.calls.push(("gate", self.now));
+            self.calls.push(("gate", self.clock.now()));
         }
         fn term_verified_descendants(&mut self) -> Result<(), CafleetError> {
             self.call("term")
@@ -2247,7 +2271,7 @@ mod tests {
             deadline: Instant,
         ) -> Result<Option<ChildExit>, CafleetError> {
             self.deadlines.push(("drain", deadline));
-            self.now = self.now.max(deadline);
+            self.reach(deadline);
             self.call("drain")?;
             Ok(self.native)
         }
@@ -2265,13 +2289,13 @@ mod tests {
         }
         fn flush_display_until(&mut self, deadline: Instant) -> Result<u64, CafleetError> {
             self.deadlines.push(("display", deadline));
-            self.now = self.now.max(deadline);
+            self.reach(deadline);
             self.call("display")?;
             Ok(self.dropped)
         }
         fn finish_events_until(&mut self, deadline: Instant) -> Result<(u64, u64), CafleetError> {
             self.deadlines.push(("events", deadline));
-            self.now = self.now.max(deadline);
+            self.reach(deadline);
             self.call("events")?;
             Ok((self.pending, self.gap))
         }
@@ -2328,7 +2352,7 @@ mod tests {
             Some(ChildExit::Code(9)),
         );
         assert_eq!(host.calls.last().unwrap().0, "restore");
-        assert_eq!(host.now, start + Duration::from_secs(4));
+        assert_eq!(host.clock.now(), start + Duration::from_secs(4));
         assert_eq!(outcome.native_exit, Some(ChildExit::Code(9)));
         assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
         for failure in &host.fail {
@@ -2382,7 +2406,7 @@ mod tests {
         );
         assert_eq!(host.deadlines[0].1, start + Duration::from_secs(2));
         assert_eq!(host.deadlines[2].1, start + Duration::from_secs(4));
-        assert_eq!(host.now, start + Duration::from_secs(4));
+        assert_eq!(host.clock.now(), start + Duration::from_secs(4));
         assert_eq!(outcome.native_exit, Some(ChildExit::Signal(15)));
     }
 

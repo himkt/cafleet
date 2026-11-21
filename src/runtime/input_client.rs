@@ -82,6 +82,7 @@ impl InputContext {
     }
 }
 pub(crate) trait InputCommandHost {
+    fn clock(&self) -> &dyn crate::time::Clock;
     fn lock(
         &mut self,
         settings: &Settings,
@@ -99,6 +100,10 @@ pub(crate) trait InputCommandHost {
 
 pub(crate) struct NativeInputHost;
 impl InputCommandHost for NativeInputHost {
+    fn clock(&self) -> &dyn crate::time::Clock {
+        &crate::time::SystemClock
+    }
+
     fn lock(
         &mut self,
         settings: &Settings,
@@ -109,7 +114,7 @@ impl InputCommandHost for NativeInputHost {
     }
 
     fn health(&mut self, run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-        probe_health(run, deadline)
+        probe_health(run, deadline, self.clock())
     }
 
     fn exchange(
@@ -119,9 +124,12 @@ impl InputCommandHost for NativeInputHost {
         deadline: Instant,
     ) -> Result<InputControlReply> {
         let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
-        let mut client =
-            crate::runtime::control::ControlClient::connect(&paths.control_socket, deadline)?;
-        client.exchange_input(request, deadline)
+        let mut client = crate::runtime::control::ControlClient::connect(
+            &paths.control_socket,
+            deadline,
+            self.clock(),
+        )?;
+        client.exchange_input(request, deadline, self.clock())
     }
 }
 
@@ -432,8 +440,7 @@ fn prepare_submission_with_host<'a>(
         with_database_budget(conn, deadline, |conn| {
             validate_submission_target(conn, settings, expected_run, expected_placement)
         })?;
-        let attempt =
-            PreparedSubmission::new(request, deadline.instant(), &crate::time::SystemClock)?;
+        let attempt = PreparedSubmission::new(request, deadline.instant(), host.clock())?;
         let held = host
             .lock(settings, expected_placement, deadline)?
             .ok_or_else(|| error("pane input remained busy before submission"))?;
@@ -488,7 +495,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             let changed = tx.execute(
                 "UPDATE member_runs SET last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
                 rusqlite::params![
-                    crate::time::now_stamp(),
+                    host.clock().wall_stamp(),
                     expected_run.run_id,
                     expected_run.owner_epoch
                 ],
@@ -522,7 +529,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         let bookkeeping = Deadline::until(
             deadline
                 .instant()
-                .max(Instant::now() + std::time::Duration::from_secs(1)),
+                .max(host.clock().now() + std::time::Duration::from_secs(1)),
         );
         let reacquired = held.reacquire_within(bookkeeping)?;
         if !reacquired && !runner_owned {
@@ -673,7 +680,7 @@ fn reconcile_receipt_with_host(
         let placement = placement.ok_or_else(|| {
             error("receipt reconciliation requires the member's live runner; the input stays uncertain")
         })?;
-        let expiration = InputExpiration::capture(deadline.instant(), &crate::time::SystemClock)?;
+        let expiration = InputExpiration::capture(deadline.instant(), host.clock())?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("receipt pane input remained busy"))?;
@@ -884,7 +891,7 @@ pub(crate) fn respond_permission_with_host(
         let (run, original) = prepare_response(conn, input, deadline)?;
         let placement =
             with_database_budget(conn, deadline, |conn| permission_placement(conn, &run))?;
-        let expiration = InputExpiration::capture(deadline.instant(), &crate::time::SystemClock)?;
+        let expiration = InputExpiration::capture(deadline.instant(), host.clock())?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
@@ -991,7 +998,7 @@ fn inspect_permission_with_host(
             tx.commit()?;
             Ok((run, placement, view))
         })?;
-        let expiration = InputExpiration::capture(deadline.instant(), &crate::time::SystemClock)?;
+        let expiration = InputExpiration::capture(deadline.instant(), host.clock())?;
         let held = host
             .lock(settings, &placement, deadline)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
@@ -1244,6 +1251,9 @@ pub(crate) mod test_support {
     }
 
     impl InputCommandHost for NoLiveHost {
+        fn clock(&self) -> &dyn crate::time::Clock {
+            &crate::time::SystemClock
+        }
         fn lock(&mut self, _: &Settings, _: &Placement, _: Deadline) -> Result<Option<PaneLock>> {
             Err(self.refuse("lock"))
         }
@@ -1804,6 +1814,9 @@ mod tests {
     }
 
     impl InputCommandHost for SocketHost {
+        fn clock(&self) -> &dyn crate::time::Clock {
+            &crate::time::SystemClock
+        }
         fn lock(
             &mut self,
             settings: &Settings,
@@ -1829,7 +1842,7 @@ mod tests {
             );
             let health = match self.health_reply.take() {
                 Some(reply) => HealthSnapshot::decode(reply, run)?,
-                None => crate::runtime::probe_health(run, deadline)?,
+                None => crate::runtime::probe_health(run, deadline, &crate::time::SystemClock)?,
             };
             if let Some(callback) = &mut self.after_health {
                 callback();
@@ -1922,8 +1935,11 @@ mod tests {
                 }));
             }
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
-            let mut client =
-                crate::runtime::control::ControlClient::connect(&paths.control_socket, deadline)?;
+            let mut client = crate::runtime::control::ControlClient::connect(
+                &paths.control_socket,
+                deadline,
+                &crate::time::SystemClock,
+            )?;
             if matches!(self.reply, ReplyMode::Disconnected) {
                 client
                     .stream_mut()
@@ -1942,7 +1958,7 @@ mod tests {
                                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
                             ) =>
                         {
-                            crate::runtime::control::pause(deadline)?;
+                            crate::runtime::control::pause(deadline, &crate::time::SystemClock)?;
                         }
                         Err(cause) => return Err(io_error(cause)),
                     }
@@ -1961,12 +1977,12 @@ mod tests {
                     if retained.is_some_and(|input| input.state == InputState::Accepted) {
                         break;
                     }
-                    crate::runtime::control::pause(deadline)?;
+                    crate::runtime::control::pause(deadline, &crate::time::SystemClock)?;
                 }
                 drop(client);
                 return Err(CafleetError::App("owned reply consumer closed".into()));
             }
-            let mut reply = client.exchange_input(request, deadline)?;
+            let mut reply = client.exchange_input(request, deadline, &crate::time::SystemClock)?;
             if let Some(wrong) = self.wrong_query_id {
                 let InputControlReply::Receipt(ReceiptReply::Present {
                     input_id,
@@ -2751,6 +2767,9 @@ mod tests {
     }
 
     impl InputCommandHost for LockTakingHost {
+        fn clock(&self) -> &dyn crate::time::Clock {
+            &crate::time::SystemClock
+        }
         fn lock(
             &mut self,
             settings: &Settings,

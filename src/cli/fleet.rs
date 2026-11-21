@@ -324,7 +324,7 @@ pub(crate) trait DeletionHost {
         run: &crate::broker::runtime::RunRecord,
         deadline: Deadline,
     ) -> Result<crate::runtime::ShutdownOutcome, CafleetError> {
-        crate::runtime::request_shutdown(conn, run, deadline.instant())
+        crate::runtime::request_shutdown(conn, run, deadline.instant(), &crate::time::SystemClock)
     }
     fn settle_hermes(
         &mut self,

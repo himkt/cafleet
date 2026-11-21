@@ -388,8 +388,15 @@ impl RunLock {
         process: ProcessIdentity,
         deadline: Instant,
     ) -> Result<RunOwner> {
-        self.transfer_to_reconciler_checked(conn, expected, process, deadline, |_| Ok(()))
-            .map(|run| run.owner())
+        self.transfer_to_reconciler_checked(
+            conn,
+            expected,
+            process,
+            deadline,
+            |_| Ok(()),
+            &crate::time::SystemClock,
+        )
+        .map(|run| run.owner())
     }
     pub(super) fn transfer_to_reconciler_checked(
         &self,
@@ -398,6 +405,7 @@ impl RunLock {
         process: ProcessIdentity,
         deadline: Instant,
         check: impl FnOnce(&Connection) -> Result<()>,
+        clock: &dyn crate::time::Clock,
     ) -> Result<RunRecord> {
         with_database_deadline(conn, deadline, |conn| {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -415,7 +423,7 @@ impl RunLock {
                 self.validate(&tx, &expected.owner())?;
                 crate::runtime::recovery::advance_recovery_owner(&tx, expected, &process)?
             };
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             tx.commit()?;
             Ok(next)
         })
@@ -471,6 +479,7 @@ impl RunLock {
             owner,
             process,
             Instant::now() + Duration::from_secs(5),
+            &crate::time::SystemClock,
         )
     }
     pub(crate) fn transfer_to_runner_with_deadline(
@@ -479,6 +488,7 @@ impl RunLock {
         owner: &RunOwner,
         process: ProcessIdentity,
         deadline: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<RunOwner> {
         ensure(
             owner.owner_kind == OwnerKind::Creator,
@@ -491,7 +501,7 @@ impl RunLock {
                 .owner_epoch
                 .checked_add(1)
                 .ok_or_else(|| error("owner epoch exhausted"))?;
-            let changed=tx.execute("UPDATE member_runs SET owner_epoch=?1,owner_kind='runner',owner_pid=?2,owner_start_identity=?3,runner_pid=?2,runner_start_identity=?3,last_health_at=?4 WHERE run_id=?5 AND owner_epoch=?6 AND owner_kind='creator'",params![epoch,process.pid,process.start_identity,crate::time::now_stamp(),owner.run_id,owner.owner_epoch])?;
+            let changed=tx.execute("UPDATE member_runs SET owner_epoch=?1,owner_kind='runner',owner_pid=?2,owner_start_identity=?3,runner_pid=?2,runner_start_identity=?3,last_health_at=?4 WHERE run_id=?5 AND owner_epoch=?6 AND owner_kind='creator'",params![epoch,process.pid,process.start_identity,clock.wall_stamp(),owner.run_id,owner.owner_epoch])?;
             ensure(changed == 1, "creator ownership transfer lost CAS")?;
             let next = storage::get_run(&tx, owner.run_id)?.owner();
             tx.commit()?;
@@ -516,6 +526,7 @@ fn validated_paths(
     run: &RunRecord,
     lock: &RunLock,
     until: Instant,
+    clock: &dyn crate::time::Clock,
 ) -> Result<RuntimePaths> {
     let paths = with_database_deadline(conn, until, |conn| {
         let current = storage::get_run(conn, run.run_id)?;
@@ -532,12 +543,16 @@ fn validated_paths(
         run.owner_pid == process.pid && run.owner_start_identity == process.start_identity,
         "descriptor access requires the current runtime owner",
     )?;
-    check_deadline(Instant::now(), until)?;
+    check_deadline(clock.now(), until)?;
     Ok(paths)
 }
 
-fn read_bounded(file: &mut File, until: Instant) -> Result<Vec<u8>> {
-    check_deadline(Instant::now(), until)?;
+fn read_bounded(
+    file: &mut File,
+    until: Instant,
+    clock: &dyn crate::time::Clock,
+) -> Result<Vec<u8>> {
+    check_deadline(clock.now(), until)?;
     ensure(
         file.metadata().map_err(io_error)?.len() <= DESCRIPTOR_LIMIT,
         "launch descriptor exceeds private size limit",
@@ -552,7 +567,7 @@ fn read_bounded(file: &mut File, until: Instant) -> Result<Vec<u8>> {
         bytes.len() as u64 <= DESCRIPTOR_LIMIT,
         "launch descriptor exceeds private size limit",
     )?;
-    check_deadline(Instant::now(), until)?;
+    check_deadline(clock.now(), until)?;
     Ok(bytes)
 }
 
@@ -571,14 +586,15 @@ impl RecoveryDescriptor {
         run: &RunRecord,
         lock: &RunLock,
         until: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<Self> {
-        let path = validated_paths(conn, run, lock, until)?.descriptor;
+        let path = validated_paths(conn, run, lock, until, clock)?.descriptor;
         if !present(&path)? {
             return Ok(Self { path, pinned: None });
         }
         let mut file = open_private(&path, false)?;
         let file_identity = identity(&file.metadata().map_err(io_error)?);
-        let bytes = read_bounded(&mut file, until)?;
+        let bytes = read_bounded(&mut file, until, clock)?;
         let descriptor = LaunchDescriptor::parse(&bytes)?;
         let recorded = &descriptor.identity;
         ensure(
@@ -596,7 +612,7 @@ impl RecoveryDescriptor {
             digest: Sha256::digest(&bytes).into(),
         };
         validate_named(&path, &pinned)?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(clock.now(), until)?;
         Ok(Self {
             path,
             pinned: Some(pinned),
@@ -609,9 +625,10 @@ impl RecoveryDescriptor {
         run: &RunRecord,
         lock: &RunLock,
         until: Instant,
+        clock: &dyn crate::time::Clock,
         unlink: impl FnOnce(&Path, Instant) -> Result<()>,
     ) -> Result<()> {
-        let paths = validated_paths(conn, run, lock, until)?;
+        let paths = validated_paths(conn, run, lock, until, clock)?;
         ensure(paths.descriptor == self.path, "descriptor pathname changed")?;
         if !present(&self.path)? {
             self.pinned = None;
@@ -622,17 +639,17 @@ impl RecoveryDescriptor {
             .as_mut()
             .ok_or_else(|| error("descriptor appeared after absence was pinned"))?;
         validate_named(&self.path, pinned)?;
-        let bytes = read_bounded(&mut pinned.file, until)?;
+        let bytes = read_bounded(&mut pinned.file, until, clock)?;
         let digest: [u8; 32] = Sha256::digest(&bytes).into();
         ensure(
             digest == pinned.digest,
             "descriptor content changed before unlink",
         )?;
         validate_named(&self.path, pinned)?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(clock.now(), until)?;
         unlink(&self.path, until)?;
         ensure(!present(&self.path)?, "descriptor remains after unlink")?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(clock.now(), until)?;
         self.pinned = None;
         Ok(())
     }
@@ -670,19 +687,33 @@ mod tests {
             let until = Instant::now() + Duration::from_secs(1);
             let mut attempts = 0;
             with_database_deadline(&mut case.fixture.conn, until, |conn| {
-                let mut pinned = RecoveryDescriptor::pin(conn, &before, &lock, until)?;
+                let mut pinned = RecoveryDescriptor::pin(
+                    conn,
+                    &before,
+                    &lock,
+                    until,
+                    &crate::time::SystemClock,
+                )?;
                 assert!(
                     load_descriptor(conn, &path).is_err(),
                     "launch-time reading still requires exact creator ownership"
                 );
-                pinned.remove(conn, &before, &lock, until, |selected, deadline| {
-                    attempts += 1;
-                    assert_eq!(selected, path.as_path());
-                    assert_eq!(deadline, until);
-                    assert!(Instant::now() < deadline);
-                    std::fs::remove_file(selected)
-                        .map_err(|_| CafleetError::App("owned descriptor removal failed".into()))
-                })
+                pinned.remove(
+                    conn,
+                    &before,
+                    &lock,
+                    until,
+                    &crate::time::SystemClock,
+                    |selected, deadline| {
+                        attempts += 1;
+                        assert_eq!(selected, path.as_path());
+                        assert_eq!(deadline, until);
+                        assert!(Instant::now() < deadline);
+                        std::fs::remove_file(selected).map_err(|_| {
+                            CafleetError::App("owned descriptor removal failed".into())
+                        })
+                    },
+                )
             })
             .unwrap();
             assert_eq!(attempts, 1);
@@ -704,6 +735,7 @@ mod tests {
             &case.fixture.run,
             &lock,
             Instant::now() + Duration::from_secs(1),
+            &crate::time::SystemClock,
         )
         .unwrap();
         drop(pinned);
@@ -720,9 +752,14 @@ mod tests {
             let before = descriptor_identity(&case.artifacts.paths.descriptor);
             let lock = case.held.as_ref().unwrap().clone();
             let until = Instant::now() + Duration::from_secs(1);
-            let mut pinned =
-                RecoveryDescriptor::pin(&mut case.fixture.conn, &case.fixture.run, &lock, until)
-                    .unwrap();
+            let mut pinned = RecoveryDescriptor::pin(
+                &mut case.fixture.conn,
+                &case.fixture.run,
+                &lock,
+                until,
+                &crate::time::SystemClock,
+            )
+            .unwrap();
             if changed == "epoch" {
                 bump_epoch(&case.fixture.conn, case.fixture.run.run_id);
             }
@@ -739,6 +776,7 @@ mod tests {
                 &case.fixture.run,
                 &lock,
                 deadline,
+                &crate::time::SystemClock,
                 |_, _| {
                     dispatched = true;
                     Ok(())
@@ -763,15 +801,21 @@ mod tests {
         let bytes = owned_bytes(&case);
         let lock = case.held.as_ref().unwrap().clone();
         let until = Instant::now() + Duration::from_secs(1);
-        let mut pinned =
-            RecoveryDescriptor::pin(&mut case.fixture.conn, &case.fixture.run, &lock, until)
-                .unwrap();
+        let mut pinned = RecoveryDescriptor::pin(
+            &mut case.fixture.conn,
+            &case.fixture.run,
+            &lock,
+            until,
+            &crate::time::SystemClock,
+        )
+        .unwrap();
         let mut attempts = 0;
         let result: TestResult<()> = pinned.remove(
             &mut case.fixture.conn,
             &case.fixture.run,
             &lock,
             until,
+            &crate::time::SystemClock,
             |_, deadline| {
                 attempts += 1;
                 assert_eq!(deadline, until);
@@ -801,6 +845,7 @@ mod tests {
                 &case.fixture.run,
                 &lock,
                 until,
+                &crate::time::SystemClock,
                 |path, deadline| {
                     attempts += 1;
                     assert_eq!(deadline, until);
@@ -1391,6 +1436,7 @@ mod tests {
                 &case.fixture.run,
                 &lock,
                 Instant::now() + Duration::from_secs(1),
+                &crate::time::SystemClock,
             )
         }
 
@@ -1402,6 +1448,7 @@ mod tests {
                 &case.fixture.run,
                 &lock,
                 Instant::now() + Duration::from_secs(1),
+                &crate::time::SystemClock,
                 |path, _| {
                     dispatched = true;
                     std::fs::remove_file(path)

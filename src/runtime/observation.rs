@@ -3731,8 +3731,8 @@ pub(crate) mod native_capture {
             fn now(&self) -> Instant {
                 crate::time::SystemClock.now()
             }
-            fn wall_stamp(&self) -> String {
-                crate::time::SystemClock.wall_stamp()
+            fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+                crate::time::SystemClock.wall_now()
             }
             fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
                 crate::time::SystemClock.monotonic_sample()
@@ -5901,8 +5901,8 @@ pub(crate) mod native_capture {
             case_until: Instant,
         }
         impl LaunchHost for CaptureVerificationLaunchHost<'_> {
-            fn now(&self) -> Instant {
-                self.inner.now()
+            fn clock(&self) -> &dyn crate::time::Clock {
+                self.inner.clock()
             }
             fn current_executable(&self) -> Result<PathBuf> {
                 self.inner.current_executable()
@@ -6621,7 +6621,7 @@ pub(crate) mod native_capture {
             until: Instant,
         ) -> Result<u64> {
             let run = storage::get_run(conn, launched.run.run_id)?;
-            Ok(crate::runtime::probe_health(&run, until)?.output_seq)
+            Ok(crate::runtime::probe_health(&run, until, &crate::time::SystemClock)?.output_seq)
         }
 
         fn driver_post_stage(
@@ -7035,7 +7035,7 @@ pub(crate) mod native_capture {
                 .to_string_lossy()
                 .into_owned();
             let mut host = CaptureVerificationLaunchHost {
-                inner: NativeLaunchHost::new(&*mux, &target, &cwd),
+                inner: NativeLaunchHost::new(&*mux, &target, &cwd, &crate::time::SystemClock),
                 case,
                 case_until,
             };
@@ -8038,8 +8038,8 @@ pub(crate) mod test_support {
             fn now(&self) -> Instant {
                 self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire))
             }
-            fn wall_stamp(&self) -> String {
-                NOW.into()
+            fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+                crate::time::parse_lenient(NOW).expect("the fixture stamp is canonical")
             }
             fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
                 panic!("the observation fixture clock serves only observation moments")
@@ -9463,8 +9463,11 @@ mod tests {
                 fn now(&self) -> Instant {
                     self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire))
                 }
-                fn wall_stamp(&self) -> String {
-                    Self::timestamp(self.millis.load(Ordering::Acquire))
+                fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+                    crate::time::parse_lenient(&Self::timestamp(
+                        self.millis.load(Ordering::Acquire),
+                    ))
+                    .expect("the timeline stamp is canonical")
                 }
                 fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
                     panic!("the timeline serves only observation moments")

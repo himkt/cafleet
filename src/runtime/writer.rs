@@ -53,8 +53,8 @@ impl Mailbox {
         self.gaps = self.gaps.checked_add(1).expect("writer gap count overflow");
         self.diagnostic = Some(cause.message().into_owned());
     }
-    fn work_deadline(&self, slice: Duration) -> Instant {
-        let local = Instant::now() + slice;
+    fn work_deadline(&self, now: Instant, slice: Duration) -> Instant {
+        let local = now + slice;
         self.deadline.map_or(local, |until| until.min(local))
     }
     fn success(&mut self) {
@@ -65,13 +65,20 @@ pub(crate) struct EventWriter {
     sender: mpsc::SyncSender<Box<ObservedTransition>>,
     mailbox: Arc<Mutex<Mailbox>>,
     thread: Option<std::thread::JoinHandle<()>>,
+    clock: Arc<dyn crate::time::Clock>,
 }
 impl EventWriter {
-    pub(crate) fn start(database_url: String, run: RunRecord, lock: Arc<RunLock>) -> Result<Self> {
+    pub(crate) fn start(
+        database_url: String,
+        run: RunRecord,
+        lock: Arc<RunLock>,
+        clock: Arc<dyn crate::time::Clock>,
+    ) -> Result<Self> {
         Self::start_worker(
             database_url,
             run,
             lock,
+            clock,
             #[cfg(test)]
             crate::runtime::writer::test_support::default_writer_hooks(),
         )
@@ -82,19 +89,21 @@ impl EventWriter {
         database_url: String,
         run: RunRecord,
         lock: Arc<RunLock>,
+        clock: Arc<dyn crate::time::Clock>,
         hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
-        Self::start_worker(database_url, run, lock, hooks)
+        Self::start_worker(database_url, run, lock, clock, hooks)
     }
 
     fn start_worker(
         database_url: String,
         run: RunRecord,
         lock: Arc<RunLock>,
+        clock: Arc<dyn crate::time::Clock>,
         #[cfg(test)] hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
         let mut conn = crate::db::connect(&database_url)?;
-        with_database_deadline(&mut conn, Instant::now() + Duration::from_secs(1), |conn| {
+        with_database_deadline(&mut conn, clock.now() + Duration::from_secs(1), |conn| {
             lock.validate(conn, &run.owner())
         })?;
         let (sender, receiver) = mpsc::sync_channel(64);
@@ -111,6 +120,7 @@ impl EventWriter {
             receiver,
             queue: VecDeque::new(),
             work_slice,
+            clock: clock.clone(),
             #[cfg(test)]
             hooks,
         };
@@ -122,6 +132,7 @@ impl EventWriter {
             sender,
             mailbox,
             thread: Some(thread),
+            clock,
         })
     }
     fn send(&self, transition: Box<ObservedTransition>) -> Result<()> {
@@ -196,8 +207,8 @@ impl EventWriter {
             .deadline
             .expect("shutdown deadline");
         if let Some(thread) = self.thread.as_ref() {
-            while !thread.is_finished() && Instant::now() < until {
-                nap_until(until);
+            while !thread.is_finished() && self.clock.now() < until {
+                nap_until(self.clock.as_ref(), until);
             }
         }
         if self
@@ -230,7 +241,7 @@ impl Drop for EventWriter {
             .lock()
             .expect("writer mailbox")
             .deadline
-            .unwrap_or_else(|| Instant::now() + Duration::from_secs(4));
+            .unwrap_or_else(|| self.clock.now() + Duration::from_secs(4));
         self.finish(until);
     }
 }
@@ -243,40 +254,41 @@ struct Worker {
     receiver: mpsc::Receiver<Box<ObservedTransition>>,
     queue: VecDeque<Box<ObservedTransition>>,
     work_slice: Duration,
+    clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
 }
 impl Worker {
     fn serve(mut self) {
         let mut retry = Duration::from_millis(100);
-        let mut next = Instant::now();
+        let mut next = self.clock.now();
         loop {
             {
                 let state = self.mailbox.lock().expect("writer mailbox");
-                if state.deadline.is_some_and(|end| Instant::now() >= end) {
+                if state.deadline.is_some_and(|end| self.clock.now() >= end) {
                     break;
                 }
                 if state.stop && state.pending == 0 {
                     break;
                 }
             }
-            if Instant::now() < next {
-                nap_until(next);
+            if self.clock.now() < next {
+                nap_until(self.clock.as_ref(), next);
                 continue;
             }
             match self.step() {
                 Ok(()) => {
                     retry = Duration::from_millis(100);
-                    next = Instant::now();
+                    next = self.clock.now();
                 }
                 Err(cause) => {
                     self.mailbox.lock().expect("writer mailbox").failure(&cause);
-                    next = Instant::now() + retry;
+                    next = self.clock.now() + retry;
                     retry = (retry * 2).min(Duration::from_secs(2));
                 }
             }
             if self.mailbox.lock().expect("writer mailbox").pending == 0 {
-                std::thread::sleep(Duration::from_millis(2));
+                self.clock.sleep(Duration::from_millis(2));
             }
         }
     }
@@ -290,7 +302,7 @@ impl Worker {
         self.mailbox
             .lock()
             .expect("writer mailbox")
-            .work_deadline(self.work_slice)
+            .work_deadline(self.clock.now(), self.work_slice)
     }
     /// Returns `false` when a test hook ends this pass before any persistence.
     fn receive(&mut self) -> Result<bool> {
@@ -303,7 +315,7 @@ impl Worker {
                 Err(cause) => return Err(cause),
             }
 
-            check_deadline(Instant::now(), until)?;
+            check_deadline(self.clock.now(), until)?;
             match self.receiver.try_recv() {
                 Ok(transition) => self.queue.push_back(transition),
                 Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
@@ -596,6 +608,7 @@ pub(crate) mod test_support {
             format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
             fixture.fixture.run.clone(),
             fixture.lock.clone(),
+            std::sync::Arc::new(crate::time::SystemClock),
             hooks,
         )
         .unwrap()
@@ -657,6 +670,7 @@ pub(crate) mod test_support {
                 format!("sqlite:///{}", self.fixture.conn.path().unwrap()),
                 self.fixture.run.clone(),
                 self.lock.clone(),
+                std::sync::Arc::new(crate::time::SystemClock),
             )
         }
     }

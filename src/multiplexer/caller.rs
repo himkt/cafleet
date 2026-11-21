@@ -374,64 +374,47 @@ mod tests {
         use crate::multiplexer::caller::tests::*;
 
         #[test]
-        fn reaching_pid_1_completes_without_reading_it() {
-            assert_eq!(
-                walk(&plain_chain()),
-                Ancestry {
-                    entries: vec![
+        fn walk_records_each_readable_ancestor_and_names_how_it_ended() {
+            for (name, table, entries, end) in [
+                (
+                    "reaching pid 1 completes without reading it",
+                    plain_chain(),
+                    vec![
                         (30, strings(&["cafleet", "fleet", "create"])),
                         (20, strings(&["/bin/sh"])),
                         (10, strings(&["tmux", "new-session"])),
                     ],
-                    end: WalkEnd::Complete,
-                }
-            );
-        }
-
-        #[test]
-        fn own_pid_1_completes_with_no_entries() {
-            assert_eq!(
-                walk(&FixtureProcessTable::new(1)),
-                Ancestry {
-                    entries: Vec::new(),
-                    end: WalkEnd::Complete,
-                }
-            );
-        }
-
-        #[test]
-        fn an_absent_entry_stops_at_that_pid() {
-            assert_eq!(
-                walk(&table(30, &[(30, 20, &["cafleet"])])),
-                Ancestry {
-                    entries: vec![(30, strings(&["cafleet"]))],
-                    end: WalkEnd::Stopped { pid: 20 },
-                }
-            );
-        }
-
-        #[test]
-        fn parent_0_records_the_entry_and_stops_there() {
-            assert_eq!(
-                walk(&table(30, &[(30, 20, &["cafleet"]), (20, 0, &["init"])])),
-                Ancestry {
-                    entries: vec![(30, strings(&["cafleet"])), (20, strings(&["init"]))],
-                    end: WalkEnd::Stopped { pid: 20 },
-                }
-            );
-        }
-
-        #[test]
-        fn a_read_error_ends_unreadable_with_the_whole_message() {
-            assert_eq!(
-                walk(&table(30, &[(30, 412, &["cafleet"])]).unreadable(412, UNREADABLE)),
-                Ancestry {
-                    entries: vec![(30, strings(&["cafleet"]))],
-                    end: WalkEnd::Unreadable {
+                    WalkEnd::Complete,
+                ),
+                (
+                    "own pid 1 completes with no entries",
+                    FixtureProcessTable::new(1),
+                    Vec::new(),
+                    WalkEnd::Complete,
+                ),
+                (
+                    "an absent entry stops at that pid",
+                    table(30, &[(30, 20, &["cafleet"])]),
+                    vec![(30, strings(&["cafleet"]))],
+                    WalkEnd::Stopped { pid: 20 },
+                ),
+                (
+                    "parent 0 records the entry and stops there",
+                    table(30, &[(30, 20, &["cafleet"]), (20, 0, &["init"])]),
+                    vec![(30, strings(&["cafleet"])), (20, strings(&["init"]))],
+                    WalkEnd::Stopped { pid: 20 },
+                ),
+                (
+                    "a read error ends unreadable with the whole message",
+                    table(30, &[(30, 412, &["cafleet"])]).unreadable(412, UNREADABLE),
+                    vec![(30, strings(&["cafleet"]))],
+                    WalkEnd::Unreadable {
                         cause: UNREADABLE.to_string(),
                     },
-                }
-            );
+                ),
+            ] {
+                assert_eq!(walk(&table), Ancestry { entries, end }, "{name}");
+            }
         }
 
         #[test]
@@ -459,59 +442,113 @@ mod tests {
         use crate::multiplexer::caller::tests::*;
 
         #[test]
-        fn row_1_refuses_at_the_nearest_shared_server_ancestor() {
-            let table = table(
-                30,
-                &[
-                    (30, 20, &["cafleet"]),
-                    (
-                        20,
-                        15,
-                        &["python", "-m", "hermes_cli.main", "gateway", "run"],
+        fn row_1_refuses_at_the_nearest_shared_server_ancestor_among_the_recorded_entries() {
+            for (name, table, expected) in [
+                (
+                    "nearest shared-server ancestor",
+                    table(
+                        30,
+                        &[
+                            (30, 20, &["cafleet"]),
+                            (
+                                20,
+                                15,
+                                &["python", "-m", "hermes_cli.main", "gateway", "run"],
+                            ),
+                            (15, 10, &["/opt/bin/codex", "app-server", "--list"]),
+                            (10, 1, &["tmux"]),
+                        ],
                     ),
-                    (15, 10, &["/opt/bin/codex", "app-server", "--list"]),
-                    (10, 1, &["tmux"]),
-                ],
-            );
-            assert_eq!(
-                shared_server(&walk(&table)),
-                Some(SharedServer {
-                    label: "hermes gateway run".to_string(),
-                    pid: 20,
-                })
-            );
+                    Some(("hermes gateway run", 20)),
+                ),
+                ("no shared-server ancestor", plain_chain(), None),
+                (
+                    "entries recorded before an unreadable end",
+                    table(
+                        30,
+                        &[(30, 20, &["cafleet"]), (20, 412, &["codex", "app-server"])],
+                    )
+                    .unreadable(412, UNREADABLE),
+                    Some(("codex app-server", 20)),
+                ),
+            ] {
+                assert_eq!(
+                    shared_server(&walk(&table)),
+                    expected.map(|(label, pid)| SharedServer {
+                        label: label.to_string(),
+                        pid,
+                    }),
+                    "{name}"
+                );
+            }
         }
 
         #[test]
-        fn row_1_is_none_without_a_shared_server_ancestor() {
-            assert_eq!(shared_server(&walk(&plain_chain())), None);
-        }
-
-        #[test]
-        fn row_1_inspects_the_entries_recorded_before_an_unreadable_end() {
-            let table = table(
-                30,
-                &[(30, 20, &["cafleet"]), (20, 412, &["codex", "app-server"])],
-            )
-            .unreadable(412, UNREADABLE);
-            assert_eq!(
-                shared_server(&walk(&table)),
-                Some(SharedServer {
-                    label: "codex app-server".to_string(),
-                    pid: 20,
-                })
-            );
-        }
-
-        #[test]
-        fn row_2_a_missing_pane_refuses_before_the_namespace_check() {
-            let table = plain_chain().nested();
-            let runner = FakeRunner::with_binary("tmux");
-            answer_tmux(&runner, "%3", None);
-            assert_eq!(
-                verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                Verification::Refused(Refusal::PaneNotFound)
-            );
+        fn rows_2_to_7_decide_a_tmux_pane_in_order() {
+            let unreadable_after_shell = || {
+                table(30, &[(30, 20, &["cafleet"]), (20, 412, &["/bin/sh"])])
+                    .unreadable(412, UNREADABLE)
+            };
+            for (name, table, pane_pid, expected) in [
+                (
+                    "row 2: a missing pane refuses before the namespace check",
+                    plain_chain().nested(),
+                    None,
+                    Verification::Refused(Refusal::PaneNotFound),
+                ),
+                (
+                    "row 3: a nested namespace refuses even an ancestor pane",
+                    plain_chain().nested(),
+                    Some(20),
+                    Verification::Refused(Refusal::NestedPidNamespace),
+                ),
+                (
+                    "row 4 precedes an unreadable walk end",
+                    unreadable_after_shell(),
+                    Some(20),
+                    Verification::Verified,
+                ),
+                (
+                    "row 4 precedes a stopped walk end",
+                    table(30, &[(30, 20, &["cafleet"]), (20, 15, &["/bin/sh"])]),
+                    Some(20),
+                    Verification::Verified,
+                ),
+                (
+                    "row 5: an unreadable walk refuses with its cause",
+                    table(30, &[(30, 412, &["cafleet"])]).unreadable(412, UNREADABLE),
+                    Some(99),
+                    Verification::Refused(Refusal::ProcessUnreadable {
+                        cause: UNREADABLE.to_string(),
+                    }),
+                ),
+                (
+                    "row 6: a walk stopped at an absent entry refuses with its pid",
+                    table(30, &[(30, 20, &["cafleet"])]),
+                    Some(99),
+                    Verification::Refused(Refusal::WalkStopped { pid: 20 }),
+                ),
+                (
+                    "row 6: a walk stopped at parent 0 refuses with its pid",
+                    table(30, &[(30, 20, &["cafleet"]), (20, 0, &["init"])]),
+                    Some(99),
+                    Verification::Refused(Refusal::WalkStopped { pid: 20 }),
+                ),
+                (
+                    "row 7: a completed walk without the pane refuses with the pane pid",
+                    plain_chain(),
+                    Some(99),
+                    Verification::Refused(Refusal::PaneNotAncestor { pane_pid: 99 }),
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("tmux");
+                answer_tmux(&runner, "%3", pane_pid);
+                assert_eq!(
+                    verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
+                    expected,
+                    "{name}"
+                );
+            }
         }
 
         #[test]
@@ -538,17 +575,6 @@ mod tests {
         }
 
         #[test]
-        fn row_3_a_nested_namespace_refuses_even_an_ancestor_pane() {
-            let table = plain_chain().nested();
-            let runner = FakeRunner::with_binary("tmux");
-            answer_tmux(&runner, "%3", Some(20));
-            assert_eq!(
-                verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                Verification::Refused(Refusal::NestedPidNamespace)
-            );
-        }
-
-        #[test]
         fn row_4_an_ancestor_pane_verifies() {
             let table = plain_chain();
             for (backend, pane) in [("tmux", "%3"), ("herdr", "w1:p2")] {
@@ -566,61 +592,6 @@ mod tests {
                     "{backend}"
                 );
             }
-        }
-
-        #[test]
-        fn row_4_precedes_an_unreadable_or_stopped_walk_end() {
-            for table in [
-                table(30, &[(30, 20, &["cafleet"]), (20, 412, &["/bin/sh"])])
-                    .unreadable(412, UNREADABLE),
-                table(30, &[(30, 20, &["cafleet"]), (20, 15, &["/bin/sh"])]),
-            ] {
-                let runner = FakeRunner::with_binary("tmux");
-                answer_tmux(&runner, "%3", Some(20));
-                assert_eq!(
-                    verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                    Verification::Verified
-                );
-            }
-        }
-
-        #[test]
-        fn row_5_an_unreadable_walk_refuses_with_its_cause() {
-            let table = table(30, &[(30, 412, &["cafleet"])]).unreadable(412, UNREADABLE);
-            let runner = FakeRunner::with_binary("tmux");
-            answer_tmux(&runner, "%3", Some(99));
-            assert_eq!(
-                verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                Verification::Refused(Refusal::ProcessUnreadable {
-                    cause: UNREADABLE.to_string(),
-                })
-            );
-        }
-
-        #[test]
-        fn row_6_a_stopped_walk_refuses_with_its_pid() {
-            for table in [
-                table(30, &[(30, 20, &["cafleet"])]),
-                table(30, &[(30, 20, &["cafleet"]), (20, 0, &["init"])]),
-            ] {
-                let runner = FakeRunner::with_binary("tmux");
-                answer_tmux(&runner, "%3", Some(99));
-                assert_eq!(
-                    verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                    Verification::Refused(Refusal::WalkStopped { pid: 20 })
-                );
-            }
-        }
-
-        #[test]
-        fn row_7_a_completed_walk_without_the_pane_refuses_with_the_pane_pid() {
-            let table = plain_chain();
-            let runner = FakeRunner::with_binary("tmux");
-            answer_tmux(&runner, "%3", Some(99));
-            assert_eq!(
-                verify_pane(&tmux_mux(&runner), &table, &walk(&table), "%3").unwrap(),
-                Verification::Refused(Refusal::PaneNotAncestor { pane_pid: 99 })
-            );
         }
 
         #[test]
@@ -1123,31 +1094,33 @@ mod tests {
         use crate::multiplexer::caller::tests::*;
 
         #[test]
-        fn a_percent_and_digits_selects_tmux() {
-            let runner = FakeRunner::with_binary("tmux");
-            let caller = resolve_pane_mux(
-                "%12",
-                Some(TMUX_SOCKET.to_string()),
-                &HashMap::new(),
-                runner.clone(),
-            )
-            .unwrap();
-            assert_eq!(caller.backend, MuxBackend::Tmux);
-            assert_eq!(caller.server, TMUX_SOCKET);
-        }
-
-        #[test]
-        fn a_workspace_colon_pane_selects_herdr() {
-            let runner = FakeRunner::with_binary("herdr");
-            let caller = resolve_pane_mux(
-                "w4:p3N",
-                Some(HERDR_SESSION.to_string()),
-                &HashMap::new(),
-                runner.clone(),
-            )
-            .unwrap();
-            assert_eq!(caller.backend, MuxBackend::Herdr);
-            assert_eq!(caller.server, HERDR_SESSION);
+        fn each_pane_id_form_selects_its_backend() {
+            for (name, pane, binary, server, backend) in [
+                (
+                    "percent and digits",
+                    "%12",
+                    "tmux",
+                    TMUX_SOCKET,
+                    MuxBackend::Tmux,
+                ),
+                (
+                    "workspace colon pane",
+                    "w4:p3N",
+                    "herdr",
+                    HERDR_SESSION,
+                    MuxBackend::Herdr,
+                ),
+            ] {
+                let caller = resolve_pane_mux(
+                    pane,
+                    Some(server.to_string()),
+                    &HashMap::new(),
+                    FakeRunner::with_binary(binary),
+                )
+                .unwrap();
+                assert_eq!(caller.backend, backend, "{name}");
+                assert_eq!(caller.server, server, "{name}");
+            }
         }
 
         #[test]
@@ -1246,103 +1219,145 @@ mod tests {
         }
 
         #[test]
-        fn an_environment_on_the_derived_backend_uses_the_caller_server() {
-            let runner = FakeRunner::with_binary("tmux");
-            let caller = resolve(
-                "%5",
-                None,
-                &[("TMUX", "/tmp/tmux-1000/default,123,0")],
-                &runner,
-            )
-            .unwrap();
-            assert_eq!(
-                (caller.backend, caller.server.as_str()),
-                (MuxBackend::Tmux, "/tmp/tmux-1000/default")
-            );
-            assert!(runner.run_argvs().is_empty());
-
-            let runner = FakeRunner::with_binary("herdr");
-            let caller = resolve(
-                "w4:p1",
-                None,
-                &[("HERDR_ENV", "1"), ("HERDR_SESSION", "work")],
-                &runner,
-            )
-            .unwrap();
-            assert_eq!(
-                (caller.backend, caller.server.as_str()),
-                (MuxBackend::Herdr, "work")
-            );
-            assert!(runner.run_argvs().is_empty());
-        }
-
-        #[test]
-        fn a_tmux_pane_outside_a_tmux_environment_asks_the_default_server_without_tmux() {
-            for pairs in [
-                AMBIGUOUS,
-                &[("HERDR_ENV", "1"), ("HERDR_SESSION", "work")][..],
-                &[],
+        fn without_mux_server_the_derived_backend_environment_or_default_server_applies() {
+            let herdr_env: &[(&str, &str)] = &[("HERDR_ENV", "1"), ("HERDR_SESSION", "work")];
+            let tmux_env: &[(&str, &str)] = &[("TMUX", "/tmp/tmux-1000/default,123,0")];
+            for (name, pane, pairs, binary, default_reply, backend, server) in [
+                (
+                    "a tmux environment names the caller server",
+                    "%5",
+                    tmux_env,
+                    "tmux",
+                    None,
+                    MuxBackend::Tmux,
+                    "/tmp/tmux-1000/default",
+                ),
+                (
+                    "a herdr environment names the caller session",
+                    "w4:p1",
+                    herdr_env,
+                    "herdr",
+                    None,
+                    MuxBackend::Herdr,
+                    "work",
+                ),
+                (
+                    "a tmux pane in an ambiguous environment asks the default server",
+                    "%5",
+                    AMBIGUOUS,
+                    "tmux",
+                    Some("/tmp/tmux-0/default\n"),
+                    MuxBackend::Tmux,
+                    "/tmp/tmux-0/default",
+                ),
+                (
+                    "a tmux pane in a herdr environment asks the default server",
+                    "%5",
+                    herdr_env,
+                    "tmux",
+                    Some("/tmp/tmux-0/default\n"),
+                    MuxBackend::Tmux,
+                    "/tmp/tmux-0/default",
+                ),
+                (
+                    "a tmux pane without an environment asks the default server",
+                    "%5",
+                    &[],
+                    "tmux",
+                    Some("/tmp/tmux-0/default\n"),
+                    MuxBackend::Tmux,
+                    "/tmp/tmux-0/default",
+                ),
+                (
+                    "a herdr pane in an ambiguous environment uses the default session",
+                    "w4:p1",
+                    AMBIGUOUS,
+                    "herdr",
+                    None,
+                    MuxBackend::Herdr,
+                    "default",
+                ),
+                (
+                    "a herdr pane in a tmux environment uses the default session",
+                    "w4:p1",
+                    tmux_env,
+                    "herdr",
+                    None,
+                    MuxBackend::Herdr,
+                    "default",
+                ),
+                (
+                    "a herdr pane without an environment uses the default session",
+                    "w4:p1",
+                    &[],
+                    "herdr",
+                    None,
+                    MuxBackend::Herdr,
+                    "default",
+                ),
             ] {
-                let runner = FakeRunner::with_binary("tmux");
-                runner.respond(Ok("/tmp/tmux-0/default\n".to_string()));
-                let caller = resolve("%5", None, pairs, &runner).unwrap();
+                let runner = FakeRunner::with_binary(binary);
+                if let Some(reply) = default_reply {
+                    runner.respond(Ok(reply.to_string()));
+                }
+                let caller = resolve(pane, None, pairs, &runner).unwrap();
                 assert_eq!(
                     (caller.backend, caller.server.as_str()),
-                    (MuxBackend::Tmux, "/tmp/tmux-0/default"),
-                    "{pairs:?}"
+                    (backend, server),
+                    "{name}"
                 );
-                assert_eq!(runner.run_argvs(), vec![default_socket_argv()], "{pairs:?}");
+                let asked: Vec<Vec<String>> = default_reply
+                    .map(|_| default_socket_argv())
+                    .into_iter()
+                    .collect();
+                assert_eq!(runner.run_argvs(), asked, "{name}");
             }
         }
 
         #[test]
-        fn a_herdr_pane_outside_a_herdr_environment_uses_the_default_session_without_commands() {
-            for pairs in [
-                AMBIGUOUS,
-                &[("TMUX", "/tmp/tmux-1000/default,123,0")][..],
-                &[],
+        fn an_unresolved_default_server_or_a_missing_binary_fails_resolution() {
+            for (name, mux_server, reply, message, asked) in [
+                (
+                    "empty default server reply",
+                    None,
+                    Some(Ok("\n".to_string())),
+                    "no tmux server found; pass --mux-server <socket path>",
+                    true,
+                ),
+                (
+                    "failed default server reply",
+                    None,
+                    Some(Err(RunError::Failed {
+                        stderr: "no server running on /tmp/tmux-0/default".to_string(),
+                    })),
+                    "no tmux server found; pass --mux-server <socket path>",
+                    true,
+                ),
+                (
+                    "missing binary",
+                    Some(TMUX_SOCKET),
+                    None,
+                    "tmux binary not found on PATH",
+                    false,
+                ),
             ] {
-                let runner = FakeRunner::with_binary("herdr");
-                let caller = resolve("w4:p1", None, pairs, &runner).unwrap();
-                assert_eq!(
-                    (caller.backend, caller.server.as_str()),
-                    (MuxBackend::Herdr, "default"),
-                    "{pairs:?}"
-                );
-                assert!(runner.run_argvs().is_empty(), "{pairs:?}");
-            }
-        }
-
-        #[test]
-        fn an_empty_or_failed_default_server_reply_names_mux_server() {
-            for reply in [
-                Ok("\n".to_string()),
-                Err(RunError::Failed {
-                    stderr: "no server running on /tmp/tmux-0/default".to_string(),
-                }),
-            ] {
-                let runner = FakeRunner::with_binary("tmux");
-                runner.respond(reply);
-                let error = match resolve("%5", None, AMBIGUOUS, &runner) {
-                    Ok(_) => panic!("no default tmux server resolves no server"),
+                let runner = if reply.is_some() {
+                    FakeRunner::with_binary("tmux")
+                } else {
+                    FakeRunner::without_binaries()
+                };
+                if let Some(reply) = reply {
+                    runner.respond(reply);
+                }
+                let pairs = if asked { AMBIGUOUS } else { &[] };
+                let error = match resolve("%5", mux_server, pairs, &runner) {
+                    Ok(_) => panic!("{name}: resolution succeeded"),
                     Err(error) => error,
                 };
-                assert_eq!(
-                    error.to_string(),
-                    "no tmux server found; pass --mux-server <socket path>"
-                );
-                assert_eq!(runner.run_argvs(), vec![default_socket_argv()]);
+                assert_eq!(error.to_string(), message, "{name}");
+                let calls: Vec<Vec<String>> = asked.then(default_socket_argv).into_iter().collect();
+                assert_eq!(runner.run_argvs(), calls, "{name}");
             }
-        }
-
-        #[test]
-        fn a_missing_binary_fails_availability() {
-            let runner = FakeRunner::without_binaries();
-            let error = match resolve("%5", Some(TMUX_SOCKET), &[], &runner) {
-                Ok(_) => panic!("an unavailable multiplexer resolves no caller mux"),
-                Err(error) => error,
-            };
-            assert_eq!(error.to_string(), "tmux binary not found on PATH");
         }
     }
 

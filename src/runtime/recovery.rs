@@ -33,6 +33,7 @@ pub(crate) enum RecoveryBoundary {
     BeforeFinish,
 }
 pub(crate) trait RecoveryHost {
+    fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock>;
     fn current_process(&mut self) -> Result<ProcessIdentity>;
     fn process_evidence(
         &mut self,
@@ -46,7 +47,7 @@ pub(crate) trait RecoveryHost {
         clock: ShutdownDeadlines,
     ) -> Result<ShutdownOutcome>;
     fn unlink_descriptor(&mut self, path: &std::path::Path, deadline: Instant) -> Result<()> {
-        unlink_descriptor_file(path, deadline)
+        unlink_descriptor_file(path, deadline, &*self.clock())
     }
     #[cfg(test)]
     fn checkpoint(&mut self, _: RecoveryBoundary, _: &RunRecord, _: Instant) -> Result<()> {
@@ -54,8 +55,12 @@ pub(crate) trait RecoveryHost {
     }
 }
 
-fn unlink_descriptor_file(path: &std::path::Path, deadline: Instant) -> Result<()> {
-    check_deadline(Instant::now(), deadline)?;
+fn unlink_descriptor_file(
+    path: &std::path::Path,
+    deadline: Instant,
+    clock: &dyn crate::time::Clock,
+) -> Result<()> {
+    check_deadline(clock.now(), deadline)?;
     std::fs::remove_file(path).map_err(|cause| error(format!("descriptor unlink failed: {cause}")))
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,8 +257,8 @@ fn recover(
     borrowed: Option<BorrowedPane<'_>>,
     host: &mut impl RecoveryHost,
 ) -> Result<RecoveryCompletion> {
-    let clock = ShutdownDeadlines::starting_now(&crate::time::SystemClock).clipped(until);
-    check_deadline(Instant::now(), until)?;
+    let clock = ShutdownDeadlines::starting_now(&*host.clock()).clipped(until);
+    check_deadline(host.clock().now(), until)?;
     ensure(member_id > 0, "positive recovery member ID required")?;
     let (run, pinned) = snapshot(conn, member_id, until)?;
     if let Some(expected) = &borrowed {
@@ -266,7 +271,7 @@ fn recover(
             .guard
             .validate_binding(&settings.database_url, expected.placement)?;
     }
-    check_deadline(Instant::now(), until)?;
+    check_deadline(host.clock().now(), until)?;
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::AfterSnapshot, &run, until)?;
     let unborrowed_pane = pinned
@@ -274,7 +279,7 @@ fn recover(
         .filter(|item| borrowed.is_none() && item.mux_pane_id.is_some());
     let acquired_pane = match unborrowed_pane {
         Some(target) => loop {
-            check_deadline(Instant::now(), until)?;
+            check_deadline(host.clock().now(), until)?;
             if let Some(guard) = PaneLock::try_acquire(&settings.database_url, target)? {
                 break Some(guard);
             }
@@ -284,8 +289,8 @@ fn recover(
             ) {
                 return completion(run, RecoveryOutcome::LiveOrUnreachable);
             }
-            std::thread::sleep(
-                Duration::from_millis(5).min(until.saturating_duration_since(Instant::now())),
+            host.clock().sleep(
+                Duration::from_millis(5).min(until.saturating_duration_since(host.clock().now())),
             );
         },
         None => None,
@@ -335,7 +340,7 @@ fn recover(
     {
         return completion(run, RecoveryOutcome::LiveOrUnreachable);
     }
-    check_deadline(Instant::now(), until)?;
+    check_deadline(host.clock().now(), until)?;
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::BeforeTakeover, &run, until)?;
     let process = host.current_process()?;
@@ -344,10 +349,19 @@ fn recover(
         check_snapshot(conn, &run, pinned.as_ref()).map(|_| ())
     };
     if path_failure.is_some() {
-        return reconcile_missing_runtime(conn, &run, pinned.as_ref(), &process, until, recheck);
+        return reconcile_missing_runtime(
+            conn,
+            &run,
+            pinned.as_ref(),
+            &process,
+            until,
+            recheck,
+            &*host.clock(),
+        );
     }
     let lock = lock.expect("verified ordinary recovery lock");
-    let current = lock.transfer_to_reconciler_checked(conn, &run, process, until, recheck)?;
+    let current =
+        lock.transfer_to_reconciler_checked(conn, &run, process, until, recheck, &*host.clock())?;
     if current.is_settled() {
         return completion(current, RecoveryOutcome::Recovered);
     }
@@ -359,6 +373,9 @@ fn recover(
 
 pub(super) struct NativeRecoveryHost;
 impl RecoveryHost for NativeRecoveryHost {
+    fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+        std::sync::Arc::new(crate::time::SystemClock)
+    }
     fn current_process(&mut self) -> Result<ProcessIdentity> {
         ProcessIdentity::current()
     }
@@ -367,7 +384,7 @@ impl RecoveryHost for NativeRecoveryHost {
         process: &ProcessIdentity,
         until: Instant,
     ) -> Result<ProcessEvidence> {
-        check_deadline(Instant::now(), until)?;
+        check_deadline(self.clock().now(), until)?;
         match process.is_alive() {
             Ok(true) => Ok(ProcessEvidence::Alive),
             Ok(false) => Ok(ProcessEvidence::Terminated),
@@ -375,7 +392,12 @@ impl RecoveryHost for NativeRecoveryHost {
         }
     }
     fn health(&mut self, run: &RunRecord, until: Instant) -> Result<RecoveryHealth> {
-        match crate::runtime::control::request(run, LifecycleRequest::health(run), until) {
+        match crate::runtime::control::request(
+            run,
+            LifecycleRequest::health(run),
+            until,
+            &*self.clock(),
+        ) {
             Ok(value) => match HealthSnapshot::decode(value, run) {
                 Ok(_) => Ok(RecoveryHealth::Matching),
                 Err(cause) => Ok(RecoveryHealth::Unavailable(cause.message().into_owned())),
@@ -388,7 +410,7 @@ impl RecoveryHost for NativeRecoveryHost {
         run: &RunRecord,
         clock: ShutdownDeadlines,
     ) -> Result<ShutdownOutcome> {
-        crate::runtime::process::recover_descendants(run, clock)
+        crate::runtime::process::recover_descendants(run, clock, &*self.clock())
     }
 }
 
@@ -420,13 +442,14 @@ fn reconcile_missing_runtime(
     process: &ProcessIdentity,
     until: Instant,
     check: impl FnOnce(&Connection) -> Result<()>,
+    clock: &dyn crate::time::Clock,
 ) -> Result<RecoveryCompletion> {
     with_database_deadline(conn, until, |conn| {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         check(&tx)?;
         let current = check_snapshot(&tx, expected, pinned)?;
         if current.is_settled() {
-            check_deadline(Instant::now(), until)?;
+            check_deadline(clock.now(), until)?;
             tx.commit()?;
             return completion(current, RecoveryOutcome::Recovered);
         }
@@ -447,7 +470,7 @@ fn reconcile_missing_runtime(
             Some(status) => status,
             None => {
                 let first = next_event_seq(&tx, &run)?;
-                for transition in loss_transitions(&tx, &run, first, true)? {
+                for transition in loss_transitions(&tx, &run, first, true, clock)? {
                     let (_, inserted) = storage::persist_transition_in_transaction(
                         &tx,
                         &run,
@@ -468,7 +491,7 @@ fn reconcile_missing_runtime(
                     run.run_id,
                     event_seq,
                     &receipt,
-                    crate::time::now_stamp(),
+                    clock.wall_stamp(),
                     evidence.clone(),
                 );
                 storage::persist_transition_in_transaction(
@@ -480,9 +503,9 @@ fn reconcile_missing_runtime(
             }
         }
         tx.execute("UPDATE member_runs SET status=?1,cleanup_state='complete',ended_at=COALESCE(ended_at,?2) WHERE run_id=?3",
-            params![target.as_str(),crate::time::now_stamp(),run.run_id])?;
+            params![target.as_str(),clock.wall_stamp(),run.run_id])?;
         let run = storage::get_run(&tx, run.run_id)?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(clock.now(), until)?;
         tx.commit()?;
         report.outcome = RecoveryOutcome::Recovered;
         report.status = run.status;
@@ -508,7 +531,7 @@ fn reconcile_retained_runtime(
     match attempt {
         Ok(()) => Ok(result),
         Err(cause)
-            if matches!(cause, CafleetError::DeadlineExceeded) || Instant::now() >= until =>
+            if matches!(cause, CafleetError::DeadlineExceeded) || host.clock().now() >= until =>
         {
             result
                 .report
@@ -530,13 +553,6 @@ fn persist(
     conn: &mut Connection,
     result: &mut RecoveryCompletion,
     transition: &ObservedTransition,
-    #[cfg_attr(
-        not(test),
-        expect(
-            unused_variables,
-            reason = "only the test boundary hook reads the host"
-        )
-    )]
     host: &mut impl RecoveryHost,
     until: Instant,
 ) -> Result<()> {
@@ -549,7 +565,7 @@ fn persist(
         )
     })?;
     refresh(conn, result, until)?;
-    check_deadline(Instant::now(), until)?;
+    check_deadline(host.clock().now(), until)?;
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::AfterCommit, &result.run, until)?;
     Ok(())
@@ -559,10 +575,11 @@ fn loss_transitions(
     run: &RunRecord,
     first: i64,
     missing: bool,
+    clock: &dyn crate::time::Clock,
 ) -> Result<Vec<ObservedTransition>> {
     let snapshot = storage::runtime_snapshot(conn, run.run_id)?;
     let mut next = first;
-    let now = crate::time::now_stamp();
+    let now = clock.wall_stamp();
     let mut transitions = Vec::new();
     if let Some(interaction_id) = snapshot.current_interaction_id {
         let interaction = storage::get_event(conn, conn.query_row(
@@ -620,7 +637,7 @@ fn publish_delivery_results(
             result.run.run_id,
             event_seq,
             receipt,
-            crate::time::now_stamp(),
+            host.clock().wall_stamp(),
             evidence.clone(),
         );
         persist(conn, result, &transition, host, until)?;
@@ -650,16 +667,22 @@ fn perform(
     clock: ShutdownDeadlines,
     until: Instant,
 ) -> Result<()> {
-    check_deadline(Instant::now(), until)?;
+    check_deadline(host.clock().now(), until)?;
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::AfterTakeover, &result.run, until)?;
-    let mut descriptor = RecoveryDescriptor::pin(conn, &result.run, &lock, until)?;
+    let mut descriptor = RecoveryDescriptor::pin(conn, &result.run, &lock, until, &*host.clock())?;
     let existing = with_database_deadline(conn, until, |conn| terminal_outcome(conn, &result.run))?;
     let target = match existing {
         Some(status) => status,
         None => {
             let transitions = with_database_deadline(conn, until, |conn| {
-                loss_transitions(conn, &result.run, next_event_seq(conn, &result.run)?, false)
+                loss_transitions(
+                    conn,
+                    &result.run,
+                    next_event_seq(conn, &result.run)?,
+                    false,
+                    &*host.clock(),
+                )
             })?;
             for transition in transitions {
                 persist(conn, result, &transition, host, until)?;
@@ -679,24 +702,30 @@ fn perform(
             .push(json!("owned recovery cleanup remains incomplete"));
         return Ok(());
     }
-    check_deadline(Instant::now(), until)?;
+    check_deadline(host.clock().now(), until)?;
     #[cfg(test)]
     host.checkpoint(RecoveryBoundary::BeforeFinish, &result.run, until)?;
     with_database_deadline(conn, until, |conn| {
         check_snapshot(conn, &result.run, pinned)
     })?;
-    descriptor.remove(conn, &result.run, &lock, until, |path, deadline| {
-        host.unlink_descriptor(path, deadline)
-    })?;
+    let clock_handle = host.clock();
+    descriptor.remove(
+        conn,
+        &result.run,
+        &lock,
+        until,
+        clock_handle.as_ref(),
+        |path, deadline| host.unlink_descriptor(path, deadline),
+    )?;
     result.run = with_database_deadline(conn, until, |conn| {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         check_snapshot(&tx, &result.run, pinned)?;
         lock.validate(&tx, &result.run.owner())?;
         storage::validate_owner(&tx, &result.run.owner())?;
         tx.execute("UPDATE member_runs SET status=?1,cleanup_state='complete',ended_at=COALESCE(ended_at,?2),cleanup_diagnostics_json=?3 WHERE run_id=?4 AND owner_epoch=?5",
-            params![target.as_str(),crate::time::now_stamp(),serde_json::to_string(&result.report.cleanup_diagnostics).map_err(io_error)?,result.run.run_id,result.run.owner_epoch])?;
+            params![target.as_str(),host.clock().wall_stamp(),serde_json::to_string(&result.report.cleanup_diagnostics).map_err(io_error)?,result.run.run_id,result.run.owner_epoch])?;
         let current = storage::get_run(&tx, result.run.run_id)?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(host.clock().now(), until)?;
         tx.commit()?;
         Ok(current)
     })?;
@@ -2339,6 +2368,9 @@ pub(crate) mod test_support {
         }
     }
     impl RecoveryHost for Host {
+        fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+            std::sync::Arc::new(crate::time::SystemClock)
+        }
         fn current_process(&mut self) -> TestResult<ProcessIdentity> {
             self.calls.push("current_process".into());
             ProcessIdentity::current()
@@ -2430,7 +2462,11 @@ pub(crate) mod test_support {
             deadline: Instant,
         ) -> TestResult<()> {
             let Some(probe) = &mut self.unlink else {
-                return crate::runtime::recovery::unlink_descriptor_file(path, deadline);
+                return crate::runtime::recovery::unlink_descriptor_file(
+                    path,
+                    deadline,
+                    &crate::time::SystemClock,
+                );
             };
             probe.calls += 1;
             assert_eq!(path, probe.path);

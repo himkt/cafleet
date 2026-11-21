@@ -3135,23 +3135,15 @@ mod tests {
         }
 
         #[test]
-        fn framing_witness_is_required_for_each_operation_on_each_multiplexer() {
-            missing_category("framing");
-        }
-
-        #[test]
-        fn plain_limit_witness_is_required_for_each_operation_on_each_multiplexer() {
-            missing_category("plain_limit");
-        }
-
-        #[test]
-        fn post_submit_witness_is_required_for_each_operation_on_each_multiplexer() {
-            missing_category("post_submit");
-        }
-
-        #[test]
-        fn unsubmitted_literal_witness_is_required_for_each_operation_on_each_multiplexer() {
-            missing_category("unsubmitted_literal");
+        fn every_witness_category_is_required_for_each_operation_on_each_multiplexer() {
+            for kind in [
+                "framing",
+                "plain_limit",
+                "post_submit",
+                "unsubmitted_literal",
+            ] {
+                missing_category(kind);
+            }
         }
 
         #[test]
@@ -3588,68 +3580,61 @@ mod tests {
         }
 
         #[test]
-        fn a_choice_answer_on_a_permission_rule_is_refused() {
-            let value = changed(|value| {
-                answers(value).push(choice_answer(
-                    RULE,
-                    "synthetic-choice-on-permission",
-                    "deny-once",
-                    json!([{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]),
-                ));
-            });
-            assert_eq!(
-                refusal(&value),
-                "invalid native profile: choice answer requires question form"
-            );
-        }
-
-        #[test]
-        fn a_decision_answer_on_a_question_rule_is_refused() {
-            let value = changed(|value| {
-                let mut entry = answers(value)[1].clone();
-                entry["decision"] = json!("allow");
-                entry["answer_rule_id"] = json!("synthetic-decision-on-question");
-                entry["stages"] = json!([question_stage("33", "decline", None)]);
-                answers(value).push(entry);
-            });
-            assert_eq!(
-                refusal(&value),
-                "invalid native profile: answer requires permission form"
-            );
-        }
-
-        #[test]
-        fn a_decision_answer_still_requires_a_single_request_choice() {
-            let value = changed(|value| {
-                value["profiles"][0]["rules"][0]["extract"]["choices"][0]["scope"] =
-                    json!("persistent");
-            });
-            assert_eq!(
-                refusal(&value),
-                "invalid native profile: answer requires single-request scope"
-            );
-        }
-
-        #[test]
-        fn a_choice_answer_naming_no_rule_choice_is_refused() {
-            let value = changed(|value| {
-                answers(value)[2]["choice_id"] = json!("never");
-                answers(value)[2]["stages"] = json!([question_stage("33", "never", None)]);
-            });
-            assert_eq!(
-                refusal(&value),
-                "invalid native profile: unknown answer choice"
-            );
-        }
-
-        #[test]
-        fn a_duplicate_question_rule_and_choice_pair_is_refused() {
-            let value = changed(|value| {
-                let mut duplicate = answers(value)[2].clone();
-                duplicate["answer_rule_id"] = json!("synthetic-question-later-again");
-                answers(value).push(duplicate);
-            });
-            assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
+        fn an_answer_outside_its_form_scope_or_choice_set_is_refused() {
+            let cases: [(&str, fn(&mut Value), &str); 5] = [
+                (
+                    "a choice answer on a permission rule",
+                    |value| {
+                        answers(value).push(choice_answer(
+                            RULE,
+                            "synthetic-choice-on-permission",
+                            "deny-once",
+                            json!([{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]),
+                        ));
+                    },
+                    "invalid native profile: choice answer requires question form",
+                ),
+                (
+                    "a decision answer on a question rule",
+                    |value| {
+                        let mut entry = answers(value)[1].clone();
+                        entry["decision"] = json!("allow");
+                        entry["answer_rule_id"] = json!("synthetic-decision-on-question");
+                        entry["stages"] = json!([question_stage("33", "decline", None)]);
+                        answers(value).push(entry);
+                    },
+                    "invalid native profile: answer requires permission form",
+                ),
+                (
+                    "a decision answer on a persistent choice",
+                    |value| {
+                        value["profiles"][0]["rules"][0]["extract"]["choices"][0]["scope"] =
+                            json!("persistent");
+                    },
+                    "invalid native profile: answer requires single-request scope",
+                ),
+                (
+                    "a choice answer naming no rule choice",
+                    |value| {
+                        answers(value)[2]["choice_id"] = json!("never");
+                        answers(value)[2]["stages"] = json!([question_stage("33", "never", None)]);
+                    },
+                    "invalid native profile: unknown answer choice",
+                ),
+                (
+                    "a duplicate question rule and choice pair",
+                    |value| {
+                        let mut duplicate = answers(value)[2].clone();
+                        duplicate["answer_rule_id"] = json!("synthetic-question-later-again");
+                        answers(value).push(duplicate);
+                    },
+                    "invalid native profile: ",
+                ),
+            ];
+            for (name, change, message) in cases {
+                let refused = refusal(&changed(change));
+                assert!(refused.starts_with(message), "{name}: {refused}");
+            }
         }
 
         #[test]
@@ -7641,61 +7626,53 @@ mod tests {
         }
 
         #[test]
-        fn threshold_selection_compares_numeric_components_numerically() {
-            let declarations = [("nine", "0.9.0"), ("ten", "0.10.0")];
-            let catalog = catalog(&declarations);
-            for (probe, expected) in [
-                ("0.9.99", Some("nine")),
-                ("0.10.0", Some("ten")),
-                ("0.8.9", None),
-            ] {
-                assert_eq!(
-                    selected(&catalog, &declarations, probe),
-                    expected,
-                    "{probe}"
-                );
-            }
-        }
-
-        #[test]
-        fn threshold_selection_orders_prereleases_by_semver_precedence() {
-            let declarations = [
-                ("alpha-1", "1.0.0-alpha.1"),
-                ("beta-2", "1.0.0-beta.2"),
-                ("beta-11", "1.0.0-beta.11"),
-                ("release", "1.0.0"),
+        fn threshold_selection_orders_versions_by_semver_precedence() {
+            let groups: [(&str, &[(&str, &str)], &[(&str, Option<&str>)]); 3] = [
+                (
+                    "numeric components compare numerically",
+                    &[("nine", "0.9.0"), ("ten", "0.10.0")],
+                    &[
+                        ("0.9.99", Some("nine")),
+                        ("0.10.0", Some("ten")),
+                        ("0.8.9", None),
+                    ],
+                ),
+                (
+                    "prereleases order by semver precedence",
+                    &[
+                        ("alpha-1", "1.0.0-alpha.1"),
+                        ("beta-2", "1.0.0-beta.2"),
+                        ("beta-11", "1.0.0-beta.11"),
+                        ("release", "1.0.0"),
+                    ],
+                    &[
+                        ("1.0.0-alpha", None),
+                        ("1.0.0-alpha.beta", Some("alpha-1")),
+                        ("1.0.0-beta.10", Some("beta-2")),
+                        ("1.0.0-beta.11", Some("beta-11")),
+                        ("1.0.0-rc.1", Some("beta-11")),
+                        ("1.0.0", Some("release")),
+                    ],
+                ),
+                (
+                    "build metadata has no precedence",
+                    &[("built", "1.2.0+build.1"), ("older", "1.0.0")],
+                    &[
+                        ("1.2.0", Some("built")),
+                        ("1.2.0+other.9", Some("built")),
+                        ("1.2.0-rc.1+build.1", Some("older")),
+                    ],
+                ),
             ];
-            let catalog = catalog(&declarations);
-            for (probe, expected) in [
-                ("1.0.0-alpha", None),
-                ("1.0.0-alpha.beta", Some("alpha-1")),
-                ("1.0.0-beta.10", Some("beta-2")),
-                ("1.0.0-beta.11", Some("beta-11")),
-                ("1.0.0-rc.1", Some("beta-11")),
-                ("1.0.0", Some("release")),
-            ] {
-                assert_eq!(
-                    selected(&catalog, &declarations, probe),
-                    expected,
-                    "{probe}"
-                );
-            }
-        }
-
-        #[test]
-        fn threshold_selection_gives_build_metadata_no_precedence() {
-            let declarations = [("built", "1.2.0+build.1"), ("older", "1.0.0")];
-            let catalog = catalog(&declarations);
-            for (probe, expected) in [
-                ("1.2.0", Some("built")),
-                ("1.2.0+other.9", Some("built")),
-                ("1.2.0-rc.1+build.1", Some("older")),
-            ] {
-                assert_eq!(
-                    selected(&catalog, &declarations, probe),
-                    expected,
-                    "{probe}"
-                );
+            for (name, declarations, probes) in groups {
+                let catalog = catalog(declarations);
+                for (probe, expected) in probes {
+                    assert_eq!(
+                        selected(&catalog, declarations, probe),
+                        *expected,
+                        "{name}: {probe}"
+                    );
+                }
             }
         }
 

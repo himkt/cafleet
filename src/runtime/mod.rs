@@ -120,11 +120,10 @@ pub(crate) fn check_deadline(now: std::time::Instant, deadline: std::time::Insta
     }
 }
 
-/// Sleep one polling tick, never past `deadline`.
-pub(crate) fn nap_until(deadline: std::time::Instant) {
-    std::thread::sleep(
-        std::time::Duration::from_millis(2)
-            .min(deadline.saturating_duration_since(std::time::Instant::now())),
+/// Sleep one polling tick on `clock`, never past `deadline`.
+pub(crate) fn nap_until(clock: &dyn crate::time::Clock, deadline: std::time::Instant) {
+    clock.sleep(
+        std::time::Duration::from_millis(2).min(deadline.saturating_duration_since(clock.now())),
     );
 }
 

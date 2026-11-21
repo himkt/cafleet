@@ -4,6 +4,7 @@
 use crate::coding_agent::SpawnProbe;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::RunError;
+use crate::time::Clock as _;
 use nix::fcntl::FcntlArg;
 use nix::fcntl::OFlag;
 use nix::fcntl::fcntl;
@@ -95,7 +96,7 @@ fn decode(status: ExitStatus, stdout: &[u8], stderr: &[u8]) -> Result<String, Ru
 }
 
 fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
-    let started = Instant::now();
+    let started = crate::time::SystemClock.now();
     if timeout.is_some_and(|timeout| timeout.is_zero()) {
         return Err(RunError::deadline_expired());
     }
@@ -133,7 +134,7 @@ fn retry_interrupted<T>(mut action: impl FnMut() -> io::Result<T>) -> io::Result
 }
 
 fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
-    let started = Instant::now();
+    let started = crate::time::SystemClock.now();
     let mut owned = OwnedChild {
         child,
         reaped: false,
@@ -298,7 +299,7 @@ fn collect_until(
     let mut status = None;
     loop {
         let left = deadline
-            .checked_duration_since(Instant::now())
+            .checked_duration_since(crate::time::SystemClock.now())
             .filter(|left| !left.is_zero())
             .ok_or(BoundedFailure::Deadline {
                 exited: status.is_some(),

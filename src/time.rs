@@ -120,8 +120,11 @@ pub(crate) enum ClockKind {
 
 pub(crate) trait Clock: Send + Sync {
     fn now(&self) -> Instant;
-    /// The canonical storage form of the current wall time (see [`format_utc`]).
-    fn wall_stamp(&self) -> String;
+    fn wall_now(&self) -> DateTime<Utc>;
+    /// The canonical storage form of [`Clock::wall_now`] (see [`format_utc`]).
+    fn wall_stamp(&self) -> String {
+        format_utc(self.wall_now())
+    }
     fn monotonic_sample(&self) -> Result<MonotonicSample, CafleetError>;
     fn sleep(&self, duration: Duration);
     fn shutdown_unit(&self) -> Duration;
@@ -136,8 +139,8 @@ impl Clock for SystemClock {
         Instant::now()
     }
 
-    fn wall_stamp(&self) -> String {
-        now_stamp()
+    fn wall_now(&self) -> DateTime<Utc> {
+        Utc::now()
     }
 
     fn monotonic_sample(&self) -> Result<MonotonicSample, CafleetError> {
@@ -253,11 +256,9 @@ pub(crate) mod test_support {
             self.origin + self.elapsed()
         }
 
-        fn wall_stamp(&self) -> String {
+        fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
             let origin = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-            crate::time::format_utc(
-                origin + chrono::Duration::from_std(self.elapsed()).expect("test elapsed fits"),
-            )
+            origin + chrono::Duration::from_std(self.elapsed()).expect("test elapsed fits")
         }
 
         fn monotonic_sample(&self) -> Result<MonotonicSample, CafleetError> {
