@@ -852,6 +852,223 @@ mod tests {
         }
     }
 
+    mod diagnostics_flush {
+        use crate::broker::runtime::RunnerDiagnosticSource;
+        use crate::runtime::writer::tests::*;
+
+        const REJECT_DIAGNOSTICS: crate::db::test_support::FaultPlan =
+            crate::db::test_support::FaultPlan::Abort {
+                trigger: "reject_runner_diagnostics",
+                on: "BEFORE INSERT ON member_runner_diagnostics",
+                message: "injected diagnostics rejection",
+            };
+
+        const STAMP: &str = "2026-11-21T12:00:00.000000+00:00";
+
+        fn stored(fixture: &WriterFixture) -> Vec<(String, String, i64)> {
+            fixture
+                .fixture
+                .conn
+                .prepare("SELECT source,message,count FROM member_runner_diagnostics WHERE run_id=?1 ORDER BY diagnostic_id")
+                .unwrap()
+                .query_map([fixture.fixture.run.run_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        }
+
+        fn assert_writer_healthy(writer: &EventWriter) {
+            let status = writer.status();
+            assert_eq!(
+                status.diagnostic, None,
+                "a flush never sets the writer diagnostic: {status:?}"
+            );
+            assert_eq!(status.gap_count, 0, "{status:?}");
+        }
+
+        #[test]
+        fn writer_flushes_buffered_diagnostics_and_merges_a_repeat_into_its_row() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let diagnostics = RunnerDiagnostics::default();
+            let mut writer = start_on_with(
+                &fixture,
+                Arc::new(Hooks::default()),
+                &clock,
+                diagnostics.clone(),
+            );
+            diagnostics.record(
+                RunnerDiagnosticSource::Observation,
+                "observation gap opened: sink_unavailable",
+                STAMP,
+            );
+            yield_until(|| stored(&fixture).len() == 1 && diagnostics.snapshot().0.is_empty());
+            diagnostics.record(
+                RunnerDiagnosticSource::Observation,
+                "observation gap opened: sink_unavailable",
+                STAMP,
+            );
+            yield_until(|| stored(&fixture).first().is_some_and(|row| row.2 == 2));
+            assert_eq!(
+                stored(&fixture),
+                [(
+                    "observation".into(),
+                    "observation gap opened: sink_unavailable".into(),
+                    2
+                )]
+            );
+            assert_writer_healthy(&writer);
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        #[test]
+        fn writer_keeps_the_buffer_through_a_transient_flush_failure() {
+            let fixture = WriterFixture::new();
+            let diagnostics = RunnerDiagnostics::default();
+            let mut writer = start_with(&fixture, Arc::new(Hooks::default()), diagnostics.clone());
+            let holder = crate::db::connect(&format!(
+                "sqlite:///{}",
+                fixture.fixture.conn.path().unwrap()
+            ))
+            .unwrap();
+            holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+            diagnostics.record(RunnerDiagnosticSource::DeferredInput, "label: held", STAMP);
+            std::thread::sleep(Duration::from_millis(800));
+            let (held, dropped) = diagnostics.snapshot();
+            assert_eq!(held.len(), 1, "a busy flush keeps its entries: {held:?}");
+            assert_eq!(dropped, 0);
+            assert!(stored(&fixture).is_empty());
+            assert_writer_healthy(&writer);
+            holder.execute_batch("ROLLBACK").unwrap();
+            wait_until_within(Duration::from_secs(5), || {
+                stored(&fixture).len() == 1 && diagnostics.snapshot().0.is_empty()
+            });
+            assert_eq!(
+                stored(&fixture),
+                [("deferred_input".into(), "label: held".into(), 1)]
+            );
+            assert_writer_healthy(&writer);
+            assert_eq!(writer.finish(deadline()), (0, 0));
+        }
+
+        #[test]
+        fn writer_drops_a_permanently_failing_flush_and_retries_one_second_later() {
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            REJECT_DIAGNOSTICS.arm(&mut fixture.fixture.conn);
+            let diagnostics = RunnerDiagnostics::default();
+            let mut writer = start_on_with(
+                &fixture,
+                Arc::new(Hooks::default()),
+                &clock,
+                diagnostics.clone(),
+            );
+            diagnostics.record(RunnerDiagnosticSource::PreviewSweep, "label: lost", STAMP);
+            yield_until(|| diagnostics.snapshot() == (Vec::new(), 1));
+            REJECT_DIAGNOSTICS.clear(&mut fixture.fixture.conn);
+            clock.advance(Duration::from_millis(999));
+            std::thread::sleep(Duration::from_millis(200));
+            assert!(
+                stored(&fixture).is_empty(),
+                "the next flush waits one second after the failure"
+            );
+            assert_eq!(diagnostics.snapshot(), (Vec::new(), 1));
+            clock.advance(Duration::from_millis(1));
+            yield_until(|| !stored(&fixture).is_empty());
+            assert_eq!(
+                stored(&fixture),
+                [(
+                    "event_writer".into(),
+                    "diagnostic buffer overflow: 1 entries dropped".into(),
+                    1
+                )]
+            );
+            assert_eq!(diagnostics.snapshot(), (Vec::new(), 0));
+            assert_writer_healthy(&writer);
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        enum WriterFailure {
+            Transient,
+            Rejection,
+            Fence,
+        }
+
+        struct RecordedCase {
+            name: &'static str,
+            failure: WriterFailure,
+            names: &'static str,
+        }
+
+        const RECORDED_CASES: &[RecordedCase] = &[
+            RecordedCase {
+                name: "a new transient writer diagnostic",
+                failure: WriterFailure::Transient,
+                names: "fixture writer boundary busy",
+            },
+            RecordedCase {
+                name: "a rejection",
+                failure: WriterFailure::Rejection,
+                names: "injected kind rejection",
+            },
+            RecordedCase {
+                name: "a fence",
+                failure: WriterFailure::Fence,
+                names: "event writer fenced",
+            },
+        ];
+
+        #[test]
+        fn writer_failures_are_recorded_and_flushed_under_event_writer() {
+            for case in RECORDED_CASES {
+                let name = case.name;
+                let clock = clock();
+                let mut fixture = WriterFixture::new();
+                let hooks = Arc::new(Hooks::default());
+                match case.failure {
+                    WriterFailure::Transient => hooks.fail_once(WriterBoundary::Persist),
+                    WriterFailure::Rejection => crate::db::test_support::FaultPlan::Abort {
+                        trigger: "reject_coverage_unknown",
+                        on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='coverage_unknown'",
+                        message: "injected kind rejection",
+                    }
+                    .arm(&mut fixture.fixture.conn),
+                    WriterFailure::Fence => crate::db::test_support::FaultPlan::Abort {
+                        trigger: "reject_every_event",
+                        on: "BEFORE INSERT ON member_runtime_events",
+                        message: "injected event failure",
+                    }
+                    .arm(&mut fixture.fixture.conn),
+                }
+                let diagnostics = RunnerDiagnostics::default();
+                let mut writer =
+                    start_on_with(&fixture, hooks.clone(), &clock, diagnostics.clone());
+                assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+                if matches!(case.failure, WriterFailure::Transient) {
+                    yield_until(|| writer.status().diagnostic.is_some());
+                    clock.advance(Duration::from_millis(100));
+                }
+                yield_until(|| {
+                    stored(&fixture).iter().any(|(source, message, _)| {
+                        source == "event_writer" && message.contains(case.names)
+                    })
+                });
+                assert!(
+                    stored(&fixture)
+                        .iter()
+                        .all(|(source, message, count)| source == "event_writer"
+                            && !message.trim().is_empty()
+                            && *count > 0),
+                    "{name}: {:?}",
+                    stored(&fixture)
+                );
+                writer.finish(until(&clock));
+            }
+        }
+    }
+
     #[test]
     fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
@@ -885,6 +1102,7 @@ pub(crate) mod test_support {
     }
 
     use crate::broker::runtime::*;
+    pub(crate) use crate::runtime::diagnostics::RunnerDiagnostics;
     use crate::runtime::test_support::Fixture;
     use crate::runtime::writer::*;
     use crate::time::Clock;
@@ -1026,12 +1244,23 @@ pub(crate) mod test_support {
         hooks: Arc<Hooks>,
         clock: &Arc<TestClock>,
     ) -> EventWriter {
+        start_on_with(fixture, hooks, clock, RunnerDiagnostics::default())
+    }
+
+    /// Like [`start_on`], recording and flushing through `diagnostics`.
+    pub(crate) fn start_on_with(
+        fixture: &WriterFixture,
+        hooks: Arc<Hooks>,
+        clock: &Arc<TestClock>,
+        diagnostics: RunnerDiagnostics,
+    ) -> EventWriter {
         EventWriter::start_with_hooks(
             format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
             fixture.fixture.run.clone(),
             fixture.lock.clone(),
             Arc::new(YieldingClock(clock.clone())),
             hooks,
+            diagnostics,
         )
         .unwrap()
     }
@@ -1054,12 +1283,22 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn start(fixture: &WriterFixture, hooks: Arc<Hooks>) -> EventWriter {
+        start_with(fixture, hooks, RunnerDiagnostics::default())
+    }
+
+    /// Like [`start`], recording and flushing through `diagnostics`.
+    pub(crate) fn start_with(
+        fixture: &WriterFixture,
+        hooks: Arc<Hooks>,
+        diagnostics: RunnerDiagnostics,
+    ) -> EventWriter {
         EventWriter::start_with_hooks(
             format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
             fixture.fixture.run.clone(),
             fixture.lock.clone(),
             std::sync::Arc::new(crate::time::SystemClock),
             hooks,
+            diagnostics,
         )
         .unwrap()
     }
@@ -1121,6 +1360,7 @@ pub(crate) mod test_support {
                 self.fixture.run.clone(),
                 self.lock.clone(),
                 std::sync::Arc::new(crate::time::SystemClock),
+                RunnerDiagnostics::default(),
             )
         }
     }

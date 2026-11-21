@@ -3871,6 +3871,7 @@ pub(crate) mod test_support {
                     lock.clone(),
                     Arc::new(YieldingClock(clock.clone())),
                     writer_hooks.clone(),
+                    crate::runtime::diagnostics::RunnerDiagnostics::default(),
                 )
                 .unwrap();
                 let child = ProcessIdentity::current().unwrap();
@@ -4487,6 +4488,37 @@ mod tests {
                     RunLock::acquire_released(&fixture.fixture.conn, &run.owner())
                         .unwrap()
                         .is_some()
+                );
+            }
+        }
+
+        #[test]
+        fn control_shutdown_outcome_diagnostics_are_stored_as_shutdown_rows() {
+            let mut fixture = ServiceFixture::new(false);
+            fixture.prepare();
+            fixture.publish();
+            fixture.fixture.conn.execute_batch("CREATE TRIGGER reject_review_running BEFORE UPDATE OF status ON member_runs WHEN NEW.status='running' BEGIN SELECT RAISE(ABORT,'fixture running persistence blocked'); END").unwrap();
+            assert_rejected(&fixture.start());
+            assert_eq!(fixture.wait().code(), Some(1));
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            let outcome: Vec<String> =
+                serde_json::from_value(run.cleanup_diagnostics_json.clone().unwrap()).unwrap();
+            assert!(!outcome.is_empty(), "the failed start reports its cause");
+            let rows: Vec<(String, String, i64)> = fixture
+                .fixture
+                .conn
+                .prepare("SELECT source,message,count FROM member_runner_diagnostics WHERE run_id=?1 AND source='shutdown' ORDER BY diagnostic_id")
+                .unwrap()
+                .query_map([run.run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            for diagnostic in &outcome {
+                let sanitized = crate::broker::runtime::diagnostic_text(diagnostic);
+                assert!(
+                    rows.iter()
+                        .any(|(_, message, count)| message.contains(&sanitized) && *count > 0),
+                    "{diagnostic:?} has a shutdown row: {rows:?}"
                 );
             }
         }

@@ -9761,6 +9761,7 @@ mod tests {
                         writer_fixture.lock.clone(),
                         Arc::new(YieldingClock(clock.clone())),
                         Arc::new(InputFixtureWriterHooks),
+                        crate::runtime::diagnostics::RunnerDiagnostics::default(),
                     )
                     .unwrap();
                     writer.set_deadline(until);
