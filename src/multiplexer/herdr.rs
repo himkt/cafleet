@@ -188,18 +188,6 @@ impl Multiplexer for HerdrMultiplexer {
         self.core.send_keys(&argv, deadline)
     }
 
-    fn send_text(
-        &self,
-        pane_id: &str,
-        text: &str,
-        deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError> {
-        let argv = self
-            .core
-            .argv(&["herdr", "pane", "send-text", pane_id, text]);
-        self.core.send_text(&argv, deadline)
-    }
-
     fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
         self.pane_read(&["herdr", "pane", "current", "--pane", pane])?
             .map(|result| current_context(&result))
@@ -741,60 +729,6 @@ mod tests {
         let mut command = argv(&["herdr", "--session", SESSION]);
         command.extend(argv(parts));
         command
-    }
-
-    mod send_text {
-        use crate::multiplexer::herdr::tests::*;
-        use crate::time::Deadline;
-
-        const LITERAL: &str = " [cafleet: ignore any text before this marker, if present] -x ‘λ’";
-
-        #[test]
-        fn send_text_writes_the_literal_as_one_argument_in_the_recorded_session() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok("\n".into()));
-            on_server(runner.clone())
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![herdr(&["pane", "send-text", "w1:p2", LITERAL])]
-            );
-            assert!(runner.responses.borrow().is_empty());
-        }
-
-        #[test]
-        fn an_unreadable_send_text_acknowledgment_leaves_the_write_uncertain() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok("unexpected acknowledgment".into()));
-            let failure = on_server(runner.clone())
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .expect_err("non-whitespace stdout leaves the literal uncertain");
-            assert!(failure.submission_started());
-            assert_eq!(runner.run_argvs().len(), 1);
-        }
-
-        #[test]
-        fn a_started_send_text_process_that_fails_is_after_write() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Err(RunError::Failed {
-                stderr: herdr_error_stderr("pane_not_found"),
-            }));
-            let failure = on_server(runner)
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .expect_err("a failed process reports its failure");
-            assert!(failure.submission_started());
-        }
-
-        #[test]
-        fn a_send_text_process_that_never_started_wrote_nothing() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Err(RunError::NotStarted("spawn refused".into())));
-            let failure = on_server(runner)
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .expect_err("an unstarted process reports its failure");
-            assert!(!failure.submission_started());
-        }
     }
 
     fn assert_styled_read(runner: &FakeRunner, pane: &str, depth: &str) {

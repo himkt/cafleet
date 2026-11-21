@@ -237,32 +237,6 @@ impl RunnerLoop<'_> {
             )
             .map_err(CafleetError::from)
     }
-    /// Serves a forced flush action with no input drain, so no queue-turn gate holds it.
-    fn flush(
-        &mut self,
-        request: InputControlRequest,
-        admitted_at: Instant,
-    ) -> Result<InputControlReply> {
-        let deadline = input_deadline(&request, admitted_at)?;
-        request.identity.validate(&self.run)?;
-        let InputControlOperation::Flush(action) = request.operation else {
-            unreachable!("a flush receives a flush operation");
-        };
-        let coordinator = self
-            .coordinator
-            .as_mut()
-            .ok_or_else(|| error("native input has not started"))?;
-        coordinator
-            .flush_received(
-                self.conn,
-                action,
-                self.native.controller,
-                self.native.transport,
-                deadline,
-            )
-            .map(InputControlReply::Flush)
-            .map_err(CafleetError::from)
-    }
     fn submit(
         &mut self,
         request: InputControlRequest,
@@ -1085,10 +1059,6 @@ impl RunnerLoop<'_> {
             InputControlOperation::PermissionInspect(_)
         ) {
             let result = self.inspect(request, admitted_at);
-            return self.clients[index].answer_input(result.as_ref());
-        }
-        if matches!(request.operation, InputControlOperation::Flush(_)) {
-            let result = self.flush(request, admitted_at);
             return self.clients[index].answer_input(result.as_ref());
         }
         let result = self.submit(request, admitted_at, client_id);

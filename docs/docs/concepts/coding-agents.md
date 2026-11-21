@@ -109,7 +109,7 @@ Start with the recommended `auto` profile in [Quickstart](../quickstart.md#claud
 | `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool |
 | `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory; under a relocated `CLAUDE_CONFIG_DIR`, use that directory's `skills/**` |
 | `Edit`, `Write` | Both | Every member that writes files | A matching entry pre-approves the member's edits; no entry covers a protected path such as `.git` or `.claude` |
-| The `member prompt`, `member exec`, `member press` and `member flush` prefixes under `ask` | Both, optional | The Director | The operator confirms each Director dispatch, including each `member exec` for a member's denied or refused command; `ask` entries outrank allow entries |
+| The `member prompt`, `member exec` and `member press` prefixes under `ask` | Both, optional | The Director | The operator confirms each Director dispatch, including each `member exec` for a member's denied or refused command; `ask` entries outrank allow entries |
 
 `defaultMode` selects auto mode only from user-level or managed settings. `Edit` and `Write` apply to every session that reads the settings file, your own included; to confine them, replace both with a path rule such as `Edit(~/work/**)`, which covers every file-editing tool.
 

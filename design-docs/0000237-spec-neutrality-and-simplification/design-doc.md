@@ -1,7 +1,7 @@
 # SPEC Neutrality, Test Simplification and Feature Reduction
 
 **Status**: Approved
-**Progress**: 9/83 tasks complete
+**Progress**: 21/83 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -538,7 +538,7 @@ Per TD-1 (a), `CLAUDE.md` § Tests is unchanged.
 
 ### Step B0: Test ledger
 
-- [ ] Generate `test-ledger.tsv` from `mise //:test -- -- --list` with `test_path`, `file`, `fix_commit` and empty `fate` columns per § Techniques <!-- completed: -->
+- [x] Generate `test-ledger.tsv` from `mise //:test -- -- --list` with `test_path`, `file`, `fix_commit` and empty `fate` columns per § Techniques <!-- completed: 2026-11-21T08:45 -->
 
 ### Step A1: Owning definitions in SPEC.md
 
@@ -557,14 +557,14 @@ Per TD-1 (a), `CLAUDE.md` § Tests is unchanged.
 
 ### Step A3: Dependent surfaces, data and confirmation tests
 
-- [ ] Add `## Testing and release acceptance` to `docs/docs/contributing.md` with the moved content and update its `native-acceptance-and-coverage` link <!-- completed: -->
-- [ ] Update the F16 anchor in `docs/docs/concepts/coding-agents.md` <!-- completed: -->
-- [ ] Update the F14 wording in `assets/skills/cafleet/reference/cli.md` <!-- completed: -->
-- [ ] Add the § Neutrality rule to `.claude/rules/documentation-maintenance.md` <!-- completed: -->
-- [ ] Rewrite `assets/profiles/bundled.json` per § Bundled pattern rewrite <!-- completed: -->
-- [ ] Extend the bundled-catalog guard tests in `src/coding_agent/catalog.rs` with the data-driven explicit-class check of § Pattern syntax, failing with profile, rule ID and construct, and list it in `docs/docs/contributing.md` § Bundled catalog provenance checks <!-- completed: -->
-- [ ] Add the in-file quoted-text table test in `src/output/text.rs` and confirm no JSON encoder receives a non-integer number <!-- completed: -->
-- [ ] Run `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
+- [x] Add `## Testing and release acceptance` to `docs/docs/contributing.md` with the moved content and update its `native-acceptance-and-coverage` link <!-- completed: 2026-11-21T08:45 -->
+- [x] Update the F16 anchor in `docs/docs/concepts/coding-agents.md` <!-- completed: 2026-11-21T08:45 -->
+- [x] Update the F14 wording in `assets/skills/cafleet/reference/cli.md` <!-- completed: 2026-11-21T08:45 -->
+- [x] Add the § Neutrality rule to `.claude/rules/documentation-maintenance.md` <!-- completed: 2026-11-21T08:45 -->
+- [x] Rewrite `assets/profiles/bundled.json` per § Bundled pattern rewrite <!-- completed: 2026-11-21T08:59 -->
+- [x] Extend the bundled-catalog guard tests in `src/coding_agent/catalog.rs` with the data-driven explicit-class check of § Pattern syntax, failing with profile, rule ID and construct, and list it in `docs/docs/contributing.md` § Bundled catalog provenance checks <!-- completed: 2026-11-21T08:59 -->
+- [x] Add the in-file quoted-text table test in `src/output/text.rs` and confirm no JSON encoder receives a non-integer number (floats appear only when parsing herdr layout replies and control frames; no writer serializes one) <!-- completed: 2026-11-21T08:59 -->
+- [x] Run `mise //:test`, `mise //:lint` and `mise //docs:build` (flush reap-deadline test flaky under full-suite load; deleted in B1) <!-- completed: 2026-11-21T09:00 -->
 
 ### Workstream B steps
 
@@ -574,9 +574,9 @@ Every step's docs-and-skills task edits the known hits it lists and every furthe
 
 ### Step B1: Remove forced flush and composer drafts (R2)
 
-- [ ] `SPEC.md`: delete §6.3 `member flush` (L1123–1185), its output row (L188), error rows (L1340–1342) and the flush reconcile semantics with `flush_input_id`/`flushed_input_ids` (L1208–1210); delete the §6.5 flush lock and termination rows (L1534–1536, 1547, 1560), trade-off L1669 and send-text sites L1583, 1791; delete §6.7 Composer drafts (L2399–2432); delete §6.9 Forced flush (L4071–4134) with the flush literal limit, the control `flush` actions (L3873–3874, 3878) and stall cause `forced_flush`; delete from §8 `kind='flush'`, `delivery_method='forced'`, `flush_input_id`, its index and the three forced/flush CHECKs <!-- completed: -->
-- [ ] Docs and skills (tokens `member flush`, `composer_draft`, `forced_flush`, `forced`, `flush_input_id`, `flushed_input_ids`, `#member-flush`): `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/roles/director.md`, `docs/docs/concepts/members.md` (including its `SPEC.md#member-flush` link), `docs/docs/concepts/coding-agents.md`, `docs/docs/quickstart.md` <!-- completed: -->
-- [ ] Data, code and tests: remove every `composer_draft` declaration and draft-only fixture entry from `assets/profiles/bundled.json` and `assets/profiles/native/`, the draft validation in `src/coding_agent/catalog.rs`, `src/runtime/flush.rs`, the flush paths in `src/runtime/input.rs` and the `member flush` command, with their DDL and tests <!-- completed: -->
+- [x] `SPEC.md`: delete §6.3 `member flush` (L1123–1185), its output row (L188), error rows (L1340–1342) and the flush reconcile semantics with `flush_input_id`/`flushed_input_ids` (L1208–1210); delete the §6.5 flush lock and termination rows (L1534–1536, 1547, 1560), trade-off L1669 and send-text sites L1583, 1791; delete §6.7 Composer drafts (L2399–2432); delete §6.9 Forced flush (L4071–4134) with the flush literal limit, the control `flush` actions (L3873–3874, 3878) and stall cause `forced_flush`; delete from §8 `kind='flush'`, `delivery_method='forced'`, `flush_input_id`, its index and the three forced/flush CHECKs <!-- completed: 2026-11-21T09:14 -->
+- [x] Docs and skills (tokens `member flush`, `composer_draft`, `forced_flush`, `forced`, `flush_input_id`, `flushed_input_ids`, `#member-flush`): `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/roles/director.md`, `docs/docs/concepts/members.md` (including its `SPEC.md#member-flush` link), `docs/docs/concepts/coding-agents.md`, `docs/docs/quickstart.md` <!-- completed: 2026-11-21T09:14 -->
+- [x] Data, code and tests: remove every `composer_draft` declaration and draft-only fixture entry from `assets/profiles/bundled.json` and `assets/profiles/native/`, the draft validation in `src/coding_agent/catalog.rs`, `src/runtime/flush.rs`, the flush paths in `src/runtime/input.rs` and the `member flush` command, with their DDL and tests <!-- completed: 2026-11-21T09:54 -->
 
 ### Step B2: Runner-pull, verified-empty preview delivery (R1, R4)
 

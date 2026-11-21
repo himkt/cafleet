@@ -31,8 +31,6 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         defer_reason: row.get("defer_reason")?,
         stop_cause: row.get("stop_cause")?,
         left_stage: row.get("left_stage")?,
-        flush_input_id: row.get("flush_input_id")?,
-        flushed_input_ids: None,
     })
 }
 
@@ -92,11 +90,7 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
     }
     let method = input.delivery_method;
     let recorded = || match method {
-        Some(DeliveryMethod::Profile | DeliveryMethod::Forced)
-            if input.delivery_reason.is_none() =>
-        {
-            Ok(None)
-        }
+        Some(DeliveryMethod::Profile) if input.delivery_reason.is_none() => Ok(None),
         Some(DeliveryMethod::Fallback)
             if input
                 .delivery_reason
@@ -244,188 +238,9 @@ fn validate_input(
             "explicit input has no preview message or attempt",
         )?;
     }
-    if let Some(flush_input_id) = input.flush_input_id {
-        let owner: (i64, InputKind) = conn.query_row(
-            "SELECT run_id, kind FROM member_input_operations WHERE input_id=?1",
-            [flush_input_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        require(
-            input.kind == InputKind::Preview && owner == (input.run_id, InputKind::Flush),
-            "member_input_operations.flush_input_id",
-            "a forced preview belongs to a flush receipt of its run",
-        )?;
-    }
     input.permission_response = validate_input_response(conn, &run, &input)?;
-    if input.kind == InputKind::Flush {
-        input.flushed_input_ids = Some(flushed_input_ids(conn, input.input_id)?);
-    }
     delivery_projection(&input)?;
     Ok(input)
-}
-
-/// A forced flush reservation's outcome: the committed flush receipt's `input_id`, or a selected
-/// preview whose receipt or message changed, which commits nothing.
-pub(crate) enum FlushReservation {
-    Reserved(i64),
-    Changed,
-}
-
-/// Inserts the `in_progress` flush receipt and moves each selected queued preview to
-/// `in_progress` with `delivery_method=forced`, in one owned transaction.
-pub(crate) fn reserve_flush(
-    conn: &mut Connection,
-    owner: &RunOwner,
-    payload_digest: &str,
-    previews: &[i64],
-) -> Result<FlushReservation, CafleetError> {
-    require(
-        !previews.is_empty(),
-        "flush_input_id",
-        "a flush selects a preview",
-    )?;
-    owned_transaction(conn, owner, |conn, run| {
-        for preview in previews {
-            let input = owned_input(conn, run, *preview)?;
-            let live = match input.message_id {
-                Some(message_id) => {
-                    crate::broker::messaging::get_message(conn, message_id)?.status
-                        == crate::broker::MessageStatus::InputRequired
-                }
-                None => false,
-            };
-            if input.kind != InputKind::Preview
-                || input.state != InputState::Ready
-                || input.deferred_at.is_none()
-                || !live
-            {
-                return Ok(FlushReservation::Changed);
-            }
-        }
-        let ordinal: i64 = conn.query_row(
-            "SELECT COUNT(*) + 1 FROM member_input_operations WHERE run_id=?1 AND kind='flush'",
-            [run.run_id],
-            |row| row.get(0),
-        )?;
-        let now = now_stamp();
-        conn.execute(
-            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,delivery_method) VALUES(?1,?2,'flush',?3,'in_progress',?4,?4,'forced')",
-            params![run.run_id, format!("flush:{}:{ordinal}", run.run_id), payload_digest, now],
-        )?;
-        let flush_input_id = conn.last_insert_rowid();
-        for preview in previews {
-            update_input(
-                conn,
-                *preview,
-                "UPDATE member_input_operations SET state='in_progress',delivery_method='forced',delivery_reason=NULL,flush_input_id=?1,updated_at=?2 WHERE input_id=?3 AND state='ready'",
-                params![flush_input_id, now, preview],
-                CAS_FAILED,
-            )?;
-        }
-        Ok(FlushReservation::Reserved(flush_input_id))
-    })
-}
-
-/// How the CLI's forced flush write ended, as the runner settles it.
-#[derive(Clone, Copy)]
-pub(crate) enum FlushSettlement {
-    Acknowledged { director_member_id: i64 },
-    NotStarted { director_member_id: i64 },
-    Uncertain(StopCause),
-}
-
-/// Settles an `in_progress` flush receipt and every preview it owns in one owned transaction,
-/// returning the flush receipt and the previews as stored.
-pub(crate) fn settle_flush(
-    conn: &mut Connection,
-    owner: &RunOwner,
-    flush_input_id: i64,
-    outcome: FlushSettlement,
-) -> Result<(InputOperation, Vec<InputOperation>), CafleetError> {
-    owned_transaction(conn, owner, |conn, run| {
-        let flush = owned_input(conn, run, flush_input_id)?;
-        require(
-            flush.kind == InputKind::Flush && flush.state == InputState::InProgress,
-            "member_input_operations.state",
-            "an outstanding flush receipt is in progress",
-        )?;
-        let previews = flushed_input_ids(conn, flush_input_id)?;
-        let now = now_stamp();
-        let flush = match outcome {
-            FlushSettlement::Acknowledged { director_member_id } => {
-                for preview in &previews {
-                    let input = owned_input(conn, run, *preview)?;
-                    stamp_preview(conn, run, &input)?;
-                    settle(
-                        conn,
-                        *preview,
-                        InputState::InProgress,
-                        InputDisposition::Submitted,
-                        Some(&format!("forced flush input {flush_input_id}")),
-                    )?;
-                }
-                settle(
-                    conn,
-                    flush_input_id,
-                    InputState::InProgress,
-                    InputDisposition::Submitted,
-                    Some(&format!(
-                        "director={director_member_id}; multiplexer acknowledged forced flush"
-                    )),
-                )?
-            }
-            FlushSettlement::NotStarted { director_member_id } => {
-                for preview in &previews {
-                    update_input(
-                        conn,
-                        *preview,
-                        "UPDATE member_input_operations SET state='ready',delivery_method=NULL,delivery_reason=NULL,flush_input_id=NULL,updated_at=?1 WHERE input_id=?2 AND state='in_progress'",
-                        params![now, preview],
-                        CAS_FAILED,
-                    )?;
-                }
-                settle(
-                    conn,
-                    flush_input_id,
-                    InputState::InProgress,
-                    InputDisposition::NotSubmitted,
-                    Some(&format!(
-                        "director={director_member_id}; no multiplexer process started"
-                    )),
-                )?
-            }
-            FlushSettlement::Uncertain(cause) => {
-                for id in previews.iter().chain([&flush_input_id]) {
-                    update_input(
-                        conn,
-                        *id,
-                        "UPDATE member_input_operations SET state='uncertain',stop_cause=?1,updated_at=?2 WHERE input_id=?3 AND state='in_progress'",
-                        params![cause.as_str(), now, id],
-                        CAS_FAILED,
-                    )?;
-                }
-                get_input(conn, flush_input_id)?
-            }
-        };
-        let previews = previews
-            .iter()
-            .map(|preview| get_input(conn, *preview))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok((flush, previews))
-    })
-}
-
-/// The preview receipts a `flush` receipt owns, ascending.
-pub(crate) fn flushed_input_ids(
-    conn: &Connection,
-    flush_input_id: i64,
-) -> Result<Vec<i64>, CafleetError> {
-    conn.prepare(
-        "SELECT input_id FROM member_input_operations WHERE flush_input_id=?1 ORDER BY input_id",
-    )?
-    .query_map([flush_input_id], |row| row.get(0))?
-    .collect::<rusqlite::Result<Vec<i64>>>()
-    .map_err(CafleetError::from)
 }
 
 pub(crate) fn input_payload_digest(run_id: i64, input: &crate::runtime::SubmitInput) -> String {
@@ -637,10 +452,6 @@ pub(crate) fn settle_lost_deferred_in_transaction(
     )?;
     conn.execute(
         "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason='runner_lost' WHERE run_id=?2 AND state='ready' AND deferred_at IS NOT NULL",
-        params![now_stamp(), run.run_id],
-    )?;
-    conn.execute(
-        "UPDATE member_input_operations SET state='uncertain',stop_cause='runner_lost',updated_at=?1 WHERE run_id=?2 AND state='in_progress' AND (kind='flush' OR flush_input_id IS NOT NULL)",
         params![now_stamp(), run.run_id],
     )?;
     Ok(())

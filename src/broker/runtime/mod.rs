@@ -483,7 +483,7 @@ stored_enum!(NotificationState, "member_runtime_events.notification_state", { In
 stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", {
     MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
 });
-stored_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", PermissionResponse => "permission_response", Flush => "flush" });
+stored_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", PermissionResponse => "permission_response" });
 stored_enum!(InputState, "member_input_operations.state", {
     Ready => "ready", InProgress => "in_progress", Accepted => "accepted",
     Uncertain => "uncertain", Settled => "settled"
@@ -498,7 +498,7 @@ stored_enum!(StopCause, "member_input_operations.stop_cause", {
     InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
     ObserverUnavailable => "observer_unavailable", DeadlineExpired => "deadline_expired",
     SubmitUnconfirmed => "submit_unconfirmed", ShortWrite => "short_write",
-    WriteFailed => "write_failed", RunnerStopped => "runner_stopped", RunnerLost => "runner_lost"
+    WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
 });
 stored_enum!(LeftStage, "member_input_operations.left_stage", {
     EscapeOnly => "escape_only", Partial => "partial", LiteralComplete => "literal_complete",
@@ -730,8 +730,6 @@ pub(crate) struct InputOperation {
     pub(crate) defer_reason: Option<String>,
     pub(crate) stop_cause: Option<StopCause>,
     pub(crate) left_stage: Option<LeftStage>,
-    pub(crate) flush_input_id: Option<i64>,
-    pub(crate) flushed_input_ids: Option<Vec<i64>>,
 }
 
 stored_enum!(DeliveryStatus, "delivery.status", {
@@ -740,7 +738,7 @@ stored_enum!(DeliveryStatus, "delivery.status", {
     NotSubmitted => "not_submitted", NotApplicable => "not_applicable"
 });
 stored_enum!(DeliveryMethod, "member_input_operations.delivery_method", {
-    Profile => "profile", Fallback => "fallback", Forced => "forced"
+    Profile => "profile", Fallback => "fallback"
 });
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

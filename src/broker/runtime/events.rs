@@ -267,7 +267,6 @@ fn published_delivery(
         cause: result_stop_cause(&input, published.status),
         action: left_input_action(conn, &get_run(conn, event.run_id)?, &input)?,
         stalled: None,
-        flush_input_id: input.flush_input_id,
         delivery: published,
         stage: payload["stage"].clone(),
     })
@@ -428,7 +427,6 @@ enum StalledBlocker {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StalledCause {
-    ForcedFlush,
     ImmediateAttempt,
     PendingFinalization,
     HeldComposer,
@@ -445,7 +443,6 @@ enum StalledCause {
 impl StalledCause {
     fn parse(kind: &str) -> Result<Self, CafleetError> {
         Ok(match kind {
-            "forced_flush" => Self::ForcedFlush,
             "immediate_attempt" => Self::ImmediateAttempt,
             "pending_finalization" => Self::PendingFinalization,
             "held_composer" => Self::HeldComposer,
@@ -463,10 +460,9 @@ impl StalledCause {
 
     fn blocker(self) -> StalledBlocker {
         match self {
-            Self::HeldComposer
-            | Self::ForcedFlush
-            | Self::PendingFinalization
-            | Self::UnresolvedInput => StalledBlocker::Required,
+            Self::HeldComposer | Self::PendingFinalization | Self::UnresolvedInput => {
+                StalledBlocker::Required
+            }
             Self::ImmediateAttempt => StalledBlocker::Optional,
             Self::DrainPending
             | Self::PaneInputBusy
@@ -718,7 +714,6 @@ struct DeliveryFields {
     cause: Option<StopCause>,
     action: Value,
     stalled: Option<StalledFields>,
-    flush_input_id: Option<i64>,
 }
 
 struct StalledFields {
@@ -876,8 +871,7 @@ fn stalled_delivery(
         }
         None => json!({"kind":"review_stalled_queue",
             "instruction":REVIEW_STALLED_QUEUE_INSTRUCTION,
-            "inspect_argv":input_show_argv(conn, input_id)?,
-            "flush_argv":member_flush_argv(conn, run)?}),
+            "inspect_argv":input_show_argv(conn, input_id)?}),
     };
     Ok(DeliveryFields {
         input_id,
@@ -890,7 +884,6 @@ fn stalled_delivery(
             waiting_since,
             cause: record["cause"].clone(),
         }),
-        flush_input_id: None,
         action,
     })
 }
@@ -907,21 +900,8 @@ fn input_show_argv(conn: &Connection, input_id: i64) -> Result<Value, CafleetErr
     Ok(json!(argv))
 }
 
-fn member_flush_argv(conn: &Connection, run: &RunRecord) -> Result<Value, CafleetError> {
-    let mut argv = vec![
-        "cafleet".to_owned(),
-        "member".into(),
-        "flush".into(),
-        run.member_id.to_string(),
-        "--from-member-id".into(),
-        run.director_member_id.to_string(),
-    ];
-    argv.extend(action_database_args(conn)?);
-    Ok(json!(argv))
-}
-
 const REVIEW_STALLED_INPUT_INSTRUCTION: &str = "Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.";
-const REVIEW_STALLED_QUEUE_INSTRUCTION: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.";
+const REVIEW_STALLED_QUEUE_INSTRUCTION: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.";
 
 fn payload(
     run: &RunRecord,
@@ -962,10 +942,7 @@ fn payload(
         payload["delivery"] = fields.delivery.to_json();
         match &fields.stalled {
             Some(stalled) => payload["cause"] = stalled.cause.clone(),
-            None => {
-                payload["stage"] = fields.stage.clone();
-                payload["flush_input_id"] = json!(fields.flush_input_id);
-            }
+            None => payload["stage"] = fields.stage.clone(),
         }
     }
     payload["director_action"] = if let Some(fields) = delivery {
@@ -1074,7 +1051,6 @@ pub(crate) fn persist_transition_in_transaction(
                 cause: result_stop_cause(&input, delivery.status),
                 action: left_input_action(conn, run, &input)?,
                 stalled: None,
-                flush_input_id: input.flush_input_id,
                 delivery,
                 stage: record["stage"].clone(),
             })
@@ -4814,10 +4790,9 @@ mod tests {
         mod stalled_queue_causes {
             use crate::broker::runtime::events::tests::composer_reliability::*;
 
-            const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.";
+            const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.";
 
-            const BLOCKER_KINDS: [&str; 3] =
-                ["forced_flush", "pending_finalization", "unresolved_input"];
+            const BLOCKER_KINDS: [&str; 2] = ["pending_finalization", "unresolved_input"];
 
             const NULL_BLOCKER_KINDS: [(&str, &str); 7] = [
                 ("drain_pending", "terminal reply pending"),
@@ -4861,8 +4836,6 @@ mod tests {
                     "kind":"review_stalled_queue",
                     "instruction":REVIEW_STALLED_QUEUE,
                     "inspect_argv":["cafleet","input","show",head.to_string(),"--json","--database-url",url],
-                    "flush_argv":["cafleet","member","flush",fixture.member.to_string(),
-                        "--from-member-id",fixture.director.to_string(),"--database-url",url],
                 })
             }
 
@@ -5094,7 +5067,6 @@ mod tests {
             object.insert("message_id".into(), message_id);
             object.insert("delivery".into(), delivery);
             object.insert("stage".into(), json!(stage));
-            object.insert("flush_input_id".into(), Value::Null);
             object.insert("director_action".into(), Value::Null);
             Value::Object(object)
         }
@@ -5162,13 +5134,12 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>();
             assert_eq!(
-                keys[keys.len() - 6..],
+                keys[keys.len() - 5..],
                 [
                     "input_id",
                     "message_id",
                     "delivery",
                     "stage",
-                    "flush_input_id",
                     "director_action"
                 ]
             );

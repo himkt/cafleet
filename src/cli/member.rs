@@ -197,18 +197,6 @@ pub(crate) enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Force-submit a member's queued previews through its outer pane.
-    Flush {
-        /// The target member.
-        #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        member_id: i64,
-        /// The root Director issuing this Director-only command.
-        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        director_member_id: i64,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
     /// Capture the tail of a member's pane.
     Capture {
         /// The target member.
@@ -324,7 +312,6 @@ pub(crate) fn run(
             exec(conn, settings, member_id, &command, json, deadline)
         }
         MemberCommand::Press { .. } => unreachable!("press has a dedicated typed dispatch"),
-        MemberCommand::Flush { .. } => unreachable!("flush has a dedicated dispatch"),
         MemberCommand::Capture {
             member_id,
             lines,
@@ -922,17 +909,6 @@ pub(super) fn press(
         &crate::output::json::member_press(&acknowledgment),
         || crate::output::format_member_press(&acknowledgment),
     )
-}
-
-pub(super) fn flush(
-    conn: &mut Connection,
-    settings: &Settings,
-    member_id: i64,
-    json: bool,
-    deadline: crate::time::Deadline,
-) -> Result<(), CafleetError> {
-    let outcome = crate::runtime::flush::flush_member(conn, settings, member_id, deadline)?;
-    emit(json, &outcome.to_json(), || outcome.text())
 }
 
 fn wrapped_delivery_refusal(

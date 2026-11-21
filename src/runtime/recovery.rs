@@ -4010,7 +4010,11 @@ mod tests {
             let attempted = insert(&case, "prompt:attempted", "in_progress", false);
             let attempted_before = storage::get_input(&case.fixture.conn, attempted).unwrap();
             let report = case.recover(&mut new_host()).unwrap();
-            assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
+            assert!(
+                matches!(report.outcome, RecoveryOutcome::Recovered),
+                "{:?}",
+                report.outcome
+            );
             let settled = storage::get_input(&case.fixture.conn, deferred).unwrap();
             assert_eq!(settled.state, InputState::Settled);
             assert_eq!(settled.disposition, Some(InputDisposition::NotSubmitted));

@@ -61,8 +61,7 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
         "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
         "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
         "stop_cause":row.stop_cause.map(|cause| cause.as_str()),
-        "left_stage":row.left_stage.map(|stage| stage.as_str()),
-        "flush_input_id":row.flush_input_id,"flushed_input_ids":row.flushed_input_ids}})
+        "left_stage":row.left_stage.map(|stage| stage.as_str())}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
@@ -225,15 +224,7 @@ mod tests {
                 let output = crate::output::json::input_operation(&input);
                 let row = output["input"].as_object().unwrap();
                 let keys = row.keys().map(String::as_str).collect::<Vec<_>>();
-                assert_eq!(
-                    &keys[keys.len() - 4..],
-                    [
-                        "stop_cause",
-                        "left_stage",
-                        "flush_input_id",
-                        "flushed_input_ids"
-                    ]
-                );
+                assert_eq!(&keys[keys.len() - 2..], ["stop_cause", "left_stage"]);
                 assert_eq!(row["stop_cause"], cause.as_str());
                 assert_eq!(row["left_stage"], stage.as_str());
                 assert_eq!(row["disposition"], "left_in_composer");
@@ -603,7 +594,7 @@ mod tests {
             "child_start_identity",
             "effective_policy",
         ];
-        const INPUT_KEYS: [&str; 19] = [
+        const INPUT_KEYS: [&str; 17] = [
             "input_id",
             "run_id",
             "operation_key",
@@ -621,8 +612,6 @@ mod tests {
             "defer_reason",
             "stop_cause",
             "left_stage",
-            "flush_input_id",
-            "flushed_input_ids",
         ];
 
         #[test]

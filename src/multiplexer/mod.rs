@@ -325,14 +325,6 @@ impl BackendCore {
         self.acknowledged_write(argv, deadline, "key")
     }
 
-    fn send_text(
-        &self,
-        argv: &[String],
-        deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError> {
-        self.acknowledged_write(argv, deadline, "text")
-    }
-
     fn acknowledged_write(
         &self,
         argv: &[String],
@@ -435,14 +427,6 @@ pub(crate) trait Multiplexer {
         &self,
         pane_id: &str,
         keys: &PressKeys,
-        deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError>;
-
-    /// Writes `text` literally into `pane_id` as one argv element.
-    fn send_text(
-        &self,
-        pane_id: &str,
-        text: &str,
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError>;
 

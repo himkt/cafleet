@@ -2,11 +2,7 @@ use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::catalog::Capture;
-use crate::coding_agent::catalog::ComposerDraft;
-use crate::coding_agent::catalog::ComposerDraftSpec;
 use crate::coding_agent::catalog::CursorRule;
-use crate::coding_agent::catalog::DraftFirst;
-use crate::coding_agent::catalog::DraftLast;
 use crate::coding_agent::catalog::FocusStyle;
 use crate::coding_agent::catalog::MarginRows;
 use crate::coding_agent::catalog::MatcherScope;
@@ -436,97 +432,6 @@ fn region_candidates(
         }
     }
     regions
-}
-/// Reads the draft from the live composer region. Each start row's region ends at the first
-/// end-pattern row that leaves the selected draft rows inside it; the live region is the single such region that satisfies the cursor
-/// rule and holds no other start-pattern row, unless the row above it also matches the start
-/// pattern, which makes it a continuation of a composer whose every row repeats the marker. The
-/// draft is its selected rows without the prompt marker or suggestion-styled cells, trailing
-/// blanks trimmed and blank edge rows dropped.
-pub(super) fn composer_draft(spec: &ComposerDraftSpec, screen: &ScreenSnapshot) -> ComposerDraft {
-    let Ok(lines) = clipped_logical_lines(screen, &BTreeMap::new()) else {
-        return ComposerDraft::Unreadable;
-    };
-    let opens = |index: usize| spec.region.start.is_match(&lines[index].text);
-    let any_cursor = Region {
-        cursor: CursorRule::Any,
-        ..spec.region.clone()
-    };
-    let framed = usize::from(
-        spec.rows.first == DraftFirst::AfterStart || spec.rows.last == DraftLast::BeforeEnd,
-    );
-    let mut nearest = BTreeMap::new();
-    for (start, end, _) in region_candidates(&any_cursor, None, screen, &lines) {
-        if end >= start + framed {
-            nearest.entry(start).or_insert(end);
-        }
-    }
-    let live: Vec<_> = region_candidates(&spec.region, None, screen, &lines)
-        .into_iter()
-        .filter(|&(start, end, _)| nearest.get(&start) == Some(&end))
-        .filter(|&(start, end, _)| !(start + 1..end).any(opens))
-        .collect();
-    let [(start, _, region)] = live[..] else {
-        return ComposerDraft::Unreadable;
-    };
-    if start > 0 && opens(start - 1) {
-        return ComposerDraft::Unreadable;
-    }
-    let first = match spec.rows.first {
-        DraftFirst::Start => region.top,
-        DraftFirst::AfterStart => region.top + 1,
-    };
-    let last = match spec.rows.last {
-        DraftLast::End => region.bottom,
-        DraftLast::BeforeEnd => region.bottom - 1,
-    };
-    let mut rows = Vec::new();
-    for row in first..last {
-        let cells: Vec<_> = (0..screen.cols)
-            .filter_map(|col| screen.screen.cell(row, col))
-            .filter(|cell| !cell.is_wide_continuation())
-            .map(|cell| {
-                let text = if cell.has_contents() {
-                    cell.contents()
-                } else {
-                    " "
-                };
-                (
-                    text,
-                    spec.suggestion
-                        .is_some_and(|style| suggestion_cell(cell, style)),
-                )
-            })
-            .collect();
-        let mut skip = 0;
-        if row == first
-            && let Some(prompt) = &spec.prompt
-        {
-            let raw: String = cells.iter().map(|(text, _)| *text).collect();
-            let Some(found) = prompt.find(&raw).filter(|found| found.start() == 0) else {
-                return ComposerDraft::Unreadable;
-            };
-            let mut consumed = 0;
-            while consumed < found.end() {
-                consumed += cells[skip].0.len();
-                skip += 1;
-            }
-        }
-        let text: String = cells[skip..]
-            .iter()
-            .filter(|(_, suggested)| !suggested)
-            .map(|(text, _)| *text)
-            .collect();
-        rows.push(text.trim_end().to_owned());
-    }
-    let Some(top) = rows.iter().position(|row| !row.is_empty()) else {
-        return ComposerDraft::Readable(String::new());
-    };
-    let bottom = rows
-        .iter()
-        .rposition(|row| !row.is_empty())
-        .expect("a nonblank row exists");
-    ComposerDraft::Readable(rows[top..=bottom].join("\n"))
 }
 /// Whether every cell from `col` to the row's last non-blank cell carries the suggestion style.
 fn suggestion_only(screen: &ScreenSnapshot, row: u16, col: u16, style: SuggestionStyle) -> bool {

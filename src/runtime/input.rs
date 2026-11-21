@@ -12,7 +12,6 @@ use crate::coding_agent::ComposerOperation;
 use crate::coding_agent::ProfileCatalog;
 use crate::coding_agent::StageGate;
 use crate::coding_agent::catalog::AnswerKey;
-use crate::coding_agent::catalog::ComposerDraft;
 use crate::coding_agent::coding_agent;
 use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
@@ -105,18 +104,6 @@ pub(crate) struct InputCoordinator {
     output_seq: u64,
     bracketed_paste: bool,
     last_drain_blocker: Option<String>,
-    flush: Option<PendingFlush>,
-}
-
-pub(crate) const FLUSH_LITERAL_LIMIT: usize = 65_536;
-const FLUSH_MARKER: &str = " [cafleet: ignore any text before this marker, if present] ";
-
-/// The previews a forced flush reserved, outside the FIFO until its write outcome settles.
-pub(crate) struct PendingFlush {
-    pub(crate) flush_input_id: i64,
-    pub(crate) entries: Vec<QueuedInput>,
-    pub(crate) expires_at: Instant,
-    director_member_id: i64,
 }
 
 /// An accepted deferred preview whose notification stamp and settlement storage prevented; like
@@ -150,69 +137,6 @@ fn message_consumed(conn: &Connection, message_id: Option<i64>) -> Result<bool> 
         }
         None => false,
     })
-}
-
-fn joined(ids: &[i64]) -> String {
-    ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
-}
-
-fn flush_literal(lines: &[String]) -> String {
-    format!("{FLUSH_MARKER}{}", lines.join(" "))
-}
-
-/// How many preview lines `literal` carries, as built from `canonical` or a `pointer` prefix.
-fn literal_count(literal: &str, canonical: &[String], pointer: &[String]) -> usize {
-    if literal == flush_literal(canonical) {
-        return canonical.len();
-    }
-    (1..=pointer.len())
-        .find(|count| literal == flush_literal(&pointer[..*count]))
-        .expect("a flush literal is built from its preview lines")
-}
-
-/// The `member press` key name for a plan's submit bytes.
-fn submit_key_name(submit: &[u8]) -> Option<&'static str> {
-    match submit {
-        [0x0d] => Some("Enter"),
-        [0x0a] => Some("Ctrl+j"),
-        [0x09] => Some("Tab"),
-        _ => None,
-    }
-}
-
-/// Why the current observation forbids a forced write, if it does.
-fn flush_observation_refusal(
-    observation: &ObservationController,
-    transport: &Transport,
-) -> Option<String> {
-    let status = observation.status();
-    if matches!(
-        status.visibility,
-        Visibility::Visible | Visibility::Obscured
-    ) || matches!(
-        status.eligibility,
-        InputEligibility::Hold(GateReason::Interaction | GateReason::Candidate)
-    ) {
-        let classification = observation
-            .current_classification()
-            .map_or("candidate", |class| class.as_str());
-        return Some(format!("an interaction is open ({classification})"));
-    }
-    let unavailable =
-        |reason: &str| format!("the member's screen observation is unavailable: {reason}");
-    if status.visibility == Visibility::Unknown {
-        return Some(unavailable(status.visibility.as_str()));
-    }
-    if let Some(code) = &status.diagnostic {
-        return Some(unavailable(&format!("observation degraded: {code}")));
-    }
-    if transport.outer_closed() {
-        return Some(unavailable("outer terminal closed"));
-    }
-    if transport.child_closed() {
-        return Some(unavailable("native output closed"));
-    }
-    None
 }
 
 /// Runner-owned ordinary input accepted with a durable ready receipt; its literal stays in
@@ -1108,19 +1032,6 @@ impl InputCoordinator {
         self.current_request = None;
         self.input_fenced = true;
         let mut settled = Vec::new();
-        if let Some(slot) = self.flush.take() {
-            let mut conn = crate::db::connect(&self.database_url)?;
-            let (flush, previews) = with_database_deadline(&mut conn, deadline, |conn| {
-                storage::settle_flush(
-                    conn,
-                    &self.run.owner(),
-                    slot.flush_input_id,
-                    storage::FlushSettlement::Uncertain(storage::StopCause::RunnerStopped),
-                )
-            })?;
-            settled.push(flush.input_id);
-            settled.extend(previews.iter().map(|preview| preview.input_id));
-        }
         if let Some((id, _, written)) = self.active_deferred() {
             self.pending = None;
             let mut conn = crate::db::connect(&self.database_url)?;
@@ -1955,24 +1866,11 @@ impl InputCoordinator {
                     !evidence_ref.trim().is_empty(),
                     "nonempty reconciliation evidence required",
                 )?;
-                let mut cascaded = Vec::new();
                 let settled = with_database_deadline(conn, deadline, |conn| {
-                    cascaded.clear();
                     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     self.validate_receipt_owner(&tx)?;
                     let input = storage::get_input(&tx, *id)?;
                     operation_key = Some(input.operation_key.clone());
-                    if let Some(flush) = input.flush_input_id {
-                        return Err(error(format!(
-                            "input {id} belongs to forced flush {flush}; reconcile the flush"
-                        )));
-                    }
-                    ensure(
-                        self.flush
-                            .as_ref()
-                            .is_none_or(|slot| slot.flush_input_id != *id),
-                        &format!("flush {id} is still outstanding"),
-                    )?;
                     self.validate_receipt_cache(&input)?;
                     ensure(
                         self.pending.is_none(),
@@ -2013,7 +1911,7 @@ impl InputCoordinator {
                             }
                             _ => None,
                         };
-                        let settled = storage::settle_any_input_in_transaction(
+                        storage::settle_any_input_in_transaction(
                             &tx,
                             &owner,
                             &input,
@@ -2021,26 +1919,7 @@ impl InputCoordinator {
                             evidence_ref,
                             proof.as_ref(),
                             deadline,
-                        )?;
-                        if input.kind == storage::InputKind::Flush {
-                            for preview in storage::flushed_input_ids(&tx, *id)? {
-                                let preview = storage::get_input(&tx, preview)?;
-                                if preview.state == storage::InputState::Settled {
-                                    continue;
-                                }
-                                let preview = storage::settle_any_input_in_transaction(
-                                    &tx,
-                                    &owner,
-                                    &preview,
-                                    *disposition,
-                                    evidence_ref,
-                                    None,
-                                    deadline,
-                                )?;
-                                cascaded.push(preview);
-                            }
-                        }
-                        settled
+                        )?
                     };
                     check_deadline(Instant::now(), deadline)?;
                     tx.commit()?;
@@ -2048,11 +1927,6 @@ impl InputCoordinator {
                 })?;
                 if let Some(retained) = self.operations.get_mut(id) {
                     retained.operation = settled;
-                }
-                for preview in cascaded.drain(..) {
-                    if let Some(retained) = self.operations.get_mut(&preview.input_id) {
-                        retained.operation = preview;
-                    }
                 }
                 self.queue.retain(|queued| queued.input_id != *id);
                 check_deadline(Instant::now(), deadline)?;
@@ -2602,8 +2476,7 @@ impl InputCoordinator {
     /// The runner already owns a preview's delivery: one waits in the FIFO or is being drained
     /// from it, or a preview's terminal transaction is pending storage.
     pub(super) fn owns_preview_delivery(&self) -> bool {
-        self.flush.is_some()
-            || self.finalization.is_some()
+        self.finalization.is_some()
             || self.pending_stamp.is_some()
             || self
                 .queue
@@ -2736,26 +2609,7 @@ impl InputCoordinator {
         conn: &mut Connection,
         observation: &ObservationController,
     ) -> Result<()> {
-        if self.input_fenced || (self.queue.is_empty() && self.flush.is_none()) {
-            return Ok(());
-        }
-        if self
-            .flush
-            .as_ref()
-            .is_some_and(|slot| Instant::now() >= slot.expires_at)
-        {
-            match self.apply_flush_settlement(
-                conn,
-                observation,
-                storage::FlushSettlement::Uncertain(storage::StopCause::WriteFailed),
-                Instant::now() + DEFERRED_FINALIZATION,
-            ) {
-                Ok(()) => {}
-                Err(cause) if storage_failure(&cause) => {}
-                Err(cause) => return Err(cause),
-            }
-        }
-        if self.queue.is_empty() {
+        if self.input_fenced || self.queue.is_empty() {
             return Ok(());
         }
         if let Some(pending) = self.finalization.take() {
@@ -2886,9 +2740,6 @@ impl InputCoordinator {
         unresolved: Option<i64>,
         recorded: Option<HeadObstacle>,
     ) -> (&'static str, Option<i64>, Option<String>) {
-        if let Some(slot) = &self.flush {
-            return ("forced_flush", Some(slot.flush_input_id), None);
-        }
         if let Some(pending) = self
             .pending
             .as_ref()
@@ -2931,7 +2782,7 @@ impl InputCoordinator {
         let operation = match retained.operation.kind {
             storage::InputKind::Prompt | storage::InputKind::Preview => ComposerOperation::Prompt,
             storage::InputKind::Exec => ComposerOperation::Exec,
-            storage::InputKind::PermissionResponse | storage::InputKind::Flush => return,
+            storage::InputKind::PermissionResponse => return,
         };
         if !self.verified_composer(operation)
             || retained.stage == SubmissionStage::ZeroBytes && retained.written_bytes == 0
@@ -2978,7 +2829,7 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<()> {
-        if self.input_fenced || self.flush.is_some() {
+        if self.input_fenced {
             return Ok(());
         }
         self.clear_verified_hold(observation);
@@ -5088,319 +4939,6 @@ impl InputCoordinator {
         }
     }
 
-    /// Serves a Director's forced flush outside the queue turn: `Reserve` moves every live queued
-    /// preview into the flush slot, and `Settle` records the CLI's write outcome.
-    pub(crate) fn flush_received(
-        &mut self,
-        conn: &mut Connection,
-        action: FlushAction,
-        observation: &ObservationController,
-        transport: &Transport,
-        deadline: Instant,
-    ) -> std::result::Result<FlushReply, InputFailure> {
-        let context = self.input_context();
-        match action {
-            FlushAction::Reserve {
-                director_member_id,
-                expires_at_mono_ns,
-            } => self.reserve_flush(
-                conn,
-                director_member_id,
-                expires_at_mono_ns,
-                (observation, transport),
-                deadline,
-            ),
-            FlushAction::Settle {
-                flush_input_id,
-                outcome,
-            } => self.settle_flush(conn, flush_input_id, outcome, observation, deadline),
-        }
-        .map_err(|source| context.failure(source))
-    }
-
-    fn reserve_flush(
-        &mut self,
-        conn: &mut Connection,
-        director_member_id: i64,
-        expires_at_mono_ns: u64,
-        (observation, transport): (&ObservationController, &Transport),
-        deadline: Instant,
-    ) -> Result<FlushReply> {
-        let refused = |cause: String| Ok(FlushReply::Refused { cause });
-        if self.input_fenced || self.manual_accounting_failed {
-            return refused("the member's input is fenced".into());
-        }
-        if self.flush.is_some() || self.pending.is_some() {
-            return refused("a runner input attempt is in flight; retry".into());
-        }
-        let expires_at =
-            InputExpiration(expires_at_mono_ns).instant(&mut RealInputDeadlineClock)?;
-        let stamped = self.pending_stamp.as_ref().map(|stamp| stamp.input_id);
-        let finalizing = self.finalization.as_ref().map(|pending| pending.input_id);
-        let unresolved = with_database_deadline(conn, deadline, |conn| {
-            conn.prepare(
-                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND kind IN ('preview','prompt','exec') AND state IN ('in_progress','accepted','uncertain') AND input_id IS NOT ?2 AND input_id IS NOT ?3 ORDER BY input_id",
-            )?
-            .query_map(rusqlite::params![self.run.run_id, stamped, finalizing], |row| {
-                row.get(0)
-            })?
-            .collect::<rusqlite::Result<Vec<i64>>>()
-            .map_err(CafleetError::from)
-        })?;
-        if !unresolved.is_empty() {
-            return refused(format!(
-                "input {} is unresolved; reconcile it with cafleet input reconcile before flushing",
-                joined(&unresolved)
-            ));
-        }
-        let mut explicit: Vec<(i64, storage::InputKind)> = self
-            .queue
-            .iter()
-            .filter(|queued| queued.request.kind != storage::InputKind::Preview)
-            .map(|queued| (queued.input_id, queued.request.kind))
-            .collect();
-        explicit.sort_unstable_by_key(|(input_id, _)| *input_id);
-        if let Some(((first, kind), rest)) = explicit.split_first() {
-            let mut cause = format!(
-                "queued {} input {first} cannot be rebuilt from its receipt; settle it with 'cafleet input reconcile {first} --from-member-id {director_member_id} --disposition not-submitted --evidence-ref REFERENCE', then resend it",
-                kind.as_str()
-            );
-            if !rest.is_empty() {
-                let rest: Vec<i64> = rest.iter().map(|(input_id, _)| *input_id).collect();
-                cause.push_str(&format!("; also queued: {}", joined(&rest)));
-            }
-            return refused(cause);
-        }
-        if let Some(cause) = flush_observation_refusal(observation, transport) {
-            return refused(cause);
-        }
-        let version = self.run.native_version.clone();
-        let catalog = &self.services.catalog;
-        let draft = version
-            .as_deref()
-            .map_or(ComposerDraft::Unreadable, |native| {
-                catalog.composer_draft(self.backend, native, &transport.snapshot())
-            });
-        let ComposerDraft::Readable(draft) = draft else {
-            return refused("the composer draft cannot be read from the screen".into());
-        };
-        if let Some(prefix) = version
-            .as_deref()
-            .and_then(|native| catalog.mode_switch_prefix(self.backend, native, &draft))
-        {
-            return refused(format!(
-                "the composer draft starts with mode prefix '{prefix}'"
-            ));
-        }
-        let plan = version.as_deref().and_then(|native| {
-            catalog.composer_plan(self.backend, native, ComposerOperation::Prompt)
-        });
-        let Some((plan, submit_key)) =
-            plan.and_then(|plan| submit_key_name(plan.submit_bytes()).map(|key| (plan, key)))
-        else {
-            return refused(format!(
-                "the {} profile has no submission plan for native version {}",
-                self.backend.name(),
-                version.as_deref().unwrap_or("-")
-            ));
-        };
-        let entries: Vec<(i64, Option<i64>)> = self
-            .queue
-            .iter()
-            .map(|queued| (queued.input_id, queued.request.message_id))
-            .collect();
-        let live = with_database_deadline(conn, deadline, |conn| {
-            let mut live = Vec::new();
-            for (input_id, message_id) in &entries {
-                let message = crate::broker::get_message(
-                    conn,
-                    message_id.expect("a queued preview has its message"),
-                )?;
-                if message.status == crate::broker::MessageStatus::InputRequired {
-                    live.push((*input_id, message));
-                }
-            }
-            Ok(live)
-        })?;
-        if live.is_empty() {
-            return Ok(FlushReply::Empty);
-        }
-        let fits = |literal: &str| {
-            literal.len() <= FLUSH_LITERAL_LIMIT && plan.plain_literal_allowed(literal)
-        };
-        let canonical: Vec<String> = live
-            .iter()
-            .map(|(_, message)| crate::delivery::canonical_preview_line(message))
-            .collect();
-        let pointer: Vec<String> = live
-            .iter()
-            .map(|(_, message)| crate::delivery::pointer_preview_line(message))
-            .collect();
-        let literal = if fits(&flush_literal(&canonical)) {
-            flush_literal(&canonical)
-        } else {
-            let count = (1..=pointer.len())
-                .rev()
-                .find(|count| fits(&flush_literal(&pointer[..*count])));
-            let Some(count) = count else {
-                let first = flush_literal(&pointer[..1]);
-                let (size, max, unit) = match plan.plain_bound() {
-                    Some((max, unit)) if !plan.plain_literal_allowed(&first) => {
-                        let size = if unit == "bytes" {
-                            first.len()
-                        } else {
-                            first.chars().count()
-                        };
-                        (size, max, unit)
-                    }
-                    _ => (first.len(), FLUSH_LITERAL_LIMIT as u64, "bytes"),
-                };
-                return refused(format!(
-                    "the first queued preview is {size} {unit} as a pointer line, above the flush limit of {max} {unit}"
-                ));
-            };
-            flush_literal(&pointer[..count])
-        };
-        let selected = literal_count(&literal, &canonical, &pointer);
-        let flushed_input_ids: Vec<i64> = live[..selected].iter().map(|(id, _)| *id).collect();
-        let message_ids: Vec<i64> = live[..selected]
-            .iter()
-            .map(|(_, message)| message.message_id)
-            .collect();
-        let remaining_input_ids: Vec<i64> = live[selected..].iter().map(|(id, _)| *id).collect();
-        let mut digested = literal.as_bytes().to_vec();
-        digested.extend_from_slice(plan.submit_bytes());
-        let digest = crate::digest::sha256_hex(&digested);
-        let reservation = with_database_deadline(conn, deadline, |conn| {
-            storage::reserve_flush(conn, &self.run.owner(), &digest, &flushed_input_ids)
-        })?;
-        let storage::FlushReservation::Reserved(flush_input_id) = reservation else {
-            return refused("queued input changed while the flush was prepared; retry".into());
-        };
-        let mut entries = Vec::with_capacity(flushed_input_ids.len());
-        for input_id in &flushed_input_ids {
-            let position = self
-                .queue
-                .iter()
-                .position(|queued| queued.input_id == *input_id)
-                .expect("a reserved preview is queued");
-            entries.push(self.queue.remove(position).expect("the found entry exists"));
-        }
-        self.flush = Some(PendingFlush {
-            flush_input_id,
-            entries,
-            expires_at,
-            director_member_id,
-        });
-        Ok(FlushReply::Reserved {
-            flush_input_id,
-            literal,
-            submit_key: submit_key.into(),
-            settle_ms: u64::try_from(STAGE_SETTLE.as_millis()).expect("the settle interval fits"),
-            flushed_input_ids,
-            message_ids,
-            remaining_input_ids,
-        })
-    }
-
-    fn settle_flush(
-        &mut self,
-        conn: &mut Connection,
-        flush_input_id: i64,
-        outcome: FlushWriteOutcome,
-        observation: &ObservationController,
-        deadline: Instant,
-    ) -> Result<FlushReply> {
-        let Some(slot) = self
-            .flush
-            .as_ref()
-            .filter(|slot| slot.flush_input_id == flush_input_id)
-        else {
-            let receipt = with_database_deadline(conn, deadline, |conn| {
-                storage::get_input(conn, flush_input_id)
-            })?;
-            ensure(
-                receipt.run_id == self.run.run_id && receipt.kind == storage::InputKind::Flush,
-                "flush receipt belongs to this run",
-            )?;
-            return Ok(FlushReply::NotOutstanding {
-                flush_input_id,
-                state: receipt.state,
-                disposition: receipt.disposition,
-            });
-        };
-        let director_member_id = slot.director_member_id;
-        let settlement = match outcome {
-            FlushWriteOutcome::Acknowledged => {
-                storage::FlushSettlement::Acknowledged { director_member_id }
-            }
-            FlushWriteOutcome::NotStarted => {
-                storage::FlushSettlement::NotStarted { director_member_id }
-            }
-            FlushWriteOutcome::Uncertain => {
-                storage::FlushSettlement::Uncertain(storage::StopCause::WriteFailed)
-            }
-        };
-        let bookkeeping = if deadline > Instant::now() {
-            deadline
-        } else {
-            Instant::now() + DEFERRED_FINALIZATION
-        };
-        self.apply_flush_settlement(conn, observation, settlement, bookkeeping)?;
-        Ok(FlushReply::Settled { flush_input_id })
-    }
-
-    /// Settles the outstanding flush slot and clears it; a failed transaction keeps the slot.
-    fn apply_flush_settlement(
-        &mut self,
-        conn: &mut Connection,
-        observation: &ObservationController,
-        settlement: storage::FlushSettlement,
-        deadline: Instant,
-    ) -> Result<()> {
-        let slot = self.flush.take().expect("an outstanding flush slot");
-        let settled = with_database_deadline(conn, deadline, |conn| {
-            storage::settle_flush(conn, &self.run.owner(), slot.flush_input_id, settlement)
-        });
-        let previews = match settled {
-            Ok((_, previews)) => previews,
-            Err(cause) => {
-                self.flush = Some(slot);
-                return Err(cause);
-            }
-        };
-        match settlement {
-            storage::FlushSettlement::NotStarted { .. } => {
-                for mut entry in slot.entries.into_iter().rev() {
-                    entry.head_since = None;
-                    entry.attempt_deadline = None;
-                    self.queue.push_front(entry);
-                }
-            }
-            storage::FlushSettlement::Acknowledged { .. } => {
-                for preview in &previews {
-                    Self::publish_result(
-                        observation,
-                        preview.input_id,
-                        SubmissionStage::Submitted,
-                        None,
-                    );
-                }
-            }
-            storage::FlushSettlement::Uncertain(_) => {
-                for preview in &previews {
-                    Self::publish_result(
-                        observation,
-                        preview.input_id,
-                        SubmissionStage::Unknown,
-                        preview.stop_cause,
-                    );
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Records the in-flight immediate attempt whose completion failed before the runner replies,
     /// as `uncertain/write_failed` once it has written a byte, and returns the client failure.
     pub(crate) fn pending_attempt_failed(
@@ -5574,7 +5112,6 @@ impl InputCoordinator {
             output_seq: 0,
             bracketed_paste: false,
             last_drain_blocker: None,
-            flush: None,
         })
     }
 
@@ -5738,21 +5275,6 @@ impl InputExpiration {
 
     pub(crate) fn monotonic_ns(&self) -> u64 {
         self.0
-    }
-
-    /// The local instant of this expiration, without the five-second admission cap.
-    pub(crate) fn instant(&self, clock: &mut impl InputDeadlineClock) -> Result<Instant> {
-        let sample = clock.sample()?;
-        sample.validate()?;
-        let remaining_ns = self
-            .0
-            .checked_sub(sample.monotonic_ns)
-            .filter(|remaining| *remaining > 0)
-            .ok_or(CafleetError::DeadlineExceeded)?;
-        sample
-            .before
-            .checked_add(Duration::from_nanos(remaining_ns))
-            .ok_or_else(|| error("input expiration exceeds the local clock range"))
     }
 }
 
@@ -10191,7 +9713,7 @@ mod tests {
                 use serde_json::Value;
                 use serde_json::json;
 
-                const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.";
+                const REVIEW_STALLED_QUEUE: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.";
 
                 /// A head queued behind an interaction that has since closed, so no queue turn
                 /// has started it and no live gate holds it.
@@ -10268,14 +9790,11 @@ mod tests {
                 }
 
                 fn review_stalled_queue(host: &Host, head: i64) -> Value {
-                    let run = &host.fixture.run;
                     let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
                     json!({
                         "kind":"review_stalled_queue",
                         "instruction":REVIEW_STALLED_QUEUE,
                         "inspect_argv":["cafleet","input","show",head.to_string(),"--json","--database-url",url],
-                        "flush_argv":["cafleet","member","flush",run.member_id.to_string(),
-                            "--from-member-id",run.director_member_id.to_string(),"--database-url",url],
                     })
                 }
 

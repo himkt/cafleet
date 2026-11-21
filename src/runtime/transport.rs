@@ -524,12 +524,6 @@ impl Transport {
             .as_ref()
             .is_some_and(|hooks| hooks.order_shutdown_parsing_after_native_exit(deadline))
     }
-    pub(crate) fn outer_closed(&self) -> bool {
-        self.outer_eof
-    }
-    pub(crate) fn child_closed(&self) -> bool {
-        self.child_eof
-    }
     pub(crate) fn pending_input_bytes(&self) -> usize {
         self.input.len()
     }

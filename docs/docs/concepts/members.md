@@ -102,20 +102,18 @@ Mouse motion, scrolling and clicks during the settle leave delivery intact, as d
 
 Later input waits while CAFleet text remains in the composer. Clearing or submitting that text lets a fresh empty-composer observation resume delivery, so a preview can appear again with the same message ID. A composer that shows only a native suggestion, the dimmed or grey hint text some CLIs draw, counts as empty. An OpenCode composer in shell mode never counts as empty, so input waits until the member returns to normal mode. A queued preview whose message the member's poll has consumed is cancelled within about a second, whatever else holds the queue.
 
-### Stalled queues and forced flush
+### Stalled queues
 
 When the queue head starts no delivery attempt within 3 minutes of reaching the front, the Director receives one `input_delivery_stalled` event for it. Time an open interaction blocks the head does not count, because the interaction already has its own event. The event names a cause and the action the Director takes:
 
 | Cause | What holds the queue | Director action |
 |---|---|---|
 | `held_composer` | CAFleet text remains in the composer | Inspect the pane, then submit or clear the text, or ask you to |
-| `unresolved_input`, `pending_finalization`, `immediate_attempt`, `forced_flush` | Another input of the member is still in progress | Reconcile the named input from pane evidence |
+| `unresolved_input`, `pending_finalization`, `immediate_attempt` | Another input of the member is still in progress | Reconcile the named input from pane evidence |
 | `drain_pending`, `pane_input_busy`, `storage_unavailable`, `delivery_budget_exhausted`, `attempt_failed`, `composer_busy` | A runner obstacle, with its detail where one exists | Resolve the obstacle when possible |
 | `queue_turn_not_reached` | No known gate explains the stall | Report it as a runner defect |
 
-When the queue stays stalled, the Director asks you to confirm a forced flush and then runs `cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID`. The command rebuilds every queued preview from its stored message and types them into the member's composer after the marker ` [cafleet: ignore any text before this marker, if present] `, then presses the submit key once, even while the queue itself is stuck. It sends no Escape and clears nothing, so the member ignores any leftover draft before the marker and acts on each preview after it. A flush that would not fit types the longest leading set of previews that fits and reports the rest as still queued.
-
-The flush refuses without typing while an interaction is open, another input is in progress or unresolved, a queued prompt or native command waits in the queue, or the composer shows a mode prefix such as `!` or `/` or cannot be read. Each refusal names its cause. An uncertain flush, for example after a failed multiplexer write, is reconciled like any other input with `input reconcile FLUSH_INPUT_ID`. The [`member flush` contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#member-flush) and the [stalled-event contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#input-delivery-stalled-event) own the exact refusals, causes and outputs.
+When the queue stays stalled behind text in the composer, the Director captures the pane and submits or clears it with `member press`, or asks you to clear or submit it on the member's native surface. The [stalled-event contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#input-delivery-stalled-event) owns the exact causes and outputs.
 
 Long previews use bracketed paste when the backend supports it and has enabled it; otherwise they show a short pointer to the poll that reads the full message. An oversized explicit prompt or native command without a safe delivery mechanism is refused before typing.
 

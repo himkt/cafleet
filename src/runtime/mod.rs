@@ -1,6 +1,5 @@
 mod artifacts;
 pub(crate) mod control;
-pub(crate) mod flush;
 mod input;
 pub(crate) mod input_client;
 mod lifecycle;
@@ -24,9 +23,6 @@ use crate::multiplexer::MultiplexerError;
 pub(crate) use crate::runtime::artifacts::*;
 pub(crate) use crate::runtime::control::CONTROL_PROTOCOL_VERSION;
 pub(crate) use crate::runtime::control::ControlDecoder;
-pub(crate) use crate::runtime::control::FlushAction;
-pub(crate) use crate::runtime::control::FlushReply;
-pub(crate) use crate::runtime::control::FlushWriteOutcome;
 pub(crate) use crate::runtime::control::HealthSnapshot;
 pub(crate) use crate::runtime::control::InputControlOperation;
 pub(crate) use crate::runtime::control::InputControlReply;

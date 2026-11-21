@@ -6,7 +6,6 @@ use crate::coding_agent::NativeVersion;
 use crate::coding_agent::detector::ObservationKind;
 use crate::error::CafleetError;
 use crate::error::Result;
-use crate::runtime::ScreenSnapshot;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -157,14 +156,6 @@ fn nonblank<'de, D: Deserializer<'de>>(d: D) -> Field<String, D::Error> {
 fn pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Regex, D::Error> {
     Regex::new(&nonblank(d)?).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
 }
-/// A required key holding a pattern or `null`.
-fn optional_pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Option<Regex>, D::Error> {
-    Option::<NonBlank>::deserialize(d)?
-        .map(|text| {
-            Regex::new(&text.0).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
-        })
-        .transpose()
-}
 fn patterns<'de, D: Deserializer<'de>>(d: D) -> Field<Vec<Regex>, D::Error> {
     Vec::<NonBlank>::deserialize(d)?
         .into_iter()
@@ -239,79 +230,6 @@ struct RawProfile {
     min_version: NativeVersion,
     rules: Vec<RawRule>,
     capabilities: RawCapabilities,
-    composer_draft: RawComposerDraft,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawComposerDraft {
-    region: Region,
-    draft_rows: DraftRows,
-    #[serde(deserialize_with = "optional_pattern")]
-    prompt_pattern: Option<Regex>,
-    mode_switch_prefixes: Vec<String>,
-    #[serde(rename = "fixture_ids")]
-    _fixture_ids: IgnoredAny,
-}
-
-#[derive(Clone, Copy, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct DraftRows {
-    pub(crate) first: DraftFirst,
-    pub(crate) last: DraftLast,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum DraftFirst {
-    Start,
-    AfterStart,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum DraftLast {
-    End,
-    BeforeEnd,
-}
-
-/// Where a profile's composer draft is read from the emulated screen.
-#[derive(Clone)]
-pub(super) struct ComposerDraftSpec {
-    pub(crate) region: Region,
-    pub(crate) rows: DraftRows,
-    pub(crate) prompt: Option<Regex>,
-    pub(crate) mode_switch_prefixes: Vec<String>,
-    pub(crate) suggestion: Option<SuggestionStyle>,
-}
-
-/// The composer text a forced flush appends to, as read from the emulated screen.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ComposerDraft {
-    Readable(String),
-    Unreadable,
-}
-
-fn compile_composer_draft(raw: RawComposerDraft, rules: &[Rule]) -> Result<ComposerDraftSpec> {
-    require(
-        !raw.mode_switch_prefixes.is_empty()
-            && raw
-                .mode_switch_prefixes
-                .iter()
-                .all(|prefix| (1..=4).contains(&prefix.chars().count())),
-        "composer_draft declares 1–4-scalar mode_switch_prefixes",
-    )?;
-    let mut styles = rules.iter().filter_map(|rule| rule.suggestion);
-    let suggestion = styles.next();
-    require(
-        styles.all(|style| Some(style) == suggestion),
-        "a profile's composer rules share one suggestion style",
-    )?;
-    Ok(ComposerDraftSpec {
-        region: raw.region,
-        rows: raw.draft_rows,
-        prompt: raw.prompt_pattern,
-        mode_switch_prefixes: raw.mode_switch_prefixes,
-        suggestion,
-    })
 }
 
 #[derive(Deserialize)]
@@ -682,7 +600,6 @@ pub(super) struct Profile {
     pub(crate) annotations: Option<Capability>,
     pub(crate) submissions: [Option<ComposerSubmission>; 2],
     pub(crate) answers: Vec<Answer>,
-    pub(crate) composer_draft: ComposerDraftSpec,
 }
 impl Profile {
     pub(super) fn answer_plan(
@@ -1191,7 +1108,6 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
         .into_iter()
         .map(|answer| compile_answer(answer, &rules, &mut identities, &mut keys))
         .collect::<Result<Vec<_>>>()?;
-    let composer_draft = compile_composer_draft(raw.composer_draft, &rules)?;
     Ok(Profile {
         backend,
         min_version_text: min.0.to_string(),
@@ -1202,7 +1118,6 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
         annotations,
         submissions,
         answers,
-        composer_draft,
     })
 }
 
@@ -1255,33 +1170,6 @@ impl ProfileCatalog {
             #[cfg(test)]
             capture_origin: "synthetic",
         })
-    }
-    /// The draft the selected profile reads from `screen`; an unselected version, or a screen
-    /// whose composer region does not match exactly once, is unreadable.
-    pub(crate) fn composer_draft(
-        &self,
-        backend: CodingAgent,
-        native_version: &str,
-        screen: &ScreenSnapshot,
-    ) -> ComposerDraft {
-        self.matching(backend, Some(native_version))
-            .map_or(ComposerDraft::Unreadable, |profile| {
-                crate::coding_agent::detector::composer_draft(&profile.composer_draft, screen)
-            })
-    }
-    /// The declared mode-switch prefix `draft` starts with; an empty draft matches none.
-    pub(crate) fn mode_switch_prefix(
-        &self,
-        backend: CodingAgent,
-        native_version: &str,
-        draft: &str,
-    ) -> Option<&str> {
-        self.matching(backend, Some(native_version))?
-            .composer_draft
-            .mode_switch_prefixes
-            .iter()
-            .find(|prefix| draft.starts_with(prefix.as_str()))
-            .map(String::as_str)
     }
     pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
         let version = NativeVersion::parse(version?)?;
@@ -1403,21 +1291,6 @@ pub(crate) struct ComposerPlan {
 impl ComposerPlan {
     pub(crate) fn literal_framing(&self) -> LiteralFraming {
         self.literal_framing
-    }
-
-    pub(crate) fn submit_bytes(&self) -> &[u8] {
-        &self.submit
-    }
-
-    /// The plan's plain literal limit as its maximum and unit word (`bytes` or `characters`).
-    pub(crate) fn plain_bound(&self) -> Option<(u64, &'static str)> {
-        self.plain_literal_limit.map(|limit| {
-            let unit = match limit.unit {
-                LiteralUnit::Bytes => "bytes",
-                LiteralUnit::Scalars => "characters",
-            };
-            (limit.max.get(), unit)
-        })
     }
 
     pub(crate) fn plain_literal_allowed(&self, literal: &str) -> bool {
@@ -1974,45 +1847,6 @@ pub(crate) mod test_support {
         sha256: NonBlank,
         #[serde(default, deserialize_with = "present")]
         composer_evidence: Option<Vec<ComposerEvidence>>,
-        #[serde(default, deserialize_with = "present")]
-        composer_draft: Option<ExpectedDraft>,
-    }
-
-    /// The draft a cited fixture's screen must extract to, or its unreadable classification.
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum ExpectedDraft {
-        Text(String),
-        Unreadable,
-    }
-
-    impl<'de> Deserialize<'de> for ExpectedDraft {
-        fn deserialize<D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> std::result::Result<Self, D::Error> {
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Text {
-                text: String,
-            }
-            #[derive(Deserialize)]
-            #[serde(untagged)]
-            enum Raw {
-                Marker(String),
-                Text(Text),
-            }
-            match Raw::deserialize(deserializer)? {
-                Raw::Marker(marker) if marker == "unreadable" => Ok(Self::Unreadable),
-                Raw::Marker(_) => Err(serde::de::Error::custom(
-                    "an expected composer draft is {\"text\": …} or \"unreadable\"",
-                )),
-                Raw::Text(Text { text }) => Ok(Self::Text(text)),
-            }
-        }
-    }
-
-    #[derive(Deserialize)]
-    struct ProvenanceDraft {
-        fixture_ids: Ids,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -2102,7 +1936,6 @@ pub(crate) mod test_support {
         min_version: NativeVersion,
         rules: Vec<ProvenanceRule>,
         capabilities: ProvenanceCapabilities,
-        composer_draft: ProvenanceDraft,
     }
 
     #[derive(Deserialize)]
@@ -2313,15 +2146,6 @@ pub(crate) mod test_support {
             for answer in &capabilities.answers {
                 cite(&answer.fixture_ids)?;
             }
-            cite(&profile.composer_draft.fixture_ids)?;
-            require(
-                profile.composer_draft.fixture_ids.0.iter().all(|id| {
-                    raw.fixtures
-                        .iter()
-                        .any(|fixture| &fixture.id.0 == id && fixture.composer_draft.is_some())
-                }),
-                "composer draft fixtures record their expected draft",
-            )?;
         }
         Ok(())
     }
@@ -2451,7 +2275,6 @@ pub(crate) mod test_support {
                 .as_array_mut()
                 .unwrap()
                 .push(composer.clone());
-            profile["composer_draft"]["fixture_ids"] = json!([id]);
             let capabilities = &mut profile["capabilities"];
             capabilities["detection"]["fixture_ids"] = json!([id]);
             capabilities["annotations"]["fixture_ids"] = json!([id]);
@@ -2505,15 +2328,8 @@ pub(crate) mod test_support {
     pub(crate) fn synthetic_definitions() -> Value {
         json!({
             "schema_version":1,
-            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773","composer_draft":"unreadable"}],
+            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
             "profiles":[{"backend":"codex","min_version":"0.0.1-synthetic",
-                "composer_draft":{
-                    "region":{"screen":"either","start_pattern":"^Synthetic state$","end_pattern":"^State end$","max_rows":4,"cursor":"any"},
-                    "draft_rows":{"first":"after_start","last":"before_end"},
-                    "prompt_pattern":null,
-                    "mode_switch_prefixes":["!"],
-                    "fixture_ids":["synthetic-permission-1"]
-                },
                 "rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
                     "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
                     "matchers":[
@@ -4147,7 +3963,6 @@ mod tests {
                 definitions["profiles"][0]["min_version"] = json!("1.2.3");
                 definitions["profiles"][0]["capabilities"]["detection"]["fixture_ids"] =
                     json!([PRIMARY]);
-                definitions["profiles"][0]["composer_draft"]["fixture_ids"] = json!([PRIMARY]);
 
                 let mut screens = serde_json::Map::new();
                 screens.insert(PRIMARY.to_owned(), primary);
