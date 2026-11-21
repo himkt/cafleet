@@ -374,9 +374,9 @@ Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, 
 
 ### Runtime presentation
 
-Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
+Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`) and `unresolved_input_ids`.
 
-Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health. Effective policy contains `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
+Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health.
 
 Uncertain prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write_failed (method=profile)` and `input_id=INPUT_ID`.
 
@@ -388,20 +388,11 @@ Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_
 
 ### Runtime events
 
-Notifications contain the full event JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,automatic_refusal_observed,automatic_review_unavailable,input_delivery_result,input_delivery_stalled,runner_degraded,runner_lost,runner_exited`.
+Notifications contain the full event JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,input_delivery_result,input_delivery_stalled,runner_degraded,runner_lost,runner_exited`.
 
-Identity fields: `event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Permission/question/automatic-review `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question,review_automatic_refusal,review_automatic_review_unavailable`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv. Delivery actions have their receipt-derived forms below; other events carry null action.
+Identity fields: `event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Permission/question `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv. Delivery actions have their receipt-derived forms below; other events carry null action.
 
 Evidence contains `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,excerpt,evidence_digest`. Positive `operation_rows` is null exactly with null operation; above one requires confirmation against excerpt. Metadata nulls screen-derived operation/choices/excerpt. Excerpts/payloads are bounded at 8/16 KiB.
-
-Both automatic-review kinds carry `null` `interaction_id` and `classification`, `source` `runner_screen`, `decision_outcome` `"unknown"` and `director_action.inspect_argv` `["cafleet","event","show","<EVENT_ID>","--json"]`:
-
-| Field | `automatic_refusal_observed` | `automatic_review_unavailable` |
-|---|---|---|
-| `evidence` | `rule_id` names the refusal rule; `operation`, `operation_rows` and `excerpt` follow the run's evidence policy | `rule_id` names the notice rule; `operation` and `operation_rows` are null |
-| `director_action.kind` | `review_automatic_refusal` | `review_automatic_review_unavailable` |
-
-Automatic-review events create no interaction/input eligibility; permission commands reject their association before writing.
 
 Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification, source `runner_lifecycle`, outcome `unknown`, null `director_action` and `cause={"kind":STOP_CAUSE}` whenever a stop cause is recorded. A prompt or exec result has its input ID and null `message_id`, with delivery and cause derived from its receipt; an uncertain preview has null `input_id`, its `message_id` and delivery `{"status":"uncertain","method":METHOD,"reason":null}`, deduplicated by run and message. Stages are `zero_bytes,partial,submitted,unknown`; an uncertain or in-progress prefix short of the submit key is `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload.
 

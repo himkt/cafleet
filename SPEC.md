@@ -1095,9 +1095,9 @@ JSON stamps `captured_at` from the local UTC clock at the capture read boundary 
 
 #### Runtime presentation
 
-Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record (§6.9 Effective policy record) or null. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These are registry reads and make no live-health claim.
+Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These are registry reads and make no live-health claim.
 
-Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STATUS` row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STATUS` row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE`. `event show` uses the same runtime object and line. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
@@ -1769,7 +1769,7 @@ Every member pane runs a coding-agent binary selected from the backend registry 
 |---|---|---|
 | Director | Eligible | A goal requirement (§ Goal requirement) and a listen requirement (§ Listen requirement), evaluated independently. Both are required. |
 | Member | Eligible | A runner-compatible PTY lifecycle, an explicit detection-coverage declaration and a classified default launch mode, `auto` or `manual`, with approval-prompt coverage: the bundled profile for the evaluated native version detects every approval form the default mode renders and declares request-bound allow and deny answers for it, at every pane geometry outside its recorded layout limits. A default mode that renders no approval form meets this without request rules. |
-| Member | Bundled support | A native version the version probe parses, selecting a bundled profile that declares detection, automatic review annotations, composer plans and request-bound answers independently from native evidence. Capabilities beyond approval-prompt coverage are optional, and an undeclared one is `unknown` coverage or unsupported. |
+| Member | Bundled support | A native version the version probe parses, selecting a bundled profile that declares detection, composer plans and request-bound answers independently from native evidence. Capabilities beyond approval-prompt coverage are optional, and an undeclared one is `unknown` coverage or unsupported. |
 
 An *approval form* is a native permission request that blocks the member until answered. Question and startup dialogs are separate interactions outside approval-prompt coverage, with or without answer plans. A *recorded layout limit* is a profile-documented rendering that no request rule matches, such as a pane narrower than the profile's `W_min`, a wrapped or clipped operation, or an uncaptured geometry; a form rendered inside one produces no `interaction_opened` event and is answered manually on the native surface.
 
@@ -2019,7 +2019,7 @@ The omitted claude and codex policies are native automatic approval modes (§6.9
 
 Native directory consent, when requested, precedes broker readiness and is independent of command permissions and auto-mode availability.
 
-Under the omitted `--permission-mode auto`, a member runs its spawn-time allow rules and every tool call matching `permissions.allow` without review; Claude Code's auto mode classifier reviews each other call, and a refused call returns to the member, which routes it to the Director like any denial. Native rules, hooks and managed policy remain authoritative (a `deny` or `ask` rule still applies), and auto mode must be available for the account and model; where it is not, the member can show native permission forms, and the runner reports `automatic_review_unavailable` when its profile recognizes the notice. The runner holds the auto-mode dialogs `Make auto mode your default permission mode?` (shown when the user settings pin a non-`auto` default) and `Teach auto mode about your environment?` (shown in auto mode) as `question` interactions, which the Director dismisses through `permission respond --choice` (§6.9 *Bundled profiles and native screen fixtures* states the choices and when each dialog stops reappearing).
+Under the omitted `--permission-mode auto`, a member runs its spawn-time allow rules and every tool call matching `permissions.allow` without review; Claude Code's auto mode classifier reviews each other call, and a refused call returns to the member, which routes it to the Director like any denial. Native rules, hooks and managed policy remain authoritative (a `deny` or `ask` rule still applies), and auto mode must be available for the account and model; where it is not, the member can show native permission forms. The runner holds the auto-mode dialogs `Make auto mode your default permission mode?` (shown when the user settings pin a non-`auto` default) and `Teach auto mode about your environment?` (shown in auto mode) as `question` interactions, which the Director dismisses through `permission respond --choice` (§6.9 *Bundled profiles and native screen fixtures* states the choices and when each dialog stops reappearing).
 
 Explicit native modes keep their own permission behavior. Under explicit `dontAsk`, a member runs without a prompt its spawn-time allow rules, Claude Code's built-in read-only commands, file reads inside its working directory and every tool call matching `permissions.allow`; every other call, a shell command or a file edit including one matching `permissions.ask`, is denied without a prompt. A write to one of Claude Code's protected paths, such as a project's `.git` or `.claude` directory, is denied whatever the allow list holds.
 
@@ -2152,7 +2152,7 @@ The CAFleet pi extension (§6.3 Asset installation) auto-loads in every pi sessi
 
 An active gate sets the status `ctx.ui.setStatus("cafleet-gate", "cafleet gate: <mode>")`, so a pane capture shows the posture. The `tool_call` handler awaits a mode promise that the `session_start` handler settles in a `finally` block with the resolved mode or the read failure, so no tool call is evaluated before the mode is known, waits forever or runs ungated after a failed read.
 
-The permission argv stays independent of the pi base, so runtime observation re-derives it from the stored policy (§6.9 Effective policy record). pi 1.5.0 rejects a long option that no loaded extension registers, printing `Error: Unknown option: --cafleet-gate`: a gated member whose extension cannot register the flag (excluded from loading, a stale copy or a load failure) exits at startup, and the runner reports `runner_exited` with the native exit code instead of running the member ungated.
+The permission argv stays independent of the pi base, so runtime observation re-derives it from the stored launch policy (§6.9 Launch policy and capability registry). pi 1.5.0 rejects a long option that no loaded extension registers, printing `Error: Unknown option: --cafleet-gate`: a gated member whose extension cannot register the flag (excluded from loading, a stale copy or a load failure) exits at startup, and the runner reports `runner_exited` with the native exit code instead of running the member ungated.
 
 **Tool policy.** Both launch modes apply:
 
@@ -2444,7 +2444,7 @@ Each backend has one default (omitted) mode, marked in the table above. Every la
 
 Claude `dontAsk` denies tools that are not pre-approved without prompting, Claude `bypassPermissions` allows without prompting, and Codex `never` returns failures without asking, so each is a fixed policy. Claude `acceptEdits` and `plan` still prompt. When an approval prompt that the run's bundled profile covers appears in a member pane, the runner reports it as `interaction_opened`, and the Director answers it with a single-request allow or deny through the permission commands (§6.3 Permission commands).
 
-The omitted Claude and Codex selections are each backend's native automatic approval mode: an automatic reviewer decides the operations that no native rule settles, and the runner reports its observable refusals and unavailability as automatic review events (§ Automatic review events). An omitted selection is not validated against the version catalog, so a member whose probed version is newer than every profile boundary still launches with the default; a native version that rejects `auto` or `--approve-for-me` exits immediately with `runner_exited` (below).
+The omitted Claude and Codex selections are each backend's native automatic approval mode: an automatic reviewer decides the operations that no native rule settles, and a refused operation returns to the member, which routes it to the Director like any denial. An omitted selection is not validated against the version catalog, so a member whose probed version is newer than every profile boundary still launches with the default; a native version that rejects `auto` or `--approve-for-me` exits immediately with `runner_exited` (below).
 
 The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping and detector/composer/answer profiles; help and usage errors report its choices, and each backend accepts them for every native version. Claude accepts the native `--permission-mode` values, documented aliases included, verified from installed help and parser evidence: the verified Claude Code 2.1.302 and 2.1.312 accept canonical `default` and its `manual` alias, help displays `manual`, and the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. The Codex choices are verified from the installed `codex --help` of Codex 0.163.0; `approve-for-me` names the native `--approve-for-me` flag, which routes approval requests through automatic review, and explicit `on-request` and `never` inherit the user's Codex configuration, including an `approvals_reviewer` setting that can answer escalations without a native form. The OpenCode choices select agent presets rather than a native permission flag: `cafleet` resolves every shell check to `allow` or `deny`, and `cafleet-ask` asks for every shell command outside the member broker commands, so OpenCode opens a native permission form. Hermes emits no argv because no Hermes launch flag selects an approval mode. The pi choices select the mode of the CAFleet member gate, because pi 1.5.0 has no native per-tool approval: `cafleet` runs the member broker commands and blocks every other bash command without a form, so it renders no approval form, and `cafleet-ask` opens the gate's approval form for every bash command outside the member broker commands.
 
@@ -2461,9 +2461,9 @@ Record `requested_mode` as nullable text, `resolved_mode` as required text, `mod
 | Omitted pi | `null` | `cafleet-ask` | `default` | `["--cafleet-gate","cafleet-ask"]` |
 | Explicit pi `cafleet` | `cafleet` | `cafleet` | `explicit` | `["--cafleet-gate","cafleet"]` |
 
-`effective_policy_json` remains null unless a tested native observation supplies it (§ Effective policy record); an installed version, argv or selected profile alone proves no effective authorization decision.
+An installed version, argv or selected profile alone proves no effective authorization decision.
 
-Launch is independent of every profile capability; detection, annotation, composer, submission and answer capabilities resolve independently through the selected profile (§ Profile selection by minimum version), and answer profiles declare each semantic decision independently. A bundled tested answer declaration rests on measured single-request answer stages. Unverified components remain unknown or unsupported. A failed probe or a backend without bundled profiles yields `coverage=unknown` and an initial coverage notification; it still permits manual terminal operation, records the selected mode and delivers ordinary programmatic input through delivery fallback, and automatic/fixed policies remain useful where screen detection is unknown. The `cafleet` OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
+Launch is independent of every profile capability; detection, composer, submission and answer capabilities resolve independently through the selected profile (§ Profile selection by minimum version), and answer profiles declare each semantic decision independently. A bundled tested answer declaration rests on measured single-request answer stages. Unverified components remain unknown or unsupported. A failed probe or a backend without bundled profiles yields `coverage=unknown` and an initial coverage notification; it still permits manual terminal operation, records the selected mode and delivers ordinary programmatic input through delivery fallback, and automatic/fixed policies remain useful where screen detection is unknown. The `cafleet` OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
 
 ##### Native executable resolution
 
@@ -2587,7 +2587,6 @@ The Claude profile from `2.1.302` applies to Claude Code under every Claude laun
 | Deny answer | `tested` | One stage per request rule selecting its single-request deny choice as `deny-once` (answer table below) |
 | Question answers | `tested` | Choice `decline` of `claude-auto-default-nudge`: stage `0e` (Ctrl+N) while `accept` is focused, then `0d` (Enter) while `decline` is focused. Choices `not-now` (byte `32`) and `dont-show-again` (byte `33`) of `claude-auto-startup`, one ungated stage each |
 | Empty-composer observation | `tested` | The idle prompt line with the terminal cursor immediately after the prompt prefix; a verified non-interaction boundary |
-| Annotations | `tested` | `claude-auto-refusal`, `claude-auto-refusal-notice`, `claude-auto-unavailable` and `claude-auto-mode-indicator`, described below |
 | Prompt submission | `tested` | Composer plan `prompt` (§ Executable native plans) |
 | Native-exec submission | `tested` | Composer plan `exec` (§ Executable native plans) |
 
@@ -2672,7 +2671,7 @@ The second label names the user-settings default (`No, keep manual mode` for `de
 
 The `decline` label carries the kept default's name and is part of the fingerprint; the explanatory paragraph has no matcher, and the rule declares no operation. Answer plan `claude-auto-default-decline` for choice `decline` has two focus-gated stages: `0e` (Ctrl+N) while `accept` is focused moves the focus to `No, keep …`, then `0d` (Enter) while `decline` is focused closes the dialog as declined. Ctrl+N wraps, so a focus already on `decline` fails the first gate before any byte. `accept` is declared only so a gate can name it and has no plan. In the captures the plan closed the dialog and changed only `hasSeenAutoDefaultNudge`.
 
-When a draft reaches the composer before the dialog mounts, Claude hides the dialog and shows the notice row `Claude has a question for you — it shows once you send or clear what you're typing.` at column 0 above the composer. Question rule `claude-question-pending-notice` (cursor any, one row) matches that row, `^Claude has a question for you — it shows once you send or clear what you're typing\.[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, and declares the Claude annotation rules' frame guard; model text quoting the words renders with the `● ` or two-space transcript margin and does not match. It declares no choices, operation or answer plan. As a candidate interaction the notice stops a profile submission after its literal stage and before its submit key (§ Measured submission plans and settle intervals) and queues later input. Two native outcomes remove it and close its episode as `not_visible`:
+When a draft reaches the composer before the dialog mounts, Claude hides the dialog and shows the notice row `Claude has a question for you — it shows once you send or clear what you're typing.` at column 0 above the composer. Question rule `claude-question-pending-notice` (cursor any, one row) matches that row, `^Claude has a question for you — it shows once you send or clear what you're typing\.[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$`, and declares the frame guard (§ Interaction frame guard) that requires `^❯\x{a0}` (the live composer prefix) and rejects `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer); model text quoting the words renders with the `● ` or two-space transcript margin and does not match. It declares no choices, operation or answer plan. As a candidate interaction the notice stops a profile submission after its literal stage and before its submit key (§ Measured submission plans and settle intervals) and queues later input. Two native outcomes remove it and close its episode as `not_visible`:
 
 | User action on the native surface | Native outcome in the 2.1.312 captures |
 |---|---|
@@ -2740,17 +2739,6 @@ Claude Code opens a diff sidebar beside the transcript at 144 columns or more (1
 | Sidebar widths other than 144, 166 and 180 columns | The separator is found per frame, so other widths clip the same way. Live acceptance observed 166 and 180 columns (separator at column 92 and 99 on tmux), and 144 columns rests on its fixture only |
 | The pending-question notice, the `1. Yes` wizard, `Make auto mode your default permission mode?` on an onboarding process's primary screen, and its `No, keep accept edits` label | Not produced in live acceptance; their rules rest on the native fixtures |
 
-Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, primary or alternate screen, cursor any) declares the same frame guard: require `^❯\x{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
-
-| Rule | Region | Captured screen |
-|---|---|---|
-| `claude-auto-refusal` | Start `^● [A-Z][A-Za-z]*\(`, end `^  ⎿ \x{a0}Denied by auto mode classifier ∙ \[`, at most 8 rows | The verbose-view transcript block `● Bash(<command>)` followed by `  ⎿  Denied by auto mode classifier ∙ [<category>] ∙ see https://code.claude.com/docs/s/claude-code-auto-mode`, kept in the live transcript |
-| `claude-auto-refusal-notice` | Start `^ +[a-z][a-z_]* denied by auto mode · \[[^\]]+\] · /permissions`, end the composer border `^─{3,}(?: [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}].* ─)?$`, at most 2 rows | The default-view status-row notice `<tool> denied by auto mode · [<category>] · /permissions` above the composer border, shown for about 8–10 seconds |
-| `claude-auto-unavailable` | Start <code>^ +auto mode disabled by settings(?:$&#124;[^0-9A-Za-z_])</code>, end the composer border, at most 2 rows | The transient notice `auto mode disabled by settings`, induced by `permissions.disableAutoMode`; the footer then shows `⏸ manual mode on` |
-| `claude-auto-mode-indicator` | Start and end `^  ⏵⏵ auto mode on \(shift\+tab to cycle\)`, one row | The footer badge on every live `auto` frame; its `mode` capture records `observed_mode` `auto mode` |
-
-`claude-auto-refusal` matches its region with one region-scoped matcher that captures the refused tool, the operation between the parentheses and the category, so the operation evidence is the refused command. Its first row follows `● Bash(` and carries no margin, so the rule declares no `row_margin`, and a wrapped operation reports its continuation rows with their two-space margin. `claude-auto-refusal-notice` captures `<tool> denied by auto mode · [<category>]` as its operation, because the default view never shows the refused command. `claude-auto-unavailable` captures its notice with a null operation. The native result prefix carries a U+00A0 after `⎿`, while a model quote of the same words carries two ASCII spaces, so quotes do not match.
-
 The Codex profile from `0.163.0` applies to Codex CLI under every Codex launch policy; the request and answer rules come from captures under `--ask-for-approval on-request --sandbox workspace-write`:
 
 | Capability | Status | Declaration |
@@ -2759,16 +2747,12 @@ The Codex profile from `0.163.0` applies to Codex CLI under every Codex launch p
 | Allow answer | `tested` | One stage, byte `79` (`y`), selecting `Yes, proceed` as `allow-once` |
 | Deny answer | `tested` | One stage, byte `33` (digit `3`), selecting `No, and tell Codex what to do differently` as `deny-once` |
 | Empty-composer observation | `tested` | The idle `› ` composer line with the terminal cursor immediately after the prefix, its placeholder text shown; a verified non-interaction boundary |
-| Annotations | `tested` | `codex-auto-review-refusal` and `codex-auto-review-indicator`, described below |
 | Prompt submission | `tested` | Composer plan `prompt` (§ Executable native plans) |
 | Native-exec submission | `tested` | Composer plan `exec` (§ Executable native plans) |
 
 The rules anchor on the live form's heading and closing lines rather than on absolute rows, and the reason line is model-authored text that the rule requires but excludes from the request identity. The deny answer uses the choice's digit because that choice displays only `esc` as its shortcut, and CAFleet never sends a lone Escape to a held form. Choice 2 approves a command prefix persistently. The native captures showed the decision on the native surface: after allow, Codex printed `✔ You approved codex to run <command> this time` and ran the command; after deny, it printed `✗ You canceled the request to run <command>` and `■ Conversation interrupted`, and ran nothing. Under an `approvals_reviewer` setting (§ Launch policy and capability registry), detection observes no request. The detection covers a single-line command; a command that wraps in a narrow pane is a recorded layout limit (§6.7 Role requirements), and ordinary programmatic input is not suppressed and may reach the form through delivery fallback.
 
-Codex 0.163.0 in `approve-for-me` routes every escalation to its automatic reviewer and shows no native permission form, so the profile adds no request rule. Both Codex annotation rules (priority 40, alternate screen, cursor any) declare the same frame guard: require `^(?:› Ask Codex to do anything|  \? for shortcuts)` (the live composer or its hint line) and reject `^  k keep & next · esc dismiss & close` (the f2 warnings overlay).
-
-- `codex-auto-review-refusal` spans from `^✗ Request denied for codex to run [^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]` to the next blank row `^[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` within 6 rows. Its region matcher `\A✗ Request denied for codex to run (?P<operation>[^\n]*[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}](?:\n  [^\n]*[^\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}])*)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*\n[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*\z` captures the refused command, and its `row_margin` is two spaces. The line stays in the transcript at column 0, followed by `• Failed (exit 1) <command>`; model quotes render indented or `• `-prefixed, never at column 0, so they do not match. Codex wraps a long command inside a token with a two-space continuation margin, and the fingerprint strips that margin before removing the row break, so a resize keeps the fingerprint.
-- `codex-auto-review-indicator` matches the one row `^  Permissions: +Workspace \(Approve for me\)[\t-\r \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]*$` in the `/status` block. Its `mode` capture records `observed_mode` `Workspace (Approve for me)`.
+Codex 0.163.0 in `approve-for-me` routes every escalation to its automatic reviewer and shows no native permission form, so the profile adds no request rule.
 
 The captures showed an allowed escalation only as an ordinary `• Ran …` transcript line, and the reviewer at work as `• Reviewing approval request (Ns • esc to interrupt)`; both are verified non-interaction frames with the composer visible, so neither needs a rule.
 
@@ -2875,7 +2859,6 @@ The Hermes profile from `2026.9.24` applies to `hermes chat --cli` under its `sm
 | Empty-composer observation | `tested` | `hermes-idle-composer` observes the idle `❯ ` prefix; `hermes-working-composer` observes the complete working placeholder at `☤ ❯ `, with the terminal cursor immediately after its prefix. Both are verified non-interaction boundaries |
 | Prompt submission | `tested` | Composer plan `prompt`, submit `0d` |
 | Native-exec submission | `tested` | Composer plan `exec`, submit `0d` |
-| Annotations | `unknown` | None declared |
 
 A digit selects and confirms its choice whatever the focus, so the answer stages have no focus gate. The focused choice carries the `❯ ` marker, and choices carry no background colour. Recorded layout limits: the ESCALATE form is detected at 37 columns and above, below which `3. Add to permanent allowlist` wraps; the override form is detected at 28 columns and above, below which the box border wraps. A command too long for the box adds `5. Show full command` and is answered manually.
 
@@ -2893,7 +2876,6 @@ The pi profile from `1.5.0` applies to pi under every pi launch mode; only `cafl
 | Empty-composer observation | `tested` | `pi-idle-composer` observes an empty editor between plain `─` borders; `pi-working-composer` observes an empty editor below its measured `Working` border. Both require the terminal cursor inside the alternate-screen editor region and establish a verified non-interaction boundary |
 | Prompt submission | `tested` | Composer plan `prompt`, submit `0d` (§ Executable native plans) |
 | Native-exec submission | `tested` | Composer plan `exec` for `! COMMAND`, submit `0d` (§ Executable native plans) |
-| Annotations | `unknown` | None declared |
 
 The title, the `Allow once` and `Deny` labels and the `$ ` operation prefix are CAFleet-authored, so they stay fixed across pi versions; pi renders the select list, its focus marker and its hint row. The form sits between two full-width `─` rules in place of the editor:
 
@@ -2991,6 +2973,10 @@ A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts
 
 Profile patterns, frame guards and region matchers of the bundled catalog, operator redaction patterns, and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; flags `i m s U` in `(?flags)` and `(?flags:…)`; and the Perl classes `\s \S \d \D \w \W` and boundaries `\b \B`. Perl classes have Unicode meaning: `\s` is White_Space (U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000), `\d` is general category Nd, `\w` is Alphabetic, M, Nd, Pc and Join_Control, `\b` is a boundary between `\w` and non-`\w`, and the capitals negate. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
 
+##### Interaction frame guard
+
+An interaction rule (`permission_request`, `question`, `unknown_interaction`) may declare `frame`, `{ "require_patterns": [...], "reject_patterns": [...] }`, with zero or more compilable require patterns and at least one compilable reject pattern; one without a reject pattern fails with `interaction frame requires a reject pattern`. Other rules reject the field. Each require pattern must match a live-screen line of the same frame and no reject pattern may match one; a frame failing the guard yields no observation from that rule.
+
 ##### Operation extraction
 
 A rule's `extract.operation` names the matcher and the named capture that supply the operation, plus optional row-processing keys:
@@ -3010,7 +2996,7 @@ A request or question rule processes each captured row in this order:
 2. Remove `row_margin` from each row `margin_rows` selects.
 3. Remove trailing whitespace.
 
-The operation evidence joins the processed rows with `\n`, and `operation_rows` is their count. The margin-then-trim order keeps a whitespace-only margined row, such as a blank line inside a multi-line Claude command, a match. An annotation rule reports its captured rows as displayed, continuation margins included, and uses `row_margin` only to normalize its fingerprint (§ Annotation detection).
+The operation evidence joins the processed rows with `\n`, and `operation_rows` is their count. The margin-then-trim order keeps a whitespace-only margined row, such as a blank line inside a multi-line Claude command, a match.
 
 ##### Diff sidebar clipping
 
@@ -3309,7 +3295,7 @@ Each detector consumes a reconstructed screen, title, cursor/input-region eviden
 | `unknown_interaction` | A live interactive form without enough evidence for a more precise type | Queue ordinary programmatic input with zero bytes and request inspection. |
 | `composer_empty` / `unknown` | The corresponding tested composer rule, or lack of one | Input eligibility is evaluated separately; absence of permission text is not an empty composer. |
 
-The persisted episode classes are exactly the §8 `member_interactions.classification` values; every other classification creates no interaction row. Each frame has exactly one of these primary observations; transcript results and notices of automatic review are annotations evaluated beside it (§ Annotation detection).
+The persisted episode classes are exactly the §8 `member_interactions.classification` values; every other classification creates no interaction row. Each frame has exactly one of these primary observations.
 
 A title such as `Action Required`, a quoted approval transcript, a transcript viewer and an old permission line cannot independently create `permission_request`. Profiles must bind controls to the same live region, distinguish general questions/startup forms, and remain explicit about wrapping, layout changes and competing rules. Conflicting strongest classifications yield `unknown_interaction` and preserve the screen. A run with no selected profile, or whose profile declares no detection, advertises unknown coverage; missing matches never imply that all requests were observed.
 
@@ -3343,57 +3329,6 @@ A `permission_continuation` rule declares `continues_rule_id`, the permission ru
 | Episode | While a permission episode of its `continues_rule_id` is active, a continuation observation keeps that episode open. Without such an active episode it is an `unknown` screen. |
 | Request binding | Inside a response, a continuation qualifies for the next stage only as the first fresh quiescent observation after the complete write of the stage gated on its `continues_choice_id`, with the episode, `human_generation`, `pointer_generation` and runner ownership unchanged and no observation gap or degradation in between. The runner then rebinds the in-flight selection to the continuation's rule id and match fingerprint within the same episode. |
 | Inspection | `permission inspect` on a continuation offers no request token or answer capability, so a continuation reached by human input is completed manually. |
-
-##### Annotation detection
-
-An annotation is a transcript result or notice, not a live form. The detector evaluates annotation rules on every frame alongside the primary observation and keeps them out of its priority and conflict resolution: it returns the primary observation exactly as without annotations, plus the list of annotation blocks, each with its rule id, matched region, post-policy evidence and in-memory fingerprint. Annotations create no `member_interactions` row and leave input eligibility, episode visibility and the primary observation unchanged. They are evaluated only while semantic classification runs, so a degraded runner's observation gap covers them.
-
-| Annotation kind | Meaning | Effect |
-|---|---|---|
-| `automatic_refusal` | The automatic reviewer refused an operation and returned the refusal to the model | `automatic_refusal_observed` (§ Automatic refusal event) |
-| `automatic_review_unavailable` | Automatic review is unavailable or degraded, for example unavailable for the account or model or fallen back to prompting | `automatic_review_unavailable` (§ Unavailable automatic review event) and `automatic_review=unavailable` in the effective policy record |
-| `automatic_review_available` | A positive automatic-mode indicator, such as a mode badge | `automatic_review=available` in the effective policy record; no event |
-
-Observation kinds parse and render each annotation kind by those exact strings. Profiles declare annotation rules in the required capability group `annotations`, either `null` or `{ "rule_ids": [...], "fixture_ids": [...] }`, with nonempty rule ids; provenance validation checks their fixtures under the rules of every other capability group (§ Profile selection by minimum version). Every bundled profile declares the key. The catalog compiles only when:
-
-- The `annotations` group accepts only annotation kinds, and the `detection`, `composer` and continuation groups reject them; an annotation rule outside the `annotations` group is invalid.
-- An annotation rule has empty `extract.choices` and `verified_noninteraction` `false`. `automatic_refusal` requires an `operation` capture, and the other two kinds require a null one.
-- An annotation rule declares `frame`, `{ "require_patterns": [...], "reject_patterns": [...] }`, with at least one compilable require pattern and zero or more compilable reject patterns. An interaction rule (`permission_request`, `question`, `unknown_interaction`) may declare `frame` with zero or more require patterns and at least one compilable reject pattern; one without a reject pattern fails with `interaction frame requires a reject pattern`. Other rules reject the field. A frame failing an interaction rule's guard yields no observation from that rule.
-- Each automatic-mode fixture produces exactly its expected primary observation and its expected annotation set.
-
-Annotation rules use the region contract of the other rules, with these differences:
-
-| Concern | Contract |
-|---|---|
-| Screen | Each rule declares the screen its captures show; scrollback is excluded, as for every rule. |
-| Blocks | The start and end patterns delimit one refusal or notice block, and the matchers require the native result decoration, so model text quoting the same words does not match. Every qualifying region yields a block, in row order and non-overlapping, so two refusals visible together are two blocks; other rules still require exactly one qualifying region. |
-| Live-transcript frame guard | Each `frame.require_patterns` entry must match a live-screen line of the same frame and no `frame.reject_patterns` entry may match one. Require patterns name lines present only in the live TUI, such as its composer or footer line; reject patterns name the transcript viewer's header, and a frame failing the guard yields no blocks for that rule. |
-| Fingerprint | Backend, rule id and the displayed operation or notice text, normalized by first stripping the operation extract's `row_margin` from each continuation row, then removing every row break and collapsing each whitespace run to one space, so a resize that rewraps a block, even inside a token, keeps its fingerprint. The event's `operation` evidence still reports the displayed rows, continuation margins included. |
-
-The annotation tracker keeps a set of fingerprint states per annotation rule:
-
-1. A fingerprint present in a frame's blocks is emitted once stable (§ Classification and episode identity); several fingerprints are tracked and emitted independently.
-2. An emitted fingerprint is not emitted again until its state resets.
-3. A state resets only after the fingerprint has been absent for 250 ms of continuous frames whose primary observation is a verified noninteraction and whose frame guard holds. A frame showing a permission form, another interaction, an overlay, an unknown screen, a guard failure or a redraw does not advance the reset, so a block hidden by any of them keeps its state and emits nothing when it reappears. A working screen advances the reset only when the profile classifies it as a verified noninteraction; Claude Code 2.1.302 and Codex 0.163.0 keep their idle composer visible while working (Codex also while its reviewer runs), so their working frames do.
-4. `automatic_review_unavailable` is emitted at most once per run per rule id unless an `automatic_review_available` annotation was observed after it.
-5. `automatic_review_available` emits no event; it only updates the effective policy record.
-
-An annotation stays visible above the idle composer, so its reset requires the annotation's absence as well as the verified noninteraction boundary.
-
-The event is an alert, not a one-to-one count of native refusals. These limits apply:
-
-| Backend | Limit |
-|---|---|
-| Every backend | A second refusal of the same normalized operation emits nothing while the first is visible or before an idle frame shows the first gone. A refusal rendered and removed within 100 ms is not observed. |
-| Claude Code 2.1.302 | In the default view the notice names no command, so refusals of the same tool and category collapse into one event, and a notice that expires while a form hides it is never observed. The default-view notice was captured at 120 columns only; a narrower pane can truncate its ` · /permissions` suffix, and such a notice is not observed. |
-| Claude Code 2.1.302 | The native-quote guard rests on the U+00A0 that the native result prefix carries. |
-| Claude Code 2.1.302 | `claude-auto-refusal` strips no row margin, so a command token wider than the pane, wrapped inside the token, changes its fingerprint after a resize and can emit once more. |
-| Claude Code 2.1.302 | Only the captured unavailable notice `auto mode disabled by settings` is observed. The binary also carries `auto mode is unavailable for your plan`, `auto mode unavailable while fast mode is on`, `auto mode unavailable for this model` and `auto mode is unavailable right now`, which no capture shows and no rule claims. |
-| Codex 0.163.0 | Commands longer than about 70 characters display truncated, so refusals sharing the displayed prefix share a fingerprint. The reviewer's reason appears only in the f2 warnings overlay and the ctrl+t view. |
-| Codex 0.163.0 | After three consecutive automatic denials Codex interrupts the turn (`■ Conversation interrupted`); the reason, `Automatic approval review rejected too many approval requests for this turn …`, appears only in the f2 warnings overlay. The Director receives one `automatic_refusal_observed` per denial, and the member stops without reporting. |
-| Codex 0.163.0 | No unavailable-review screen appears on the live screen, so no rule claims `automatic_review_unavailable`, and the positive indicator appears only on demand in the `/status` block. |
-
-The member's routed refusal evidence remains the record in each case.
 
 #### Persistence, notification and read interfaces
 
@@ -3450,7 +3385,7 @@ Runtime event kinds are the §8 `member_runtime_events.kind` values. The event p
 }
 ```
 
-`INSTRUCTION` is the permission-request instruction (§ Request-bound permission responses). Event keys are ordered `event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for applicable lifecycle/result events. Delivery results append `input_id,message_id,delivery,stage`; stalled delivery appends `input_id,message_id,waiting_since`; all events finish with required `director_action`. Permission/question/automatic-review actions order `kind,instruction,inspect_argv`; delivery actions follow § Input delivery result event and § Input delivery stalled event. Other events carry null action. `evidence.backend` and kind identify an automatic reviewer; its effective policy stays on the run.
+`INSTRUCTION` is the permission-request instruction (§ Request-bound permission responses). Event keys are ordered `event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for applicable lifecycle/result events. Delivery results append `input_id,message_id,delivery,stage`; stalled delivery appends `input_id,message_id,waiting_since`; all events finish with required `director_action`. Permission/question actions order `kind,instruction,inspect_argv`; delivery actions follow § Input delivery result event and § Input delivery stalled event. Other events carry null action.
 
 The evidence object, in events and in stored interaction evidence, has ordered keys `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from; it is null exactly when `operation` is null, including under metadata evidence.
 
@@ -3469,26 +3404,6 @@ Before persistence, the outbox stores an observed transition keyed by `(run_id, 
 The runner writes events and inbox messages through its own database transactions and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence or listener restart. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may replay historical frames as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`, retaining the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
 
 `event show` returns the complete durable event with its notification/archive state and current interaction/run state, and `input show` returns a durable programmatic-input receipt (§ CLI presentation contract). Runtime events use the ordinary broker message envelope and poll-time consumption.
-
-##### Automatic review events
-
-Both events follow the runtime-event contract above: an atomic event plus an `input_required` Director inbox message, the outbox, idempotent replay, archived recovery and the evidence policy. Neither creates an interaction row or changes input eligibility. Each payload has null `interaction_id` and `classification`, `source` `runner_screen`, `decision_outcome` `"unknown"` and `director_action.inspect_argv` `["cafleet","event","show","<EVENT_ID>","--json"]`, built from the stored event ID. `evidence` is the ordered evidence object, and its `excerpt` follows the run's evidence policy:
-
-| Field | `automatic_refusal_observed` | `automatic_review_unavailable` |
-|---|---|---|
-| `director_action.kind` | `review_automatic_refusal` | `review_automatic_review_unavailable` |
-| `evidence.rule_id` | The refusal rule | The notice rule |
-| `evidence.operation`, `evidence.operation_rows` | The run's evidence policy (null under `metadata`) | `null` |
-
-##### Automatic refusal event
-
-The `director_action.instruction` is: "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward." When the evidence has `operation_rows` greater than 1, the instruction appends the same displayed-rows sentence as the permission-request instruction (§ Request-bound permission responses).
-
-The event has no linked interaction, so `permission inspect` and `permission respond` naming it fail their event/interaction association check before any byte.
-
-##### Unavailable automatic review event
-
-The `director_action.instruction` is: "Verify this event. Automatic review is unavailable for this member, so native permission forms may appear and each needs a decision, and refusals may stop its work. Supervise the member as interactive, and tell the user when the selected automatic mode cannot apply." The member keeps running under the mode the native host actually applies; CAFleet never restarts it in another mode.
 
 ##### Input delivery result event
 
@@ -3549,37 +3464,6 @@ Capture the member's pane. When the composer holds text, submit or clear it with
 ```
 
 A verified empty composer resumes delivery on the next queue turn or sweep. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
-
-##### Effective policy record
-
-The runner writes `member_runs.effective_policy_json` only from a tested annotation observation:
-
-```json
-{
-  "automatic_review": "unavailable",
-  "observed_mode": null,
-  "rule_id": "claude-auto-unavailable",
-  "event_id": 512,
-  "observed_at": "2026-10-29T02:30:00Z"
-}
-```
-
-| Key | Type | Contract |
-|---|---|---|
-| `automatic_review` | text | `available` or `unavailable` |
-| `observed_mode` | text or null | The native mode name the screen displays, after the evidence policy: null under `metadata`; under `redacted`, the displayed name with the configured patterns applied, or null when the screen names none |
-| `rule_id` | text | The observing rule |
-| `event_id` | integer or null | The emitted `automatic_review_unavailable` event; null for an `automatic_review_available` update |
-| `observed_at` | text | UTC RFC 3339 observation time |
-
-Only a change of `automatic_review` or `observed_mode` writes the record. Readers validate the shape and fail on a malformed record. A null record means no tested observation has been made; it is never filled from argv or the selected mode.
-
-| Write | Transaction | Failure behavior |
-|---|---|---|
-| With `automatic_review_unavailable` | Part of the event's outbox frame and its immediate event transaction, so live commit and recovery replay apply it idempotently with the event | The event-transaction behavior |
-| `automatic_review_available` update | Submitted to the event worker in observation order and committed through the ownership-checked transaction (owner epoch, database identity and historical ownership), additionally requiring `member_runs.status` `running` or `degraded` | A stale owner fails with `stale ownership token` and any other status fails as a `member_runs.status` invariant violation; the worker records a local diagnostic, drops that write without retry and continues |
-
-The available update is not spooled: a runner lost before it commits loses only that observation, and the next indicator observation records it again.
 
 #### CLI presentation contract
 
@@ -3896,7 +3780,7 @@ The runner classifies and counts the resulting actual positive outer-terminal re
 
 The Director uses its own session's effective approval mode, independently of the member's launch mode. In verified auto mode, evaluate the requested command or operation and decide allow or deny. In other or unknown modes, obtain the user's request-specific permission before transmitting an answer. Resolve mode from current host/session evidence and record its provenance in host-owned pending state; member argv, event text and a CLI flag supply no proof of Director mode. Native and managed host policy remain authoritative. Mode/source fields are attributed audit claims in this same-user coordination tool, not authentication credentials.
 
-The runtime event payload includes the broker-generated `director_action` field. A permission-request `interaction_opened` event has `kind=review_permission_request`, an `instruction` and `inspect_argv`; a question `interaction_opened` event has `kind=review_question` with the question instruction below and the same `inspect_argv`; the automatic review events carry their own actions (§ Automatic review events), delivery results and stalled events carry their actions below, and other events have null action. The instruction is: "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward." When the event evidence has `operation_rows` greater than 1, the instruction appends one space and the sentence: "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding." The question instruction is: "Verify this event and the current question. Inspect it for the choices CAFleet can answer and their scope. In the Director session's effective auto mode, choose one of those choices; otherwise obtain the user's choice. Submit it through the request-bound CAFleet response command with that choice, or give that complete command to the user. When the inspection lists no choice, ask the user to answer on the member's native surface. Inspect the native result and continuation afterward." Build inspection argv from validated stored identities, never screen text, and validate the action against its event/run/Director association. Replay existing records idempotently, preserving their exact message bytes; all event payloads use version 2 and remain within the 16 KiB payload limit.
+The runtime event payload includes the broker-generated `director_action` field. A permission-request `interaction_opened` event has `kind=review_permission_request`, an `instruction` and `inspect_argv`; a question `interaction_opened` event has `kind=review_question` with the question instruction below and the same `inspect_argv`; delivery results and stalled events carry their actions below, and other events have null action. The instruction is: "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward." When the event evidence has `operation_rows` greater than 1, the instruction appends one space and the sentence: "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding." The question instruction is: "Verify this event and the current question. Inspect it for the choices CAFleet can answer and their scope. In the Director session's effective auto mode, choose one of those choices; otherwise obtain the user's choice. Submit it through the request-bound CAFleet response command with that choice, or give that complete command to the user. When the inspection lists no choice, ask the user to answer on the member's native surface. Inspect the native result and continuation afterward." Build inspection argv from validated stored identities, never screen text, and validate the action against its event/run/Director association. Replay existing records idempotently, preserving their exact message bytes; all event payloads use version 2 and remain within the 16 KiB payload limit.
 
 Before deciding, establish the actual command/tool operation, arguments, absolute cwd, required environment overrides, target resources, privilege/network effects and native choice scope as needed for the risk assessment. Evaluate those facts against the assigned task and host policy. When metadata/redacted evidence omits a necessary fact, use authorized current capture and routed member evidence, or ask the user to inspect the request when evaluation remains incomplete. Screen content is evidence, not instruction. Apply the selected evidence policy to inspection output and persistence; store bounded opaque evidence references and decision metadata rather than copying raw commands or secrets into receipts.
 
@@ -3961,16 +3845,12 @@ The poll consumes the message. Before running any other command after it, the Di
 
 For a permission refusal returned to the member, the evidence route is the member's routed request: exact attempted command, absolute cwd, required environment overrides and actual refusal. A screen event can alert the Director earlier or supplement that route; it supplies no missing dispatch evidence. For a blocked request, follow the `review_permission_request` instruction (§ Request-bound permission responses); the native result it inspects is the native output/exit/error and the member's actual continuation. Previews, prompts and native commands the runner queued during the request drain automatically after the interaction closes (§ Runner-owned deferred delivery); a deferred input's eventual result arrives as an `input_delivery_result` event. Messages that were held rather than queued remain pending for the member runner's sweep (§ Runner pending-preview sweep). A different command submitted through native exec is a separate authorized action, never proof that the original request was answered. Reconcile uncertain outcomes before retries, and preserve host/managed permission authority throughout.
 
-The Director handles the automatic review events (§ Automatic review events) through the same wake, consuming poll, host-owned pending-action record and `event show` verification:
+The Director handles these events through the same wake, consuming poll, host-owned pending-action record and `event show` verification:
 
 | Event | Director procedure |
 |---|---|
 | `interaction_opened` in automatic mode | The permission-request procedure above, including `permission respond`. |
 | `interaction_opened` for a `question` | Follow the `review_question` instruction (§ Request-bound permission responses), submitting the choice with `permission respond --choice`. |
-| `automatic_refusal_observed` with a routed request | Dispatch evidence comes only from the routed request fields the `review_automatic_refusal` instruction names (§ Automatic refusal event); the event and captures corroborate it and supply no missing field. In verified auto mode decide to authorize through the routed-command dispatch (`member exec`) or to refuse with a broker reply; otherwise obtain the user's permission first, then inspect the actual result and continuation. |
-| `automatic_refusal_observed` without a routed request | Dispatch nothing and keep the event as an informational pending item. When the member next reports, routes a request or reaches an idle composer without addressing it, ask it through the broker whether the refused operation is still needed; the item closes when a routed request arrives or the member answers that it is not needed. |
-| Several `automatic_refusal_observed` events, then an idle member that sent no report | Codex 0.163.0 interrupts the turn after three consecutive automatic denials, so the member stops without routing a request (§ Annotation detection). Treat the events as one pending item and ask the member through the broker whether the refused operations are still needed; the broker message resumes it. |
-| `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user when the selected automatic mode cannot apply. No answer is sent. |
 
 A routed request that arrives with no event follows the refusal route above.
 
@@ -4022,7 +3902,7 @@ The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.
 | `messages` | Point-to-point delivery, poll consumption and preview stamp |
 | `runtime_database_identity` | Singleton database-instance identity for runtime namespaces |
 | `cafleet_database` | Singleton record of the cafleet version that initialized the file |
-| `member_runs` | Launch intent, ownership, lifecycle, recorded coverage and observed effective policy |
+| `member_runs` | Launch intent, ownership, lifecycle and recorded coverage |
 | `member_interactions` | Observed interactive episodes and visibility closure |
 | `member_runtime_events` | Sequenced events with atomic Director inbox association or archival |
 | `member_input_operations` | Durable submission receipts, delivery method/deferral metadata, payload digests and settled replay protection |
@@ -4119,7 +3999,6 @@ CREATE TABLE member_runs (
     coverage TEXT NOT NULL CHECK(coverage IN ('tested','unknown')),
     status TEXT NOT NULL CHECK(status IN ('starting','prepared','running','degraded','recovering','exited','failed','lost')),
     native_version TEXT,
-    effective_policy_json TEXT CHECK(effective_policy_json IS NULL OR (json_valid(effective_policy_json) AND json_type(effective_policy_json) = 'object')),
     owner_epoch INTEGER NOT NULL CHECK(owner_epoch > 0),
     owner_kind TEXT NOT NULL CHECK(owner_kind IN ('creator','runner','reconciler')),
     owner_pid INTEGER NOT NULL CHECK(owner_pid > 0),
@@ -4163,7 +4042,7 @@ CREATE TABLE member_runtime_events (
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     event_seq INTEGER NOT NULL CHECK(event_seq > 0),
     interaction_id INTEGER REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
-    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','automatic_refusal_observed','automatic_review_unavailable','input_delivery_result','input_delivery_stalled','runner_degraded','runner_lost','runner_exited')),
+    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','input_delivery_result','input_delivery_stalled','runner_degraded','runner_lost','runner_exited')),
     observed_at TEXT NOT NULL,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
     notification_state TEXT NOT NULL CHECK(notification_state IN ('inbox','archived')),

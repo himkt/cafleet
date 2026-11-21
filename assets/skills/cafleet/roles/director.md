@@ -67,7 +67,7 @@ Spawn every member with the omitted `--permission-mode`, which selects the backe
 
 A backend's `{permission_flags}` note names any first-launch or nudge dialog its default mode shows. That dialog follows the question rules of [Consume observed interactions](#consume-observed-interactions), which cover listed and unlisted choices; any other first-launch dialog, such as a folder-trust prompt, follows that section too.
 
-An `interaction_opened` permission request in either mode class follows the [same procedure](#consume-observed-interactions), automatic review events follow its [event table](#consume-automatic-review-events), and a routed request that arrives with no event follows [dispatch](#director-side-dispatch).
+An `interaction_opened` permission request in either mode class follows the [same procedure](#consume-observed-interactions), and a routed request that arrives with no event follows [dispatch](#director-side-dispatch).
 
 ### Spawn prompt size limit
 
@@ -242,18 +242,6 @@ New members use CAFleet-owned PTYs with separate launch-policy, detection, empty
 A `question` event carries the `review_question` instruction and follows the same steps with these differences. In step 4, `permission inspect` lists the choices CAFleet can answer in `supported_choices`, each with its label and scope, and reports no missing evidence. In step 5, in verified auto mode pick one listed choice as the member's backend note directs; otherwise obtain the user's choice. In step 6, submit it with `permission respond --choice CHOICE_ID` in place of `--decision`. For a question with no listed choice, ask the user to answer it on the member's native surface and send no answer yourself.
 
 A response selects a tested single-request allow/deny choice, or a tested dismissal choice of a question; it changes no persistent/session permission or host policy. Mode/source fields and evidence references are attributed coordination records rather than authentication credentials.
-
-### Consume automatic review events
-
-An `automatic_refusal_observed` or `automatic_review_unavailable` event follows steps 1–3 above, then its broker-built instruction. Neither event has a linked interaction, so `permission inspect` and `permission respond` reject it; there is no native request to answer.
-
-| Event | Procedure |
-|---|---|
-| `automatic_refusal_observed` with a routed request | Take dispatch evidence only from the [routed request](member.md#reconsider-then-route); the event and captures corroborate it and supply no missing field. Decide under step 5: authorize a separate execution through `member exec` or refuse with a broker reply, then inspect the actual result and continuation. |
-| `automatic_refusal_observed` without a routed request, including several events followed by an idle member that sent no report | Dispatch nothing and keep the events pending as one item; a backend can end the turn after repeated automatic denials (its `{permission_flags}` note names the threshold) without the member routing a request. When the member next reports, routes a request or goes idle, ask it through the broker whether the refused operations are still needed (the message resumes an idle member), and close the item when a routed request arrives or the member answers that it is not needed. |
-| `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user that the selected automatic mode cannot apply. Send no answer; the member keeps running under the mode its native host applies. |
-
-The event is an alert, not a one-to-one count of refusals: a repeated refusal of the same operation can emit nothing while the first is visible. `member show --json` exposes the run's recorded `effective_policy`. The [runtime events](../reference/cli.md#runtime-events) reference owns payload fields and limits.
 
 ### Reconcile generated input
 
