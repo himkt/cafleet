@@ -6040,125 +6040,6 @@ mod tests {
                 reply
             }
 
-            fn refuse(host: &mut Host, request: InputControlRequest) {
-                let result = host.handle(request);
-                let result = match result {
-                    Ok(None) => (0..3)
-                        .find_map(|_| {
-                            host.drain();
-                            match host.coordinator.advance(
-                                &mut host.fixture.conn,
-                                &mut host.transport,
-                                &mut host.pty,
-                                &host.controller,
-                                host.until,
-                            ) {
-                                Ok(None) => None,
-                                result => Some(result),
-                            }
-                        })
-                        .expect("ineligible operation resolves within bounded drained turns"),
-                    result => result,
-                };
-                match result {
-                    Err(_) => {}
-                    Ok(Some(reply)) => assert!(matches!(
-                        submitted(reply).status,
-                        SubmissionStatus::Held | SubmissionStatus::Rejected
-                    )),
-                    Ok(None) => panic!("ineligible operation returns a refusal"),
-                }
-                assert!(host.pty.offers.is_empty());
-                assert_eq!(
-                    host.fixture
-                        .conn
-                        .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
-                            row.get::<_, i64>(0)
-                        })
-                        .unwrap(),
-                    0
-                );
-            }
-
-            #[test]
-            fn operations_preview_binds_the_exact_run_message_key_and_durable_recipient() {
-                with_host(|host| {
-                    let message = host.message(LITERAL);
-                    let key = crate::broker::runtime::preview_operation_key(
-                        host.fixture.run.run_id,
-                        message.message_id,
-                        1,
-                    )
-                    .unwrap();
-                    let canonical = canonical_preview(&message);
-                    let mut program = canonical.as_bytes().to_vec();
-                    program.push(b'~');
-                    host.pty.expect_program(program);
-                    let input = preview_request(host, &message, &canonical);
-                    let reply = complete(host, input);
-                    let row =
-                        storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
-                    assert_eq!(row.kind, storage::InputKind::Preview);
-                    assert_eq!(row.operation_key, key);
-                    assert_eq!(row.message_id, Some(message.message_id));
-                    assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(
-                        host.pty.offers,
-                        vec![canonical.as_bytes().to_vec(), b"~".to_vec()]
-                    );
-                    assert_eq!(
-                        crate::broker::get_message(&host.fixture.conn, message.message_id).unwrap(),
-                        message
-                    );
-                    let notified: Option<String> = host
-                        .fixture
-                        .conn
-                        .query_row(
-                            "SELECT notified_at FROM messages WHERE message_id=?1",
-                            [message.message_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap();
-                    assert!(notified.is_none());
-                });
-
-                for wrong_recipient in [false, true] {
-                    with_host(|host| {
-                        let run = &host.fixture.run;
-                        let (sender, recipient) = if wrong_recipient {
-                            (run.member_id, run.director_member_id)
-                        } else {
-                            (run.director_member_id, run.member_id)
-                        };
-                        let message = crate::broker::send_message(
-                            &mut host.fixture.conn,
-                            sender,
-                            recipient,
-                            LITERAL,
-                        )
-                        .unwrap();
-                        let key_run = run.run_id + i64::from(!wrong_recipient);
-                        let input = request(
-                            host,
-                            crate::broker::runtime::preview_operation_key(
-                                key_run,
-                                message.message_id,
-                                1,
-                            )
-                            .unwrap(),
-                            storage::InputKind::Preview,
-                            Some(message.message_id),
-                        );
-                        refuse(host, input);
-                        assert_eq!(
-                            crate::broker::get_message(&host.fixture.conn, message.message_id)
-                                .unwrap(),
-                            message
-                        );
-                    });
-                }
-            }
-
             #[test]
             fn operations_exec_selects_its_native_shell_plan_and_requires_its_own_coverage() {
                 let mut definition = catalog_definition();
@@ -6201,7 +6082,7 @@ mod tests {
 
         mod composer_reliability {
             use crate::runtime::input::tests::ordinary_prompt::deferred_queue::{
-                form, queued, result_events, row,
+                form, queued, row,
             };
             use crate::runtime::input::tests::ordinary_prompt::*;
             use serde_json::{Value, json};
@@ -6392,12 +6273,7 @@ mod tests {
                         host.coordinator
                             .set_post_submit_verification_until(Instant::now());
                         let reply = native_verification_reply(host);
-                        assert_left(
-                            host,
-                            &reply,
-                            storage::StopCause::SubmitUnconfirmed,
-                            storage::LeftStage::Submitted,
-                        );
+                        assert_uncertain(host, &reply, storage::StopCause::SubmitUnconfirmed);
                         assert_eq!(reply.stage, SubmissionStage::Submitted, "{fixture_id}");
                     });
                 }
@@ -6540,22 +6416,11 @@ mod tests {
                 .unwrap()
             }
 
-            fn assert_left(
-                host: &Host,
-                reply: &SubmissionResult,
-                cause: storage::StopCause,
-                stage: storage::LeftStage,
-            ) {
-                assert_eq!(reply.status, SubmissionStatus::LeftInComposer);
+            fn assert_uncertain(host: &Host, reply: &SubmissionResult, cause: storage::StopCause) {
+                assert_eq!(reply.status, SubmissionStatus::Uncertain);
                 let input = stored(host, reply);
-                assert_eq!(input.state, storage::InputState::Settled);
-                assert_eq!(
-                    input.disposition,
-                    Some(storage::InputDisposition::LeftInComposer)
-                );
+                assert_eq!(input.state, storage::InputState::Uncertain);
                 assert_eq!(input.stop_cause, Some(cause));
-                assert_eq!(input.left_stage, Some(stage));
-                assert_eq!(reply.reason.as_deref(), Some(cause.as_str()));
             }
 
             fn enable_paste(host: &mut Host) {
@@ -6568,36 +6433,6 @@ mod tests {
                 host.confirm_submissions = false;
                 let request = request(host, key, literal);
                 assert!(host.handle(request).unwrap().is_none());
-            }
-
-            fn stopped_preview(
-                host: &mut Host,
-                short: bool,
-            ) -> (crate::broker::MessageRecord, i64) {
-                host.confirm_submissions = false;
-                let message = host.message("stopped preview");
-                let literal = canonical_preview(&message);
-                host.pty.expect_program(program(&literal, false));
-                if short {
-                    host.pty.short = Some(3);
-                }
-                let request = preview_request(host, &message, &literal);
-                assert!(host.handle(request).unwrap().is_none());
-                until_written(host, if short { 3 } else { literal.len() });
-                host.show(DRAFT.to_vec());
-                host.type_human(b"x");
-                let reply = finish(host, false);
-                assert_left(
-                    host,
-                    &reply,
-                    storage::StopCause::ManualInput,
-                    if short {
-                        storage::LeftStage::Partial
-                    } else {
-                        storage::LeftStage::LiteralComplete
-                    },
-                );
-                (message, reply.input_id.unwrap())
             }
 
             fn old_wait() -> String {
@@ -6628,12 +6463,7 @@ mod tests {
                     until_written(host, LITERAL.len());
                     host.type_human(b"x");
                     let reply = finish(host, false);
-                    assert_left(
-                        host,
-                        &reply,
-                        storage::StopCause::ManualInput,
-                        storage::LeftStage::LiteralComplete,
-                    );
+                    assert_uncertain(host, &reply, storage::StopCause::ManualInput);
                     assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
                 });
             }
@@ -6695,12 +6525,7 @@ mod tests {
                         host.pty.short = None;
                         host.type_human(b"\x1b[<0;10;20M");
                         let reply = finish(host, false);
-                        assert_left(
-                            host,
-                            &reply,
-                            storage::StopCause::PointerInput,
-                            storage::LeftStage::Partial,
-                        );
+                        assert_uncertain(host, &reply, storage::StopCause::PointerInput);
                         assert_eq!(host.pty.offers.last().unwrap(), CLOSE);
                         assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
                     },
@@ -6715,12 +6540,7 @@ mod tests {
                     until_written(host, 3);
                     host.type_human(b"x");
                     let reply = finish(host, false);
-                    assert_left(
-                        host,
-                        &reply,
-                        storage::StopCause::ManualInput,
-                        storage::LeftStage::Partial,
-                    );
+                    assert_uncertain(host, &reply, storage::StopCause::ManualInput);
                 });
             }
 
@@ -6780,42 +6600,7 @@ mod tests {
                     host.coordinator.pending.as_mut().unwrap().deadline =
                         Instant::now() + Duration::from_millis(100);
                     let reply = finish(host, false);
-                    assert_left(
-                        host,
-                        &reply,
-                        storage::StopCause::DeadlineExpired,
-                        storage::LeftStage::Partial,
-                    );
-                });
-            }
-
-            #[test]
-            fn a_verified_fallback_stop_after_escape_records_escape_only() {
-                let mut expected = b"\x1b".to_vec();
-                expected.extend_from_slice(LITERAL.as_bytes());
-                expected.push(b'\r');
-                with_catalog_host(configured("plain", Value::Null), expected, |host| {
-                    host.show(DRAFT.to_vec());
-                    let id = queued(
-                        host,
-                        request(host, "prompt:escape-only", LITERAL),
-                        "composer_busy",
-                    );
-                    host.coordinator
-                        .set_queued_composer_busy_since(id, &old_wait());
-                    until_written(host, 1);
-                    assert_eq!(host.pty.written, b"\x1b");
-                    host.type_human(b"x");
-                    for _ in 0..64 {
-                        let _ = turn(host);
-                    }
-                    let input = row(host, id);
-                    assert_eq!(
-                        input.disposition,
-                        Some(storage::InputDisposition::LeftInComposer)
-                    );
-                    assert_eq!(input.left_stage, Some(storage::LeftStage::EscapeOnly));
-                    assert_eq!(input.stop_cause, Some(storage::StopCause::ManualInput));
+                    assert_uncertain(host, &reply, storage::StopCause::DeadlineExpired);
                 });
             }
 
@@ -6974,43 +6759,6 @@ mod tests {
             }
 
             #[test]
-            fn over_limit_preview_uses_the_pointer_form_with_the_same_payload_identity() {
-                with_catalog_host(
-                    configured("plain", json!({"unit":"bytes","max":1024})),
-                    encoded(),
-                    |host| {
-                        let message = host.message(&"あ".repeat(3000));
-                        let canonical = canonical_preview(&message);
-                        let expected_digest = storage::input_payload_digest(
-                            host.fixture.run.run_id,
-                            &SubmitInput {
-                                operation_key: storage::preview_operation_key(
-                                    host.fixture.run.run_id,
-                                    message.message_id,
-                                    1,
-                                )
-                                .unwrap(),
-                                input_kind: storage::InputKind::Preview,
-                                message_id: Some(message.message_id),
-                                literal: canonical.clone(),
-                            },
-                        );
-                        let request = preview_request(host, &message, &canonical);
-                        assert!(host.handle(request).unwrap().is_none());
-                        let reply = finish(host, true);
-                        assert_eq!(reply.status, SubmissionStatus::Accepted);
-                        let text = String::from_utf8(host.pty.written.clone()).unwrap();
-                        assert!(text.contains(&format!(
-                            "Body is 3000 characters; run cafleet message poll {} --json to read it.",
-                            message.to_member_id
-                        )));
-                        assert!(!text.contains(&message.text));
-                        assert_eq!(stored(host, &reply).payload_digest, expected_digest);
-                    },
-                );
-            }
-
-            #[test]
             fn queued_prompt_over_the_limit_settles_not_submitted_and_advances() {
                 with_catalog_host(
                     permission_configured("plain", json!({"unit":"bytes","max":1})),
@@ -7056,12 +6804,7 @@ mod tests {
                     host.coordinator.pending.as_mut().unwrap().deadline =
                         Instant::now() + Duration::from_secs(1);
                     let reply = finish(host, false);
-                    assert_left(
-                        host,
-                        &reply,
-                        storage::StopCause::DeadlineExpired,
-                        storage::LeftStage::LiteralComplete,
-                    );
+                    assert_uncertain(host, &reply, storage::StopCause::DeadlineExpired);
                     assert!(!host.pty.offers.iter().any(|bytes| bytes == b"~"));
                 });
             }
@@ -7131,16 +6874,12 @@ mod tests {
             }
 
             #[test]
-            fn unconfirmed_submit_records_the_submitted_left_stage() {
+            fn an_expired_post_submit_verification_records_uncertain_submit_unconfirmed() {
                 with_host(|host| {
                     start(host, "prompt:unconfirmed", LITERAL);
                     let reply = finish(host, false);
-                    assert_left(
-                        host,
-                        &reply,
-                        storage::StopCause::SubmitUnconfirmed,
-                        storage::LeftStage::Submitted,
-                    );
+                    assert_uncertain(host, &reply, storage::StopCause::SubmitUnconfirmed);
+                    assert_eq!(reply.stage, SubmissionStage::Submitted);
                     assert_eq!(host.pty.written, encoded());
                 });
             }
@@ -7157,508 +6896,6 @@ mod tests {
             }
 
             #[test]
-            fn redelivery_successor_waits_ahead_of_later_inputs_and_survives_the_idle_bound() {
-                with_host(|host| {
-                    let (message, stopped) = stopped_preview(host, false);
-                    let next = storage::find_latest_preview_input(
-                        &host.fixture.conn,
-                        host.fixture.run.run_id,
-                        message.message_id,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    assert_eq!(next.preview_attempt, Some(2));
-                    assert_eq!(next.defer_reason.as_deref(), Some("redelivery"));
-                    let later = queued(
-                        host,
-                        request(host, "prompt:behind-redelivery", LITERAL),
-                        "earlier_input",
-                    );
-                    let writes = host.pty.written.clone();
-                    host.coordinator
-                        .set_queued_composer_busy_since(next.input_id, &old_wait());
-                    for _ in 0..64 {
-                        let _ = turn(host);
-                    }
-                    assert_eq!(host.pty.written, writes);
-                    assert_eq!(row(host, next.input_id).state, storage::InputState::Ready);
-                    assert_eq!(row(host, later).state, storage::InputState::Ready);
-                    assert_eq!(
-                        row(host, stopped).disposition,
-                        Some(storage::InputDisposition::LeftInComposer)
-                    );
-                });
-            }
-
-            #[test]
-            fn consumed_held_preview_is_cancelled_on_the_next_queue_turn_without_writing() {
-                with_host(|host| {
-                    let (message, _) = stopped_preview(host, false);
-                    let next = storage::find_latest_preview_input(
-                        &host.fixture.conn,
-                        host.fixture.run.run_id,
-                        message.message_id,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    let writes = host.pty.written.clone();
-                    assert!(
-                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
-                            .unwrap()
-                            .iter()
-                            .any(|consumed| consumed.message_id == message.message_id)
-                    );
-                    let _ = turn(host);
-                    let cancelled = row(host, next.input_id);
-                    assert_eq!(
-                        cancelled.disposition,
-                        Some(storage::InputDisposition::NotSubmitted)
-                    );
-                    assert_eq!(
-                        cancelled.delivery_reason.as_deref(),
-                        Some("message_consumed")
-                    );
-                    assert_eq!(host.pty.written, writes);
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(
-                        result_events(host, next.input_id),
-                        0,
-                        "a consumed re-delivery successor publishes no delivery result"
-                    );
-                });
-            }
-
-            #[test]
-            fn an_enter_press_that_verifies_the_composer_empty_delivers_the_waiting_head_then_the_later_input()
-             {
-                with_host(|host| {
-                    let (message, stopped) = stopped_preview(host, false);
-                    let waiting = storage::find_latest_preview_input(
-                        &host.fixture.conn,
-                        host.fixture.run.run_id,
-                        message.message_id,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    let later = queued(
-                        host,
-                        request(host, "prompt:after-the-stalled-head", LITERAL),
-                        "earlier_input",
-                    );
-                    host.coordinator
-                        .set_queued_composer_busy_since(waiting.input_id, &old_wait());
-                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, waiting.input_id);
-                    drain_stalled_events(host);
-                    readable_stalled_head(host, waiting.input_id, stopped);
-                    assert_eq!(
-                        row(host, waiting.input_id).state,
-                        storage::InputState::Ready
-                    );
-                    assert_eq!(row(host, later).state, storage::InputState::Ready);
-                    assert_eq!(
-                        host.coordinator.held_composer.map(|(input_id, _)| input_id),
-                        Some(stopped),
-                        "the left-in-composer blocker holds the composer"
-                    );
-                    let blocker = row(host, stopped);
-                    let canonical = canonical_preview(&message);
-                    let preview_program = [canonical.as_bytes(), b"~"].concat();
-                    host.confirm_submissions = true;
-                    host.confirm_after_programs([preview_program.clone(), encoded()]);
-                    let before = host.pty.written.len();
-                    host.type_human(b"\r");
-                    host.show(SCREEN.to_vec());
-                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
-                        host,
-                        |host| {
-                            matches!(
-                                row(host, later).state,
-                                storage::InputState::Accepted | storage::InputState::Settled
-                            )
-                        },
-                    );
-                    assert_eq!(
-                        host.coordinator.held_composer, None,
-                        "the verified empty composer clears the hold"
-                    );
-                    assert!(matches!(
-                        row(host, waiting.input_id).state,
-                        storage::InputState::Accepted | storage::InputState::Settled
-                    ));
-                    assert_eq!(
-                        host.pty.written[before..],
-                        [b"\r".as_slice(), &preview_program, &encoded()].concat(),
-                        "the press submits the retained literal, then the waiting head and the later input deliver in order"
-                    );
-                    assert_eq!(row(host, stopped), blocker);
-                });
-            }
-
-            #[test]
-            fn stalled_held_head_publishes_one_event_with_the_blocking_input() {
-                with_host(|host| {
-                    let (message, stopped) = stopped_preview(host, false);
-                    let next = storage::find_latest_preview_input(
-                        &host.fixture.conn,
-                        host.fixture.run.run_id,
-                        message.message_id,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    host.coordinator
-                        .set_queued_composer_busy_since(next.input_id, &old_wait());
-                    crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, next.input_id);
-                    for _ in 0..64 {
-                        let _ = turn(host);
-                    }
-                    let mut statement = host.fixture.conn.prepare("SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2").unwrap();
-                    let payloads = statement
-                        .query_map(
-                            rusqlite::params![host.fixture.run.run_id, next.input_id],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .unwrap()
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .unwrap();
-                    assert_eq!(payloads.len(), 1);
-                    let event: Value = serde_json::from_str(&payloads[0]).unwrap();
-                    assert_eq!(event["blocking_input_id"], stopped);
-                    assert_eq!(event["message_id"], message.message_id);
-                    assert_eq!(event["director_action"]["kind"], "review_stalled_input");
-                    assert_eq!(event["director_action"]["press_argv"], Value::Null);
-                });
-            }
-
-            fn held_blocker_for_stalled_heads(host: &mut Host, immediate: bool) -> i64 {
-                let id = hold_failed_blocker(host, immediate);
-                let blocker = row(host, id);
-                assert_eq!(blocker.state, storage::InputState::Uncertain);
-                assert_eq!(blocker.stop_cause, Some(storage::StopCause::WriteFailed));
-                id
-            }
-
-            /// An immediate blocker whose `uncertain/write_failed` bookkeeping write fails, so it
-            /// stays `in_progress` while it holds the composer.
-            fn held_in_progress_blocker_after_a_failed_uncertain_write(host: &mut Host) -> i64 {
-                host.fixture
-                    .conn
-                    .execute_batch(
-                        "CREATE TRIGGER owned_uncertain_bookkeeping_failure BEFORE UPDATE OF state ON member_input_operations
-                         WHEN OLD.operation_key='prompt:reconciled-stalled-blocker' AND NEW.state='uncertain'
-                         BEGIN SELECT RAISE(FAIL,'owned uncertain bookkeeping failure'); END",
-                    )
-                    .unwrap();
-                let held = catch_unwind(AssertUnwindSafe(|| hold_failed_blocker(host, true)));
-                let removed = host
-                    .fixture
-                    .conn
-                    .execute_batch("DROP TRIGGER owned_uncertain_bookkeeping_failure");
-                let id = match held {
-                    Ok(id) => {
-                        removed.unwrap();
-                        id
-                    }
-                    Err(primary) => resume_unwind(primary),
-                };
-                let blocker = row(host, id);
-                assert_eq!(blocker.state, storage::InputState::InProgress);
-                assert_eq!(blocker.stop_cause, None);
-                id
-            }
-
-            fn hold_failed_blocker(host: &mut Host, immediate: bool) -> i64 {
-                host.coordinator.services.hooks = Arc::new(FailLaterBeforeWrite {
-                    inner: host.hooks.clone(),
-                    armed: std::sync::atomic::AtomicBool::new(true),
-                });
-                host.pty.short = Some(3);
-                let input = request(host, "prompt:reconciled-stalled-blocker", LITERAL);
-                if immediate {
-                    assert!(host.handle(input).unwrap().is_none());
-                } else {
-                    form(host);
-                    queued(host, input, "interaction_open");
-                    host.show(SCREEN.to_vec());
-                }
-                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
-                    host,
-                    |host| host.pty.written.len() == 3,
-                );
-                assert_eq!(host.pty.written, LITERAL.as_bytes()[..3]);
-                let id = host
-                    .coordinator
-                    .pending
-                    .as_ref()
-                    .unwrap()
-                    .input_id()
-                    .unwrap();
-                let failure = later_checkpoint_failure(host);
-                let primary = match &failure.source {
-                    CafleetError::WithDiagnostics { cause, .. } => cause.as_ref(),
-                    source => source,
-                };
-                assert!(
-                    matches!(primary, CafleetError::DeadlineExceeded),
-                    "{failure:?}"
-                );
-                assert_eq!(failure.context.input_id, Some(id));
-                if immediate {
-                    host.coordinator.finish_pending_attempt();
-                }
-                assert!(host.coordinator.pending.is_none());
-                assert_eq!(host.pty.offers, [LITERAL.as_bytes().to_vec()]);
-                host.pty.short = None;
-                host.show(DRAFT.to_vec());
-                host.confirm_after_programs([encoded()]);
-                id
-            }
-
-            fn reconcile_stalled_blocker(
-                host: &mut Host,
-                id: i64,
-                disposition: storage::InputDisposition,
-            ) -> storage::InputOperation {
-                let before = row(host, id);
-                let result = host
-                    .receipt(ReceiptAction::Reconcile {
-                        input_id: id,
-                        expected: before.state,
-                        disposition,
-                        evidence_ref:
-                            "synthetic:operator-reconciled-positive-literal-held-composer".into(),
-                    })
-                    .unwrap();
-                assert!(
-                    matches!(result, InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
-                );
-                let after = row(host, id);
-                assert_eq!(after.state, storage::InputState::Settled);
-                assert_eq!(after.disposition, Some(disposition));
-                assert_eq!(after.stop_cause, before.stop_cause);
-                after
-            }
-
-            fn drain_stalled_events(host: &mut Host) {
-                for _ in 0..4 {
-                    for _ in 0..8 {
-                        let _ = turn(host);
-                    }
-                    loop {
-                        host.drain();
-                        let writer = host.writer.status();
-                        let health = host.controller.health(&host.writer);
-                        assert!(
-                            writer.diagnostic.is_none(),
-                            "writer={writer:?}; health={health:?}"
-                        );
-                        assert_eq!(writer.gap_count, 0, "writer={writer:?}; health={health:?}");
-                        if !health.degraded && health.pending_count == 0 && !health.pending_evidence
-                        {
-                            break;
-                        }
-                        assert!(
-                            Instant::now() < host.until,
-                            "writer={writer:?}; health={health:?}"
-                        );
-                        std::thread::sleep(Duration::from_millis(1));
-                    }
-                }
-            }
-
-            fn readable_stalled_head(host: &Host, head: i64, blocker: i64) -> Value {
-                let ids = host.fixture.conn.prepare(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2 ORDER BY event_id",
-                ).unwrap().query_map(rusqlite::params![host.fixture.run.run_id, head], |row| row.get::<_, i64>(0))
-                    .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-                assert_eq!(
-                    ids.len(),
-                    1,
-                    "head={:?}; blocker={:?}; writer={:?}; health={:?}",
-                    row(host, head),
-                    row(host, blocker),
-                    host.writer.status(),
-                    host.controller.health(&host.writer)
-                );
-                let event = storage::get_event(&host.fixture.conn, ids[0]).unwrap();
-                assert_eq!(event.event.run_id, host.fixture.run.run_id);
-                assert_eq!(row(host, head).run_id, event.event.run_id);
-                assert_eq!(row(host, blocker).run_id, event.event.run_id);
-                let payload = event.event.payload_json;
-                assert_eq!(payload["input_id"], head);
-                assert_eq!(payload["blocking_input_id"], blocker);
-                assert_eq!(payload["message_id"], json!(row(host, head).message_id));
-                assert_eq!(
-                    payload["cause"],
-                    json!({"kind":"held_composer","detail":null})
-                );
-                assert_eq!(payload["director_action"]["kind"], "review_stalled_input");
-                payload
-            }
-
-            #[test]
-            fn reconciled_held_blocker_before_first_stalled_publication_keeps_the_signal() {
-                for immediate in [false, true] {
-                    for disposition in [
-                        storage::InputDisposition::NotSubmitted,
-                        storage::InputDisposition::AbandonedUncertain,
-                        storage::InputDisposition::Submitted,
-                    ] {
-                        crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
-                            permission_configured("plain", Value::Null), encoded(), |host| {
-                                let blocker = held_blocker_for_stalled_heads(host, immediate);
-                                let head = queued(host, request(host, "prompt:stalled-after-reconcile", LITERAL), "earlier_input");
-                                host.coordinator.set_queued_composer_busy_since(head, &old_wait());
-                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
-                                let since = host.coordinator.queue.front().unwrap().composer_busy_since;
-                                let reconciled = reconcile_stalled_blocker(host, blocker, disposition);
-                                assert_eq!(host.coordinator.queue.front().unwrap().composer_busy_since, since);
-                                let offers = host.pty.offers.clone();
-                                let written = host.pty.written.clone();
-                                drain_stalled_events(host);
-                                assert_eq!(row(host, head).state, storage::InputState::Ready);
-                                assert_eq!(host.pty.offers, offers);
-                                assert_eq!(host.pty.written, written);
-                                let event = readable_stalled_head(host, head, blocker);
-                                drain_stalled_events(host);
-                                assert_eq!(readable_stalled_head(host, head, blocker), event);
-                                assert_eq!(row(host, blocker), reconciled);
-                                finish_after_exceptional_clear(host, blocker, head);
-                                assert_eq!(readable_stalled_head(host, head, blocker), event);
-                                assert_eq!(row(host, blocker), reconciled);
-                            },
-                        );
-                    }
-                }
-            }
-
-            #[test]
-            fn reconciled_already_notified_blocker_notifies_the_later_head_after_consumption_cancellation()
-             {
-                for disposition in [
-                    storage::InputDisposition::NotSubmitted,
-                    storage::InputDisposition::AbandonedUncertain,
-                    storage::InputDisposition::Submitted,
-                ] {
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
-                        permission_configured("plain", Value::Null),
-                        encoded(),
-                        |host| {
-                            let blocker = held_blocker_for_stalled_heads(host, false);
-                            let message = host.message(
-                                "waiting preview cancelled after its stalled notification",
-                            );
-                            let literal = canonical_preview(&message);
-                            let first = queued(
-                                host,
-                                preview_request(host, &message, &literal),
-                                "earlier_input",
-                            );
-                            let later = queued(
-                                host,
-                                request(host, "prompt:later-stalled-head", LITERAL),
-                                "earlier_input",
-                            );
-                            host.coordinator
-                                .set_queued_composer_busy_since(first, &old_wait());
-                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, first);
-                            let offers = host.pty.offers.clone();
-                            let written = host.pty.written.clone();
-                            drain_stalled_events(host);
-                            let original = readable_stalled_head(host, first, blocker);
-                            let since = host.coordinator.queue.front().unwrap().composer_busy_since;
-                            let reconciled = reconcile_stalled_blocker(host, blocker, disposition);
-                            assert_eq!(
-                                host.coordinator.queue.front().unwrap().composer_busy_since,
-                                since
-                            );
-                            assert!(
-                                crate::broker::poll_messages(
-                                    &host.fixture.conn,
-                                    message.to_member_id
-                                )
-                                .unwrap()
-                                .iter()
-                                .any(|consumed| consumed.message_id == message.message_id)
-                            );
-                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(host, |host| row(host, first).state == storage::InputState::Settled);
-                            assert_eq!(
-                                row(host, first).disposition,
-                                Some(storage::InputDisposition::NotSubmitted)
-                            );
-                            assert_eq!(
-                                row(host, first).delivery_reason.as_deref(),
-                                Some("message_consumed")
-                            );
-                            assert_eq!(host.coordinator.queue.front().unwrap().input_id, later);
-                            assert_eq!(readable_stalled_head(host, first, blocker), original);
-                            drain_stalled_events(host);
-                            let later_events: i64 = host.fixture.conn.query_row(
-                                "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
-                                rusqlite::params![host.fixture.run.run_id, later], |row| row.get(0),
-                            ).unwrap();
-                            assert_eq!(
-                                later_events, 0,
-                                "the later head starts its own composer-only bound"
-                            );
-                            host.coordinator
-                                .set_queued_composer_busy_since(later, &old_wait());
-                            crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, later);
-                            drain_stalled_events(host);
-                            assert_eq!(host.pty.offers, offers);
-                            assert_eq!(host.pty.written, written);
-                            assert_eq!(row(host, later).state, storage::InputState::Ready);
-                            let next = readable_stalled_head(host, later, blocker);
-                            drain_stalled_events(host);
-                            assert_eq!(readable_stalled_head(host, later, blocker), next);
-                            assert_eq!(readable_stalled_head(host, first, blocker), original);
-                            finish_after_exceptional_clear(host, blocker, later);
-                            assert_eq!(row(host, blocker), reconciled);
-                            assert_eq!(readable_stalled_head(host, later, blocker), next);
-                            assert_eq!(readable_stalled_head(host, first, blocker), original);
-                        },
-                    );
-                }
-            }
-
-            #[test]
-            fn consumed_exceptional_in_progress_blocker_stalls_until_reconciliation_and_fresh_empty()
-             {
-                crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
-                    permission_configured("plain", Value::Null),
-                    encoded(),
-                    |host| {
-                        let blocker = held_in_progress_blocker_after_a_failed_uncertain_write(host);
-                        let head = queued(
-                            host,
-                            request(host, "prompt:behind-consumed-in-progress", LITERAL),
-                            "earlier_input",
-                        );
-                        host.coordinator
-                            .set_queued_composer_busy_since(head, &old_wait());
-                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
-                        let offers = host.pty.offers.clone();
-                        let written = host.pty.written.clone();
-                        drain_stalled_events(host);
-                        assert_eq!(row(host, blocker).state, storage::InputState::InProgress);
-                        assert_eq!(row(host, head).state, storage::InputState::Ready);
-                        assert_eq!(host.pty.offers, offers);
-                        assert_eq!(host.pty.written, written);
-                        let original = readable_stalled_head(host, head, blocker);
-                        let reconciled = reconcile_stalled_blocker(
-                            host,
-                            blocker,
-                            storage::InputDisposition::AbandonedUncertain,
-                        );
-                        drain_stalled_events(host);
-                        assert_eq!(readable_stalled_head(host, head, blocker), original);
-                        finish_after_exceptional_clear(host, blocker, head);
-                        assert_eq!(row(host, blocker), reconciled);
-                        assert_eq!(readable_stalled_head(host, head, blocker), original);
-                    },
-                );
-            }
-
-            #[test]
             fn a_newly_opened_interaction_confirms_the_written_submit_key() {
                 with_catalog_host(
                     permission_configured("plain", Value::Null),
@@ -7672,67 +6909,6 @@ mod tests {
                             .expect("the new interaction confirms the submitted input");
                         assert_eq!(reply.status, SubmissionStatus::Accepted);
                         assert_eq!(stored(host, &reply).stop_cause, None);
-                    },
-                );
-            }
-
-            #[test]
-            fn a_consumed_in_progress_held_blocker_stalls_as_held_composer_while_an_unrelated_barrier_blocks_progress()
-             {
-                crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
-                    permission_configured("plain", Value::Null),
-                    encoded(),
-                    |host| {
-                        let blocker = held_in_progress_blocker_after_a_failed_uncertain_write(host);
-                        let owner = host.fixture.run.owner();
-                        let unrelated = storage::test_support::reserve_input(
-                            &mut host.fixture.conn,
-                            &owner,
-                            &storage::NewInput {
-                                operation_key: "prompt:unrelated-in-progress-barrier".into(),
-                                kind: storage::InputKind::Prompt,
-                                payload_digest: "f".repeat(64),
-                                message_id: None,
-                            },
-                        )
-                        .unwrap();
-                        assert_eq!(unrelated.state, storage::InputState::InProgress);
-                        let head = queued(
-                            host,
-                            request(host, "prompt:behind-two-in-progress-inputs", LITERAL),
-                            "earlier_input",
-                        );
-                        host.coordinator
-                            .set_queued_composer_busy_since(head, &old_wait());
-                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, head);
-                        let offers = host.pty.offers.clone();
-                        let written = host.pty.written.clone();
-                        drain_stalled_events(host);
-                        let event = readable_stalled_head(host, head, blocker);
-                        assert_eq!(row(host, head).state, storage::InputState::Ready);
-                        assert_eq!(row(host, unrelated.input_id), unrelated);
-                        assert_eq!(
-                            host.pty.offers, offers,
-                            "an unrelated active writer still blocks held-only progress"
-                        );
-                        assert_eq!(host.pty.written, written);
-                        reconcile_stalled_blocker(
-                            host,
-                            unrelated.input_id,
-                            storage::InputDisposition::NotSubmitted,
-                        );
-                        drain_stalled_events(host);
-                        assert_eq!(readable_stalled_head(host, head, blocker), event);
-                        assert_eq!(host.pty.offers, offers);
-                        assert_eq!(host.pty.written, written);
-                        let reconciled = reconcile_stalled_blocker(
-                            host,
-                            blocker,
-                            storage::InputDisposition::AbandonedUncertain,
-                        );
-                        finish_after_exceptional_clear(host, blocker, head);
-                        assert_eq!(row(host, blocker), reconciled);
-                        assert_eq!(readable_stalled_head(host, head, blocker), event);
                     },
                 );
             }
@@ -7768,289 +6944,6 @@ mod tests {
             struct FailAfterWrite {
                 inner: Arc<Hooks>,
                 armed: std::sync::atomic::AtomicBool,
-            }
-
-            struct FailLaterBeforeWrite {
-                inner: Arc<Hooks>,
-                armed: std::sync::atomic::AtomicBool,
-            }
-
-            impl InputHooks for FailLaterBeforeWrite {
-                fn checkpoint(
-                    &self,
-                    boundary: InputBoundary,
-                    state: &InputCheckpoint,
-                    deadline: Instant,
-                ) -> Result<()> {
-                    let later_write =
-                        matches!(boundary, InputBoundary::BeforeWrite) && state.written_bytes > 0;
-                    self.inner.checkpoint(boundary, state, deadline)?;
-                    if later_write && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
-                        return Err(CafleetError::DeadlineExceeded);
-                    }
-                    Ok(())
-                }
-            }
-
-            fn later_checkpoint_failure(host: &mut Host) -> InputFailure {
-                loop {
-                    assert!(
-                        Instant::now() < host.until,
-                        "a later pre-write checkpoint fails after actual positive bytes"
-                    );
-                    host.drain();
-                    match host.try_advance() {
-                        Err(failure) => return failure,
-                        Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-                        Ok(Some(_)) => panic!("the later checkpoint retains its primary error"),
-                    }
-                }
-            }
-
-            fn exceptional_literal_stage(kind: storage::InputKind) -> Vec<u8> {
-                let mut bytes = Vec::new();
-                if kind == storage::InputKind::Exec {
-                    bytes.extend_from_slice(b"! ");
-                }
-                bytes.extend_from_slice(LITERAL.as_bytes());
-                bytes
-            }
-
-            fn exceptional_program(kind: storage::InputKind) -> Vec<u8> {
-                let mut bytes = exceptional_literal_stage(kind);
-                bytes.push(b'~');
-                bytes
-            }
-
-            fn exceptional_literal(
-                host: &mut Host,
-                kind: storage::InputKind,
-                short: Option<usize>,
-                deferred: bool,
-            ) -> (i64, i64) {
-                let mut input = request(host, "ordinary:exceptional-literal", LITERAL);
-                if kind == storage::InputKind::Exec {
-                    let InputControlOperation::SubmitPrompt(mut body) = input.operation else {
-                        panic!("the harness creates a prompt body")
-                    };
-                    body.input_kind = kind;
-                    input.operation = InputControlOperation::SubmitExec(body);
-                }
-                host.coordinator.services.hooks = Arc::new(FailLaterBeforeWrite {
-                    inner: host.hooks.clone(),
-                    armed: std::sync::atomic::AtomicBool::new(true),
-                });
-                host.pty.short = short;
-                let first = if deferred {
-                    form(host);
-                    Some(queued(host, input, "interaction_open"))
-                } else {
-                    assert!(host.handle(input).unwrap().is_none());
-                    None
-                };
-                if deferred {
-                    host.show(SCREEN.to_vec());
-                }
-                let literal = exceptional_literal_stage(kind);
-                let written = short.unwrap_or(literal.len());
-                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
-                    host,
-                    |host| host.pty.written.len() == written,
-                );
-                assert_eq!(host.pty.written, literal[..written]);
-                let id = host
-                    .coordinator
-                    .pending
-                    .as_ref()
-                    .unwrap()
-                    .input_id()
-                    .unwrap();
-                if let Some(first) = first {
-                    assert_eq!(id, first);
-                }
-                let next = queued(
-                    host,
-                    request(host, "prompt:after-exceptional-literal", LITERAL),
-                    "earlier_input",
-                );
-                let failure = later_checkpoint_failure(host);
-                assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
-                assert_eq!(failure.context.input_id, Some(id));
-                assert_eq!(failure.context.run_id, Some(host.fixture.run.run_id));
-                let failed = row(host, id);
-                assert_eq!(failed.state, storage::InputState::Uncertain);
-                assert_eq!(failed.stop_cause, Some(storage::StopCause::WriteFailed));
-                if !deferred {
-                    host.coordinator
-                        .set_queued_composer_busy_since(next, &old_wait());
-                    let since = host.coordinator.queue.front().unwrap().composer_busy_since;
-                    host.coordinator.finish_pending_attempt();
-                    host.coordinator.finish_pending_attempt();
-                    assert_eq!(
-                        host.coordinator.queue.front().unwrap().composer_busy_since,
-                        since
-                    );
-                }
-                assert_eq!(failed.disposition, None);
-                assert!(host.coordinator.pending.is_none());
-                assert_eq!(host.pty.offers.len(), 1);
-                assert_eq!(host.pty.offers[0], literal);
-                host.pty.short = None;
-                host.confirm_after_programs([encoded()]);
-                (id, next)
-            }
-
-            fn finish_after_exceptional_clear(host: &mut Host, first: i64, next: i64) {
-                let before = host.pty.written.clone();
-                let blocked = row(host, first);
-                host.show(SCREEN.to_vec());
-                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
-                    host,
-                    |host| row(host, next).state == storage::InputState::Accepted,
-                );
-                let delivered = row(host, next);
-                assert_eq!(delivered.disposition, None);
-                assert_eq!(
-                    delivered.delivery_method,
-                    Some(storage::DeliveryMethod::Profile)
-                );
-                assert_eq!(delivered.delivery_reason, None);
-                assert_eq!(host.pty.written, [before, encoded()].concat());
-                assert_eq!(
-                    host.pty.offers[1..],
-                    [LITERAL.as_bytes().to_vec(), b"~".to_vec()]
-                );
-                assert_eq!(row(host, first), blocked);
-            }
-
-            #[test]
-            fn exceptional_later_before_write_requires_fresh_empty_after_positive_literal_bytes() {
-                for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
-                    for short in [Some(3), None] {
-                        with_catalog_host(
-                            permission_configured("plain", Value::Null),
-                            exceptional_program(kind),
-                            |host| {
-                                let (first, next) = exceptional_literal(host, kind, short, true);
-                                let before = host.pty.written.clone();
-                                for _ in 0..64 {
-                                    let _ = turn(host);
-                                }
-                                assert_eq!(row(host, next).state, storage::InputState::Ready);
-                                assert_eq!(
-                                    host.pty.written, before,
-                                    "the stale empty frame grants no write"
-                                );
-                                assert_eq!(host.pty.offers.len(), 1);
-                                finish_after_exceptional_clear(host, first, next);
-                            },
-                        );
-                    }
-                }
-            }
-
-            #[test]
-            fn exceptional_later_before_write_holds_nonempty_composer_past_idle_bound_and_stalls() {
-                for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
-                    for short in [Some(3), None] {
-                        with_catalog_host(
-                            permission_configured("plain", Value::Null),
-                            exceptional_program(kind),
-                            |host| {
-                                let (first, next) = exceptional_literal(host, kind, short, true);
-                                host.show(DRAFT.to_vec());
-                                host.coordinator
-                                    .set_queued_composer_busy_since(next, &old_wait());
-                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, next);
-                                let before = host.pty.written.clone();
-                                for _ in 0..64 {
-                                    let _ = turn(host);
-                                }
-                                assert_eq!(row(host, next).state, storage::InputState::Ready);
-                                assert_eq!(
-                                    host.pty.written, before,
-                                    "held CAFleet text outlives the idle fallback bound"
-                                );
-                                assert_eq!(host.pty.offers.len(), 1);
-                                crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until(
-                                host,
-                                |host| host.fixture.conn.query_row(
-                                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
-                                    rusqlite::params![host.fixture.run.run_id, next],
-                                    |row| row.get::<_, i64>(0),
-                                ).unwrap() > 0,
-                            );
-                                let payloads = host.fixture.conn.prepare(
-                                "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2",
-                            ).unwrap().query_map(rusqlite::params![host.fixture.run.run_id, next], |row| row.get::<_, String>(0))
-                                .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-                                assert_eq!(payloads.len(), 1);
-                                let event: Value = serde_json::from_str(&payloads[0]).unwrap();
-                                assert_eq!(event["blocking_input_id"], first);
-                                assert_eq!(event["input_id"], next);
-                                assert_eq!(event["message_id"], Value::Null);
-                                assert_eq!(host.pty.written, before);
-                                finish_after_exceptional_clear(host, first, next);
-                            },
-                        );
-                    }
-                }
-            }
-
-            #[test]
-            fn exceptional_later_before_write_immediate_retirement_preserves_the_hold_and_timer() {
-                for kind in [storage::InputKind::Prompt, storage::InputKind::Exec] {
-                    for short in [Some(3), None] {
-                        crate::runtime::input::tests::ordinary_prompt::composer_busy::with_busy_host(
-                            permission_configured("plain", Value::Null),
-                            exceptional_program(kind),
-                            |host| {
-                                let (first, next) = exceptional_literal(host, kind, short, false);
-                                let mut reconcile = host.request("receipt:exceptional-literal");
-                                reconcile.operation =
-                                    InputControlOperation::Receipt(ReceiptAction::Reconcile {
-                                        input_id: first,
-                                        expected: storage::InputState::Uncertain,
-                                        disposition: storage::InputDisposition::AbandonedUncertain,
-                                        evidence_ref:
-                                            "synthetic:positive-literal-later-before-write-failure"
-                                                .into(),
-                                    });
-                                assert!(
-                                    matches!(host.handle(reconcile).unwrap(), Some(InputControlReply::Receipt(ReceiptReply::Settled { input_id })) if input_id == first)
-                                );
-                                let abandoned = row(host, first);
-                                assert_eq!(abandoned.state, storage::InputState::Settled);
-                                assert_eq!(
-                                    abandoned.disposition,
-                                    Some(storage::InputDisposition::AbandonedUncertain)
-                                );
-                                let before = host.pty.written.clone();
-                                for _ in 0..64 {
-                                    let _ = turn(host);
-                                }
-                                assert_eq!(row(host, next).state, storage::InputState::Ready);
-                                assert_eq!(host.pty.written, before);
-                                assert_eq!(host.pty.offers.len(), 1);
-                                host.show(DRAFT.to_vec());
-                                let since =
-                                    host.coordinator.queue.front().unwrap().composer_busy_since;
-                                for _ in 0..64 {
-                                    let _ = turn(host);
-                                }
-                                assert_eq!(
-                                    host.coordinator.queue.front().unwrap().composer_busy_since,
-                                    since
-                                );
-                                assert_eq!(row(host, next).state, storage::InputState::Ready);
-                                assert_eq!(host.pty.written, before);
-                                assert_eq!(host.pty.offers.len(), 1);
-                                finish_after_exceptional_clear(host, first, next);
-                                assert_eq!(row(host, first), abandoned);
-                            },
-                        );
-                    }
-                }
             }
 
             impl InputHooks for FailAfterWrite {
@@ -8099,7 +6992,6 @@ mod tests {
                 assert_eq!(input.state, storage::InputState::Uncertain);
                 assert_eq!(input.stop_cause, Some(storage::StopCause::WriteFailed));
                 assert_eq!(input.disposition, None);
-                assert_eq!(input.left_stage, None);
             }
 
             #[test]
@@ -8242,50 +7134,6 @@ mod tests {
             }
 
             #[test]
-            fn redelivery_is_inserted_ahead_of_input_already_queued_at_the_stop() {
-                with_host(|host| {
-                    host.confirm_submissions = false;
-                    let message = host.message("redelivery preserves message order");
-                    let literal = canonical_preview(&message);
-                    host.pty.expect_program(program(&literal, false));
-                    assert!(
-                        host.handle(preview_request(host, &message, &literal))
-                            .unwrap()
-                            .is_none()
-                    );
-                    until_written(host, literal.len());
-                    let later = queued(
-                        host,
-                        request(host, "prompt:already-queued", LITERAL),
-                        "earlier_input",
-                    );
-                    host.show(DRAFT.to_vec());
-                    host.type_human(b"x");
-                    let reply = finish(host, false);
-                    assert_left(
-                        host,
-                        &reply,
-                        storage::StopCause::ManualInput,
-                        storage::LeftStage::LiteralComplete,
-                    );
-                    let next = storage::find_latest_preview_input(
-                        &host.fixture.conn,
-                        host.fixture.run.run_id,
-                        message.message_id,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    let order = host
-                        .coordinator
-                        .queue
-                        .iter()
-                        .map(|input| input.input_id)
-                        .collect::<Vec<_>>();
-                    assert_eq!(order, [next.input_id, later]);
-                });
-            }
-
-            #[test]
             fn verified_fifo_advances_past_uncertain_and_holds_the_following_ordinary_head() {
                 with_catalog_host(
                     configured("plain", Value::Null),
@@ -8328,93 +7176,23 @@ mod tests {
             }
 
             #[test]
-            fn clearing_the_held_composer_restores_the_human_draft_idle_timeout_rule() {
-                with_catalog_host(
-                    configured("plain", Value::Null),
-                    program("あxx", false),
-                    |host| {
-                        host.pty.short = Some(1);
-                        start(host, "prompt:clear-held", "あxx");
-                        until_written(host, 1);
-                        host.show(DRAFT.to_vec());
-                        host.type_human(b"x");
-                        let reply = finish(host, false);
-                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
-                        host.pty.short = None;
-                        host.show(SCREEN.to_vec());
-                        let _ = turn(host);
-                        host.show(DRAFT.to_vec());
-                        let later = queued(
-                            host,
-                            request(host, "prompt:human-draft-after-clear", LITERAL),
-                            "composer_busy",
-                        );
-                        host.coordinator
-                            .set_queued_composer_busy_since(later, &old_wait());
-                        let before = host.pty.written.len();
-                        until_written(host, before + 1);
-                        let input = row(host, later);
-                        assert_eq!(
-                            input.delivery_method,
-                            Some(storage::DeliveryMethod::Fallback)
-                        );
-                        assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
-                        assert_eq!(host.pty.offers.last().unwrap(), b"\x1b");
-                    },
-                );
-            }
-
-            #[test]
-            fn held_composer_time_behind_an_interaction_publishes_no_stalled_event() {
-                with_catalog_host(
-                    permission_configured("plain", Value::Null),
-                    encoded(),
-                    |host| {
-                        let (message, _) = stopped_preview(host, false);
-                        let waiting = storage::find_latest_preview_input(
-                            &host.fixture.conn,
-                            host.fixture.run.run_id,
-                            message.message_id,
-                        )
-                        .unwrap()
-                        .unwrap();
-                        host.coordinator
-                            .set_queued_composer_busy_since(waiting.input_id, &old_wait());
-                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::backdate_head_since(host, waiting.input_id);
-                        form(host);
-                        for _ in 0..64 {
-                            let _ = turn(host);
-                        }
-                        let count: i64 = host.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.input_id')=?2", rusqlite::params![host.fixture.run.run_id,waiting.input_id], |row| row.get(0)).unwrap();
-                        assert_eq!(count, 0);
-                        assert_eq!(
-                            row(host, waiting.input_id).state,
-                            storage::InputState::Ready
-                        );
-                    },
-                );
-            }
-
-            #[test]
-            fn nonverified_runs_keep_uncertain_fifo_heads_and_create_no_redelivery() {
+            fn a_nonverified_run_keeps_the_fifo_stopped_behind_an_uncertain_prompt() {
                 let catalog = configured("plain", Value::Null).without_submission(
                     crate::coding_agent::CodingAgent::Codex,
                     ComposerOperation::Prompt,
                 );
                 with_catalog_host(catalog, encoded(), |host| {
                     host.confirm_submissions = false;
-                    let message = host.message("legacy unverified preview");
-                    let literal = canonical_preview(&message);
                     let mut bytes = b"\x1b".to_vec();
-                    bytes.extend_from_slice(literal.as_bytes());
+                    bytes.extend_from_slice(LITERAL.as_bytes());
                     bytes.push(b'\r');
                     host.pty.expect_program(bytes);
                     assert!(
-                        host.handle(preview_request(host, &message, &literal))
+                        host.handle(request(host, "prompt:legacy-uncertain", LITERAL))
                             .unwrap()
                             .is_none()
                     );
-                    until_written(host, 1 + literal.len());
+                    until_written(host, 1 + LITERAL.len());
                     let later = queued(
                         host,
                         request(host, "prompt:legacy-fifo", LITERAL),
@@ -8425,51 +7203,11 @@ mod tests {
                     assert_eq!(reply.status, SubmissionStatus::Uncertain);
                     let input = stored(host, &reply);
                     assert_eq!(input.stop_cause, Some(storage::StopCause::ManualInput));
-                    assert_eq!(input.left_stage, None);
-                    let latest = storage::find_latest_preview_input(
-                        &host.fixture.conn,
-                        host.fixture.run.run_id,
-                        message.message_id,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    assert_eq!(latest.input_id, input.input_id);
-                    assert_eq!(latest.preview_attempt, Some(1));
                     let written = host.pty.written.clone();
                     for _ in 0..64 {
                         let _ = turn(host);
                     }
                     assert_eq!(row(host, later).state, storage::InputState::Ready);
-                    assert_eq!(host.pty.written, written);
-                });
-            }
-
-            #[test]
-            fn an_inactive_target_cancels_the_waiting_preview_without_writing() {
-                with_host(|host| {
-                    let (message, _) = stopped_preview(host, false);
-                    let waiting = storage::find_latest_preview_input(
-                        &host.fixture.conn,
-                        host.fixture.run.run_id,
-                        message.message_id,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    let written = host.pty.written.clone();
-                    host.fixture
-                        .conn
-                        .execute(
-                            "UPDATE members SET status='deregistered' WHERE member_id=?1",
-                            [host.fixture.run.member_id],
-                        )
-                        .unwrap();
-                    let _ = host.try_advance();
-                    let input = row(host, waiting.input_id);
-                    assert_eq!(
-                        input.disposition,
-                        Some(storage::InputDisposition::NotSubmitted)
-                    );
-                    assert_eq!(input.delivery_reason.as_deref(), Some("target_inactive"));
                     assert_eq!(host.pty.written, written);
                 });
             }
@@ -8587,23 +7325,17 @@ mod tests {
                     until_literal_written(host, prompt_request(host, "prompt:human-race"));
                     host.type_human(b"h");
                     let reply = finish_after_interruption(host);
-                    assert_eq!(reply.status, SubmissionStatus::LeftInComposer);
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
                     assert_eq!(reply.stage, SubmissionStage::LiteralComplete);
                     assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
                     let id = reply.input_id.unwrap();
                     let stored = storage::get_input(&host.fixture.conn, id).unwrap();
-                    assert_eq!(stored.state, storage::InputState::Settled);
-                    assert_eq!(
-                        stored.disposition,
-                        Some(storage::InputDisposition::LeftInComposer)
-                    );
-                    assert_eq!(stored.left_stage, Some(storage::LeftStage::LiteralComplete));
+                    assert_eq!(stored.state, storage::InputState::Uncertain);
                     assert_eq!(stored.stop_cause, Some(storage::StopCause::ManualInput));
-                    assert_eq!(reply.reason.as_deref(), Some("manual_input"));
                     assert_eq!(
                         delivery_selection(host, id),
                         (Some("profile".into()), None),
-                        "the selected method survives the settled left outcome"
+                        "the selected method survives the uncertain outcome"
                     );
                 });
             }
@@ -8692,11 +7424,6 @@ mod tests {
                         "{row:?}"
                     );
                     assert!(row.has_stalled_blocker_provenance(), "{row:?}");
-                    assert_eq!(
-                        host.coordinator.held_composer.map(|(blocker, _)| blocker),
-                        Some(input_id),
-                        "the written attempt still holds the composer"
-                    );
                 }
 
                 #[test]
@@ -8784,16 +7511,10 @@ mod tests {
                     reply: &SubmissionResult,
                     cause: storage::StopCause,
                 ) {
-                    assert_eq!(reply.status, SubmissionStatus::LeftInComposer, "{cause:?}");
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain, "{cause:?}");
                     assert_eq!(reply.stage, SubmissionStage::LiteralComplete, "{cause:?}");
-                    assert_eq!(reply.reason.as_deref(), Some(cause.as_str()));
                     let row = stored(host, reply);
-                    assert_eq!(row.state, storage::InputState::Settled);
-                    assert_eq!(
-                        row.disposition,
-                        Some(storage::InputDisposition::LeftInComposer)
-                    );
-                    assert_eq!(row.left_stage, Some(storage::LeftStage::LiteralComplete));
+                    assert_eq!(row.state, storage::InputState::Uncertain);
                     assert_eq!(row.stop_cause, Some(cause));
                     assert_eq!(
                         host.pty.stage_bytes(),
@@ -9357,194 +8078,6 @@ mod tests {
                 });
             }
 
-            #[test]
-            fn queued_preview_consumed_before_its_drain_settles_not_submitted_without_typing() {
-                with_permission_host(Duration::from_secs(8), |host| {
-                    let message = host.message("queued preview body");
-                    form(host);
-                    let request = preview_request(host, &message, &canonical_preview(&message));
-                    let id = queued(host, request, "interaction_open");
-                    assert!(
-                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
-                            .unwrap()
-                            .iter()
-                            .any(|consumed| consumed.message_id == message.message_id)
-                    );
-                    close(host);
-                    turns_until(host, |host| {
-                        row(host, id).state == storage::InputState::Settled
-                    });
-                    assert_not_submitted(host, id, "message_consumed");
-                    assert!(host.pty.offers.is_empty());
-                    let notified: Option<String> = host
-                        .fixture
-                        .conn
-                        .query_row(
-                            "SELECT notified_at FROM messages WHERE message_id=?1",
-                            [message.message_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap();
-                    assert!(notified.is_none());
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(
-                        result_events(host, id),
-                        0,
-                        "a preview consumed by poll publishes no delivery result"
-                    );
-                });
-            }
-
-            /// Lets each screen reach the controller, then outlives the drain deadline, as a slow
-            /// observer callback does while injected keystrokes keep the child echoing.
-            pub(in crate::runtime::input) struct ExpiringObserver<O> {
-                pub(in crate::runtime::input) inner: O,
-                pub(in crate::runtime::input) deadline: Instant,
-            }
-            impl<O: crate::runtime::transport::ScreenObserver>
-                crate::runtime::transport::ScreenObserver for ExpiringObserver<O>
-            {
-                fn observe(&mut self, screen: &crate::runtime::ScreenSnapshot) -> Result<()> {
-                    let observed = self.inner.observe(screen);
-                    std::thread::sleep(
-                        self.deadline.saturating_duration_since(Instant::now())
-                            + Duration::from_millis(1),
-                    );
-                    observed
-                }
-                fn input_health(&self) -> crate::runtime::ObservationHealth {
-                    self.inner.input_health()
-                }
-                fn parser_failure(&mut self) -> Result<()> {
-                    self.inner.parser_failure()
-                }
-            }
-
-            /// `complete_pending_input` on a written immediate attempt whose drain deadline expires
-            /// inside the observer callback.
-            fn fail_pending_drain_mid_observation(host: &mut Host) {
-                host.child_output(b"echo of injected keys");
-                let deadline = Instant::now() + Duration::from_millis(30);
-                let drained =
-                    host.coordinator
-                        .progress_with_manual(&mut host.transport, |transport| {
-                            transport.quiesce_for_input(
-                                &mut host.human,
-                                &mut host.pty,
-                                &mut host.output,
-                                &mut ExpiringObserver {
-                                    inner: host.controller.observer(
-                                        &host.writer,
-                                        &crate::runtime::RealObservationClock,
-                                    ),
-                                    deadline,
-                                },
-                                deadline,
-                            )
-                        });
-                let failure = drained.expect_err("the pre-write drain fails at its deadline");
-                let _reply = host.coordinator.pending_attempt_failed(
-                    &mut host.fixture.conn,
-                    &host.controller,
-                    failure,
-                );
-                host.coordinator.finish_pending_attempt();
-            }
-
-            /// One `tick_running` turn with no client attempt in flight: the transport tick, the
-            /// observation poll, then the queue turn, which advances only on a quiescent drain.
-            fn queue_turn(host: &mut Host) {
-                host.coordinator
-                    .progress_with_manual(&mut host.transport, |transport| {
-                        transport.tick(
-                            &mut host.human,
-                            &mut host.pty,
-                            &mut host.output,
-                            &mut host
-                                .controller
-                                .observer(&host.writer, &crate::runtime::RealObservationClock),
-                        )
-                    })
-                    .unwrap();
-                host.controller
-                    .poll(
-                        &host.transport.snapshot(),
-                        &host.writer,
-                        &crate::runtime::RealObservationClock,
-                    )
-                    .unwrap();
-                if matches!(host.quiesce_once(), InputDrain::Quiescent) {
-                    let _ = host.try_advance();
-                }
-            }
-
-            #[test]
-            fn run_34_a_deadline_expired_immediate_write_releases_its_consumed_queued_head() {
-                with_permission_host(Duration::from_secs(30), |host| {
-                    assert!(
-                        host.handle(host.request("prompt:run-34-blocker"))
-                            .unwrap()
-                            .is_none()
-                    );
-                    while host.pty.stages.is_empty() {
-                        assert!(
-                            Instant::now() < host.until,
-                            "the blocker's literal is written"
-                        );
-                        host.drain();
-                        assert!(host.advance().is_none());
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    let blocker = host.hooks.input_id();
-                    fail_pending_drain_mid_observation(host);
-                    let blocking = row(host, blocker);
-                    assert_eq!(blocking.state, storage::InputState::Uncertain);
-                    assert_eq!(blocking.stop_cause, Some(storage::StopCause::WriteFailed));
-
-                    let message = host.message("queued behind the blocker");
-                    let request = preview_request(host, &message, &canonical_preview(&message));
-                    let head = queued(host, request, "earlier_input");
-                    let offers = host.pty.offers.len();
-                    assert!(matches!(
-                        host.receipt(crate::runtime::ReceiptAction::Reconcile {
-                            input_id: blocker,
-                            expected: storage::InputState::Uncertain,
-                            disposition: storage::InputDisposition::Submitted,
-                            evidence_ref: "audit:pane-shows-submitted".into(),
-                        })
-                        .unwrap(),
-                        InputControlReply::Receipt(crate::runtime::ReceiptReply::Settled {
-                            input_id
-                        }) if input_id == blocker
-                    ));
-                    assert!(
-                        crate::broker::poll_messages(&host.fixture.conn, message.to_member_id)
-                            .unwrap()
-                            .iter()
-                            .any(|consumed| consumed.message_id == message.message_id)
-                    );
-
-                    host.child_output(SCREEN);
-                    let bound = Instant::now() + Duration::from_secs(3);
-                    while row(host, head).state == storage::InputState::Ready {
-                        assert!(
-                            Instant::now() < bound,
-                            "the consumed head is released; drain blocker {:?}",
-                            host.transport.drain_blocker()
-                        );
-                        queue_turn(host);
-                        std::thread::sleep(Duration::from_millis(100));
-                    }
-                    assert_not_submitted(host, head, "message_consumed");
-                    assert_eq!(
-                        host.pty.offers.len(),
-                        offers,
-                        "the consumed preview is never typed"
-                    );
-                    assert_eq!(result_events(host, head), 0);
-                });
-            }
-
             fn queued_ids(host: &Host) -> Vec<i64> {
                 host.coordinator
                     .queue
@@ -10103,126 +8636,6 @@ mod tests {
             }
 
             #[test]
-            fn a_preview_attempt_deadline_with_a_busy_pane_lock_settles_not_submitted_without_publishing()
-             {
-                with_permission_host(Duration::from_secs(30), |host| {
-                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
-                    let message = host.message("preview behind a busy pane lock");
-                    form(host);
-                    let preview = queued(
-                        host,
-                        preview_request(host, &message, &canonical_preview(&message)),
-                        "interaction_open",
-                    );
-                    let prompt = queued(
-                        host,
-                        host.request("prompt:busy-control"),
-                        "interaction_open",
-                    );
-                    let _held = PaneLock::try_acquire(&url, &host.placement())
-                        .unwrap()
-                        .unwrap();
-                    close(host);
-                    turns_until(host, |host| {
-                        row(host, prompt).state == storage::InputState::Settled
-                    });
-                    assert_not_submitted(host, preview, "pane_input_busy");
-                    assert_not_submitted(host, prompt, "pane_input_busy");
-                    turns_until(host, |host| result_events(host, prompt) == 1);
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(
-                        result_events(host, preview),
-                        0,
-                        "the transient preview outcome publishes nothing; the sweep retries it"
-                    );
-                    assert_eq!(result_events(host, prompt), 1, "a prompt still publishes");
-                    assert!(host.pty.offers.is_empty());
-                });
-            }
-
-            #[test]
-            fn a_preview_whose_target_changed_still_publishes_its_delivery_result() {
-                with_permission_host(Duration::from_secs(60), |host| {
-                    let message = host.message("preview for a moved target");
-                    form(host);
-                    let id = queued(
-                        host,
-                        preview_request(host, &message, &canonical_preview(&message)),
-                        "interaction_open",
-                    );
-                    host.fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
-                            [host.fixture.run.member_id],
-                        )
-                        .unwrap();
-                    close(host);
-                    turns_until(host, |host| settled(host, id));
-                    assert_not_submitted(host, id, "target_changed");
-                    turns_until(host, |host| result_events(host, id) > 0);
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(result_events(host, id), 1, "the result is published once");
-                });
-            }
-
-            #[test]
-            fn orderly_shutdown_settles_a_queued_preview_runner_stopped_without_publishing() {
-                with_permission_host(Duration::from_secs(30), |host| {
-                    let message = host.message("preview queued at shutdown");
-                    form(host);
-                    let preview = queued(
-                        host,
-                        preview_request(host, &message, &canonical_preview(&message)),
-                        "interaction_open",
-                    );
-                    let prompt = queued(
-                        host,
-                        host.request("prompt:shutdown-control"),
-                        "interaction_open",
-                    );
-                    let settled = shut_down(host);
-                    assert_eq!(settled, vec![preview, prompt]);
-                    assert_not_submitted(host, preview, "runner_stopped");
-                    assert_not_submitted(host, prompt, "runner_stopped");
-                    assert_eq!(result_events(host, prompt), 1, "a prompt still publishes");
-                    assert_eq!(
-                        result_events(host, preview),
-                        0,
-                        "the next run's sweep retries the still-pending message"
-                    );
-                    assert!(host.pty.offers.is_empty());
-                });
-            }
-
-            #[test]
-            fn preview_receipts_use_the_canonical_digest_and_reject_another_literal() {
-                with_permission_host(Duration::from_secs(5), |host| {
-                    let message = host.message("digest preview body");
-                    form(host);
-                    let other = preview_request(host, &message, "not the canonical preview");
-                    assert!(host.handle(other).is_err());
-                    let canonical = canonical_preview(&message);
-                    let id = queued(
-                        host,
-                        preview_request(host, &message, &canonical),
-                        "interaction_open",
-                    );
-                    let input = row(host, id);
-                    let expected = storage::input_payload_digest(
-                        host.fixture.run.run_id,
-                        &SubmitInput {
-                            operation_key: input.operation_key.clone(),
-                            input_kind: storage::InputKind::Preview,
-                            message_id: Some(message.message_id),
-                            literal: canonical,
-                        },
-                    );
-                    assert_eq!(input.payload_digest, expected);
-                });
-            }
-
-            #[test]
             fn queue_orderly_shutdown_settles_queued_work_not_submitted_without_bytes() {
                 with_permission_host(Duration::from_secs(5), |host| {
                     form(host);
@@ -10334,7 +8747,7 @@ mod tests {
             }
 
             #[test]
-            fn queued_stopped_inputs_publish_once_and_resume_after_the_composer_empties() {
+            fn queued_stopped_inputs_publish_once_and_resume_only_after_reconciliation() {
                 for case in [
                     "write_failure",
                     "human_input_after_the_settle",
@@ -10355,12 +8768,7 @@ mod tests {
                             }
                             _ => host.type_human(b"h"),
                         }
-                        let target = if case == "write_failure" {
-                            storage::InputState::Uncertain
-                        } else {
-                            storage::InputState::Settled
-                        };
-                        while row(host, first).state != target {
+                        while row(host, first).state != storage::InputState::Uncertain {
                             assert!(
                                 Instant::now() < host.until,
                                 "{case}: the head records its stopped outcome"
@@ -10400,19 +8808,18 @@ mod tests {
                             "{case}: the published cause is the receipt's"
                         );
                         assert_eq!(row(host, next).state, storage::InputState::Ready, "{case}");
-                        if case == "write_failure" {
-                            reconcile(host, first);
-                        } else {
-                            assert_eq!(
-                                row(host, first).disposition,
-                                Some(storage::InputDisposition::LeftInComposer)
-                            );
-                            assert_eq!(
-                                row(host, first).left_stage,
-                                Some(storage::LeftStage::LiteralComplete)
-                            );
-                        }
                         host.show(SCREEN.to_vec());
+                        let offers = host.pty.offers.len();
+                        crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(
+                            host,
+                        );
+                        assert_eq!(
+                            row(host, next).state,
+                            storage::InputState::Ready,
+                            "{case}: a verified empty composer leaves the FIFO stopped"
+                        );
+                        assert_eq!(host.pty.offers.len(), offers, "{case}");
+                        reconcile(host, first);
                         turns_until(host, |host| settled(host, next));
                         assert_eq!(
                             host.pty.offers[host.pty.offers.len() - 2..],
@@ -10422,151 +8829,6 @@ mod tests {
                         assert_eq!(result_events(host, first), 1, "{case}");
                     });
                 }
-            }
-
-            #[test]
-            fn preview_after_an_uncertain_head_waits_for_a_verified_empty_composer() {
-                with_permission_host(Duration::from_secs(60), |host| {
-                    form(host);
-                    let head = queued(
-                        host,
-                        host.request("prompt:uncertain-head"),
-                        "interaction_open",
-                    );
-                    close(host);
-                    until_head_literal(host);
-                    host.pty.failure = Some(io::ErrorKind::BrokenPipe);
-                    while row(host, head).state != storage::InputState::Uncertain {
-                        assert!(Instant::now() < host.until, "the head becomes uncertain");
-                        host.drain();
-                        if let Err(failure) = host.try_advance() {
-                            assert!(
-                                failure
-                                    .source
-                                    .message()
-                                    .contains("injected PTY write failure"),
-                                "{failure:?}"
-                            );
-                        }
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    host.pty.failure = None;
-                    let offers = host.pty.offers.len();
-                    let message = host.message("preview behind an uncertain head");
-                    let canonical = canonical_preview(&message);
-                    let preview = queued(
-                        host,
-                        preview_request(host, &message, &canonical),
-                        "earlier_input",
-                    );
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(
-                        host.pty.offers.len(),
-                        offers,
-                        "the preview receives zero bytes while the composer holds the stopped input: {:?}",
-                        &host.pty.offers[offers..]
-                    );
-                    assert_eq!(row(host, preview).state, storage::InputState::Ready);
-                    reconcile(host, head);
-                    host.show(SCREEN.to_vec());
-                    turns_until(host, |host| settled(host, preview));
-                    assert_eq!(
-                        host.pty.offers[offers..],
-                        [canonical.into_bytes(), b"~".to_vec()]
-                    );
-                });
-            }
-
-            #[test]
-            fn accepted_preview_stamp_failure_is_retried_and_published_once_without_retyping() {
-                use std::sync::Arc;
-                use std::sync::Mutex;
-                with_permission_host(Duration::from_secs(60), |host| {
-                    let message = host.message("preview whose stamp is busy once");
-                    let canonical = canonical_preview(&message);
-                    host.confirm_after_programs([[canonical.as_bytes(), b"~"].concat()]);
-                    form(host);
-                    let id = queued(
-                        host,
-                        preview_request(host, &message, &canonical),
-                        "interaction_open",
-                    );
-                    let blocker = Arc::new(Mutex::new((
-                        rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap(),
-                        None::<Instant>,
-                    )));
-                    let observer = blocker.clone();
-                    host.fixture
-                        .conn
-                        .authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
-                            if matches!(
-                                context.action,
-                                rusqlite::hooks::AuthAction::Transaction {
-                                    operation: rusqlite::hooks::TransactionOperation::Begin
-                                }
-                            ) {
-                                let mut held = observer.lock().unwrap();
-                                let state: String = held
-                                    .0
-                                    .query_row(
-                                        "SELECT state FROM member_input_operations WHERE input_id=?1",
-                                        [id],
-                                        |row| row.get(0),
-                                    )
-                                    .unwrap();
-                                if held.1.is_none() && state == "accepted" {
-                                    held.0.execute_batch("BEGIN IMMEDIATE").unwrap();
-                                    held.1 = Some(Instant::now());
-                                }
-                            }
-                            rusqlite::hooks::Authorization::Allow
-                        }))
-                        .unwrap();
-                    close(host);
-                    let stamp = |host: &Host| -> Option<String> {
-                        host.fixture
-                            .conn
-                            .query_row(
-                                "SELECT notified_at FROM messages WHERE message_id=?1",
-                                [message.message_id],
-                                |row| row.get(0),
-                            )
-                            .unwrap()
-                    };
-                    let mut released = false;
-                    while stamp(host).is_none() || result_events(host, id) == 0 {
-                        assert!(
-                            Instant::now() < host.until,
-                            "the stamp and result follow once storage recovers"
-                        );
-                        if !released {
-                            let held = blocker.lock().unwrap();
-                            if held
-                                .1
-                                .is_some_and(|since| since.elapsed() > Duration::from_millis(1200))
-                            {
-                                held.0.execute_batch("ROLLBACK").unwrap();
-                                released = true;
-                            }
-                        }
-                        host.drain();
-                        host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    assert!(
-                        released,
-                        "storage was busy for the accepted preview's stamp"
-                    );
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(result_events(host, id), 1, "the result is published once");
-                    assert_eq!(row(host, id).state, storage::InputState::Settled);
-                    assert_eq!(
-                        host.pty.offers,
-                        vec![canonical.into_bytes(), b"~".to_vec()],
-                        "the preview is typed once"
-                    );
-                    assert!(!host.coordinator.input_fenced);
-                });
             }
 
             #[test]
@@ -10609,52 +8871,6 @@ mod tests {
                         host.pty.offers,
                         vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()],
                         "the requeued input drains once after closure"
-                    );
-                });
-            }
-
-            #[test]
-            fn preview_queued_behind_a_left_immediate_attempt_waits_for_a_verified_empty_composer()
-            {
-                with_permission_host(Duration::from_secs(60), |host| {
-                    let first = host.request("prompt:immediate-uncertain");
-                    assert!(host.handle(first).unwrap().is_none());
-                    let message = host.message("preview behind an immediate attempt");
-                    let canonical = canonical_preview(&message);
-                    let preview = queued(
-                        host,
-                        preview_request(host, &message, &canonical),
-                        "earlier_input",
-                    );
-                    until_head_literal(host);
-                    host.type_human(b"h");
-                    let reply = loop {
-                        assert!(Instant::now() < host.until, "the immediate attempt replies");
-                        host.drain();
-                        if let Some(reply) = host.advance() {
-                            break submitted(reply);
-                        }
-                        std::thread::sleep(Duration::from_millis(5));
-                    };
-                    assert_eq!(reply.status, SubmissionStatus::LeftInComposer);
-                    assert_eq!(
-                        row(host, reply.input_id.unwrap()).left_stage,
-                        Some(storage::LeftStage::LiteralComplete)
-                    );
-                    let offers = host.pty.offers.len();
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(
-                        host.pty.offers.len(),
-                        offers,
-                        "the queued preview receives zero bytes: {:?}",
-                        &host.pty.offers[offers..]
-                    );
-                    assert_eq!(row(host, preview).state, storage::InputState::Ready);
-                    host.show(SCREEN.to_vec());
-                    turns_until(host, |host| settled(host, preview));
-                    assert_eq!(
-                        host.pty.offers[offers..],
-                        [canonical.into_bytes(), b"~".to_vec()]
                     );
                 });
             }
@@ -10984,148 +9200,6 @@ mod tests {
             }
         }
 
-        mod method_rendering {
-            use crate::broker::runtime::DeliveryMethod;
-            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued;
-            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::row;
-            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until;
-            use crate::runtime::input::tests::ordinary_prompt::*;
-
-            const UNCLASSIFIED: &[u8] = b"\x1b[2J\x1b[1;1Hworking on something";
-
-            fn planless_catalog() -> ProfileCatalog {
-                prompt_plan_catalog(&catalog_definition()).without_submission(
-                    crate::coding_agent::CodingAgent::Codex,
-                    crate::coding_agent::ComposerOperation::Prompt,
-                )
-            }
-
-            fn fallback_preview(canonical: &str) -> Vec<u8> {
-                let mut bytes = b"\x1b".to_vec();
-                bytes.extend_from_slice(
-                    crate::delivery::fallback_preview_line(canonical).as_bytes(),
-                );
-                bytes.push(b'\r');
-                bytes
-            }
-
-            fn preview_digest(host: &Host, message: i64, canonical: &str) -> String {
-                storage::input_payload_digest(
-                    host.fixture.run.run_id,
-                    &SubmitInput {
-                        operation_key: crate::broker::runtime::preview_operation_key(
-                            host.fixture.run.run_id,
-                            message,
-                            1,
-                        )
-                        .unwrap(),
-                        input_kind: storage::InputKind::Preview,
-                        message_id: Some(message),
-                        literal: canonical.into(),
-                    },
-                )
-            }
-
-            #[test]
-            fn method_rendering_fallback_preview_appends_the_dismissal_clause_outside_its_digest() {
-                with_catalog_host(planless_catalog(), Vec::new(), |host| {
-                    let message = host.message("fallback preview body");
-                    let canonical = canonical_preview(&message);
-                    host.pty.expect_program(fallback_preview(&canonical));
-                    let reply = settle(host, preview_request(host, &message, &canonical));
-                    assert_eq!(reply.status, SubmissionStatus::Accepted);
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![
-                            b"\x1b".to_vec(),
-                            crate::delivery::fallback_preview_line(&canonical).into_bytes(),
-                            b"\r".to_vec()
-                        ]
-                    );
-                    let input =
-                        storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
-                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
-                    assert_eq!(
-                        input.delivery_reason.as_deref(),
-                        Some("submission_plan_unavailable")
-                    );
-                    assert_eq!(
-                        input.payload_digest,
-                        preview_digest(host, message.message_id, &canonical)
-                    );
-                });
-            }
-
-            #[test]
-            fn method_rendering_queued_fallback_keeps_one_input_id_across_composer_changes_and_retries()
-             {
-                with_catalog_host(catalog(), Vec::new(), |host| {
-                    let message = host.message("queued fallback body");
-                    let canonical = canonical_preview(&message);
-                    host.pty.expect_program(fallback_preview(&canonical));
-                    host.show(UNCLASSIFIED.to_vec());
-                    let id = queued(
-                        host,
-                        preview_request(host, &message, &canonical),
-                        "composer_busy",
-                    );
-                    let digest = row(host, id).payload_digest;
-                    host.show(b"\x1b[2J\x1b[1;1Hstill working".to_vec());
-                    let repeated = submitted(
-                        host.handle(preview_request(host, &message, &canonical))
-                            .unwrap()
-                            .expect("a repeated preview key replies from its receipt"),
-                    );
-                    assert_eq!(repeated.input_id, Some(id));
-                    assert!(host.pty.offers.is_empty());
-                    let expired = crate::time::format_utc(
-                        chrono::Utc::now() - chrono::Duration::seconds(181),
-                    );
-                    host.coordinator
-                        .set_queued_composer_busy_since(id, &expired);
-                    turns_until(host, |host| {
-                        matches!(
-                            row(host, id).state,
-                            storage::InputState::Accepted | storage::InputState::Settled
-                        )
-                    });
-                    host.show(SCREEN.to_vec());
-                    let after = submitted(
-                        host.handle(preview_request(host, &message, &canonical))
-                            .unwrap()
-                            .expect("a submitted preview key replies without typing"),
-                    );
-                    assert_eq!(after.input_id, Some(id));
-                    assert_eq!(after.status, SubmissionStatus::Accepted);
-                    for _ in 0..20 {
-                        host.drain();
-                        host.advance();
-                    }
-                    assert_eq!(host.pty.program, vec![fallback_preview(&canonical)]);
-                    let input = row(host, id);
-                    assert_eq!(
-                        input.payload_digest, digest,
-                        "the digest ignores the method"
-                    );
-                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
-                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
-                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
-                    let rows: i64 = host
-                        .fixture
-                        .conn
-                        .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
-                            row.get(0)
-                        })
-                        .unwrap();
-                    assert_eq!(rows, 1);
-                    assert_eq!(
-                        input.payload_digest,
-                        preview_digest(host, message.message_id, &canonical)
-                    );
-                });
-            }
-        }
-
         mod composer_busy {
             use crate::broker::runtime::DeliveryMethod;
             use crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued;
@@ -11165,13 +9239,6 @@ mod tests {
                     host.controller.health(&host.writer).eligibility,
                     InputEligibility::Hold(_)
                 ));
-            }
-
-            fn fallback_program() -> Vec<u8> {
-                let mut bytes = b"\x1b".to_vec();
-                bytes.extend_from_slice(LITERAL.as_bytes());
-                bytes.push(b'\r');
-                bytes
             }
 
             /// Drives a fixed number of runner turns, enough for a misbehaving queue to write.
@@ -11464,89 +9531,6 @@ mod tests {
                         }
                         delivered(host, first) && delivered(host, later)
                     });
-                });
-            }
-
-            #[test]
-            fn composer_busy_onset_survives_a_busy_requeue_and_still_reaches_idle_timeout() {
-                with_busy_host(busy_catalog(), fallback_program(), |host| {
-                    busy(host);
-                    let request = host.request("prompt:flickering-composer");
-                    let id = queued(host, request, "composer_busy");
-                    let near_bound = crate::time::format_utc(
-                        chrono::Utc::now() - chrono::Duration::seconds(178),
-                    );
-                    host.coordinator
-                        .set_queued_composer_busy_since(id, &near_bound);
-                    host.show(SCREEN.to_vec());
-                    while row(host, id).state == storage::InputState::Ready {
-                        assert!(
-                            Instant::now() < host.until,
-                            "a verified empty composer starts the attempt"
-                        );
-                        host.drain();
-                        host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    assert!(host.pty.offers.is_empty());
-                    host.show(DRAFT.to_vec());
-                    hold_turns(host);
-                    assert_eq!(row(host, id).state, storage::InputState::Ready);
-                    assert!(
-                        host.pty.offers.is_empty(),
-                        "the busy requeue writes zero bytes: {:?}",
-                        host.pty.offers
-                    );
-                    turns_until(host, |host| delivered(host, id));
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![
-                            b"\x1b".to_vec(),
-                            LITERAL.as_bytes().to_vec(),
-                            b"\r".to_vec()
-                        ],
-                        "the retained onset reaches the 3-minute bound"
-                    );
-                    let input = row(host, id);
-                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
-                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
-                });
-            }
-
-            #[test]
-            fn composer_busy_falls_back_with_idle_timeout_three_minutes_after_busy_onset() {
-                with_busy_host(busy_catalog(), fallback_program(), |host| {
-                    busy(host);
-                    let request = host.request("prompt:idle-timeout");
-                    let id = queued(host, request, "composer_busy");
-                    let just_inside = crate::time::format_utc(
-                        chrono::Utc::now() - chrono::Duration::seconds(170),
-                    );
-                    host.coordinator
-                        .set_queued_composer_busy_since(id, &just_inside);
-                    hold_turns(host);
-                    assert!(
-                        host.pty.offers.is_empty(),
-                        "no Escape before the 3-minute bound"
-                    );
-                    let expired = crate::time::format_utc(
-                        chrono::Utc::now() - chrono::Duration::seconds(181),
-                    );
-                    host.coordinator
-                        .set_queued_composer_busy_since(id, &expired);
-                    turns_until(host, |host| delivered(host, id));
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![
-                            b"\x1b".to_vec(),
-                            LITERAL.as_bytes().to_vec(),
-                            b"\r".to_vec()
-                        ]
-                    );
-                    let input = row(host, id);
-                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
-                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
-                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
                 });
             }
         }
@@ -11919,33 +9903,6 @@ mod tests {
                     }
                     std::thread::sleep(Duration::from_millis(5));
                 }
-            }
-
-            pub(in crate::runtime::input) fn canonical_preview(
-                message: &crate::broker::MessageRecord,
-            ) -> String {
-                crate::delivery::canonical_preview_line(message)
-            }
-
-            pub(in crate::runtime::input) fn preview_request(
-                host: &Host,
-                message: &crate::broker::MessageRecord,
-                literal: &str,
-            ) -> InputControlRequest {
-                let key = crate::broker::runtime::preview_operation_key(
-                    host.fixture.run.run_id,
-                    message.message_id,
-                    1,
-                )
-                .unwrap();
-                let mut request = host.request(&key);
-                request.operation = InputControlOperation::SubmitPrompt(SubmitInput {
-                    operation_key: key,
-                    input_kind: storage::InputKind::Preview,
-                    message_id: Some(message.message_id),
-                    literal: literal.into(),
-                });
-                request
             }
 
             pub(in crate::runtime::input) fn delivery_selection(
@@ -12708,16 +10665,6 @@ mod tests {
                             )
                         })
                         .unwrap()
-                }
-                pub(crate) fn message(&mut self, body: &str) -> crate::broker::MessageRecord {
-                    let run = self.fixture.run.clone();
-                    crate::broker::send_message(
-                        &mut self.fixture.conn,
-                        run.director_member_id,
-                        run.member_id,
-                        body,
-                    )
-                    .unwrap()
                 }
             }
             pub(in crate::runtime::input) fn with_host(body: impl FnOnce(&mut Host)) {
@@ -13750,128 +11697,8 @@ mod tests {
             settled_ids(h)
         }
 
-        fn claude_boxed_single_row_form(h: &mut Host) -> (i64, i64, i64, i64) {
-            h.child_output(native_fixture_bytes(
-                &crate::coding_agent::detector::test_support::bundled_screen(
-                    "claude-2.1.302-boxed-single-row-permission-1",
-                ),
-            ));
-            settled_ids(h)
-        }
-
-        type FormFeed = fn(&mut Host) -> (i64, i64, i64, i64);
-
         #[test]
-        fn a_preview_during_a_visible_claude_permission_form_is_queued_without_child_bytes() {
-            let forms: [(&str, FormFeed); 2] = [
-                ("claude-2.1.302-default-permission-1", claude_blocked_form),
-                (
-                    "claude-2.1.302-boxed-single-row-permission-1",
-                    claude_boxed_single_row_form,
-                ),
-            ];
-            for (fixture, feed_form) in forms {
-                with_claude_inspection(|h, _, _| {
-                    let ids = feed_form(h);
-                    let inspected = inspect(h, ids);
-                    assert!(inspected.request_token.is_some(), "{fixture}");
-                    let generation = h.controller.request_generation();
-                    let offers = h.pty.offers.clone();
-                    let program = h.pty.program.clone();
-                    assert!(
-                        matches!(
-                            h.controller.health(&h.writer).eligibility,
-                            InputEligibility::Hold(_)
-                        ),
-                        "{fixture}: the visible form makes the composer ineligible"
-                    );
-                    let run = h.fixture.run.clone();
-                    let message = crate::broker::send_message(
-                        &mut h.fixture.conn,
-                        run.director_member_id,
-                        run.member_id,
-                        "preview during a permission form",
-                    )
-                    .unwrap();
-                    let key = crate::broker::runtime::preview_operation_key(
-                        run.run_id,
-                        message.message_id,
-                        1,
-                    )
-                    .unwrap();
-                    let mut request = h.request(&key);
-                    request.operation =
-                        InputControlOperation::SubmitPrompt(crate::runtime::SubmitInput {
-                            operation_key: key.clone(),
-                            input_kind: storage::InputKind::Preview,
-                            message_id: Some(message.message_id),
-                            literal: crate::delivery::canonical_preview_line(&message),
-                        });
-                    let reply = h
-                        .coordinator
-                        .handle_received(&mut h.fixture.conn, request, &h.controller, h.until)
-                        .unwrap();
-                    let Some(InputControlReply::Submission(queued)) = reply else {
-                        panic!(
-                            "{fixture}: a preview during a visible form returns a Submission reply"
-                        )
-                    };
-                    assert_eq!(
-                        (queued.status, queued.stage),
-                        (SubmissionStatus::Queued, SubmissionStage::ZeroBytes),
-                        "{fixture}"
-                    );
-                    assert_eq!(
-                        queued
-                            .delivery
-                            .as_ref()
-                            .and_then(|delivery| delivery.reason.as_deref()),
-                        Some("interaction_open"),
-                        "{fixture}: the visible form, not a missing composer plan, defers the preview"
-                    );
-                    assert_eq!(
-                        h.pty.offers, offers,
-                        "{fixture}: no child byte, Escape included, is offered"
-                    );
-                    assert_eq!(
-                        h.pty.program, program,
-                        "{fixture}: no program byte is written"
-                    );
-                    let receipt = storage::find_input(&h.fixture.conn, run.run_id, &key)
-                        .unwrap()
-                        .unwrap_or_else(|| panic!("{fixture}: the queued preview has a receipt"));
-                    assert_eq!(Some(receipt.input_id), queued.input_id, "{fixture}");
-                    assert_eq!(receipt.state, storage::InputState::Ready, "{fixture}");
-                    assert_eq!(
-                        receipt.defer_reason.as_deref(),
-                        Some("interaction_open"),
-                        "{fixture}"
-                    );
-                    let notified: Option<String> = h
-                        .fixture
-                        .conn
-                        .query_row(
-                            "SELECT notified_at FROM messages WHERE message_id=?1",
-                            [message.message_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap();
-                    assert_eq!(notified, None, "{fixture}");
-                    assert!(h.controller.current_request().is_some(), "{fixture}");
-                    assert_eq!(h.controller.request_generation(), generation, "{fixture}");
-                    assert_eq!(
-                        inspect(h, ids).request_token,
-                        inspected.request_token,
-                        "{fixture}"
-                    );
-                });
-            }
-        }
-
-        #[test]
-        fn a_preview_prompt_and_exec_during_dialog_a_queue_with_zero_bytes_and_each_drains_once() {
-            use crate::runtime::input::tests::ordinary_prompt::support::canonical_preview;
-            use crate::runtime::input::tests::ordinary_prompt::support::preview_request;
+        fn a_prompt_and_exec_during_dialog_a_queue_with_zero_bytes_and_each_drains_once() {
             const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
             const LITERAL: &str = "queued behind the auto-mode nudge";
             let fixture = |id: &str| {
@@ -13890,25 +11717,13 @@ mod tests {
                         h.controller.health(&h.writer).eligibility,
                         InputEligibility::Hold(_)
                     ));
-                    let run = h.fixture.run.clone();
-                    let message = crate::broker::send_message(
-                        &mut h.fixture.conn,
-                        run.director_member_id,
-                        run.member_id,
-                        "preview during Dialog A",
-                    )
-                    .unwrap();
-                    let preview = canonical_preview(&message);
-                    let mut program = preview.as_bytes().to_vec();
-                    program.push(b'\r');
-                    program.extend_from_slice(LITERAL.as_bytes());
+                    let mut program = LITERAL.as_bytes().to_vec();
                     program.push(b'\r');
                     program.extend_from_slice(b"! ");
                     program.extend_from_slice(LITERAL.as_bytes());
                     program.push(b'\r');
                     h.pty.expect_program(program.clone());
                     h.confirm_after_programs([
-                        [preview.as_bytes(), b"\r"].concat(),
                         [LITERAL.as_bytes(), b"\r"].concat(),
                         [b"! ".as_slice(), LITERAL.as_bytes(), b"\r"].concat(),
                     ]);
@@ -13927,11 +11742,7 @@ mod tests {
                         literal: LITERAL.into(),
                     });
                     let mut queued_ids = Vec::new();
-                    for (case, request) in [
-                        ("preview", preview_request(h, &message, &preview)),
-                        ("prompt", prompt),
-                        ("exec", exec),
-                    ] {
+                    for (case, request) in [("prompt", prompt), ("exec", exec)] {
                         let Some(InputControlReply::Submission(queued)) =
                             h.handle(request).unwrap()
                         else {
@@ -13984,18 +11795,9 @@ mod tests {
                         "each input is delivered once, in order"
                     );
                     assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
-                    for (index, id) in queued_ids.into_iter().enumerate() {
+                    for id in queued_ids {
                         let input = storage::get_input(&h.fixture.conn, id).unwrap();
-                        if index == 0 {
-                            assert_eq!(input.state, storage::InputState::Settled, "preview {id}");
-                            assert_eq!(
-                                input.disposition,
-                                Some(storage::InputDisposition::Submitted),
-                                "preview {id}"
-                            );
-                        } else {
-                            assert_eq!(input.state, storage::InputState::Accepted, "{id}");
-                        }
+                        assert_eq!(input.state, storage::InputState::Accepted, "{id}");
                         assert_eq!(
                             input.delivery_method,
                             Some(crate::broker::runtime::DeliveryMethod::Profile)
@@ -17433,186 +15235,6 @@ mod tests {
                 retained.attempt_available,
                 retained.leased,
             )
-        }
-
-        #[test]
-        fn retirement_requires_settlement_and_no_active_writer_then_removes_only_its_cache() {
-            with_host(|h| {
-                let run = h.fixture.run.clone();
-                let message = crate::broker::send_message(
-                    &mut h.fixture.conn,
-                    run.director_member_id,
-                    run.member_id,
-                    "retirement preview",
-                )
-                .unwrap();
-                let canonical =
-                    crate::runtime::input::tests::ordinary_prompt::support::canonical_preview(
-                        &message,
-                    );
-                let mut program = canonical.as_bytes().to_vec();
-                program.push(b'~');
-                h.pty.expect_program(program.clone());
-                let request =
-                    crate::runtime::input::tests::ordinary_prompt::support::preview_request(
-                        h, &message, &canonical,
-                    );
-                let accepted =
-                    crate::runtime::input::tests::ordinary_prompt::support::settle(h, request);
-                assert!(matches!(accepted.status, SubmissionStatus::Accepted));
-                let id = accepted.input_id.expect("durable Preview ID");
-                let before = cached(h, id);
-                assert!(matches!(before.1, SubmissionStage::Submitted));
-                assert!(!before.4 && !before.5);
-                assert!(h.coordinator.pending.is_none());
-                let offers = h.pty.offers.clone();
-                assert_eq!(h.pty.program, vec![program.clone()]);
-
-                let Err(uncommitted) =
-                    h.coordinator
-                        .retire_received(&mut h.fixture.conn, id, h.until)
-                else {
-                    panic!("Accepted Preview requires committed settlement before retirement")
-                };
-                assert!(uncommitted.to_string().contains(&id.to_string()));
-                assert_eq!(cached(h, id), before);
-                assert_eq!(
-                    storage::get_input(&h.fixture.conn, id).unwrap().state,
-                    storage::InputState::Accepted
-                );
-                let settled =
-                    storage::settle_preview(&mut h.fixture.conn, &run.owner(), id).unwrap();
-                let stamp: Option<String> = h
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [message.message_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert!(stamp.is_some());
-
-                let Err(expired) =
-                    h.coordinator
-                        .retire_received(&mut h.fixture.conn, id, Instant::now())
-                else {
-                    panic!("retirement requires a live original deadline")
-                };
-                assert!(matches!(expired, CafleetError::DeadlineExceeded));
-                let mut foreign_request = h.request("unused-retirement-key");
-                foreign_request.operation =
-                    InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
-                foreign_request.identity.member_id += 1;
-                assert!(h.handle(foreign_request).is_err());
-                assert_eq!(cached(h, id), before);
-                assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
-
-                let unrelated_key = "prompt:retirement-active-writer";
-                let unrelated = h.request(unrelated_key);
-                assert!(h.handle(unrelated).unwrap().is_none());
-                for _ in 0..8 {
-                    h.drain();
-                    assert!(h.advance().is_none());
-                    if h.coordinator.pending.as_ref().unwrap().phase == InputPhase::Armed {
-                        break;
-                    }
-                }
-                let pending = h.coordinator.pending.as_ref().unwrap();
-                assert!(pending.phase == InputPhase::Armed);
-                let unrelated_id = pending.input_id().expect("actual second reservation");
-                let original_deadline = pending.deadline;
-                let original_bytes = pending.bytes.clone();
-                let unrelated_before = cached(h, unrelated_id);
-                assert!(unrelated_before.4 && !unrelated_before.5);
-                let Err(failure) = h
-                    .coordinator
-                    .retire_received(&mut h.fixture.conn, id, h.until)
-                else {
-                    panic!("retirement excludes the actual Armed writer")
-                };
-                assert!(failure.to_string().contains(&id.to_string()));
-                let pending = h
-                    .coordinator
-                    .pending
-                    .as_ref()
-                    .expect("refusal preserves unrelated writer");
-                assert_eq!(pending.request.operation_key, unrelated_key);
-                assert_eq!(pending.input_id(), Some(unrelated_id));
-                assert_eq!(pending.deadline, original_deadline);
-                assert_eq!(pending.bytes, original_bytes);
-                assert!(pending.phase == InputPhase::Armed);
-                assert_eq!(cached(h, unrelated_id), unrelated_before);
-                assert_eq!(cached(h, id), before);
-                assert_eq!(h.pty.offers, offers);
-
-                h.coordinator.finish_pending_attempt();
-                let other_cache = cached(h, unrelated_id);
-                let other_row = storage::get_input(&h.fixture.conn, unrelated_id).unwrap();
-                assert_eq!(other_row.state, storage::InputState::InProgress);
-                h.child_output(b"\x1b[2J\x1b[HUnclassified screen");
-                h.drain();
-                assert!(!matches!(
-                    h.controller.health(&h.writer).eligibility,
-                    InputEligibility::ComposerEmpty
-                ));
-                let changes = h.fixture.conn.total_changes();
-                let mut retirement = h.request("unused-retirement-key");
-                retirement.operation =
-                    InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
-                let reply = h
-                    .handle(retirement)
-                    .unwrap()
-                    .expect("typed retirement dispatch");
-                assert_retired(reply, id);
-                assert!(!h.coordinator.operations.contains_key(&id));
-                assert_eq!(cached(h, unrelated_id), other_cache);
-                assert_eq!(h.fixture.conn.total_changes(), changes);
-                assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
-                assert_eq!(
-                    storage::get_input(&h.fixture.conn, unrelated_id).unwrap(),
-                    other_row
-                );
-                let after_stamp: Option<String> = h
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [message.message_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert_eq!(after_stamp, stamp);
-                assert_eq!(h.pty.offers, offers);
-
-                let changes = h.fixture.conn.total_changes();
-                let again = h
-                    .coordinator
-                    .retire_received(&mut h.fixture.conn, id, h.until)
-                    .unwrap();
-                assert_retired(again, id);
-                assert_eq!(h.fixture.conn.total_changes(), changes);
-                h.fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_input_operations SET state='accepted',disposition=NULL WHERE input_id=?1",
-                        [id],
-                    )
-                    .unwrap();
-                assert!(
-                    h.coordinator
-                        .retire_received(&mut h.fixture.conn, id, h.until)
-                        .is_err(),
-                    "cache absence still checks the durable row on the supplied connection"
-                );
-                assert!(
-                    h.coordinator
-                        .retire_received(&mut h.fixture.conn, i64::MAX, h.until)
-                        .is_err()
-                );
-                assert_eq!(cached(h, unrelated_id), other_cache);
-                assert_eq!(h.pty.offers, offers);
-            });
         }
     }
 

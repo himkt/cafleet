@@ -3225,17 +3225,6 @@ mod tests {
                 ServiceControlRequest::Input(_)
             ));
         }
-        let mut preview = case.request("submit_prompt", None);
-        preview["input_kind"] = json!("preview");
-        preview["message_id"] = json!(14);
-        assert!(matches!(
-            decoded(&preview).operation,
-            InputControlOperation::SubmitPrompt(SubmitInput {
-                input_kind: InputKind::Preview,
-                message_id: Some(14),
-                ..
-            })
-        ));
         let identity = case.request("submit_prompt", None)["identity"].clone();
         for (kind, field) in [
             ("health", None),
@@ -3487,12 +3476,6 @@ mod tests {
             bad["literal"] = json!(format!("a{}b", char::from(byte)));
             rejection(&good, &bytes(&bad));
         }
-        let mut preview = good.clone();
-        preview["input_kind"] = json!("preview");
-        preview["message_id"] = json!(14);
-        decoded(&preview);
-        preview["message_id"] = Value::Null;
-        rejection(&good, &bytes(&preview));
         let good = case.request("permission_respond", None);
         for (field, invalid) in [
             ("expected_run_id", json!(case.fixture.run.run_id + 1)),

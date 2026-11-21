@@ -1993,60 +1993,6 @@ mod tests {
     }
 
     #[test]
-    fn wrapped_left_prompt_and_exec_errors_describe_the_retained_text_and_escape_only_stage() {
-        use crate::runtime::{SubmissionResult, SubmissionStage, SubmissionStatus};
-        for label in ["prompt", "native command"] {
-            for stage in [
-                SubmissionStage::Partial,
-                SubmissionStage::LiteralComplete,
-                SubmissionStage::Submitted,
-            ] {
-                let cause = if stage == SubmissionStage::Submitted {
-                    "submit_unconfirmed"
-                } else {
-                    "manual_input"
-                };
-                let result = SubmissionResult {
-                    status: SubmissionStatus::LeftInComposer,
-                    input_id: Some(9),
-                    stage,
-                    output_seq: Some(4),
-                    reason: Some(cause.into()),
-                    delivery: Some(DeliveryProjection {
-                        status: DeliveryStatus::LeftInComposer,
-                        method: Some(DeliveryMethod::Profile),
-                        reason: None,
-                    }),
-                };
-                assert_eq!(
-                    wrapped_delivery_refusal(label, 110, &result),
-                    format!(
-                        "{label} delivery to member 110 was not submitted: {cause} (method=profile); the typed text stays in the member's composer. Inspect the pane before retrying."
-                    )
-                );
-            }
-            let result = SubmissionResult {
-                status: SubmissionStatus::LeftInComposer,
-                input_id: Some(9),
-                stage: SubmissionStage::EscapeOnly,
-                output_seq: Some(4),
-                reason: Some("manual_input".into()),
-                delivery: Some(DeliveryProjection {
-                    status: DeliveryStatus::LeftInComposer,
-                    method: Some(DeliveryMethod::Fallback),
-                    reason: None,
-                }),
-            };
-            assert_eq!(
-                wrapped_delivery_refusal(label, 110, &result),
-                format!(
-                    "{label} delivery to member 110 was not submitted: manual_input (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying."
-                )
-            );
-        }
-    }
-
-    #[test]
     fn wrapped_uncertain_prompt_and_exec_errors_name_the_recorded_cause_and_method() {
         use crate::runtime::SubmissionResult;
         use crate::runtime::SubmissionStage;

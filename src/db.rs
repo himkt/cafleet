@@ -867,14 +867,12 @@ mod tests {
 
     #[test]
     fn composer_receipt_required_columns_are_checked_without_modifying_the_selected_database() {
-        for column in ["stop_cause", "preview_attempt", "left_stage"] {
-            assert_incompatible_and_untouched("missing-composer-receipt-column.db", |conn| {
-                conn.execute_batch(&format!(
-                    "ALTER TABLE member_input_operations RENAME COLUMN {column} TO missing_{column}"
-                ))
-                .unwrap();
-            });
-        }
+        assert_incompatible_and_untouched("missing-composer-receipt-column.db", |conn| {
+            conn.execute_batch(
+                "ALTER TABLE member_input_operations RENAME COLUMN stop_cause TO missing_stop_cause",
+            )
+            .unwrap();
+        });
     }
 
     #[test]

@@ -2413,6 +2413,14 @@ pub(crate) mod test_support {
         /// journaling it; the next journaled line restores the composer screen.
         pub(crate) const FORM_LINE: &str = "show-permission-form";
         pub(crate) const FORM: &[u8] = b"\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: write held.txt\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ";
+        /// A manual line that makes the native child show a composer holding a draft, which no
+        /// composer rule matches; the next journaled line restores the composer screen.
+        pub(crate) const DRAFT_LINE: &str = "show-composer-draft";
+        pub(crate) const DRAFT: &[u8] =
+            b"\x1b[2J\x1b[23;1HSynthetic draft: half-typed\r\nState end";
+        /// Literal text that makes the native child show the detected permission form while the
+        /// literal is still unsubmitted, once per native process, so the write stops mid-stage.
+        pub(crate) const FORM_MID_WRITE: &str = "open-form-mid-write";
         pub(crate) const PANIC_RECORD_LIMIT: usize = 16 * 1024;
         pub(crate) const PANIC_DIRECTORY: &str = "service-input-panics";
 
@@ -2747,6 +2755,26 @@ pub(crate) mod test_support {
                 pause(until);
             }
         }
+        /// Waits until the runner observes a non-degraded screen with no open interaction and
+        /// no pending observation work, which also holds on a run without composer verification.
+        pub(crate) fn input_service_settled(fixture: &mut ServiceFixture, until: Instant) {
+            loop {
+                assert!(Instant::now() < until);
+                let health = fixture.health();
+                if health.observation.as_ref().is_some_and(|observation| {
+                    !observation.degraded
+                        && observation.eligibility
+                            != InputEligibility::Hold(GateReason::Interaction)
+                        && observation.pending_count == 0
+                }) {
+                    return;
+                }
+                pause(until);
+            }
+        }
+        fn composer_ready(fixture: &mut ServiceFixture, until: Instant) {
+            input_service_composer(fixture, until);
+        }
         pub(crate) fn with_input_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
             with_configured_input_service(false, 0, body);
         }
@@ -2785,6 +2813,27 @@ pub(crate) mod test_support {
                 detecting,
                 0,
                 |config| config["preview_sweep"] = json!(true),
+                composer_ready,
+                body,
+            );
+        }
+
+        /// A sweeping input service whose catalog `configure_catalog` adjusts first.
+        pub(crate) fn with_sweeping_input_service_catalog(
+            lifetime: Duration,
+            detecting: bool,
+            configure_catalog: impl FnOnce(&mut Value),
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            with_input_service_lifetime(
+                lifetime,
+                detecting,
+                0,
+                |config| {
+                    config["preview_sweep"] = json!(true);
+                    configure_catalog(&mut config["catalog"]);
+                },
+                input_service_settled,
                 body,
             );
         }
@@ -2808,6 +2857,7 @@ pub(crate) mod test_support {
                 detecting,
                 exit_code,
                 |config| configure_catalog(&mut config["catalog"]),
+                composer_ready,
                 body,
             );
         }
@@ -2817,6 +2867,7 @@ pub(crate) mod test_support {
             detecting: bool,
             exit_code: i32,
             configure: impl FnOnce(&mut Value),
+            ready: impl FnOnce(&mut ServiceFixture, Instant),
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
             let until = Instant::now() + lifetime;
@@ -2831,7 +2882,7 @@ pub(crate) mod test_support {
             fixture.cleanup_deadline = Some(until);
             let primary = catch_unwind(AssertUnwindSafe(|| {
                 fixture.start_running();
-                input_service_composer(&mut fixture, until);
+                ready(&mut fixture, until);
                 body(&mut fixture, until);
             }));
             let cleanup = catch_unwind(AssertUnwindSafe(|| {
@@ -2931,7 +2982,9 @@ pub(crate) mod test_support {
                 conn.busy_timeout(Duration::ZERO).unwrap();
                 let stdin = std::io::stdin();
                 let mut terminal = tcgetattr(&stdin).unwrap();
-                terminal.local_flags.remove(LocalFlags::ECHO);
+                terminal
+                    .local_flags
+                    .remove(LocalFlags::ECHO | LocalFlags::ICANON);
                 tcsetattr(&stdin, SetArg::TCSANOW, &terminal).unwrap();
                 let flags = OFlag::from_bits_retain(fcntl(&stdin, FcntlArg::F_GETFL).unwrap());
                 fcntl(&stdin, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK)).unwrap();
@@ -2951,6 +3004,7 @@ pub(crate) mod test_support {
                 output.flush().unwrap();
                 let mut input = stdin.lock();
                 let mut pending = Vec::new();
+                let mut form_mid_write_shown = false;
                 loop {
                     assert!(
                         Clock.sample().unwrap().monotonic_ns < expires,
@@ -2968,6 +3022,16 @@ pub(crate) mod test_support {
                         Err(cause) => panic!("owned synthetic native input: {cause}"),
                     }
                     assert!(pending.len() <= 65536);
+                    if !form_mid_write_shown
+                        && !pending.contains(&b'\n')
+                        && pending
+                            .windows(FORM_MID_WRITE.len())
+                            .any(|window| window == FORM_MID_WRITE.as_bytes())
+                    {
+                        form_mid_write_shown = true;
+                        output.write_all(FORM).unwrap();
+                        output.flush().unwrap();
+                    }
                     while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
                         let mut line = pending.drain(..=end).collect::<Vec<_>>();
                         assert_eq!(line.pop(), Some(b'\n'));
@@ -2975,11 +3039,16 @@ pub(crate) mod test_support {
                             line.pop();
                         }
                         let line = String::from_utf8(line).unwrap();
-                        if line == "finish" {
+                        if line.ends_with("finish") {
                             return;
                         }
                         if line == FORM_LINE {
                             output.write_all(FORM).unwrap();
+                            output.flush().unwrap();
+                            continue;
+                        }
+                        if line == DRAFT_LINE {
+                            output.write_all(DRAFT).unwrap();
                             output.flush().unwrap();
                             continue;
                         }
@@ -3822,86 +3891,6 @@ mod tests {
         }
 
         #[test]
-        fn service_input_disconnected_preview_consumer_retains_outcome_without_automatic_retyping()
-        {
-            with_input_service(|fixture, until| {
-                let message = crate::broker::send_message(
-                    &mut fixture.fixture.conn,
-                    fixture.fixture.run.director_member_id,
-                    fixture.fixture.run.member_id,
-                    "disconnected preview λ",
-                )
-                .unwrap();
-                let key = crate::broker::runtime::preview_operation_key(
-                    fixture.fixture.run.run_id,
-                    message.message_id,
-                    1,
-                )
-                .unwrap();
-                let accepted_until = until.min(Instant::now() + Duration::from_secs(3));
-                let literal = crate::delivery::canonical_preview_line(&message);
-                let value = request(
-                    fixture,
-                    &key,
-                    &literal,
-                    InputKind::Preview,
-                    Some(message.message_id),
-                    accepted_until,
-                );
-                let mut abandoned = Peer::connect(fixture);
-                abandoned.send(&encode_control_frame(&value).unwrap(), until);
-                abandoned.stream.shutdown(Shutdown::Read).unwrap();
-                let row = loop {
-                    let current = storage::find_input(
-                        &fixture.fixture.conn,
-                        fixture.fixture.run.run_id,
-                        &key,
-                    )
-                    .unwrap();
-                    if let Some(row) = current.as_ref()
-                        && row.state == InputState::Accepted
-                    {
-                        break row.clone();
-                    }
-                    assert!(
-                        Instant::now() < accepted_until,
-                        "disconnected consumer's durable accepted outcome is absent: row={current:?}; native_records={:?}",
-                        input_service_records(fixture),
-                    );
-                    assert!(fixture.child.try_wait().unwrap().is_none());
-                    pause(accepted_until);
-                };
-                drop(abandoned);
-                wait_input_service_record(fixture, &literal, until);
-                let retained = submission(exchange(fixture, &value, until));
-                assert_eq!(retained.input_id, Some(row.input_id));
-                input_service_barrier(fixture, until);
-                assert_eq!(
-                    input_service_records(fixture)
-                        .iter()
-                        .filter(|record| record["line"] == literal)
-                        .count(),
-                    1
-                );
-                assert_eq!(
-                    storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
-                    row
-                );
-                assert_eq!(row.message_id, Some(message.message_id));
-                let notified: Option<String> = fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [message.message_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert!(notified.is_none());
-            });
-        }
-
-        #[test]
         fn service_input_expired_unreserved_attempt_releases_pending_work_for_a_fresh_key() {
             const EXPIRATION_TOLERANCE: Duration = Duration::from_millis(100);
 
@@ -4236,25 +4225,22 @@ mod tests {
             );
         }
 
+        const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
+        /// Longer than two sweep intervals, so a sweep that could deliver would have done so.
+        const SWEEP_WINDOW: Duration = Duration::from_millis(2500);
+
         fn send(fixture: &mut ServiceFixture, body: &str) -> MessageRecord {
             let run = &fixture.fixture.run;
             let (director, member) = (run.director_member_id, run.member_id);
             crate::broker::send_message(&mut fixture.fixture.conn, director, member, body).unwrap()
         }
 
-        fn previews(fixture: &ServiceFixture, message_id: i64) -> Vec<InputOperation> {
-            let conn = &fixture.fixture.conn;
-            conn.prepare(
-                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND message_id=?2 ORDER BY input_id",
+        /// The canonical preview line of a message whose body needs no folding.
+        fn line(message: &MessageRecord) -> String {
+            format!(
+                "[cafleet msg {} from {} {}] {} {RESUME_CLAUSE}",
+                message.message_id, message.from_member_id, message.created_at, message.text
             )
-            .unwrap()
-            .query_map(
-                rusqlite::params![fixture.fixture.run.run_id, message_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap()
-            .map(|id| storage::get_input(conn, id.unwrap()).unwrap())
-            .collect()
         }
 
         fn notified_at(fixture: &ServiceFixture, message_id: i64) -> Option<String> {
@@ -4269,18 +4255,6 @@ mod tests {
                 .unwrap()
         }
 
-        fn result_events(fixture: &ServiceFixture, input_id: i64) -> i64 {
-            fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
-                    rusqlite::params![fixture.fixture.run.run_id, input_id],
-                    |row| row.get(0),
-                )
-                .unwrap()
-        }
-
         fn lines(fixture: &ServiceFixture) -> Vec<String> {
             input_service_records(fixture)
                 .iter()
@@ -4288,8 +4262,11 @@ mod tests {
                 .collect()
         }
 
-        fn line(message: &MessageRecord) -> String {
-            crate::delivery::canonical_preview_line(message)
+        fn typed_count(fixture: &ServiceFixture, text: &str) -> usize {
+            lines(fixture)
+                .iter()
+                .filter(|typed| typed.contains(text))
+                .count()
         }
 
         fn wait_for(until: Instant, what: &str, mut done: impl FnMut() -> bool) {
@@ -4306,15 +4283,22 @@ mod tests {
             });
         }
 
-        fn assert_runner_settled_submitted(fixture: &ServiceFixture, message: &MessageRecord) {
-            let receipts = previews(fixture, message.message_id);
-            let latest = receipts
-                .last()
-                .expect("the sweep reserved a preview receipt");
-            assert_eq!(latest.kind, InputKind::Preview);
-            assert_eq!(latest.state, InputState::Settled, "{latest:?}");
-            assert_eq!(latest.disposition, Some(InputDisposition::Submitted));
-            assert!(notified_at(fixture, message.message_id).is_some());
+        /// The receipt-free delivery results the run published for `message_id`.
+        fn preview_results(fixture: &ServiceFixture, message_id: i64) -> Vec<Value> {
+            fixture
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.message_id')=?2 AND json_type(payload_json,'$.input_id')='null' ORDER BY event_seq",
+                )
+                .unwrap()
+                .query_map(
+                    rusqlite::params![fixture.fixture.run.run_id, message_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+                .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                .collect()
         }
 
         fn pane_lock(fixture: &ServiceFixture) -> crate::pane_lock::PaneLock {
@@ -4330,8 +4314,76 @@ mod tests {
                 .expect("the test takes the member's free pane input lock")
         }
 
+        fn wait_interaction_open(fixture: &ServiceFixture, until: Instant) {
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            loop {
+                assert!(Instant::now() < until, "the detected interaction opens");
+                let health = NativeInputHost.health(&run, until).unwrap();
+                let observation = health.observation.as_ref().unwrap();
+                if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
+                    && observation.pending_count == 0
+                    && !observation.pending_evidence
+                {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        fn wait_composer_not_empty(fixture: &mut ServiceFixture, until: Instant) {
+            loop {
+                assert!(Instant::now() < until, "the composer stops verifying empty");
+                let health = fixture.health();
+                if health.observation.as_ref().is_some_and(|observation| {
+                    observation.eligibility != InputEligibility::ComposerEmpty
+                }) {
+                    return;
+                }
+                pause(until);
+            }
+        }
+
+        /// Types `barrier` and waits for its journal line, which also carries any literal the
+        /// native child still holds unsubmitted; the child then restores the empty composer.
+        fn clear_with_barrier(fixture: &mut ServiceFixture, until: Instant) {
+            manual(fixture, b"barrier\r", until);
+            wait_for(until, "the barrier line is journaled", || {
+                lines(fixture)
+                    .iter()
+                    .any(|typed| typed.ends_with("barrier"))
+            });
+            input_service_settled(fixture, until);
+        }
+
+        fn submit(
+            fixture: &ServiceFixture,
+            key: &str,
+            literal: &str,
+            kind: InputKind,
+            until: Instant,
+        ) -> (SubmissionResult, Value) {
+            let value = request(fixture, key, literal, kind, None, until);
+            let reply = exchange(fixture, &value, until);
+            assert!(reply.get("error").is_none(), "{reply}");
+            let result = serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
+            (result, reply)
+        }
+
+        fn reconcile(fixture: &ServiceFixture, input_id: i64, until: Instant) {
+            let value = json!({"protocol_version":1,"kind":"receipt",
+                "identity":fixture.prepared.as_ref().unwrap(),"expires_at_mono_ns":expiration(until),
+                "action":"reconcile","input_id":input_id,"expected_state":"uncertain",
+                "disposition":"submitted","evidence_ref":"audit:pane-shows-the-input"});
+            let reply = exchange(fixture, &value, until);
+            assert!(reply.get("error").is_none(), "{reply}");
+        }
+
+        fn without_composer_verification(catalog: &mut Value) {
+            catalog["profiles"][0]["capabilities"]["composer"] = Value::Null;
+        }
+
         #[test]
-        fn the_sweep_submits_unnotified_previews_oldest_first_with_no_caller_command() {
+        fn the_next_sweep_types_unnotified_previews_oldest_first_into_a_verified_empty_composer() {
             with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
                 let first = send(fixture, "first swept preview");
                 let second = send(fixture, "second swept preview");
@@ -4343,21 +4395,6 @@ mod tests {
                     [line(&first), line(&second), "barrier".to_owned()],
                     "each preview is typed once, oldest first"
                 );
-                for message in [&first, &second] {
-                    let receipts = previews(fixture, message.message_id);
-                    assert_eq!(receipts.len(), 1, "{receipts:?}");
-                    assert_eq!(
-                        receipts[0].operation_key,
-                        storage::preview_operation_key(
-                            fixture.fixture.run.run_id,
-                            message.message_id,
-                            1
-                        )
-                        .unwrap(),
-                        "the runner reserves attempt 1 under its own run key"
-                    );
-                    assert_runner_settled_submitted(fixture, message);
-                }
             });
         }
 
@@ -4386,193 +4423,53 @@ mod tests {
                 let later = send(fixture, "pending after the consumed message");
                 wait_delivered(fixture, &later, until);
                 input_service_barrier(fixture, until);
-                assert!(previews(fixture, consumed.message_id).is_empty());
                 assert_eq!(notified_at(fixture, consumed.message_id), None);
                 assert_eq!(lines(fixture), [line(&later), "barrier".to_owned()]);
             });
         }
 
         #[test]
-        fn a_disconnected_consumers_accepted_preview_is_settled_by_the_sweep_and_its_receipt_retired()
-         {
-            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
-                let message = send(fixture, "disconnected swept preview λ");
-                let key = storage::preview_operation_key(
-                    fixture.fixture.run.run_id,
-                    message.message_id,
-                    1,
-                )
-                .unwrap();
-                let literal = line(&message);
-                let value = request(
-                    fixture,
-                    &key,
-                    &literal,
-                    InputKind::Preview,
-                    Some(message.message_id),
-                    until,
-                );
-                let mut abandoned = Peer::connect(fixture);
-                abandoned.send(&encode_control_frame(&value).unwrap(), until);
-                abandoned.stream.shutdown(Shutdown::Read).unwrap();
-                wait_delivered(fixture, &message, until);
-                drop(abandoned);
+        fn a_non_empty_composer_blocks_delivery_until_it_verifies_empty() {
+            with_sweeping_input_service(Duration::from_secs(15), false, |fixture, until| {
+                manual(fixture, format!("{DRAFT_LINE}\r").as_bytes(), until);
+                wait_composer_not_empty(fixture, until);
+                let message = send(fixture, "behind a human draft");
+                std::thread::sleep(SWEEP_WINDOW);
+                assert!(lines(fixture).is_empty(), "{:?}", lines(fixture));
+                assert_eq!(notified_at(fixture, message.message_id), None);
                 input_service_barrier(fixture, until);
-                assert_eq!(lines(fixture), [literal, "barrier".to_owned()]);
-                let receipts = previews(fixture, message.message_id);
-                assert_eq!(receipts.len(), 1, "{receipts:?}");
-                assert_eq!(receipts[0].operation_key, key);
-                assert_runner_settled_submitted(fixture, &message);
-                let query = json!({"protocol_version":1,"kind":"receipt",
-                    "identity":fixture.prepared.as_ref().unwrap(),"expires_at_mono_ns":expiration(until),
-                    "action":"query","operation_key":key});
-                let reply = exchange(fixture, &query, until);
-                let receipt = &reply["result"]["receipt"];
-                assert_eq!(receipt["status"], "present", "{reply}");
-                assert_eq!(receipt["input_id"], receipts[0].input_id, "{reply}");
-                let projection: SubmissionResult =
-                    serde_json::from_value(receipt["submission"].clone()).unwrap();
-                assert_eq!(
-                    projection.output_seq, None,
-                    "the sweep retires the coordinator's cached receipt after settling it: {reply}"
-                );
+                wait_delivered(fixture, &message, until);
+                assert_eq!(lines(fixture), ["barrier".to_owned(), line(&message)]);
             });
         }
 
         #[test]
-        fn the_sweep_never_duplicates_a_preview_the_fifo_already_holds() {
-            with_sweeping_input_service(Duration::from_secs(10), true, |fixture, until| {
-                let run =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
-                loop {
-                    assert!(Instant::now() < until, "the detected interaction opens");
-                    let health = NativeInputHost.health(&run, until).unwrap();
-                    let observation = health.observation.as_ref().unwrap();
-                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
-                        && observation.pending_count == 0
-                        && !observation.pending_evidence
-                    {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                let message = send(fixture, "queued behind the form");
-                let settings =
-                    Settings::for_database(Path::new(fixture.fixture.conn.path().unwrap()));
-                crate::delivery::deliver_pending(
-                    &mut fixture.fixture.conn,
-                    &settings,
-                    run.member_id,
-                    None,
-                    crate::time::Deadline::until(
-                        until.min(Instant::now() + Duration::from_secs(5)),
-                    ),
-                    &std::collections::BTreeSet::new(),
-                )
-                .unwrap();
-                let queued = previews(fixture, message.message_id);
-                assert_eq!(queued.len(), 1, "{queued:?}");
-                assert_eq!(queued[0].state, InputState::Ready);
-                std::thread::sleep(Duration::from_millis(2500));
-                assert_eq!(
-                    previews(fixture, message.message_id),
-                    queued,
-                    "two sweep intervals add no receipt while the FIFO holds the preview"
-                );
-                assert!(input_service_records(fixture).is_empty());
-                input_service_barrier(fixture, until);
-                wait_delivered(fixture, &message, until);
-                assert_eq!(
-                    lines(fixture)
-                        .iter()
-                        .filter(|typed| **typed == line(&message))
-                        .count(),
-                    1
-                );
-                assert_eq!(previews(fixture, message.message_id).len(), 1);
-            });
-        }
-
-        #[test]
-        fn a_sweep_request_queues_with_zero_bytes_behind_a_held_pane_lock_and_delivers_once_free() {
+        fn a_held_pane_lock_defers_the_sweep_with_zero_bytes_until_it_is_free() {
             with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
                 let held = pane_lock(fixture);
                 let message = send(fixture, "swept behind a held pane lock");
-                wait_for(until, "the sweep reserves a receipt", || {
-                    !previews(fixture, message.message_id).is_empty()
-                });
-                std::thread::sleep(Duration::from_millis(1500));
-                let receipts = previews(fixture, message.message_id);
-                assert_eq!(receipts.len(), 1, "{receipts:?}");
-                assert_eq!(
-                    receipts[0].delivery().unwrap().status,
-                    DeliveryStatus::Queued,
-                    "the request queues with zero bytes while another process holds the lock"
-                );
+                std::thread::sleep(SWEEP_WINDOW);
                 assert!(input_service_records(fixture).is_empty());
                 assert_eq!(notified_at(fixture, message.message_id), None);
                 drop(held);
                 wait_delivered(fixture, &message, until);
-                assert_eq!(previews(fixture, message.message_id).len(), 1);
-                assert_runner_settled_submitted(fixture, &message);
+                assert_eq!(typed_count(fixture, &line(&message)), 1);
                 pane_lock(fixture);
             });
         }
 
         #[test]
-        fn a_transient_failure_backs_off_and_retries_the_same_head_before_a_newer_message() {
+        fn a_retried_head_is_delivered_before_a_newer_message() {
             with_sweeping_input_service(Duration::from_secs(45), false, |fixture, until| {
                 let held = pane_lock(fixture);
                 let head = send(fixture, "head behind a busy pane");
                 let newer = send(fixture, "newer message");
-                wait_for(
-                    until,
-                    "the head's first attempt settles not submitted",
-                    || {
-                        previews(fixture, head.message_id)
-                            .first()
-                            .is_some_and(|first| first.state == InputState::Settled)
-                    },
-                );
-                let first = previews(fixture, head.message_id).remove(0);
-                assert_eq!(first.disposition, Some(InputDisposition::NotSubmitted));
-                assert_eq!(first.delivery_reason.as_deref(), Some("pane_input_busy"));
-                assert!(previews(fixture, newer.message_id).is_empty());
-                wait_for(until, "the head is retried as attempt 2", || {
-                    previews(fixture, head.message_id).len() == 2
-                });
-                let retry = previews(fixture, head.message_id).remove(1);
-                assert_eq!(
-                    retry.operation_key,
-                    storage::preview_operation_key(fixture.fixture.run.run_id, head.message_id, 2)
-                        .unwrap()
-                );
-                let settled_at = crate::time::parse_lenient(&first.updated_at).unwrap();
-                let retried_at = crate::time::parse_lenient(&retry.created_at).unwrap();
-                assert!(
-                    retried_at - settled_at >= chrono::Duration::milliseconds(900),
-                    "the retry waits out the one-second backoff: {settled_at} -> {retried_at}"
-                );
-                assert!(
-                    previews(fixture, newer.message_id).is_empty(),
-                    "strict oldest-first: the newer message waits behind the head"
-                );
-                assert_eq!(
-                    result_events(fixture, first.input_id),
-                    0,
-                    "a retried preview publishes no delivery result"
-                );
+                std::thread::sleep(SWEEP_WINDOW);
+                assert!(input_service_records(fixture).is_empty());
                 drop(held);
                 wait_delivered(fixture, &head, until);
                 wait_delivered(fixture, &newer, until);
                 assert_eq!(lines(fixture), [line(&head), line(&newer)]);
-                assert_runner_settled_submitted(fixture, &head);
-                assert_runner_settled_submitted(fixture, &newer);
-                assert!(
-                    previews(fixture, newer.message_id)[0].input_id > retry.input_id,
-                    "the newer message is attempted only after the head"
-                );
             });
         }
 
@@ -4606,354 +4503,210 @@ mod tests {
         }
 
         #[test]
-        fn an_in_flight_sweep_attempt_blocks_a_second_sweep_and_queues_a_control_request_behind_it()
-        {
+        fn a_control_request_arriving_during_a_sweep_attempt_queues_behind_it() {
             with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
                 let stopped = StoppedNative::stop(fixture);
                 let head = send(fixture, "in flight while the native is stopped");
-                let newer = send(fixture, "second pending message");
-                wait_for(until, "the sweep starts its immediate attempt", || {
-                    previews(fixture, head.message_id)
-                        .first()
-                        .is_some_and(|attempt| attempt.state == InputState::InProgress)
-                });
-                let value = request(
+                std::thread::sleep(Duration::from_millis(1500));
+                let (queued, queued_reply) = submit(
                     fixture,
                     "prompt:behind-the-sweep",
                     "control request behind the sweep",
                     InputKind::Prompt,
-                    None,
                     until.min(Instant::now() + Duration::from_secs(10)),
                 );
-                let reply = exchange(fixture, &value, until);
-                assert!(reply.get("error").is_none(), "{reply}");
-                let queued: SubmissionResult =
-                    serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
-                assert_eq!(queued.status, SubmissionStatus::Queued, "{reply}");
-                assert_eq!(
-                    queued
-                        .delivery
-                        .as_ref()
-                        .and_then(|delivery| delivery.reason.as_deref()),
-                    Some("earlier_input"),
-                    "a control request behind the in-flight sweep attempt waits for it"
-                );
-                std::thread::sleep(Duration::from_millis(1200));
-                assert!(
-                    previews(fixture, newer.message_id).is_empty(),
-                    "no second sweep attempt starts while one is in flight"
-                );
-                assert_eq!(previews(fixture, head.message_id).len(), 1);
+                assert_eq!(queued.status, SubmissionStatus::Queued, "{queued_reply}");
                 drop(stopped);
-                wait_delivered(fixture, &head, until);
-                wait_delivered(fixture, &newer, until);
                 wait_input_service_record(fixture, "control request behind the sweep", until);
                 let typed = lines(fixture);
-                assert_eq!(typed[0], line(&head), "{typed:?}");
-                for expected in [
-                    line(&head),
-                    line(&newer),
-                    "control request behind the sweep".to_owned(),
-                ] {
-                    assert_eq!(
-                        typed.iter().filter(|typed| **typed == expected).count(),
-                        1,
-                        "{typed:?}"
-                    );
-                }
-                assert_runner_settled_submitted(fixture, &head);
-                assert_eq!(previews(fixture, head.message_id).len(), 1);
+                assert!(typed[0].contains(&line(&head)), "{typed:?}");
+                assert_eq!(
+                    typed
+                        .iter()
+                        .filter(|typed| **typed == "control request behind the sweep")
+                        .count(),
+                    1,
+                    "{typed:?}"
+                );
             });
         }
 
-        mod queue_housekeeping {
-            use crate::runtime::service::tests::preview_sweep::*;
-
-            pub(super) fn queue_preview(
-                fixture: &ServiceFixture,
-                message: &MessageRecord,
-                until: Instant,
-            ) -> i64 {
-                let key = storage::preview_operation_key(
-                    fixture.fixture.run.run_id,
-                    message.message_id,
-                    1,
-                )
-                .unwrap();
-                let value = request(
-                    fixture,
-                    &key,
-                    &line(message),
-                    InputKind::Preview,
-                    Some(message.message_id),
-                    until,
-                );
-                let reply = exchange(fixture, &value, until);
-                assert!(reply.get("error").is_none(), "{reply}");
-                let queued: SubmissionResult =
-                    serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
-                assert_eq!(queued.status, SubmissionStatus::Queued, "{reply}");
-                queued.input_id.expect("queued work has a durable input ID")
-            }
-
-            /// Queues three previews in FIFO order: a head and a later entry whose messages the
-            /// test consumes, around a kept entry that stays `input_required`.
-            fn queue_three(
-                fixture: &mut ServiceFixture,
-                until: Instant,
-            ) -> [(MessageRecord, i64); 3] {
-                ["consumed head", "kept entry", "consumed later entry"].map(|body| {
-                    let message = send(fixture, body);
-                    let input_id = queue_preview(fixture, &message, until);
-                    (message, input_id)
-                })
-            }
-
-            /// Marks both messages consumed and returns when the last consumption committed.
-            fn consume(fixture: &mut ServiceFixture, messages: [&MessageRecord; 2]) -> Instant {
-                for message in messages {
-                    fixture
-                        .fixture
-                        .conn
-                        .execute(
-                            "UPDATE messages SET status_state='completed' WHERE message_id=?1",
-                            [message.message_id],
-                        )
-                        .unwrap();
-                }
-                Instant::now()
-            }
-
-            pub(super) fn input(fixture: &ServiceFixture, input_id: i64) -> InputOperation {
-                storage::get_input(&fixture.fixture.conn, input_id).unwrap()
-            }
-
-            /// The runner loop's slack beyond one housekeeping interval: a tick in progress when
-            /// the interval elapses plus the cancelling transaction.
-            const HOUSEKEEPING_SLACK: Duration = Duration::from_millis(300);
-
-            /// Waits one housekeeping interval plus tick slack, measured from `since`, for every
-            /// listed entry to leave `ready`, running `during` on each wait.
-            fn await_housekeeping(
-                fixture: &mut ServiceFixture,
-                since: Instant,
-                input_ids: [i64; 2],
-                mut during: impl FnMut(&mut ServiceFixture),
-            ) {
-                let bound = since
-                    + crate::runtime::service::QUEUE_HOUSEKEEPING_INTERVAL
-                    + HOUSEKEEPING_SLACK;
-                while input_ids
-                    .iter()
-                    .any(|id| input(fixture, *id).state == InputState::Ready)
-                {
-                    assert!(
-                        Instant::now() < bound,
-                        "housekeeping cancels each consumed queued entry within its interval: {:?}",
-                        input_ids.map(|id| input(fixture, id))
-                    );
-                    during(fixture);
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-
-            fn assert_cancelled_consumed(fixture: &ServiceFixture, input_id: i64) {
-                let settled = input(fixture, input_id);
-                assert_eq!(settled.state, InputState::Settled, "{settled:?}");
-                assert_eq!(settled.disposition, Some(InputDisposition::NotSubmitted));
-                assert_eq!(settled.delivery_reason.as_deref(), Some("message_consumed"));
-                assert_eq!(
-                    result_events(fixture, input_id),
-                    0,
-                    "a preview consumed by poll publishes no delivery result"
-                );
-            }
-
-            fn assert_housekept(
-                fixture: &ServiceFixture,
-                [(_, head), (_, kept), (_, later)]: &[(MessageRecord, i64); 3],
-            ) {
-                assert_cancelled_consumed(fixture, *head);
-                assert_cancelled_consumed(fixture, *later);
-                assert_eq!(
-                    input(fixture, *kept).state,
-                    InputState::Ready,
-                    "an entry whose message is still input_required stays queued"
-                );
-            }
-
-            pub(super) fn open_form(fixture: &mut ServiceFixture, until: Instant) {
+        #[test]
+        fn a_queued_prompt_is_written_before_the_sweep_starts_when_an_interaction_closes() {
+            with_sweeping_input_service(Duration::from_secs(20), true, |fixture, until| {
                 manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
-                loop {
-                    assert!(Instant::now() < until, "the detected interaction opens");
-                    let health = fixture.health();
-                    let observation = health.observation.as_ref().unwrap();
-                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
-                        && observation.pending_count == 0
-                        && !observation.pending_evidence
-                    {
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-            }
+                wait_interaction_open(fixture, until);
+                let (queued, queued_reply) = submit(
+                    fixture,
+                    "prompt:behind-the-form",
+                    "prompt queued behind the form",
+                    InputKind::Prompt,
+                    until.min(Instant::now() + Duration::from_secs(10)),
+                );
+                assert_eq!(queued.status, SubmissionStatus::Queued, "{queued_reply}");
+                let message = send(fixture, "pending behind the form");
+                std::thread::sleep(SWEEP_WINDOW);
+                assert!(lines(fixture).is_empty(), "{:?}", lines(fixture));
+                manual(fixture, b"barrier\r", until);
+                wait_delivered(fixture, &message, until);
+                assert_eq!(
+                    lines(fixture),
+                    [
+                        "barrier".to_owned(),
+                        "prompt queued behind the form".to_owned(),
+                        line(&message)
+                    ]
+                );
+            });
+        }
 
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_an_immediate_attempt_is_in_flight()
-             {
-                with_input_service(|fixture, until| {
-                    let stopped = StoppedNative::stop(fixture);
-                    let key = "prompt:in-flight-while-stopped";
-                    let value = request(
-                        fixture,
-                        key,
-                        "in flight while the native is stopped",
-                        InputKind::Prompt,
-                        None,
-                        until.min(Instant::now() + Duration::from_secs(8)),
-                    );
-                    let mut client = Peer::connect(fixture);
-                    client.send(&encode_control_frame(&value).unwrap(), until);
-                    let in_flight = || {
-                        fixture
-                            .fixture
-                            .conn
-                            .query_row(
-                                "SELECT input_id FROM member_input_operations WHERE operation_key=?1 AND state='in_progress'",
-                                [key],
-                                |row| row.get::<_, i64>(0),
-                            )
-                            .ok()
-                    };
-                    wait_for(until, "the immediate attempt starts writing", || {
-                        in_flight().is_some()
+        #[test]
+        fn an_uncertain_preview_is_typed_again_once_the_composer_is_verified_empty() {
+            with_sweeping_input_service(Duration::from_secs(30), true, |fixture, until| {
+                let message = send(fixture, &format!("retried preview {FORM_MID_WRITE}"));
+                wait_for(until, "the stopped preview publishes its result", || {
+                    !preview_results(fixture, message.message_id).is_empty()
+                });
+                assert_eq!(notified_at(fixture, message.message_id), None);
+                clear_with_barrier(fixture, until);
+                wait_delivered(fixture, &message, until);
+                assert_eq!(
+                    typed_count(fixture, &line(&message)),
+                    2,
+                    "the stopped literal and its retry: {:?}",
+                    lines(fixture)
+                );
+            });
+        }
+
+        #[test]
+        fn an_uncertain_preview_publishes_one_delivery_result_without_an_input_id() {
+            with_sweeping_input_service(Duration::from_secs(30), true, |fixture, until| {
+                let message = send(fixture, &format!("uncertain preview {FORM_MID_WRITE}"));
+                wait_for(until, "the stopped preview publishes its result", || {
+                    !preview_results(fixture, message.message_id).is_empty()
+                });
+                clear_with_barrier(fixture, until);
+                wait_delivered(fixture, &message, until);
+                std::thread::sleep(SWEEP_WINDOW);
+                let results = preview_results(fixture, message.message_id);
+                assert_eq!(results.len(), 1, "{results:?}");
+                let result = &results[0];
+                assert_eq!(result["input_id"], Value::Null, "{result}");
+                assert_eq!(result["message_id"], message.message_id, "{result}");
+                assert_eq!(result["delivery"]["status"], "uncertain", "{result}");
+                assert_eq!(result["director_action"], Value::Null, "{result}");
+            });
+        }
+
+        #[test]
+        fn an_unverified_run_stamps_an_uncertain_preview_before_publishing_it_and_never_retypes_it()
+        {
+            with_sweeping_input_service_catalog(
+                Duration::from_secs(30),
+                true,
+                without_composer_verification,
+                |fixture, until| {
+                    let message = send(fixture, &format!("unverified preview {FORM_MID_WRITE}"));
+                    wait_for(until, "the stopped preview publishes its result", || {
+                        !preview_results(fixture, message.message_id).is_empty()
                     });
-                    let attempt = in_flight().unwrap();
-                    let queue = queue_three(fixture, until);
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
+                    assert!(
+                        notified_at(fixture, message.message_id).is_some(),
+                        "the stamp precedes the published result"
+                    );
+                    clear_with_barrier(fixture, until);
+                    std::thread::sleep(SWEEP_WINDOW);
                     assert_eq!(
-                        input(fixture, attempt).state,
-                        InputState::InProgress,
-                        "housekeeping ran while the immediate attempt was still in flight"
+                        typed_count(fixture, &line(&message)),
+                        1,
+                        "{:?}",
+                        lines(fixture)
                     );
-                    assert_housekept(fixture, &queue);
-                    drop(stopped);
-                    drop(client);
-                });
-            }
+                    assert_eq!(preview_results(fixture, message.message_id).len(), 1);
+                },
+            );
+        }
 
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_the_drain_stays_pending() {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let queue = queue_three(fixture, until);
-                    let hold_reply_prefix =
-                        |fixture: &mut ServiceFixture| manual(fixture, b"\x1b", until);
-                    let warm = Instant::now() + Duration::from_millis(200);
-                    while Instant::now() < warm {
-                        hold_reply_prefix(fixture);
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(
-                        fixture,
-                        consumed,
-                        [queue[0].1, queue[2].1],
-                        hold_reply_prefix,
-                    );
-                    assert_housekept(fixture, &queue);
-                    manual(fixture, b"\r", until);
-                });
-            }
+        /// Stops a prompt mid-write with a detected form, clears the form, then checks that
+        /// neither a queued exec nor a sweep preview writes a byte until the prompt is
+        /// reconciled.
+        fn uncertain_prompt_stops_the_fifo_and_the_sweep(
+            fixture: &mut ServiceFixture,
+            until: Instant,
+        ) {
+            let (stopped, stopped_reply) = submit(
+                fixture,
+                "prompt:stopped-mid-write",
+                &format!("stopped prompt {FORM_MID_WRITE}"),
+                InputKind::Prompt,
+                until.min(Instant::now() + Duration::from_secs(10)),
+            );
+            assert_eq!(
+                stopped.status,
+                SubmissionStatus::Uncertain,
+                "{stopped_reply}"
+            );
+            clear_with_barrier(fixture, until);
+            let (queued, queued_reply) = submit(
+                fixture,
+                "exec:behind-the-uncertain-prompt",
+                "printf behind",
+                InputKind::Exec,
+                until.min(Instant::now() + Duration::from_secs(10)),
+            );
+            assert_eq!(queued.status, SubmissionStatus::Queued, "{queued_reply}");
+            let message = send(fixture, "preview behind the uncertain prompt");
+            std::thread::sleep(SWEEP_WINDOW);
+            let before = lines(fixture);
+            assert_eq!(
+                before.len(),
+                1,
+                "only the stopped prompt's line: {before:?}"
+            );
+            assert_eq!(notified_at(fixture, message.message_id), None);
+            reconcile(
+                fixture,
+                stopped.input_id.expect("the stopped prompt has a receipt"),
+                until,
+            );
+            wait_for(until, "the queued exec and the preview drain", || {
+                let typed = lines(fixture);
+                typed.iter().any(|typed| typed.ends_with("printf behind"))
+                    && typed.iter().any(|typed| typed.contains(&line(&message)))
+            });
+            let typed = lines(fixture);
+            let exec = typed
+                .iter()
+                .position(|typed| typed.ends_with("printf behind"))
+                .unwrap();
+            let preview = typed
+                .iter()
+                .position(|typed| typed.contains(&line(&message)))
+                .unwrap();
+            assert!(
+                exec < preview,
+                "the FIFO drains before the sweep: {typed:?}"
+            );
+        }
 
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_after_a_storage_outage_leaves_a_finalization_retry()
-             {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let queue = queue_three(fixture, until);
-                    consume(fixture, [&queue[0].0, &queue[2].0]);
-                    let outage = fixture
-                        .fixture
-                        .conn
-                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                        .unwrap();
-                    std::thread::sleep(Duration::from_millis(1500));
-                    drop(outage);
-                    let released = Instant::now();
-                    await_housekeeping(fixture, released, [queue[0].1, queue[2].1], |_| {});
-                    assert_housekept(fixture, &queue);
-                });
-            }
+        #[test]
+        fn an_uncertain_prompt_stops_queued_input_and_the_sweep_until_reconciled_on_a_verified_run()
+        {
+            with_sweeping_input_service(Duration::from_secs(40), true, |fixture, until| {
+                uncertain_prompt_stops_the_fifo_and_the_sweep(fixture, until);
+            });
+        }
 
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_a_sweep_attempt_is_in_flight() {
-                with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
-                    let stopped = StoppedNative::stop(fixture);
-                    let swept = send(fixture, "swept while the native is stopped");
-                    wait_for(until, "the sweep starts its immediate attempt", || {
-                        previews(fixture, swept.message_id)
-                            .first()
-                            .is_some_and(|attempt| attempt.state == InputState::InProgress)
-                    });
-                    let queue = queue_three(fixture, until);
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
-                    assert_eq!(
-                        previews(fixture, swept.message_id)[0].state,
-                        InputState::InProgress,
-                        "housekeeping ran while the sweep attempt was still in flight"
-                    );
-                    assert_housekept(fixture, &queue);
-                    drop(stopped);
-                });
-            }
-
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_each_queue_turn_fails() {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let queue = queue_three(fixture, until);
-                    fixture
-                        .fixture
-                        .conn
-                        .execute_batch(
-                            "CREATE TRIGGER owned_deferred_attempt_failure BEFORE UPDATE OF state ON member_input_operations
-                             WHEN OLD.kind='preview' AND NEW.state='in_progress'
-                             BEGIN SELECT RAISE(FAIL,'owned deferred attempt failure'); END",
-                        )
-                        .unwrap();
-                    manual(fixture, b"\r", until);
-                    wait_for(until, "the answered form closes", || {
-                        fixture.health().observation.as_ref().unwrap().eligibility
-                            != InputEligibility::Hold(GateReason::Interaction)
-                    });
-                    std::thread::sleep(Duration::from_millis(300));
-                    assert_eq!(
-                        input(fixture, queue[0].1).state,
-                        InputState::Ready,
-                        "the queue head's attempts fail without starting it"
-                    );
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
-                    assert_housekept(fixture, &queue);
-                    fixture
-                        .fixture
-                        .conn
-                        .execute_batch("DROP TRIGGER owned_deferred_attempt_failure")
-                        .unwrap();
-                    wait_for(until, "the runner survives the swallowed errors", || {
-                        input(fixture, queue[1].1).state == InputState::Settled
-                    });
-                    let kept = input(fixture, queue[1].1);
-                    assert_eq!(
-                        kept.disposition,
-                        Some(InputDisposition::Submitted),
-                        "{kept:?}"
-                    );
-                });
-            }
+        #[test]
+        fn an_uncertain_prompt_stops_queued_input_and_the_sweep_until_reconciled_on_an_unverified_run()
+         {
+            with_sweeping_input_service_catalog(
+                Duration::from_secs(40),
+                true,
+                without_composer_verification,
+                uncertain_prompt_stops_the_fifo_and_the_sweep,
+            );
         }
     }
 

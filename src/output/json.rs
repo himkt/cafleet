@@ -188,51 +188,6 @@ pub(crate) fn permission_inspection(row: &crate::runtime::PermissionInspection) 
 mod tests {
     use serde_json::json;
 
-    mod composer_reliability {
-        use crate::broker::runtime as storage;
-        use crate::broker::runtime::test_support::Fixture;
-
-        #[test]
-        fn input_json_presents_left_stage_immediately_after_its_stop_cause() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            for (stage, cause) in [
-                (
-                    storage::LeftStage::EscapeOnly,
-                    storage::StopCause::ManualInput,
-                ),
-                (
-                    storage::LeftStage::Partial,
-                    storage::StopCause::PointerInput,
-                ),
-                (
-                    storage::LeftStage::LiteralComplete,
-                    storage::StopCause::DeadlineExpired,
-                ),
-                (
-                    storage::LeftStage::Submitted,
-                    storage::StopCause::SubmitUnconfirmed,
-                ),
-            ] {
-                let input = fixture.left_input(
-                    &owner,
-                    stage.as_str(),
-                    storage::InputKind::Prompt,
-                    cause,
-                    stage,
-                );
-                let output = crate::output::json::input_operation(&input);
-                let row = output["input"].as_object().unwrap();
-                let keys = row.keys().map(String::as_str).collect::<Vec<_>>();
-                assert_eq!(&keys[keys.len() - 2..], ["stop_cause", "left_stage"]);
-                assert_eq!(row["stop_cause"], cause.as_str());
-                assert_eq!(row["left_stage"], stage.as_str());
-                assert_eq!(row["disposition"], "left_in_composer");
-                assert_eq!(row["delivery"]["status"], "left_in_composer");
-            }
-        }
-    }
-
     use crate::broker::runtime::RunStatus;
     use crate::runtime::RecoveryOutcome;
     use crate::runtime::RecoveryReport;
@@ -331,7 +286,6 @@ mod tests {
     }
 
     mod delivery_outcomes {
-        use crate::broker::MessageRecord;
         use crate::broker::runtime::DeliveryMethod;
         use crate::broker::runtime::DeliveryProjection;
         use crate::broker::runtime::DeliveryStatus;
@@ -398,23 +352,6 @@ mod tests {
                     json!({"status":"not_applicable","method":null,"reason":"self_send"}),
                 ),
             ]
-        }
-
-        #[test]
-        fn send_outcome_appends_input_id_and_ordered_delivery_after_its_existing_keys() {
-            let message = MessageRecord::fixture(9, 2, 3, "hello");
-            for (sent, input_id, delivery, expected) in cases() {
-                let output = crate::output::json::send_outcome(&message, sent, input_id, &delivery);
-                assert_key_order(
-                    &output,
-                    &["message", "notification_sent", "input_id", "delivery"],
-                );
-                assert_key_order(&output["delivery"], &["status", "method", "reason"]);
-                assert_eq!(output["notification_sent"], sent);
-                assert_eq!(output["input_id"], json!(input_id));
-                assert_eq!(output["delivery"], expected);
-                assert_eq!(output["message"], crate::output::json::message(&message));
-            }
         }
 
         #[test]
