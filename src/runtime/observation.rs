@@ -5900,7 +5900,7 @@ pub(crate) mod native_capture {
             case_until: Instant,
         }
         impl LaunchHost for CaptureVerificationLaunchHost<'_> {
-            fn clock(&self) -> &dyn crate::time::Clock {
+            fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
                 self.inner.clock()
             }
             fn current_executable(&self) -> Result<PathBuf> {
@@ -7034,7 +7034,12 @@ pub(crate) mod native_capture {
                 .to_string_lossy()
                 .into_owned();
             let mut host = CaptureVerificationLaunchHost {
-                inner: NativeLaunchHost::new(&*mux, &target, &cwd, &crate::time::SystemClock),
+                inner: NativeLaunchHost::new(
+                    &*mux,
+                    &target,
+                    &cwd,
+                    std::sync::Arc::new(crate::time::SystemClock),
+                ),
                 case,
                 case_until,
             };
@@ -8002,11 +8007,8 @@ pub(crate) mod test_support {
     pub(crate) mod controller {
         use crate::broker::runtime as storage;
         use crate::runtime::ProcessIdentity;
-        use crate::runtime::observation::*;
         use crate::runtime::writer::test_support::WriterFixture;
-        use std::sync::atomic::AtomicU64;
-        use std::sync::atomic::Ordering;
-        use std::time::Duration;
+        pub(crate) use crate::time::test_support::TestClock;
         use std::time::Instant;
         pub(crate) const VERSION: &str = "0.0.1-synthetic";
         pub(crate) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
@@ -8017,40 +8019,11 @@ pub(crate) mod test_support {
             fixture.fixture.run =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         }
-        pub(crate) struct Clock {
-            pub(crate) origin: Instant,
-            pub(crate) millis: AtomicU64,
-        }
-        impl Clock {
-            pub(crate) fn new() -> Self {
-                Self {
-                    origin: Instant::now(),
-                    millis: AtomicU64::new(0),
-                }
-            }
-            pub(crate) fn set(&self, millis: u64) {
-                self.millis.store(millis, Ordering::Release);
-            }
-        }
-        impl crate::time::Clock for Clock {
-            fn now(&self) -> Instant {
-                self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire))
-            }
-            fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
-                crate::time::parse_lenient(NOW).expect("the fixture stamp is canonical")
-            }
-            fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
-                panic!("the observation fixture clock serves only observation moments")
-            }
-            fn sleep(&self, _: Duration) {
-                panic!("the observation fixture clock advances only through set")
-            }
-            fn shutdown_unit(&self) -> Duration {
-                crate::time::SHUTDOWN_UNIT
-            }
-            fn kind(&self) -> crate::time::ClockKind {
-                crate::time::ClockKind::Deterministic
-            }
+        /// A virtual clock whose wall time starts at the fixture stamp [`NOW`].
+        pub(crate) fn fixture_clock() -> TestClock {
+            TestClock::starting_at(Instant::now()).with_wall_origin(
+                crate::time::parse_lenient(NOW).expect("the fixture stamp is canonical"),
+            )
         }
         pub(crate) fn running(fixture: &mut WriterFixture, child: &ProcessIdentity) {
             fixture.fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![child.pid,child.start_identity,NOW,fixture.fixture.run.run_id]).unwrap();
@@ -8984,7 +8957,7 @@ mod tests {
             use crate::runtime::system::test_support::TestChild;
 
             let until = Instant::now() + Duration::from_secs(5);
-            let clock = crate::runtime::observation::test_support::controller::Clock::new();
+            let clock = crate::runtime::observation::test_support::controller::fixture_clock();
             let mut now_ms = 0;
             let mut writer_fixture = WriterFixture::new();
             let fixture = &mut writer_fixture.fixture;
@@ -9026,7 +8999,7 @@ mod tests {
                         "actual current authority before original fixture deadline"
                     );
                     now_ms += 2;
-                    clock.set(now_ms);
+                    clock.set_elapsed(Duration::from_millis(now_ms));
                 }
                 assert!(controller.tracker.active_episode().is_some());
                 assert!(controller.current_request().is_some());
@@ -9077,7 +9050,7 @@ mod tests {
                     "a later genuine complete screen cannot restore exhausted authority"
                 );
                 now_ms += 110;
-                clock.set(now_ms);
+                clock.set_elapsed(Duration::from_millis(now_ms));
                 let later = controller.poll(&terminal.snapshot(), &writer, &clock);
                 if let Err(cause) = later {
                     assert!(
@@ -9132,7 +9105,7 @@ mod tests {
             use crate::runtime::system::test_support::TestChild;
 
             let until = Instant::now() + Duration::from_secs(5);
-            let clock = crate::runtime::observation::test_support::controller::Clock::new();
+            let clock = crate::runtime::observation::test_support::controller::fixture_clock();
             let now_ms = std::cell::Cell::new(0);
             let mut writer_fixture = WriterFixture::new();
             let fixture = &mut writer_fixture.fixture;
@@ -9181,7 +9154,7 @@ mod tests {
                             }
                             assert!(Instant::now() < until, "the observed state settles in time");
                             now_ms.set(now_ms.get() + 2);
-                            clock.set(now_ms.get());
+                            clock.set_elapsed(Duration::from_millis(now_ms.get()));
                         }
                         (
                             controller.request_generation(),
@@ -9300,7 +9273,7 @@ mod tests {
                  {
                     let fault = Arc::new(Fault::new(ObservationPhase::QuietTimer));
                     let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
-                    case.clock.set(200);
+                    case.clock.set_elapsed(Duration::from_millis(200));
                     case.terminal
                         .feed(&form("write candidate-after-open.txt"))
                         .unwrap();
@@ -9311,7 +9284,7 @@ mod tests {
                     let sequence = case.terminal.snapshot().screen_seq;
                     let calls = fault.calls.load(Ordering::Acquire);
                     fault.arm();
-                    case.clock.set(300);
+                    case.clock.set_elapsed(Duration::from_millis(300));
                     let status = case
                         .controller
                         .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
@@ -9335,7 +9308,7 @@ mod tests {
                     let fault = Arc::new(Fault::new(ObservationPhase::ChildOutput));
                     let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
                     fault.arm();
-                    case.clock.set(200);
+                    case.clock.set_elapsed(Duration::from_millis(200));
                     let calls = fault.calls.load(Ordering::Acquire);
                     let _attempt = case
                         .controller
@@ -9368,12 +9341,12 @@ mod tests {
                         let mut case = LiveCase::with_observation_hooks(Some(fault));
                         let before = case.controller.status().gap_count;
                         let result = if invariant == "clock" {
-                            case.clock.set(99);
+                            case.clock.set_elapsed(Duration::from_millis(99));
                             case.controller
                                 .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
                                 .map(|_| ())
                         } else {
-                            case.clock.set(200);
+                            case.clock.set_elapsed(Duration::from_millis(200));
                             let mut stale = case.terminal.snapshot();
                             stale.screen_seq = 0;
                             case.controller
@@ -9398,51 +9371,13 @@ mod tests {
                 }
             }
 
-            struct Timeline {
-                origin: Instant,
-                millis: AtomicU64,
-            }
-            impl Timeline {
-                fn new() -> Self {
-                    Self {
-                        origin: Instant::now(),
-                        millis: AtomicU64::new(0),
-                    }
-                }
-                fn set(&self, millis: u64) {
-                    self.millis.store(millis, Ordering::Release);
-                }
-                fn timestamp(millis: u64) -> String {
-                    let origin = chrono::DateTime::parse_from_rfc3339(NOW)
-                        .unwrap()
-                        .with_timezone(&chrono::Utc);
-                    crate::time::format_utc(
-                        origin + chrono::Duration::milliseconds(i64::try_from(millis).unwrap()),
-                    )
-                }
-            }
-            impl crate::time::Clock for Timeline {
-                fn now(&self) -> Instant {
-                    self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire))
-                }
-                fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
-                    crate::time::parse_lenient(&Self::timestamp(
-                        self.millis.load(Ordering::Acquire),
-                    ))
-                    .expect("the timeline stamp is canonical")
-                }
-                fn monotonic_sample(&self) -> Result<crate::time::MonotonicSample> {
-                    panic!("the timeline serves only observation moments")
-                }
-                fn sleep(&self, _: Duration) {
-                    panic!("the timeline advances only through its setter")
-                }
-                fn shutdown_unit(&self) -> Duration {
-                    crate::time::SHUTDOWN_UNIT
-                }
-                fn kind(&self) -> crate::time::ClockKind {
-                    crate::time::ClockKind::Deterministic
-                }
+            fn timestamp(millis: u64) -> String {
+                let origin = chrono::DateTime::parse_from_rfc3339(NOW)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc);
+                crate::time::format_utc(
+                    origin + chrono::Duration::milliseconds(i64::try_from(millis).unwrap()),
+                )
             }
 
             /// A recoverable detector failure holds input and records a gap.
@@ -9458,7 +9393,7 @@ mod tests {
                 hooks: Arc<Hooks>,
                 child: TestChild,
                 terminal: TerminalState,
-                clock: Timeline,
+                clock: TestClock,
                 fixture: WriterFixture,
             }
             impl LiveCase {
@@ -9492,14 +9427,14 @@ mod tests {
                     running(&mut fixture, &child.identity());
                     let mut terminal =
                         TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-                    let clock = Timeline::new();
+                    let clock = fixture_clock();
                     controller
                         .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
                         .unwrap();
                     terminal
                         .feed_observed(&opening, &mut controller.observer(&writer, &clock))
                         .unwrap();
-                    clock.set(100);
+                    clock.set_elapsed(Duration::from_millis(100));
                     controller
                         .poll(&terminal.snapshot(), &writer, &clock)
                         .unwrap();
@@ -9534,7 +9469,7 @@ mod tests {
                         assert!(Instant::now() < until, "owned child exit deadline");
                         std::thread::sleep(Duration::from_millis(2));
                     }
-                    self.clock.set(millis);
+                    self.clock.set_elapsed(Duration::from_millis(millis));
                     let sequence = self.terminal.snapshot().screen_seq;
                     self.controller
                         .child_exited(
@@ -9597,11 +9532,11 @@ mod tests {
                 case.exit(300);
                 case.hooks.wait(WriterBoundary::Persist, 2);
                 wait_until(|| case.writer.status().diagnostic.is_some());
-                case.clock.set(500);
+                case.clock.set_elapsed(Duration::from_millis(500));
                 case.controller
                     .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
                     .unwrap();
-                case.clock.set(700);
+                case.clock.set_elapsed(Duration::from_millis(700));
                 drop(release);
                 let unfinished = case.drain(deadline());
                 let events = case.events();
@@ -9620,10 +9555,7 @@ mod tests {
                         RuntimeEventKind::RunnerExited,
                     ]
                 );
-                assert_eq!(
-                    events.last().unwrap().event.observed_at,
-                    Timeline::timestamp(300)
-                );
+                assert_eq!(events.last().unwrap().event.observed_at, timestamp(300));
                 for _ in 0..3 {
                     case.controller
                         .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
@@ -9670,7 +9602,7 @@ mod tests {
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
-            let clock = Clock::new();
+            let clock = fixture_clock();
             let (mut controller, _child, mut terminal) =
                 started_controller(&mut fixture, &writer, &clock, &catalog());
             terminal
@@ -9684,12 +9616,12 @@ mod tests {
                 controller.status().eligibility,
                 InputEligibility::Hold(GateReason::Candidate)
             ));
-            clock.set(99);
+            clock.set_elapsed(Duration::from_millis(99));
             controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
             assert_eq!(committed(&fixture), 0);
-            clock.set(100);
+            clock.set_elapsed(Duration::from_millis(100));
             controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
@@ -9715,7 +9647,7 @@ mod tests {
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
-            let clock = Clock::new();
+            let clock = fixture_clock();
             let (mut controller, _child, mut terminal) =
                 started_controller(&mut fixture, &writer, &clock, &catalog());
             let mut bytes = form("write disposable.txt");
@@ -9723,7 +9655,7 @@ mod tests {
             terminal
                 .feed_observed(&bytes, &mut controller.observer(&writer, &clock))
                 .unwrap();
-            clock.set(100);
+            clock.set_elapsed(Duration::from_millis(100));
             let status = controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
@@ -9745,7 +9677,9 @@ mod tests {
                 configure(&mut fixture);
                 let mut controller =
                     ObservationController::new(&fixture.fixture.run, &catalog()).unwrap();
-                controller.observer_failed(reason, &Clock::new()).unwrap();
+                controller
+                    .observer_failed(reason, &fixture_clock())
+                    .unwrap();
                 let status = controller.status();
                 assert!(matches!(status.eligibility, InputEligibility::Hold(_)));
                 assert_eq!(status.diagnostic.as_deref(), Some(code));
@@ -9759,7 +9693,7 @@ mod tests {
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
-            let clock = Clock::new();
+            let clock = fixture_clock();
             let mut controller =
                 ObservationController::new(&fixture.fixture.run, &catalog()).unwrap();
             let screen = TerminalState::new(TerminalSize { rows: 24, cols: 80 })
@@ -9796,7 +9730,7 @@ mod tests {
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
-            let clock = Clock::new();
+            let clock = fixture_clock();
             let (mut controller, mut child, mut terminal) =
                 started_controller(&mut fixture, &writer, &clock, &catalog());
             terminal
@@ -9805,7 +9739,7 @@ mod tests {
                     &mut controller.observer(&writer, &clock),
                 )
                 .unwrap();
-            clock.set(100);
+            clock.set_elapsed(Duration::from_millis(100));
             controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
@@ -9825,7 +9759,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(2));
             };
             assert_eq!(exit.signal(), Some(15));
-            clock.set(200);
+            clock.set_elapsed(Duration::from_millis(200));
             controller
                 .child_exited(ChildExit::Signal(15), &terminal.snapshot(), &writer, &clock)
                 .unwrap();
@@ -9853,7 +9787,7 @@ mod tests {
             let mut writer = start(&fixture, hooks.clone());
             let release = Release(hooks.clone());
             hooks.wait(WriterBoundary::Receive, 1);
-            let clock = Clock::new();
+            let clock = fixture_clock();
             let (mut controller, _child, mut terminal) =
                 started_controller(&mut fixture, &writer, &clock, &catalog);
             let preview = crate::broker::messaging::insert_message_validated(
@@ -9875,7 +9809,7 @@ mod tests {
             assert_eq!(writer.status().pending_count, 1);
             let mut last_opening_sequence = 0;
             for index in 0..32 {
-                clock.set(index * 200);
+                clock.set_elapsed(Duration::from_millis(index * 200));
                 terminal
                     .feed(&form(&format!("write fixture-{index:02}.txt")))
                     .unwrap();
@@ -9884,7 +9818,7 @@ mod tests {
                     .observer(&writer, &clock)
                     .observe(&terminal.snapshot())
                     .unwrap();
-                clock.set(index * 200 + 100);
+                clock.set_elapsed(Duration::from_millis(index * 200 + 100));
                 controller
                     .poll(&terminal.snapshot(), &writer, &clock)
                     .unwrap();
@@ -9894,7 +9828,7 @@ mod tests {
             assert_eq!(writer.status().pending_count, 64);
             assert!(!writer.status().diagnostic.is_some());
             assert_eq!(committed(&fixture), 0);
-            clock.set(8600);
+            clock.set_elapsed(Duration::from_millis(8600));
             let replacement = form("write final-original.txt");
             assert_eq!(replacement[0], 0x1b);
             terminal
@@ -9904,7 +9838,7 @@ mod tests {
             terminal
                 .feed_observed(&replacement[1..], &mut controller.observer(&writer, &clock))
                 .unwrap();
-            clock.set(8700);
+            clock.set_elapsed(Duration::from_millis(8700));
             let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
             assert_retained_pressure(attempt, controller.status());
             let original_sequence = terminal.snapshot().screen_seq;
@@ -9942,7 +9876,11 @@ mod tests {
                 assert_eq!(view.event.event_seq, sequence);
                 assert_eq!(view.event.interaction_id, Some(interaction.interaction_id));
                 assert_eq!(interaction.episode_seq, episode);
-                assert_eq!(view.event.observed_at, NOW);
+                assert_eq!(
+                    view.event.observed_at,
+                    crate::time::Clock::wall_stamp(&clock),
+                    "the supersede is observed at the clock's current moment"
+                );
                 assert_eq!(view.event.payload_json["evidence"]["screen_seq"], screen);
             }
             assert_eq!(opened.event.kind, RuntimeEventKind::InteractionOpened);

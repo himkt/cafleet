@@ -161,7 +161,7 @@ pub(crate) trait ShutdownHost {
 
 pub(crate) fn shutdown(
     host: &mut impl ShutdownHost,
-    clock: ShutdownDeadlines,
+    deadlines: ShutdownDeadlines,
     native: Option<ChildExit>,
 ) -> ShutdownOutcome {
     let mut outcome = ShutdownOutcome::complete(native);
@@ -179,7 +179,7 @@ pub(crate) fn shutdown(
     note(&mut outcome.diagnostics, host.term_verified_descendants());
     let drained = note(
         &mut outcome.diagnostics,
-        host.drain_and_reap_until(clock.child_deadline()),
+        host.drain_and_reap_until(deadlines.child_deadline()),
     )
     .flatten();
     reconcile_exit(&mut outcome, drained, "conflicting native exit status");
@@ -193,16 +193,16 @@ pub(crate) fn shutdown(
     );
     let dropped_display_bytes = note(
         &mut outcome.diagnostics,
-        host.flush_display_until(clock.display_deadline()),
+        host.flush_display_until(deadlines.display_deadline()),
     )
     .unwrap_or(0);
     let (pending_event_frames, unsaved_observation_gap) = note(
         &mut outcome.diagnostics,
-        host.finish_events_until(clock.storage_deadline()),
+        host.finish_events_until(deadlines.storage_deadline()),
     )
     .unwrap_or((0, 0));
     note(&mut outcome.diagnostics, host.restore_terminal());
-    if host.clock().now() > clock.storage_deadline() {
+    if host.clock().now() > deadlines.storage_deadline() {
         outcome
             .diagnostics
             .push("shutdown exceeded its original storage deadline".into());
@@ -366,7 +366,7 @@ pub(crate) struct Started {
     pub(crate) child: ProcessIdentity,
 }
 pub(crate) trait LaunchHost {
-    fn clock(&self) -> &dyn crate::time::Clock;
+    fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock>;
     fn current_executable(&self) -> Result<PathBuf>;
     fn split_runner(
         &mut self,
@@ -409,14 +409,14 @@ pub(crate) struct LaunchOutcome {
 fn pending_failure(
     conn: &mut Connection,
     run: &RunRecord,
-    clock: ShutdownDeadlines,
+    deadlines: ShutdownDeadlines,
     diagnostics: &[String],
-    time: &dyn crate::time::Clock,
+    clock: &dyn crate::time::Clock,
 ) -> Result<()> {
-    with_database_deadline(conn, clock.storage_deadline(), |conn| {
+    with_database_deadline(conn, deadlines.storage_deadline(), |conn| {
         ensure_same_database(conn, &run.database_identity_json)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute("UPDATE member_runs SET status='failed',ended_at=COALESCE(ended_at,?1),cleanup_state=?2,cleanup_diagnostics_json=?3 WHERE run_id=?4 AND launch_nonce=?5",params![time.wall_stamp(),if diagnostics.is_empty(){"complete"}else{"incomplete"},serde_json::to_string(diagnostics).map_err(io_error)?,run.run_id,run.launch_nonce])?;
+        tx.execute("UPDATE member_runs SET status='failed',ended_at=COALESCE(ended_at,?1),cleanup_state=?2,cleanup_diagnostics_json=?3 WHERE run_id=?4 AND launch_nonce=?5",params![clock.wall_stamp(),if diagnostics.is_empty(){"complete"}else{"incomplete"},serde_json::to_string(diagnostics).map_err(io_error)?,run.run_id,run.launch_nonce])?;
         broker::members::deregister_member_rows(&tx, run.member_id)?;
         tx.commit().map_err(crate::error::CafleetError::from)
     })
@@ -431,14 +431,14 @@ struct PendingGuard<'a> {
     conn: &'a mut Connection,
     run: RunRecord,
     armed: bool,
+    clock: std::sync::Arc<dyn crate::time::Clock>,
 }
 impl PendingGuard<'_> {
     fn rollback(
         &mut self,
         primary: CafleetError,
-        clock: ShutdownDeadlines,
+        deadlines: ShutdownDeadlines,
         mut diagnostics: Vec<String>,
-        time: &dyn crate::time::Clock,
     ) -> CafleetError {
         self.armed = false;
         let current = note(
@@ -450,7 +450,13 @@ impl PendingGuard<'_> {
             &mut diagnostics,
             remove_pending_descriptor(self.conn, &current),
         );
-        if let Err(cause) = pending_failure(self.conn, &current, clock, &diagnostics, time) {
+        if let Err(cause) = pending_failure(
+            self.conn,
+            &current,
+            deadlines,
+            &diagnostics,
+            self.clock.as_ref(),
+        ) {
             diagnostics.push(cause.message().into_owned());
         }
         diagnostics
@@ -461,11 +467,11 @@ impl PendingGuard<'_> {
 impl Drop for PendingGuard<'_> {
     fn drop(&mut self) {
         if self.armed {
+            let deadlines = ShutdownDeadlines::starting_now(self.clock.as_ref());
             let cause = self.rollback(
                 error("pending creation was interrupted"),
-                ShutdownDeadlines::starting_now(&crate::time::SystemClock),
+                deadlines,
                 Vec::new(),
-                &crate::time::SystemClock,
             );
             eprintln!("{cause}");
         }
@@ -484,15 +490,15 @@ pub(crate) fn create_registered(
         conn,
         run: pending.run.clone(),
         armed: true,
+        clock: host.clock(),
     };
     let (mut artifacts, spawn) = match prepare(guard.conn, &pending) {
         Ok(value) => value,
         Err(cause) => {
             return Err(guard.rollback(
                 cause,
-                ShutdownDeadlines::starting_now(host.clock()),
+                ShutdownDeadlines::starting_now(&*host.clock()),
                 Vec::new(),
-                host.clock(),
             ));
         }
     };
@@ -655,7 +661,7 @@ fn launch_registered(
             Some(payload),
         ),
     };
-    let clock = ShutdownDeadlines::starting_now(host.clock());
+    let deadlines = ShutdownDeadlines::starting_now(&*host.clock());
     let mut notes = Vec::new();
     match storage::get_run(guard.conn, pending.run.run_id) {
         Ok(current) if current.owner_kind == OwnerKind::Runner => {
@@ -671,7 +677,7 @@ fn launch_registered(
             }
             let panicked = "owned child cleanup panicked; explicit reconciliation required";
             if let Some(outcome) = guarded(&mut notes, panicked, || {
-                host.shutdown_owned(&current, clock)
+                host.shutdown_owned(&current, deadlines)
             }) {
                 notes.extend(outcome.diagnostics);
                 if outcome.cleanup_state == CleanupState::Incomplete && notes.is_empty() {
@@ -685,10 +691,10 @@ fn launch_registered(
     if let Some(pane) = pane {
         let panicked = "owned pane cleanup panicked; explicit reconciliation required";
         guarded(&mut notes, panicked, || {
-            host.close_pane(&pane, clock.storage_deadline())
+            host.close_pane(&pane, deadlines.storage_deadline())
         });
     }
-    let failure = guard.rollback(primary, clock, notes, host.clock());
+    let failure = guard.rollback(primary, deadlines, notes);
     if let Some(payload) = unwind {
         eprintln!("{failure}");
         std::panic::resume_unwind(payload);
@@ -702,7 +708,7 @@ pub(crate) struct NativeLaunchHost<'a> {
     target: &'a PaneTarget,
     cwd: &'a str,
     client: Option<ControlClient>,
-    clock: &'a dyn crate::time::Clock,
+    clock: std::sync::Arc<dyn crate::time::Clock>,
 }
 
 impl<'a> NativeLaunchHost<'a> {
@@ -710,7 +716,7 @@ impl<'a> NativeLaunchHost<'a> {
         mux: &'a dyn Multiplexer,
         target: &'a PaneTarget,
         cwd: &'a str,
-        clock: &'a dyn crate::time::Clock,
+        clock: std::sync::Arc<dyn crate::time::Clock>,
     ) -> Self {
         Self {
             mux,
@@ -723,8 +729,8 @@ impl<'a> NativeLaunchHost<'a> {
 }
 
 impl LaunchHost for NativeLaunchHost<'_> {
-    fn clock(&self) -> &dyn crate::time::Clock {
-        self.clock
+    fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+        self.clock.clone()
     }
     fn current_executable(&self) -> Result<std::path::PathBuf> {
         std::env::current_exe().map_err(io_error)
@@ -750,7 +756,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
             descriptor.identity.run_id,
         )?;
         let mut client =
-            ControlClient::connect_starting(&paths.control_socket, deadline, self.clock)?;
+            ControlClient::connect_starting(&paths.control_socket, deadline, self.clock.as_ref())?;
         let request = LifecycleRequest::Prepare {
             protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: descriptor.identity.clone(),
@@ -759,7 +765,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
                 .as_millis()
                 .min(10000) as u64,
         };
-        let result = client.exchange(&request, deadline, self.clock)?;
+        let result = client.exchange(&request, deadline, self.clock.as_ref())?;
         let prepared = serde_json::from_value(result).map_err(io_error)?;
         self.client = Some(client);
         Ok(prepared)
@@ -782,7 +788,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
                 .clone()
                 .expect("published placement carries the created pane"),
         };
-        let value = client.exchange(&request, deadline, self.clock)?;
+        let value = client.exchange(&request, deadline, self.clock.as_ref())?;
         serde_json::from_value(value).map_err(io_error)
     }
     fn settle_hermes(
@@ -803,13 +809,13 @@ impl LaunchHost for NativeLaunchHost<'_> {
     fn shutdown_owned(
         &mut self,
         run: &RunRecord,
-        clock: ShutdownDeadlines,
+        deadlines: ShutdownDeadlines,
     ) -> Result<ShutdownOutcome> {
         if let Ok(value) = request(
             run,
             LifecycleRequest::shutdown(run),
-            clock.storage_deadline(),
-            self.clock,
+            deadlines.storage_deadline(),
+            self.clock.as_ref(),
         ) {
             return serde_json::from_value(value).map_err(io_error);
         }
@@ -820,8 +826,8 @@ impl LaunchHost for NativeLaunchHost<'_> {
                 nix::sys::signal::Signal::SIGTERM,
             )
             .map_err(io_error)?;
-            while runner.matches()? && self.clock.now() < clock.storage_deadline() {
-                pause(clock.storage_deadline(), self.clock)?;
+            while runner.matches()? && self.clock.now() < deadlines.storage_deadline() {
+                pause(deadlines.storage_deadline(), self.clock.as_ref())?;
             }
         }
         let mut notes=vec!["runner control shutdown unavailable; descendant cleanup requires explicit reconciliation".into()];
@@ -883,7 +889,7 @@ mod tests {
                 &mux,
                 &target,
                 "/readiness-fixture",
-                &crate::time::SystemClock,
+                std::sync::Arc::new(crate::time::SystemClock),
             ));
             assert!(runner.events().is_empty(), "{:?}", runner.events());
             result
@@ -1149,7 +1155,7 @@ mod tests {
 
     struct LaunchFixtureHost {
         database_url: String,
-        clock: TestClock,
+        clock: std::sync::Arc<TestClock>,
         delay: Duration,
         calls: Vec<&'static str>,
         deadlines: Vec<(&'static str, Instant)>,
@@ -1173,7 +1179,7 @@ mod tests {
         fn new(fixture: &Fixture) -> Self {
             Self {
                 database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                clock: TestClock::starting_at(Instant::now()),
+                clock: std::sync::Arc::new(TestClock::starting_at(Instant::now())),
                 delay: Duration::ZERO,
                 calls: Vec::new(),
                 deadlines: Vec::new(),
@@ -1223,8 +1229,8 @@ mod tests {
     }
 
     impl LaunchHost for LaunchFixtureHost {
-        fn clock(&self) -> &dyn crate::time::Clock {
-            &self.clock
+        fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
+            self.clock.clone()
         }
         fn current_executable(&self) -> Result<PathBuf, CafleetError> {
             Ok("/absolute/cafleet".into())

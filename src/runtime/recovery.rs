@@ -44,7 +44,7 @@ pub(crate) trait RecoveryHost {
     fn cleanup_owned(
         &mut self,
         run: &RunRecord,
-        clock: ShutdownDeadlines,
+        deadlines: ShutdownDeadlines,
     ) -> Result<ShutdownOutcome>;
     fn unlink_descriptor(&mut self, path: &std::path::Path, deadline: Instant) -> Result<()> {
         unlink_descriptor_file(path, deadline, &*self.clock())
@@ -257,7 +257,7 @@ fn recover(
     borrowed: Option<BorrowedPane<'_>>,
     host: &mut impl RecoveryHost,
 ) -> Result<RecoveryCompletion> {
-    let clock = ShutdownDeadlines::starting_now(&*host.clock()).clipped(until);
+    let deadlines = ShutdownDeadlines::starting_now(&*host.clock()).clipped(until);
     check_deadline(host.clock().now(), until)?;
     ensure(member_id > 0, "positive recovery member ID required")?;
     let (run, pinned) = snapshot(conn, member_id, until)?;
@@ -368,7 +368,7 @@ fn recover(
     with_database_deadline(conn, until, |conn| {
         storage::settle_lost_deferred(conn, &current.owner())
     })?;
-    reconcile_retained_runtime(conn, current, pinned, lock, host, clock, until)
+    reconcile_retained_runtime(conn, current, pinned, lock, host, deadlines, until)
 }
 
 pub(super) struct NativeRecoveryHost;
@@ -408,9 +408,9 @@ impl RecoveryHost for NativeRecoveryHost {
     fn cleanup_owned(
         &mut self,
         run: &RunRecord,
-        clock: ShutdownDeadlines,
+        deadlines: ShutdownDeadlines,
     ) -> Result<ShutdownOutcome> {
-        crate::runtime::process::recover_descendants(run, clock, &*self.clock())
+        crate::runtime::process::recover_descendants(run, deadlines, &*self.clock())
     }
 }
 
@@ -523,11 +523,19 @@ fn reconcile_retained_runtime(
     pinned: Option<Placement>,
     lock: Arc<RunLock>,
     host: &mut impl RecoveryHost,
-    clock: ShutdownDeadlines,
+    deadlines: ShutdownDeadlines,
     until: Instant,
 ) -> Result<RecoveryCompletion> {
     let mut result = completion(run, RecoveryOutcome::Recovering)?;
-    let attempt = perform(conn, &mut result, pinned.as_ref(), lock, host, clock, until);
+    let attempt = perform(
+        conn,
+        &mut result,
+        pinned.as_ref(),
+        lock,
+        host,
+        deadlines,
+        until,
+    );
     match attempt {
         Ok(()) => Ok(result),
         Err(cause)
@@ -664,7 +672,7 @@ fn perform(
     pinned: Option<&Placement>,
     lock: Arc<RunLock>,
     host: &mut impl RecoveryHost,
-    clock: ShutdownDeadlines,
+    deadlines: ShutdownDeadlines,
     until: Instant,
 ) -> Result<()> {
     check_deadline(host.clock().now(), until)?;
@@ -691,7 +699,7 @@ fn perform(
         }
     };
     publish_delivery_results(conn, result, host, until)?;
-    let cleanup = host.cleanup_owned(&result.run, clock)?;
+    let cleanup = host.cleanup_owned(&result.run, deadlines)?;
     for diagnostic in &cleanup.diagnostics {
         result.report.cleanup_diagnostics.push(json!(diagnostic));
     }
@@ -708,13 +716,13 @@ fn perform(
     with_database_deadline(conn, until, |conn| {
         check_snapshot(conn, &result.run, pinned)
     })?;
-    let clock_handle = host.clock();
+    let clock = host.clock();
     descriptor.remove(
         conn,
         &result.run,
         &lock,
         until,
-        clock_handle.as_ref(),
+        clock.as_ref(),
         |path, deadline| host.unlink_descriptor(path, deadline),
     )?;
     result.run = with_database_deadline(conn, until, |conn| {
@@ -1337,6 +1345,7 @@ mod tests {
     mod descriptor_cleanup {
         use crate::runtime::recovery::test_support::descriptor::*;
         use crate::runtime::recovery::tests::*;
+        use crate::time::Clock as _;
         #[test]
         fn runner_recovery_coordinator_propagates_actual_unlink_failure_and_retries_historical_epoch()
          {
@@ -1390,15 +1399,16 @@ mod tests {
             let bytes = owned_bytes(&case);
             let mut host =
                 Host::with_unlink(&case, Instant::now() + Duration::from_millis(500), false);
-            host.action = Some(Box::new(|boundary, _, deadline| {
+            let clock = host.virtual_clock.clone().expect("a virtual host");
+            host.action = Some(Box::new(move |boundary, _, deadline| {
                 if boundary == "before_finish" {
-                    std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+                    clock.advance(deadline.saturating_duration_since(clock.now()));
                 }
                 Ok(())
             }));
             let result = case.recover(&mut host);
             assert!(host.calls.iter().any(|name| name == "before_finish"));
-            assert!(Instant::now() >= host.deadline);
+            assert!(host.clock.now() >= host.deadline);
             assert_eq!(
                 host.unlink.as_ref().unwrap().calls,
                 0,
@@ -1583,12 +1593,12 @@ mod tests {
             let expected = case.fixture.run.clone();
             let held = borrowed.then(|| case.pane_lock());
             case.release();
-            let until = Instant::now() + cap;
-            let mut host = Host::with_clock(until, delay);
+            let mut host = Host::with_clock(Instant::now() + cap, delay);
+            let until = host.deadline;
             let report = if let Some(held) = held.as_ref() {
                 with_database_deadline(&mut case.fixture.conn, until, |conn| {
-                    std::thread::sleep(Duration::from_millis(100));
-                    host.clock.as_mut().unwrap().before_entry = Instant::now();
+                    host.virtual_clock().advance(Duration::from_millis(100));
+                    host.probe.as_mut().unwrap().before_entry = host.clock.now();
                     recover_member_with_held_pane_lock(
                         conn,
                         &case.settings,
@@ -1602,7 +1612,7 @@ mod tests {
                 })
                 .unwrap()
             } else {
-                host.clock.as_mut().unwrap().before_entry = Instant::now();
+                host.probe.as_mut().unwrap().before_entry = host.clock.now();
                 recover_member_with_host(
                     &mut case.fixture.conn,
                     &case.settings,
@@ -1613,7 +1623,7 @@ mod tests {
                 .unwrap()
             };
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
-            assert!(host.clock.as_ref().unwrap().observed.is_some());
+            assert!(host.probe.as_ref().unwrap().observed.is_some());
         }
 
         #[test]
@@ -2119,6 +2129,8 @@ pub(crate) mod test_support {
     use crate::error::CafleetError;
     use crate::runtime::test_support::*;
     use crate::runtime::*;
+    use crate::time::Clock;
+    use crate::time::test_support::TestClock;
     use serde_json::Value;
     use std::io::Write;
     use std::sync::Arc;
@@ -2334,10 +2346,26 @@ pub(crate) mod test_support {
         pub(crate) cleanup: CleanupState,
         pub(crate) calls: Vec<String>,
         pub(crate) action: Option<CheckpointAction>,
-        pub(crate) clock: Option<ClockProbe>,
+        pub(crate) probe: Option<ClockProbe>,
         pub(crate) unlink: Option<UnlinkProbe>,
+        /// The clock recovery reads: virtual by default, real for a test that contends on a
+        /// real lock and needs the real-time budget to expire.
+        pub(crate) clock: Arc<dyn crate::time::Clock>,
+        pub(crate) virtual_clock: Option<Arc<TestClock>>,
     }
     impl Host {
+        /// A host on a virtual clock whose deadline lies as far ahead as `deadline` does now.
+        pub(crate) fn on_virtual_time(deadline: Instant) -> Self {
+            let clock = crate::runtime::test_support::virtual_clock();
+            Self {
+                deadline: clock.now() + deadline.saturating_duration_since(Instant::now()),
+                clock: clock.clone(),
+                virtual_clock: Some(clock),
+                ..Self::new(deadline)
+            }
+        }
+        /// A host on real time, for a caller whose deadline is real, such as a CLI command or a
+        /// test that contends on a real lock.
         pub(crate) fn new(deadline: Instant) -> Self {
             Self {
                 deadline,
@@ -2346,20 +2374,26 @@ pub(crate) mod test_support {
                 cleanup: CleanupState::Complete,
                 calls: Vec::new(),
                 action: None,
-                clock: None,
+                probe: None,
                 unlink: None,
+                clock: Arc::new(crate::time::SystemClock),
+                virtual_clock: None,
             }
         }
+        pub(crate) fn virtual_clock(&self) -> &TestClock {
+            self.virtual_clock
+                .as_deref()
+                .expect("this host runs on the virtual clock")
+        }
         pub(crate) fn with_clock(deadline: Instant, delay: Duration) -> Self {
-            Self {
-                clock: Some(ClockProbe {
-                    before_entry: Instant::now(),
-                    after_entry: None,
-                    delay,
-                    observed: None,
-                }),
-                ..Self::new(deadline)
-            }
+            let mut host = Self::on_virtual_time(deadline);
+            host.probe = Some(ClockProbe {
+                before_entry: host.clock.now(),
+                after_entry: None,
+                delay,
+                observed: None,
+            });
+            host
         }
         pub(crate) fn with_unlink(case: &Case, deadline: Instant, fail: bool) -> Self {
             Self {
@@ -2368,12 +2402,12 @@ pub(crate) mod test_support {
                     calls: 0,
                     fail,
                 }),
-                ..Self::new(deadline)
+                ..Self::on_virtual_time(deadline)
             }
         }
         fn assert_entry_clock(&mut self, clock: ShutdownDeadlines) {
             let until = self.deadline;
-            let Some(probe) = &mut self.clock else {
+            let Some(probe) = &mut self.probe else {
                 return;
             };
             assert!(probe.observed.replace(clock).is_none());
@@ -2404,7 +2438,7 @@ pub(crate) mod test_support {
                 deadline, self.deadline,
                 "all evidence/checkpoints share one original deadline"
             );
-            if Instant::now() >= deadline {
+            if self.clock.now() >= deadline {
                 Err(CafleetError::DeadlineExceeded)
             } else {
                 Ok(())
@@ -2413,7 +2447,7 @@ pub(crate) mod test_support {
     }
     impl RecoveryHost for Host {
         fn clock(&self) -> std::sync::Arc<dyn crate::time::Clock> {
-            std::sync::Arc::new(crate::time::SystemClock)
+            self.clock.clone()
         }
         fn current_process(&mut self) -> TestResult<ProcessIdentity> {
             self.calls.push("current_process".into());
@@ -2474,8 +2508,8 @@ pub(crate) mod test_support {
             deadline: Instant,
         ) -> TestResult<()> {
             let snapshot = matches!(boundary, RecoveryBoundary::AfterSnapshot);
-            if snapshot && let Some(probe) = &mut self.clock {
-                assert!(probe.after_entry.replace(Instant::now()).is_none());
+            if snapshot && let Some(probe) = &mut self.probe {
+                assert!(probe.after_entry.replace(self.clock.now()).is_none());
             }
             self.check(deadline)?;
             let name = match boundary {
@@ -2493,10 +2527,9 @@ pub(crate) mod test_support {
             if let Some(action) = &mut self.action {
                 action(name, run, deadline)?;
             }
-            if snapshot && let Some(probe) = &self.clock {
-                let resume = Instant::now() + probe.delay;
-                assert!(resume < deadline);
-                std::thread::sleep(resume.saturating_duration_since(Instant::now()));
+            if snapshot && let Some(probe) = &self.probe {
+                assert!(self.clock.now() + probe.delay < deadline);
+                self.virtual_clock().advance(probe.delay);
             }
             Ok(())
         }
@@ -2509,7 +2542,7 @@ pub(crate) mod test_support {
                 return crate::runtime::recovery::unlink_descriptor_file(
                     path,
                     deadline,
-                    &crate::time::SystemClock,
+                    self.clock.as_ref(),
                 );
             };
             probe.calls += 1;
@@ -2583,7 +2616,7 @@ pub(crate) mod test_support {
             .collect()
     }
     pub(crate) fn new_host() -> Host {
-        Host::new(Instant::now() + Duration::from_secs(2))
+        Host::on_virtual_time(Instant::now() + Duration::from_secs(2))
     }
 
     pub(crate) fn rows(conn: &Connection) -> Vec<TableSnapshot> {

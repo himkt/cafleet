@@ -329,7 +329,6 @@ mod tests {
                         operation_key: "exec:cli-receipt-history".into(),
                         kind: storage::InputKind::Exec,
                         payload_digest: "d".repeat(64),
-                        message_id: None,
                     },
                 )
                 .unwrap();

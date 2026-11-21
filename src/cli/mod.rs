@@ -1238,7 +1238,7 @@ mod tests {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
                 let input = fixture
-                    .input(&owner, "prompt:guard", InputKind::Prompt, None)
+                    .input(&owner, "prompt:guard", InputKind::Prompt)
                     .input_id;
                 let interaction = fixture
                     .open(&owner)

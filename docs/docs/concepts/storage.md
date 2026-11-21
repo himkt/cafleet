@@ -29,12 +29,12 @@ Run `cafleet setup` after installation. The same classifier guards normal comman
 Each cafleet version starts from a fresh database, so no fleets, messages or runtime history carry across an upgrade:
 
 1. Finish and delete your active fleets before upgrading.
-2. After upgrading, run `cafleet setup` once. It creates the version's `~/.local/share/cafleet/cafleet_<VERSION>.db` and records the asset installations there; until then `cafleet doctor` reports the database as absent.
+2. After upgrading, run `cafleet setup` once. It creates the version's `~/.local/share/cafleet/cafleet_<VERSION>.db` and installs the embedded assets; until then `cafleet doctor` reports the database as absent.
 3. Create your fleets anew.
 
 Database files of earlier versions in `~/.local/share/cafleet/` stay in place, byte for byte; delete them by hand when you no longer need them. With an explicit `--database-url`, point it at a new empty path, or delete the old file by hand, then run `cafleet setup`.
 
-## Assets-install recording
+## Installed assets
 
 Setup writes each backend's embedded skills and any preset or plugin, and `cafleet doctor` compares every installed file with the embedded copy at each backend's resolved path. Operator customizations belong outside setup-owned assets.
 

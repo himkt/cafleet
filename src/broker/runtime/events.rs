@@ -2030,7 +2030,7 @@ mod tests {
         fn stalled_fixture() -> (Fixture, RunOwner, InputOperation) {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            let head = fixture.input(&owner, "prompt:stalled-head", InputKind::Prompt, None);
+            let head = fixture.input(&owner, "prompt:stalled-head", InputKind::Prompt);
             let head = storage::requeue_zero_byte_immediate(
                 &mut fixture.conn,
                 &owner,
@@ -2160,7 +2160,7 @@ mod tests {
                 assert_eq!(durable_state(&fixture.reopen()), before);
             }
             let (mut fixture, owner, _) = stalled_fixture();
-            let head = fixture.input(&owner, "prompt:unselected-head", InputKind::Prompt, None);
+            let head = fixture.input(&owner, "prompt:unselected-head", InputKind::Prompt);
             storage::record_input_state(
                 &mut fixture.conn,
                 &owner,
@@ -2183,7 +2183,7 @@ mod tests {
         }
 
         fn immediate_uncertain(fixture: &mut Fixture, owner: &RunOwner) -> InputOperation {
-            let input = fixture.input(owner, "prompt:immediate-history", InputKind::Prompt, None);
+            let input = fixture.input(owner, "prompt:immediate-history", InputKind::Prompt);
             storage::record_input_uncertain(
                 &mut fixture.conn,
                 owner,
@@ -2317,12 +2317,7 @@ mod tests {
         fn immediate_submitted_inputs_publish_no_delivery_result() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            let input = fixture.input(
-                &owner,
-                "prompt:immediate-submitted",
-                InputKind::Prompt,
-                None,
-            );
+            let input = fixture.input(&owner, "prompt:immediate-submitted", InputKind::Prompt);
             storage::record_input_state(
                 &mut fixture.conn,
                 &owner,
@@ -2365,7 +2360,7 @@ mod tests {
 
         fn deferred_result(fixture: &mut Fixture) -> (RuntimeEventRecord, i64, Value) {
             let owner = fixture.activate();
-            let input = fixture.input(&owner, "prompt:deferred", InputKind::Prompt, None);
+            let input = fixture.input(&owner, "prompt:deferred", InputKind::Prompt);
             fixture
                 .conn
                 .execute(

@@ -1393,7 +1393,7 @@ mod tests {
 
     use crate::coding_agent::ProfileCatalog;
 
-    use crate::runtime::observation::test_support::controller::Clock;
+    use crate::runtime::observation::test_support::controller::fixture_clock;
     use crate::runtime::transport::REPLY_PREFIX_BOUND;
     use crate::runtime::writer::test_support::Hooks;
     use crate::runtime::writer::test_support::Release;
@@ -1684,7 +1684,7 @@ mod tests {
         fixture: WriterFixture,
         writer: EventWriter,
         controller: ObservationController,
-        clock: Clock,
+        clock: TestClock,
         hooks: Arc<Hooks>,
         release: Option<Release>,
         until: Instant,
@@ -1708,7 +1708,7 @@ mod tests {
                 fixture,
                 writer,
                 controller,
-                clock: Clock::new(),
+                clock: fixture_clock(),
                 hooks,
                 release,
                 until,
@@ -2263,12 +2263,12 @@ mod tests {
                             "fixture flush failure"
                         }
                         "observer" => {
-                            h.clock.set(1);
+                            h.clock.set_elapsed(Duration::from_millis(1));
                             h.controller
                                 .observer(&h.writer, &h.clock)
                                 .observe(&drain_transport.snapshot())
                                 .unwrap();
-                            h.clock.set(0);
+                            h.clock.set_elapsed(Duration::from_millis(0));
                             "observation clock regressed"
                         }
                         "zero" => {

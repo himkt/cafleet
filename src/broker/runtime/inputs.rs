@@ -108,11 +108,6 @@ fn validate_input(
         "member_input_operations.stop_cause",
         "a stop cause requires an uncertain or settled input",
     )?;
-    require(
-        matches!(input.kind, InputKind::Prompt | InputKind::Exec),
-        "member_input_operations.kind",
-        "previews and permission answers are delivered without a durable receipt",
-    )?;
     delivery_projection(&input)?;
     Ok(input)
 }
@@ -332,11 +327,6 @@ pub(crate) fn reserve_input_with_provenance(
     new: &NewInput,
     reservation: NewReservation<'_>,
 ) -> Result<InputReservation, CafleetError> {
-    require(
-        matches!(new.kind, InputKind::Prompt | InputKind::Exec),
-        "kind",
-        "only prompt and exec input reserves an ordinary receipt",
-    )?;
     nonblank(&new.operation_key, "operation_key")?;
     hex(&new.payload_digest, 64, "payload_digest")?;
     owned_transaction(conn, owner, |conn, run| {
@@ -607,13 +597,12 @@ mod tests {
     fn receipt_key_digest_and_settled_disposition_survive_reconnection() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        let input = fixture.input(&owner, "prompt:one", InputKind::Prompt, None);
+        let input = fixture.input(&owner, "prompt:one", InputKind::Prompt);
         assert_eq!(input.state, InputState::InProgress);
         let request = NewInput {
             operation_key: "prompt:one".into(),
             kind: InputKind::Prompt,
             payload_digest: "d".repeat(64),
-            message_id: None,
         };
         let mut other = fixture.reopen();
         assert_eq!(
@@ -647,13 +636,12 @@ mod tests {
     fn operation_key_rejects_a_changed_digest_or_kind() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        fixture.input(&owner, "same-key", InputKind::Prompt, None);
+        fixture.input(&owner, "same-key", InputKind::Prompt);
         for changed in ["digest", "kind"] {
             let mut request = NewInput {
                 operation_key: "same-key".into(),
                 kind: InputKind::Prompt,
                 payload_digest: "d".repeat(64),
-                message_id: None,
             };
             match changed {
                 "digest" => request.payload_digest = "e".repeat(64),
@@ -678,7 +666,7 @@ mod tests {
     fn settlement_cas_rejects_stale_state_and_preserves_recorded_evidence() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        let input = fixture.input(&owner, "exec:lost-stdout", InputKind::Exec, None);
+        let input = fixture.input(&owner, "exec:lost-stdout", InputKind::Exec);
         storage::record_input_uncertain(
             &mut fixture.conn,
             &owner,
@@ -745,7 +733,7 @@ mod tests {
     fn reconciling_an_uncertain_receipt_with_a_recorded_method_not_submitted_reads_back() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
-        let input = fixture.input(&owner, "prompt:uncertain", InputKind::Prompt, None);
+        let input = fixture.input(&owner, "prompt:uncertain", InputKind::Prompt);
         storage::requeue_zero_byte_immediate(
             &mut fixture.conn,
             &owner,
@@ -795,7 +783,7 @@ mod tests {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
         fixture.conn.execute("WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<4095) INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,disposition,evidence_ref) SELECT ?1,'settled:'||x,'prompt',?2,'settled',?3,?3,'not_submitted','audit:zero-byte' FROM n",params![owner.run_id,"d".repeat(64),NOW]).unwrap();
-        let input = fixture.input(&owner, "settled:4096", InputKind::Prompt, None);
+        let input = fixture.input(&owner, "settled:4096", InputKind::Prompt);
         crate::broker::runtime::test_support::settle_input(
             &mut fixture.conn,
             &owner,
@@ -830,14 +818,13 @@ mod tests {
                     operation_key: "reserved".into(),
                     kind: InputKind::Exec,
                     payload_digest: "d".repeat(64),
-                    message_id: None
                 }
             )
             .is_err()
         );
         assert!(rows(&fixture.reopen(), "member_input_operations").is_empty());
         fault.clear(&mut fixture.conn);
-        let input = fixture.input(&owner, "reserved", InputKind::Exec, None);
+        let input = fixture.input(&owner, "reserved", InputKind::Exec);
         fixture
             .conn
             .execute_batch("PRAGMA ignore_check_constraints=ON")
@@ -858,7 +845,7 @@ mod tests {
         use crate::broker::runtime::inputs::tests::*;
 
         fn deferred_attempt(fixture: &mut Fixture, owner: &RunOwner, key: &str) -> InputOperation {
-            let input = fixture.input(owner, key, InputKind::Prompt, None);
+            let input = fixture.input(owner, key, InputKind::Prompt);
             storage::requeue_zero_byte_immediate(
                 &mut fixture.conn,
                 owner,
@@ -890,7 +877,7 @@ mod tests {
             let owner = fixture.activate();
             for (index, &cause) in CAUSES.iter().enumerate() {
                 let key = format!("exec:cause:{index}");
-                let input = fixture.input(&owner, &key, InputKind::Exec, None);
+                let input = fixture.input(&owner, &key, InputKind::Exec);
                 assert_eq!(input.stop_cause, None, "{cause:?}");
                 let uncertain = storage::record_input_uncertain(
                     &mut fixture.conn,
@@ -938,7 +925,7 @@ mod tests {
             for &(case, message) in CASES {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
-                let input = fixture.input(&owner, "prompt:refused", InputKind::Prompt, None);
+                let input = fixture.input(&owner, "prompt:refused", InputKind::Prompt);
                 match case {
                     Refused::PlainStateTransition | Refused::SupersededOwner => {}
                     Refused::Ready => {
@@ -1017,7 +1004,7 @@ mod tests {
             for kind in [InputKind::Prompt, InputKind::Exec] {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
-                let uncertain = fixture.input(&owner, "ordinary:immediate-uncertain", kind, None);
+                let uncertain = fixture.input(&owner, "ordinary:immediate-uncertain", kind);
                 storage::record_input_uncertain(
                     &mut fixture.conn,
                     &owner,
@@ -1025,7 +1012,7 @@ mod tests {
                     StopCause::WriteFailed,
                 )
                 .unwrap();
-                let submitted = fixture.input(&owner, "ordinary:immediate-submitted", kind, None);
+                let submitted = fixture.input(&owner, "ordinary:immediate-submitted", kind);
                 storage::record_input_state(
                     &mut fixture.conn,
                     &owner,
@@ -1219,7 +1206,7 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let input = fixture.input(&owner, &format!("prompt:{index}"), InputKind::Prompt, None);
+            let input = fixture.input(&owner, &format!("prompt:{index}"), InputKind::Prompt);
             fixture
                 .conn
                 .execute(
@@ -1234,7 +1221,7 @@ mod tests {
             assert_eq!(stored.deferred_at.is_none(), !deferred, "{assignment}");
             assert_eq!(stored.defer_reason.is_none(), !deferred, "{assignment}");
         }
-        let queued_with_method = fixture.input(&owner, "exec:invalid", InputKind::Exec, None);
+        let queued_with_method = fixture.input(&owner, "exec:invalid", InputKind::Exec);
         fixture
             .conn
             .execute(

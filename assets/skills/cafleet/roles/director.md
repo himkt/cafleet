@@ -249,7 +249,7 @@ Permission responses require the selected profile's independently tested answer 
 
 Retain every known `input_id` from stdout, queued results and uncertainty errors, then inspect `cafleet input show INPUT_ID --json`. Read its [`stop_cause`](../reference/cli.md#input-show-and-input-reconcile) together with pane/native evidence. Queued input keeps its ID across method changes; after a client timeout, inspect it before selecting another key. Explicit prompt/exec requires a separate deliberate retry after pane inspection. An uncertain prompt or exec stops the member's queue: no queued input and no preview reaches it until you reconcile that input. An uncertain preview's `input_delivery_result` carries no input ID and needs no reconciliation: its runner types it again once the composer is verified empty, and a repeated preview carries the same message ID.
 
-For an uncertain input, only the Director records evidence-based `input reconcile`; its [CLI contract](../reference/cli.md#input-show-and-input-reconcile) owns synchronization, no-writer and unreachable-owner preconditions and claim retention. Durable keys and episode claims preserve possibly submitted permission answers.
+For an uncertain input, only the Director records evidence-based `input reconcile`; its [CLI contract](../reference/cli.md#input-show-and-input-reconcile) owns synchronization, no-writer and unreachable-owner preconditions. `input reconcile` covers only prompt and exec; a permission answer is held only in the runner's memory, which accepts one answer per interaction episode.
 
 A composer rule that never verifies empty after clearing is a profile defect: record it and route it for correction of the bundled profile. You never poll another member's inbox.
 

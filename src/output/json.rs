@@ -459,8 +459,8 @@ mod tests {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let event = fixture.open(&owner);
-            let input = fixture.input(&owner, "exec:uncertain", InputKind::Exec, None);
-            let queued = fixture.input(&owner, "prompt:queued", InputKind::Prompt, None);
+            let input = fixture.input(&owner, "exec:uncertain", InputKind::Exec);
+            let queued = fixture.input(&owner, "prompt:queued", InputKind::Prompt);
             fixture
                 .conn
                 .execute(
@@ -468,7 +468,7 @@ mod tests {
                     [queued.input_id],
                 )
                 .unwrap();
-            let zero_bytes = fixture.input(&owner, "prompt:zero-bytes", InputKind::Prompt, None);
+            let zero_bytes = fixture.input(&owner, "prompt:zero-bytes", InputKind::Prompt);
             fixture
                 .conn
                 .execute(
@@ -602,7 +602,7 @@ mod tests {
                     event.interaction_id.unwrap()
                 )
             );
-            let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec, None);
+            let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec);
             let output = crate::output::json::input_operation(&input);
             assert_key_order(&output["input"], &INPUT_KEYS);
             assert_eq!(
@@ -618,7 +618,7 @@ mod tests {
         fn input_presentation_reports_the_recorded_stop_cause_and_keeps_the_text_line() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            let caused = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
+            let caused = fixture.input(&owner, "prompt:caused", InputKind::Prompt);
             let caused = storage::record_input_uncertain(
                 &mut fixture.conn,
                 &owner,
@@ -649,7 +649,7 @@ mod tests {
                 "short_write",
                 "reconciliation keeps the recorded cause"
             );
-            let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt, None);
+            let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt);
             assert_eq!(
                 crate::output::json::input_operation(&plain)["input"]["stop_cause"],
                 Value::Null

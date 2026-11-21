@@ -1605,7 +1605,7 @@ mod tests {
         }
 
         #[test]
-        fn plain_setup_without_hermes_installs_skills_records_the_row_and_reports_the_skip() {
+        fn plain_setup_without_hermes_installs_skills_and_reports_the_skip() {
             let installed = install_with(HermesSetup::Absent);
             installed.result.as_ref().unwrap();
             assert_eq!(

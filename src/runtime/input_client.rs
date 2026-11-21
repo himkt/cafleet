@@ -171,10 +171,6 @@ fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()>
     usage(
         run_id > 0 && crate::pane_lock::valid_input(&request.literal),
         "ordinary submission requires a positive run and one nonblank line without control characters",
-    )?;
-    usage(
-        matches!(request.input_kind, InputKind::Prompt | InputKind::Exec),
-        "ordinary input kind required",
     )
 }
 
@@ -516,9 +512,6 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         let operation = match input.input_kind {
             InputKind::Prompt => InputControlOperation::SubmitPrompt(input),
             InputKind::Exec => InputControlOperation::SubmitExec(input),
-            InputKind::Preview | InputKind::Answer => {
-                unreachable!("validated ordinary input kind")
-            }
         };
         let request = control_request(expected_run, &attempt.expiration, operation);
         held.validate_binding(&settings.database_url, expected_placement)?;
@@ -2167,7 +2160,6 @@ mod tests {
                     operation_key: "prompt:other-live-receipt".into(),
                     kind: InputKind::Prompt,
                     payload_digest: "c".repeat(64),
-                    message_id: None,
                 },
             )
             .unwrap();
@@ -2308,7 +2300,6 @@ mod tests {
                         owner.run_id,
                         &request,
                     ),
-                    message_id: None,
                 },
             )
             .unwrap();
@@ -3151,7 +3142,6 @@ mod tests {
                     payload_digest: crate::broker::runtime::input_payload_digest(
                         run.run_id, &request,
                     ),
-                    message_id: None,
                 },
             )
             .unwrap();
@@ -3481,7 +3471,7 @@ mod tests {
         fn uncertain(cause: Option<storage::StopCause>) -> storage::InputOperation {
             let mut fixture = StorageFixture::new();
             let owner = fixture.activate();
-            let input = fixture.input(&owner, "prompt:reason", InputKind::Prompt, None);
+            let input = fixture.input(&owner, "prompt:reason", InputKind::Prompt);
             match cause {
                 Some(cause) => storage::record_input_uncertain(
                     &mut fixture.conn,
@@ -3597,7 +3587,6 @@ mod tests {
                 operation_key: "prompt:absent-placement".into(),
                 kind: InputKind::Prompt,
                 payload_digest: "d".repeat(64),
-                message_id: None,
             },
         )
         .unwrap()

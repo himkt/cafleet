@@ -126,16 +126,6 @@ impl RequestTokenSource for SystemRequestTokens {
     }
 }
 
-struct PendingInputClient {
-    id: u64,
-    deadline: Instant,
-}
-
-/// The runner's own immediate preview attempt; it has no control-socket client to answer.
-struct PendingSweep {
-    deadline: Instant,
-}
-
 struct NativeIo<'a> {
     input: &'a mut NonblockingFile,
     pty: &'a mut PtySession,
@@ -280,14 +270,7 @@ impl RunnerLoop<'_> {
         let reply =
             coordinator.handle_received(self.conn, request, self.native.controller, deadline)?;
         if reply.is_none() {
-            ensure(
-                self.pending_input_client.is_none() && self.pending_sweep.is_none(),
-                "an accepted immediate input requires no other attempt in flight",
-            )?;
-            self.pending_input_client = Some(PendingInputClient {
-                id: client_id,
-                deadline,
-            });
+            self.turns.admit_client(client_id, deadline)?;
         }
         Ok(reply)
     }
@@ -360,9 +343,9 @@ struct LiveShutdown<'a> {
     output: &'a mut NonblockingFile,
     raw: &'a mut RawTerminalGuard,
     writer: &'a mut EventWriter,
-    clock: ShutdownDeadlines,
+    deadlines: ShutdownDeadlines,
     controller: &'a mut ObservationController,
-    observation_clock: &'a dyn crate::time::Clock,
+    clock: &'a dyn crate::time::Clock,
     coordinator: Option<&'a mut InputCoordinator>,
 }
 impl LiveShutdown<'_> {
@@ -372,12 +355,11 @@ impl LiveShutdown<'_> {
         return self.controller.poll_for(
             &snapshot,
             self.writer,
-            self.observation_clock,
+            self.clock,
             ObservationPhase::ShutdownDrain,
         );
         #[cfg(not(test))]
-        self.controller
-            .poll(&snapshot, self.writer, self.observation_clock)
+        self.controller.poll(&snapshot, self.writer, self.clock)
     }
     #[cfg(test)]
     fn await_native_exit_before_parsing(&mut self, deadline: Instant) -> Result<()> {
@@ -387,7 +369,7 @@ impl LiveShutdown<'_> {
         {
             return Ok(());
         }
-        while self.observation_clock.now() < deadline {
+        while self.clock.now() < deadline {
             self.transport.prefetch_child_bytes(self.pty)?;
             if self.pty.try_wait()?.is_some() {
                 self.send_exit()?;
@@ -395,7 +377,7 @@ impl LiveShutdown<'_> {
                     return Ok(());
                 }
             }
-            nap_until(self.observation_clock, deadline);
+            nap_until(self.clock, deadline);
         }
         Err(CafleetError::DeadlineExceeded)
     }
@@ -406,7 +388,7 @@ impl LiveShutdown<'_> {
                 exit,
                 &self.transport.snapshot(),
                 self.writer,
-                self.observation_clock,
+                self.clock,
             )?;
         }
         Ok(())
@@ -414,13 +396,13 @@ impl LiveShutdown<'_> {
 }
 impl ShutdownHost for LiveShutdown<'_> {
     fn clock(&self) -> &dyn crate::time::Clock {
-        self.observation_clock
+        self.clock
     }
     fn gate_programmatic_input(&mut self) {
-        self.writer.set_deadline(self.clock.storage_deadline());
+        self.writer.set_deadline(self.deadlines.storage_deadline());
         #[cfg(test)]
         self.controller
-            .begin_capture_shutdown(self.clock.storage_deadline());
+            .begin_capture_shutdown(self.deadlines.storage_deadline());
     }
     fn term_verified_descendants(&mut self) -> Result<()> {
         self.pty.signal_verified(nix::sys::signal::Signal::SIGTERM)
@@ -433,18 +415,16 @@ impl ShutdownHost for LiveShutdown<'_> {
         #[cfg(test)]
         self.await_native_exit_before_parsing(deadline)?;
 
-        while self.observation_clock.now() < deadline {
+        while self.clock.now() < deadline {
             let mut tick = |transport: &mut Transport| {
                 #[cfg(test)]
                 let mut observer = self.controller.observer_for(
                     self.writer,
-                    self.observation_clock,
+                    self.clock,
                     ObservationPhase::ShutdownDrain,
                 );
                 #[cfg(not(test))]
-                let mut observer = self
-                    .controller
-                    .observer(self.writer, self.observation_clock);
+                let mut observer = self.controller.observer(self.writer, self.clock);
                 transport.tick(self.input, self.pty, self.output, &mut observer)
             };
             let progress = match self.coordinator.as_mut() {
@@ -456,7 +436,7 @@ impl ShutdownHost for LiveShutdown<'_> {
             if !self.pty.survivors()? && progress.child_eof {
                 break;
             }
-            nap_until(self.observation_clock, deadline);
+            nap_until(self.clock, deadline);
         }
         self.pty.try_wait()
     }
@@ -465,11 +445,11 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
     fn close_pty(&mut self) -> Result<()> {
         self.pty.close()?;
-        while self.observation_clock.now() < self.clock.storage_deadline() {
+        while self.clock.now() < self.deadlines.storage_deadline() {
             if (self.pty.try_wait()?.is_some() || !self.pty.has_child()) && !self.pty.survivors()? {
                 break;
             }
-            nap_until(self.observation_clock, self.clock.storage_deadline());
+            nap_until(self.clock, self.deadlines.storage_deadline());
         }
         self.send_exit()?;
         ensure(
@@ -482,10 +462,9 @@ impl ShutdownHost for LiveShutdown<'_> {
         )
     }
     fn flush_display_until(&mut self, deadline: Instant) -> Result<u64> {
-        while self.transport.pending_display_bytes() > 0 && self.observation_clock.now() < deadline
-        {
+        while self.transport.pending_display_bytes() > 0 && self.clock.now() < deadline {
             self.transport.flush_display(self.output)?;
-            nap_until(self.observation_clock, deadline);
+            nap_until(self.clock, deadline);
         }
         Ok(self.transport.discard_display_tail() as u64)
     }
@@ -498,15 +477,15 @@ impl ShutdownHost for LiveShutdown<'_> {
     fn finish_events_until(&mut self, deadline: Instant) -> Result<(u64, u64)> {
         self.send_exit()?;
         if self
-            .clock
-            .remaining_storage_at(self.observation_clock.now())
+            .deadlines
+            .remaining_storage_at(self.clock.now())
             .is_zero()
         {
             return Err(crate::error::CafleetError::DeadlineExceeded);
         }
-        while self.controller.has_pending() && self.observation_clock.now() < deadline {
+        while self.controller.has_pending() && self.clock.now() < deadline {
             self.poll_shutdown()?;
-            nap_until(self.observation_clock, deadline);
+            nap_until(self.clock, deadline);
         }
         let (pending, gap) = self.writer.finish(deadline);
         Ok((
@@ -575,8 +554,8 @@ pub(crate) fn run_service(
 ) -> Result<i32> {
     #[cfg(test)]
     let mut services = services;
-    let observation_clock = services.clock.clone();
-    let shutdown_clock = || ShutdownDeadlines::starting_now(observation_clock.as_ref());
+    let clock = services.clock.clone();
+    let shutdown_deadlines = || ShutdownDeadlines::starting_now(clock.as_ref());
     #[cfg(not(test))]
     let catalog = crate::coding_agent::ProfileCatalog::bundled();
     #[cfg(test)]
@@ -596,13 +575,13 @@ pub(crate) fn run_service(
             .ok_or_else(|| error("run ownership lock is held"))?,
     );
     let process = ProcessIdentity::current()?;
-    let handshake_deadline = observation_clock.now() + Duration::from_secs(10);
+    let handshake_deadline = clock.now() + Duration::from_secs(10);
     let owner = lock.transfer_to_runner_with_deadline(
         &mut conn,
         &original.owner(),
         process.clone(),
         handshake_deadline,
-        observation_clock.as_ref(),
+        clock.as_ref(),
     )?;
     let run = storage::get_run(&conn, owner.run_id)?;
     with_database_deadline(&mut conn, handshake_deadline, |conn| {
@@ -625,7 +604,7 @@ pub(crate) fn run_service(
         .as_file()
         .map_err(io_error)?;
     let initial_size = terminal_size(&terminal)?;
-    let mut pty = PtySession::prepare(initial_size, observation_clock.clone())?;
+    let mut pty = PtySession::prepare(initial_size, clock.clone())?;
     let mut raw = RawTerminalGuard::enter(&terminal)?;
     let mut input = NonblockingFile::new(&std::io::stdin())?;
     let mut output = NonblockingFile::new(&std::io::stdout())?;
@@ -636,7 +615,7 @@ pub(crate) fn run_service(
             display_bytes: 262144,
             bytes_per_tick: 16384,
         },
-        observation_clock.clone(),
+        clock.clone(),
     )?;
     let listener = UnixListener::bind(&artifacts.paths.control_socket).map_err(|cause| {
         error(format!(
@@ -665,7 +644,7 @@ pub(crate) fn run_service(
         settings.database_url.clone(),
         run.clone(),
         lock.clone(),
-        observation_clock.clone(),
+        clock.clone(),
         #[cfg(test)]
         services.writer_hooks.clone(),
     )?;
@@ -681,7 +660,7 @@ pub(crate) fn run_service(
             transport: &mut transport,
             controller: &mut controller,
             writer: &writer,
-            clock: observation_clock.as_ref(),
+            clock: clock.as_ref(),
         },
         conn: &mut conn,
         original: &original,
@@ -696,7 +675,7 @@ pub(crate) fn run_service(
         terminate: &terminate,
         resize: &resize,
         catalog,
-        clock: observation_clock.clone(),
+        clock: clock.clone(),
         #[cfg(test)]
         capture: services.capture.take(),
         handshake_deadline,
@@ -705,18 +684,14 @@ pub(crate) fn run_service(
         creator_connection: None,
         started: false,
         coordinator: None,
-        pending_input_client: None,
-        pending_sweep: None,
         #[cfg(not(test))]
-        preview_sweep: PreviewSweep::default(),
+        turns: InputTurns::new(),
         #[cfg(test)]
-        preview_sweep: if services.preview_sweep {
-            PreviewSweep::default()
+        turns: if services.preview_sweep {
+            InputTurns::new()
         } else {
-            PreviewSweep::disabled()
+            InputTurns::without_sweep()
         },
-        deferred_retry: DeferredRetry::default(),
-        queue_housekeeping_at: None,
         shutdown_client: None,
         native_exit: None,
     };
@@ -734,18 +709,18 @@ pub(crate) fn run_service(
         Ok(result) => (result, None),
         Err(payload) => (Err(error("runner loop unwound")), Some(payload)),
     };
-    let clock = match loop_result {
-        Ok(clock) => clock,
+    let deadlines = match loop_result {
+        Ok(deadlines) => deadlines,
         Err(cause) => {
-            let clock = shutdown_clock();
+            let deadlines = shutdown_deadlines();
             let mut message = cause.message().into_owned();
             if started {
                 let degraded = with_database_deadline(
                     &mut conn,
-                    clock.storage_deadline(),
+                    deadlines.storage_deadline(),
                     |conn| {
                         lock.validate(conn, &owner)?;
-                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![observation_clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
+                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
                         Ok(())
                     },
                 );
@@ -754,13 +729,13 @@ pub(crate) fn run_service(
                 }
             }
             failure = Some(message);
-            clock
+            deadlines
         }
     };
     if let Some(coordinator) = coordinator.as_mut() {
-        let fenced = coordinator.fence(clock.storage_deadline());
+        let fenced = coordinator.fence(deadlines.storage_deadline());
         coordinator.finish_pending_attempt();
-        let unpublished = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
+        let unpublished = with_database_deadline(&mut conn, deadlines.storage_deadline(), |conn| {
             storage::unpublished_delivery_results(conn, run.run_id)
         });
         if let Ok(unpublished) = &unpublished {
@@ -784,7 +759,7 @@ pub(crate) fn run_service(
             }
         }
     }
-    let clock = pty.begin_shutdown(clock);
+    let deadlines = pty.begin_shutdown(deadlines);
     let mut live = LiveShutdown {
         pty: &mut pty,
         transport: &mut transport,
@@ -792,12 +767,12 @@ pub(crate) fn run_service(
         output: &mut output,
         raw: &mut raw,
         writer: &mut writer,
-        clock,
+        deadlines,
         controller: &mut controller,
-        observation_clock: observation_clock.as_ref(),
+        clock: clock.as_ref(),
         coordinator: coordinator.as_mut(),
     };
-    let mut outcome = shutdown(&mut live, clock, native_exit);
+    let mut outcome = shutdown(&mut live, deadlines, native_exit);
     if let Some(cause) = failure {
         outcome.fail(cause);
     }
@@ -807,9 +782,9 @@ pub(crate) fn run_service(
     if let Some(cause) = writer.diagnostic() {
         outcome.fail(cause);
     }
-    let persisted = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
+    let persisted = with_database_deadline(&mut conn, deadlines.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
-        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,observation_clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
+        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
         Ok(())
     });
     if let Err(cause) = persisted {
@@ -819,12 +794,12 @@ pub(crate) fn run_service(
         && let Some(client) = clients.iter_mut().find(|client| client.id == id)
     {
         client.answer(serde_json::to_value(&outcome).map_err(io_error));
-        while !client.output.is_empty() && observation_clock.now() < clock.storage_deadline() {
+        while !client.output.is_empty() && clock.now() < deadlines.storage_deadline() {
             if client.closed || client.flush().is_err() {
                 client.closed = true;
                 break;
             }
-            observation_clock.sleep(Duration::from_millis(1));
+            clock.sleep(Duration::from_millis(1));
         }
     }
     for diagnostic in &outcome.diagnostics {
@@ -874,11 +849,7 @@ struct RunnerLoop<'a> {
     creator_connection: Option<u64>,
     started: bool,
     coordinator: Option<InputCoordinator>,
-    pending_input_client: Option<PendingInputClient>,
-    pending_sweep: Option<PendingSweep>,
-    preview_sweep: PreviewSweep,
-    deferred_retry: DeferredRetry,
-    queue_housekeeping_at: Option<Instant>,
+    turns: InputTurns,
     shutdown_client: Option<u64>,
     native_exit: Option<ChildExit>,
 }
@@ -902,14 +873,14 @@ impl RunnerLoop<'_> {
             }
             self.accept()?;
             for index in 0..self.clients.len() {
-                if let Some(clock) = self.serve_client(index)? {
-                    return Ok(clock);
+                if let Some(deadlines) = self.serve_client(index)? {
+                    return Ok(deadlines);
                 }
             }
             self.clients.retain(|client| !client.closed);
             let progress = if self.started {
                 match self.tick_running()? {
-                    ControlFlow::Break(clock) => return Ok(clock),
+                    ControlFlow::Break(deadlines) => return Ok(deadlines),
                     ControlFlow::Continue(progress) => progress,
                 }
             } else {
@@ -1226,17 +1197,32 @@ impl RunnerLoop<'_> {
         if progress.outer_eof {
             return Ok(ControlFlow::Break(self.shutdown_deadlines()));
         }
-        if let Some(clock) = self.observe_exit()? {
-            return Ok(ControlFlow::Break(clock));
+        if let Some(deadlines) = self.observe_exit()? {
+            return Ok(ControlFlow::Break(deadlines));
         }
-        self.housekeep_queue()?;
-        if self.pending_input_client.is_some() || self.pending_sweep.is_some() {
-            if let Some(clock) = self.complete_pending_input()? {
-                return Ok(ControlFlow::Break(clock));
+        let mut io = LoopIo {
+            native: &mut self.native,
+            terminate: self.terminate,
+            resize: self.resize,
+            native_exit: &mut self.native_exit,
+            run_id: self.run.run_id,
+        };
+        let coordinator = started(&mut self.coordinator);
+        match self
+            .turns
+            .turn(coordinator, self.conn, &self.run, &mut io)?
+        {
+            InputTurnOutcome::Continue => {}
+            InputTurnOutcome::Shutdown(deadlines) => return Ok(ControlFlow::Break(deadlines)),
+            InputTurnOutcome::Reply { client, result } => {
+                if let Some(client) = self
+                    .clients
+                    .iter_mut()
+                    .find(|candidate| candidate.id == client && !candidate.closed)
+                {
+                    client.answer_input(result.as_ref());
+                }
             }
-        } else {
-            self.retry_deferred()?;
-            self.sweep_previews()?;
         }
         Ok(ControlFlow::Continue(progress))
     }
@@ -1250,96 +1236,200 @@ impl RunnerLoop<'_> {
                 publish_stopped_results(coordinator, conn, run_id, controller, clock)
             })
     }
+}
 
-    fn advance(&mut self, deadline: Instant) -> Result<Option<InputControlReply>> {
-        let coordinator = started(&mut self.coordinator);
-        coordinator
-            .advance(
-                self.conn,
-                self.native.transport,
-                self.native.pty,
-                self.native.controller,
-                deadline,
-            )
-            .map_err(CafleetError::from)
+/// The sweep's read snapshot: the run's member is an active ordinary member whose recorded run
+/// is this run with a concrete placement, and its oldest unnotified pending message.
+fn sweep_snapshot(conn: &mut Connection, run: &RunRecord) -> Result<Option<broker::MessageRecord>> {
+    let tx = conn.transaction()?;
+    let Some(fleet_id) = broker::active_member_fleet(&tx, run.member_id)? else {
+        return Ok(None);
+    };
+    let current = broker::get_member(&tx, run.member_id, fleet_id)?.filter(|member| {
+        member.kind == broker::MemberKind::Member
+            && member.placement.mux_pane_id.is_some()
+            && member
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.run.run_id == run.run_id)
+    });
+    let message = match current {
+        Some(_) => broker::oldest_pending_preview(&tx, run.member_id)?,
+        None => None,
+    };
+    tx.commit()?;
+    Ok(message)
+}
+
+/// The in-flight immediate input attempt that later turns drive to its reply.
+enum PendingAttempt {
+    /// A control client's attempt, answered on that client.
+    Client { id: u64, deadline: Instant },
+    /// The runner's own sweep preview, which has no client to answer.
+    Sweep { deadline: Instant },
+}
+
+/// What a turn's input work asks the runner loop to do next.
+pub(crate) enum InputTurnOutcome {
+    Continue,
+    Shutdown(ShutdownDeadlines),
+    /// A control client's completed immediate attempt and its reply.
+    Reply {
+        client: u64,
+        result: Result<InputControlReply>,
+    },
+}
+
+/// The runner I/O that input work drives between transport turns.
+pub(crate) trait InputTurnIo {
+    fn clock(&self) -> &dyn crate::time::Clock;
+    fn controller(&self) -> &ObservationController;
+    fn quiesce(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        deadline: Instant,
+    ) -> std::result::Result<InputDrain, InputFailure>;
+    fn advance(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        deadline: Instant,
+    ) -> Result<Option<InputControlReply>>;
+    /// A termination request, which preempts any further write.
+    fn terminate_requested(&self) -> bool;
+    /// A pending resize, which defers a write to a later turn.
+    fn resize_requested(&self) -> bool;
+    /// The deadlines of the shutdown a termination request starts.
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines;
+    /// Records an observed native exit and returns the shutdown it starts.
+    fn observe_exit(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+    ) -> Result<Option<ShutdownDeadlines>>;
+}
+
+/// The runner's input work after each transport turn: queue housekeeping, the in-flight
+/// immediate attempt, deferred retries and the preview sweep.
+pub(crate) struct InputTurns {
+    pending: Option<PendingAttempt>,
+    preview_sweep: PreviewSweep,
+    deferred_retry: DeferredRetry,
+    queue_housekeeping_at: Option<Instant>,
+}
+
+impl InputTurns {
+    pub(crate) fn new() -> Self {
+        Self {
+            pending: None,
+            preview_sweep: PreviewSweep::default(),
+            deferred_retry: DeferredRetry::default(),
+            queue_housekeeping_at: None,
+        }
+    }
+
+    /// Holds a client's accepted immediate attempt until a later turn completes it.
+    pub(crate) fn admit_client(&mut self, id: u64, deadline: Instant) -> Result<()> {
+        ensure(
+            self.pending.is_none(),
+            "an accepted immediate input requires no other attempt in flight",
+        )?;
+        self.pending = Some(PendingAttempt::Client { id, deadline });
+        Ok(())
+    }
+
+    /// Runs one turn's input work in the runner loop's order.
+    pub(crate) fn turn(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        run: &RunRecord,
+        io: &mut impl InputTurnIo,
+    ) -> Result<InputTurnOutcome> {
+        self.housekeep_queue(coordinator, conn, io)?;
+        if self.pending.is_some() {
+            return self.complete_pending_input(coordinator, conn, io);
+        }
+        self.retry_deferred(coordinator, conn, io)?;
+        self.sweep_previews(coordinator, conn, run, io)?;
+        Ok(InputTurnOutcome::Continue)
     }
 
     /// Drives the in-flight immediate input to its reply: a client-owned attempt answers its
     /// client, and the runner's own sweep attempt settles without a reply.
-    fn complete_pending_input(&mut self) -> Result<Option<ShutdownDeadlines>> {
-        let deadline = match (&self.pending_input_client, &self.pending_sweep) {
-            (Some(client), None) => client.deadline,
-            (None, Some(sweep)) => sweep.deadline,
-            _ => unreachable!("exactly one immediate input attempt is in flight"),
+    fn complete_pending_input(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        io: &mut impl InputTurnIo,
+    ) -> Result<InputTurnOutcome> {
+        let deadline = match self.pending.as_ref().expect("an attempt is in flight") {
+            PendingAttempt::Client { deadline, .. } | PendingAttempt::Sweep { deadline } => {
+                *deadline
+            }
         };
-        let coordinator = started(&mut self.coordinator);
-        let result = match self.native.quiesce(coordinator, deadline) {
+        let result = match io.quiesce(coordinator, deadline) {
             Err(failure) => coordinator
-                .pending_attempt_failed(self.conn, self.native.controller, failure)
+                .pending_attempt_failed(conn, io.controller(), failure)
                 .map(Some)
                 .map_err(CafleetError::from),
             Ok(InputDrain::Pending) => Ok(None),
             Ok(InputDrain::Quiescent) => {
-                if self.terminate.load(Ordering::Acquire) {
-                    return Ok(Some(self.shutdown_deadlines()));
+                if io.terminate_requested() {
+                    return Ok(InputTurnOutcome::Shutdown(io.shutdown_deadlines()));
                 }
-                if let Some(clock) = self.observe_exit()? {
-                    return Ok(Some(clock));
+                if let Some(deadlines) = io.observe_exit(coordinator, conn)? {
+                    return Ok(InputTurnOutcome::Shutdown(deadlines));
                 }
-                if self.resize.load(Ordering::Acquire) {
+                if io.resize_requested() {
                     Ok(None)
                 } else {
-                    self.advance(deadline)
+                    io.advance(coordinator, conn, deadline)
                 }
             }
         };
-        if !matches!(result, Ok(None)) {
-            started(&mut self.coordinator).finish_pending_attempt();
-            self.deferred_retry.next_at = None;
-            if self.pending_sweep.take().is_some() {
+        if matches!(result, Ok(None)) {
+            return Ok(InputTurnOutcome::Continue);
+        }
+        coordinator.finish_pending_attempt();
+        self.deferred_retry.next_at = None;
+        match self.pending.take().expect("an attempt is in flight") {
+            PendingAttempt::Sweep { .. } => {
                 self.finish_sweep(
                     result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
+                    io.clock().now(),
                 );
-                return Ok(None);
+                Ok(InputTurnOutcome::Continue)
             }
-            let pending = self
-                .pending_input_client
-                .take()
-                .expect("completed input retains its original client");
-            if let Some(client) = self
-                .clients
-                .iter_mut()
-                .find(|client| client.id == pending.id && !client.closed)
-            {
-                client.answer_input(
-                    result
-                        .as_ref()
-                        .map(|reply| reply.as_ref().expect("completed input has a reply")),
-                );
-            }
+            PendingAttempt::Client { id, .. } => Ok(InputTurnOutcome::Reply {
+                client: id,
+                result: result.map(|reply| reply.expect("completed input has a reply")),
+            }),
         }
-        Ok(None)
     }
 
-    fn retry_deferred(&mut self) -> Result<()> {
-        let coordinator = started(&mut self.coordinator);
+    fn retry_deferred(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        io: &mut impl InputTurnIo,
+    ) -> Result<()> {
         if !coordinator.has_deferred_work()
             || !self.deferred_retry.due(
                 coordinator.deferred_attempt_writing(),
-                self.native.controller.status(),
-                self.native.clock.now(),
+                io.controller().status(),
+                io.clock().now(),
             )
         {
             return Ok(());
         }
-        let deadline = self.native.clock.now() + Duration::from_secs(5);
-        let drained = self.native.quiesce(coordinator, deadline);
+        let deadline = io.clock().now() + Duration::from_secs(5);
+        let drained = io.quiesce(coordinator, deadline);
         if let Ok(InputDrain::Quiescent) = drained
-            && !self.terminate.load(Ordering::Acquire)
-            && !self.resize.load(Ordering::Acquire)
-            && let Err(failure) = self.advance(deadline)
+            && !io.terminate_requested()
+            && !io.resize_requested()
+            && let Err(failure) = io.advance(coordinator, conn, deadline)
         {
-            let coordinator = started(&mut self.coordinator);
             if coordinator.deferred_failed() {
                 return Err(failure);
             }
@@ -1348,14 +1438,18 @@ impl RunnerLoop<'_> {
         Ok(())
     }
 
-    fn housekeep_queue(&mut self) -> Result<()> {
-        let now = self.native.clock.now();
+    fn housekeep_queue(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        io: &impl InputTurnIo,
+    ) -> Result<()> {
+        let now = io.clock().now();
         if self.queue_housekeeping_at.is_some_and(|at| now < at) {
             return Ok(());
         }
         self.queue_housekeeping_at = Some(now + QUEUE_HOUSEKEEPING_INTERVAL);
-        let coordinator = started(&mut self.coordinator);
-        if let Err(failure) = coordinator.queue_housekeeping(self.conn, self.native.controller) {
+        if let Err(failure) = coordinator.queue_housekeeping(conn, io.controller()) {
             if coordinator.deferred_failed() {
                 return Err(failure);
             }
@@ -1366,41 +1460,43 @@ impl RunnerLoop<'_> {
 
     /// Delivers the member's oldest unnotified pending message, strictly oldest-first, when no
     /// ordinary attempt is active and the FIFO is empty.
-    fn sweep_previews(&mut self) -> Result<()> {
-        let now = self.native.clock.now();
+    fn sweep_previews(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        run: &RunRecord,
+        io: &impl InputTurnIo,
+    ) -> Result<()> {
+        let now = io.clock().now();
         self.preview_sweep
-            .observe(self.native.controller.status().eligibility);
-        if !started(&mut self.coordinator).sweep_may_start() || !self.preview_sweep.due(now) {
+            .observe(io.controller().status().eligibility);
+        if !coordinator.sweep_may_start() || !self.preview_sweep.due(now) {
             return Ok(());
         }
         let deadline = now + SWEEP_ATTEMPT_BUDGET;
-        let run = self.run.clone();
-        match with_database_deadline(self.conn, deadline, |conn| sweep_snapshot(conn, &run)) {
-            Ok(Some(message)) => self.submit_sweep(&message, deadline),
+        match with_database_deadline(conn, deadline, |conn| sweep_snapshot(conn, run)) {
+            Ok(Some(message)) => {
+                let reply = coordinator
+                    .handle_preview(conn, &message, io.controller(), deadline)
+                    .map_err(CafleetError::from);
+                match reply {
+                    Ok(None) => self.pending = Some(PendingAttempt::Sweep { deadline }),
+                    Ok(Some(reply)) => self.finish_sweep(Ok(reply), io.clock().now()),
+                    Err(cause) => self.finish_sweep(Err(cause), io.clock().now()),
+                }
+            }
             Ok(None) => {}
             Err(cause) => {
                 eprintln!("member runtime: preview sweep: {}", cause.message());
-                self.preview_sweep.back_off(self.native.clock.now());
+                self.preview_sweep.back_off(io.clock().now());
             }
         }
         Ok(())
     }
 
-    fn submit_sweep(&mut self, message: &broker::MessageRecord, deadline: Instant) {
-        let reply = started(&mut self.coordinator)
-            .handle_preview(self.conn, message, self.native.controller, deadline)
-            .map_err(CafleetError::from);
-        match reply {
-            Ok(None) => self.pending_sweep = Some(PendingSweep { deadline }),
-            Ok(Some(reply)) => self.finish_sweep(Ok(reply)),
-            Err(cause) => self.finish_sweep(Err(cause)),
-        }
-    }
-
     /// Feeds a completed sweep attempt's outcome to the run-wide backoff: a submitted preview
     /// resets it, and a transient obstacle arms it.
-    fn finish_sweep(&mut self, reply: Result<InputControlReply>) {
-        let now = self.native.clock.now();
+    fn finish_sweep(&mut self, reply: Result<InputControlReply>, now: Instant) {
         let submission = match reply {
             Ok(InputControlReply::Submission(submission)) => submission,
             Ok(_) => unreachable!("a preview submission replies with a submission"),
@@ -1433,27 +1529,94 @@ impl RunnerLoop<'_> {
     }
 }
 
-/// The sweep's read snapshot: the run's member is an active ordinary member whose recorded run
-/// is this run with a concrete placement, and its oldest unnotified pending message.
-fn sweep_snapshot(conn: &mut Connection, run: &RunRecord) -> Result<Option<broker::MessageRecord>> {
-    let tx = conn.transaction()?;
-    let Some(fleet_id) = broker::active_member_fleet(&tx, run.member_id)? else {
-        return Ok(None);
-    };
-    let current = broker::get_member(&tx, run.member_id, fleet_id)?.filter(|member| {
-        member.kind == broker::MemberKind::Member
-            && member.placement.mux_pane_id.is_some()
-            && member
-                .runtime
-                .as_ref()
-                .is_some_and(|runtime| runtime.run.run_id == run.run_id)
-    });
-    let message = match current {
-        Some(_) => broker::oldest_pending_preview(&tx, run.member_id)?,
-        None => None,
-    };
-    tx.commit()?;
-    Ok(message)
+#[cfg(test)]
+impl InputTurns {
+    /// Turns whose sweep never comes due, so a runner fixture's own preview delivery races no
+    /// sweep.
+    pub(crate) fn without_sweep() -> Self {
+        Self {
+            preview_sweep: PreviewSweep::disabled(),
+            ..Self::new()
+        }
+    }
+
+    /// Whether no immediate attempt is in flight.
+    pub(crate) fn idle(&self) -> bool {
+        self.pending.is_none()
+    }
+
+    /// The earliest instants at which a turn has timer work: the next sweep pass (after any
+    /// backoff) and the next queue housekeeping.
+    pub(crate) fn wakes(&self, now: Instant) -> [Option<Instant>; 2] {
+        let sweep = self
+            .preview_sweep
+            .next_at
+            .into_iter()
+            .chain(self.preview_sweep.backoff_until)
+            .max()
+            .unwrap_or(now);
+        [Some(sweep), self.queue_housekeeping_at]
+    }
+}
+
+/// The live runner's I/O for its input turns.
+struct LoopIo<'a, 'b> {
+    native: &'a mut NativeIo<'b>,
+    terminate: &'a AtomicBool,
+    resize: &'a AtomicBool,
+    native_exit: &'a mut Option<ChildExit>,
+    run_id: i64,
+}
+
+impl InputTurnIo for LoopIo<'_, '_> {
+    fn clock(&self) -> &dyn crate::time::Clock {
+        self.native.clock
+    }
+    fn controller(&self) -> &ObservationController {
+        self.native.controller
+    }
+    fn quiesce(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        deadline: Instant,
+    ) -> std::result::Result<InputDrain, InputFailure> {
+        self.native.quiesce(coordinator, deadline)
+    }
+    fn advance(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        deadline: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        coordinator
+            .advance(
+                conn,
+                self.native.transport,
+                self.native.pty,
+                self.native.controller,
+                deadline,
+            )
+            .map_err(CafleetError::from)
+    }
+    fn terminate_requested(&self) -> bool {
+        self.terminate.load(Ordering::Acquire)
+    }
+    fn resize_requested(&self) -> bool {
+        self.resize.load(Ordering::Acquire)
+    }
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+        self.native.shutdown_deadlines()
+    }
+    fn observe_exit(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+    ) -> Result<Option<ShutdownDeadlines>> {
+        let (clock, run_id) = (self.native.clock, self.run_id);
+        self.native.observe_exit(self.native_exit, |controller| {
+            publish_stopped_results(coordinator, conn, run_id, controller, clock)
+        })
+    }
 }
 
 /// Fences ordinary input after the native exit and queues every durable deferred result that
@@ -3397,13 +3560,11 @@ pub(crate) mod test_support {
         use crate::coding_agent::catalog::LiteralFraming;
         use crate::db::test_support::FaultPlan;
         use crate::error::CafleetError;
-        use crate::runtime::service::DeferredRetry;
-        use crate::runtime::service::PreviewSweep;
-        use crate::runtime::service::QUEUE_HOUSEKEEPING_INTERVAL;
-        use crate::runtime::service::SWEEP_ATTEMPT_BUDGET;
+        use crate::runtime::service::InputTurnIo;
+        use crate::runtime::service::InputTurnOutcome;
+        use crate::runtime::service::InputTurns;
         use crate::runtime::service::SystemRequestTokens;
         use crate::runtime::service::input_deadline;
-        use crate::runtime::service::sweep_snapshot;
         use crate::runtime::service::tick_sleep;
         use crate::runtime::test_support::Fixture;
         use crate::runtime::transport::test_support::FakeDisplay;
@@ -3594,9 +3755,66 @@ pub(crate) mod test_support {
             }
         }
 
-        enum Pending {
-            Client(Instant),
-            Sweep(Instant),
+        /// The runner I/O the production input turns drive: the scenario's fake terminal,
+        /// scripted child and observation, with no termination, resize or native exit.
+        struct ScenarioIo<'a> {
+            clock: &'a TestClock,
+            controller: &'a mut ObservationController,
+            writer: &'a EventWriter,
+            transport: &'a mut Transport,
+            human: &'a mut FakeInput,
+            child: &'a mut NativeChild,
+            display: &'a mut FakeDisplay,
+        }
+
+        impl InputTurnIo for ScenarioIo<'_> {
+            fn clock(&self) -> &dyn Clock {
+                self.clock
+            }
+            fn controller(&self) -> &ObservationController {
+                self.controller
+            }
+            fn quiesce(
+                &mut self,
+                coordinator: &mut InputCoordinator,
+                deadline: Instant,
+            ) -> std::result::Result<InputDrain, InputFailure> {
+                coordinator.progress_with_manual(self.transport, |transport| {
+                    transport.quiesce_for_input(
+                        self.human,
+                        self.child,
+                        self.display,
+                        &mut self.controller.observer(self.writer, self.clock),
+                        deadline,
+                    )
+                })
+            }
+            fn advance(
+                &mut self,
+                coordinator: &mut InputCoordinator,
+                conn: &mut rusqlite::Connection,
+                deadline: Instant,
+            ) -> Result<Option<InputControlReply>> {
+                coordinator
+                    .advance(conn, self.transport, self.child, self.controller, deadline)
+                    .map_err(CafleetError::from)
+            }
+            fn terminate_requested(&self) -> bool {
+                false
+            }
+            fn resize_requested(&self) -> bool {
+                false
+            }
+            fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+                ShutdownDeadlines::starting_now(self.clock)
+            }
+            fn observe_exit(
+                &mut self,
+                _: &mut InputCoordinator,
+                _: &mut rusqlite::Connection,
+            ) -> Result<Option<ShutdownDeadlines>> {
+                Ok(None)
+            }
         }
 
         pub(crate) struct Runner {
@@ -3612,10 +3830,7 @@ pub(crate) mod test_support {
             pub(crate) display: FakeDisplay,
             pub(crate) replies: Vec<std::result::Result<InputControlReply, CafleetError>>,
             pub(crate) held_pane: Option<crate::pane_lock::PaneLock>,
-            pending: Option<Pending>,
-            preview_sweep: PreviewSweep,
-            deferred_retry: DeferredRetry,
-            queue_housekeeping_at: Option<Instant>,
+            turns: InputTurns,
             finished: bool,
         }
 
@@ -3741,10 +3956,7 @@ pub(crate) mod test_support {
                     display: FakeDisplay::default(),
                     replies: Vec::new(),
                     held_pane: None,
-                    pending: None,
-                    preview_sweep: PreviewSweep::default(),
-                    deferred_retry: DeferredRetry::default(),
-                    queue_housekeeping_at: None,
+                    turns: InputTurns::new(),
                     finished: false,
                 }
             }
@@ -3828,7 +4040,7 @@ pub(crate) mod test_support {
                     self.turn();
                     if self.child.screens.chunks.is_empty()
                         && self.human.chunks.is_empty()
-                        && self.pending.is_none()
+                        && self.turns.idle()
                         && self.clock.elapsed() > start
                     {
                         return;
@@ -3849,8 +4061,8 @@ pub(crate) mod test_support {
                 panic!("{duration:?} of virtual time passes within {TURN_LIMIT} turns");
             }
 
-            /// One runner loop turn of a started runner, in `RunnerLoop::tick_running` order,
-            /// followed by its idle sleep.
+            /// One runner loop turn of a started runner: the transport tick and observation poll,
+            /// the production input turns, then the loop's idle sleep.
             pub(crate) fn turn(&mut self) {
                 self.await_writer();
                 let clock = self.clock.clone();
@@ -3868,12 +4080,30 @@ pub(crate) mod test_support {
                 self.controller
                     .poll(&self.transport.snapshot(), &self.writer, clock.as_ref())
                     .unwrap();
-                self.housekeep_queue();
-                if self.pending.is_some() {
-                    self.complete_pending_input();
-                } else {
-                    self.retry_deferred();
-                    self.sweep_previews();
+                let mut io = ScenarioIo {
+                    clock: clock.as_ref(),
+                    controller: &mut self.controller,
+                    writer: &self.writer,
+                    transport: &mut self.transport,
+                    human: &mut self.human,
+                    child: &mut self.child,
+                    display: &mut self.display,
+                };
+                match self
+                    .turns
+                    .turn(
+                        &mut self.coordinator,
+                        &mut self.fixture.conn,
+                        &self.fixture.run,
+                        &mut io,
+                    )
+                    .unwrap()
+                {
+                    InputTurnOutcome::Continue => {}
+                    InputTurnOutcome::Reply { result, .. } => self.replies.push(result),
+                    InputTurnOutcome::Shutdown(_) => {
+                        unreachable!("a scenario runner requests no shutdown")
+                    }
                 }
                 self.await_writer();
                 let pause = tick_sleep(
@@ -3889,7 +4119,7 @@ pub(crate) mod test_support {
             /// Moves the clock to the next turn that can do work, or to `limit`, while nothing is
             /// in flight: the turns in between read no bytes and reach no timer.
             fn skip_idle_turns(&mut self, limit: Instant) {
-                let idle = self.pending.is_none()
+                let idle = self.turns.idle()
                     && !self.coordinator.has_deferred_work()
                     && self.child.screens.chunks.is_empty()
                     && self.human.chunks.is_empty()
@@ -3899,23 +4129,15 @@ pub(crate) mod test_support {
                     return;
                 }
                 let now = self.clock.now();
-                let sweep = self
-                    .preview_sweep
-                    .next_at
+                let wake = self
+                    .turns
+                    .wakes(now)
                     .into_iter()
-                    .chain(self.preview_sweep.backoff_until)
-                    .max()
-                    .unwrap_or(now);
-                let wake = [
-                    Some(sweep),
-                    self.queue_housekeeping_at,
-                    self.controller.status().next_deadline,
-                ]
-                .into_iter()
-                .flatten()
-                .chain([limit])
-                .min()
-                .expect("the limit bounds every wake");
+                    .chain([self.controller.status().next_deadline])
+                    .flatten()
+                    .chain([limit])
+                    .min()
+                    .expect("the limit bounds every wake");
                 if wake > now {
                     self.clock.advance(wake - now);
                 }
@@ -3938,35 +4160,6 @@ pub(crate) mod test_support {
                 }
             }
 
-            fn quiesce(
-                &mut self,
-                deadline: Instant,
-            ) -> std::result::Result<InputDrain, InputFailure> {
-                let clock = self.clock.clone();
-                self.coordinator
-                    .progress_with_manual(&mut self.transport, |transport| {
-                        transport.quiesce_for_input(
-                            &mut self.human,
-                            &mut self.child,
-                            &mut self.display,
-                            &mut self.controller.observer(&self.writer, clock.as_ref()),
-                            deadline,
-                        )
-                    })
-            }
-
-            fn advance(&mut self, deadline: Instant) -> Result<Option<InputControlReply>> {
-                self.coordinator
-                    .advance(
-                        &mut self.fixture.conn,
-                        &mut self.transport,
-                        &mut self.child,
-                        &self.controller,
-                        deadline,
-                    )
-                    .map_err(CafleetError::from)
-            }
-
             /// Admits a control request the way the runner serves an input client.
             pub(crate) fn submit(&mut self, operation: InputControlOperation) {
                 let expires = self.clock.now() + Duration::from_secs(30);
@@ -3986,142 +4179,8 @@ pub(crate) mod test_support {
                     deadline,
                 ) {
                     Ok(Some(reply)) => self.replies.push(Ok(reply)),
-                    Ok(None) => {
-                        assert!(self.pending.is_none(), "one immediate attempt at a time");
-                        self.pending = Some(Pending::Client(deadline));
-                    }
+                    Ok(None) => self.turns.admit_client(0, deadline).unwrap(),
                     Err(failure) => self.replies.push(Err(CafleetError::from(failure))),
-                }
-            }
-
-            fn complete_pending_input(&mut self) {
-                let deadline = match self.pending.as_ref().expect("an attempt is in flight") {
-                    Pending::Client(deadline) | Pending::Sweep(deadline) => *deadline,
-                };
-                let result = match self.quiesce(deadline) {
-                    Err(failure) => self
-                        .coordinator
-                        .pending_attempt_failed(&mut self.fixture.conn, &self.controller, failure)
-                        .map(Some)
-                        .map_err(CafleetError::from),
-                    Ok(InputDrain::Pending) => Ok(None),
-                    Ok(InputDrain::Quiescent) => self.advance(deadline),
-                };
-                if matches!(result, Ok(None)) {
-                    return;
-                }
-                self.coordinator.finish_pending_attempt();
-                self.deferred_retry.next_at = None;
-                match self.pending.take().expect("an attempt is in flight") {
-                    Pending::Sweep(_) => self.finish_sweep(
-                        result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
-                    ),
-                    Pending::Client(_) => self
-                        .replies
-                        .push(result.map(|reply| reply.expect("a completed input has a reply"))),
-                }
-            }
-
-            fn retry_deferred(&mut self) {
-                if !self.coordinator.has_deferred_work()
-                    || !self.deferred_retry.due(
-                        self.coordinator.deferred_attempt_writing(),
-                        self.controller.status(),
-                        self.clock.now(),
-                    )
-                {
-                    return;
-                }
-                let deadline = self.clock.now() + Duration::from_secs(5);
-                if let Ok(InputDrain::Quiescent) = self.quiesce(deadline)
-                    && let Err(failure) = self.advance(deadline)
-                {
-                    assert!(
-                        !self.coordinator.deferred_failed(),
-                        "deferred input stops the runner: {failure}"
-                    );
-                }
-            }
-
-            fn housekeep_queue(&mut self) {
-                let now = self.clock.now();
-                if self.queue_housekeeping_at.is_some_and(|at| now < at) {
-                    return;
-                }
-                self.queue_housekeeping_at = Some(now + QUEUE_HOUSEKEEPING_INTERVAL);
-                if let Err(failure) = self
-                    .coordinator
-                    .queue_housekeeping(&mut self.fixture.conn, &self.controller)
-                {
-                    assert!(
-                        !self.coordinator.deferred_failed(),
-                        "queue housekeeping stops the runner: {failure}"
-                    );
-                }
-            }
-
-            fn sweep_previews(&mut self) {
-                let now = self.clock.now();
-                self.preview_sweep
-                    .observe(self.controller.status().eligibility);
-                if !self.coordinator.sweep_may_start() || !self.preview_sweep.due(now) {
-                    return;
-                }
-                let deadline = now + SWEEP_ATTEMPT_BUDGET;
-                let run = self.fixture.run.clone();
-                match crate::db::with_database_deadline(&mut self.fixture.conn, deadline, |conn| {
-                    sweep_snapshot(conn, &run)
-                }) {
-                    Ok(Some(message)) => {
-                        let reply = self
-                            .coordinator
-                            .handle_preview(
-                                &mut self.fixture.conn,
-                                &message,
-                                &self.controller,
-                                deadline,
-                            )
-                            .map_err(CafleetError::from);
-                        match reply {
-                            Ok(None) => self.pending = Some(Pending::Sweep(deadline)),
-                            Ok(Some(reply)) => self.finish_sweep(Ok(reply)),
-                            Err(cause) => self.finish_sweep(Err(cause)),
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(_) => self.preview_sweep.back_off(self.clock.now()),
-                }
-            }
-
-            fn finish_sweep(&mut self, reply: Result<InputControlReply>) {
-                let now = self.clock.now();
-                let submission = match reply {
-                    Ok(InputControlReply::Submission(submission)) => submission,
-                    Ok(_) => unreachable!("a preview submission replies with a submission"),
-                    Err(_) => {
-                        self.preview_sweep.back_off(now);
-                        return;
-                    }
-                };
-                match submission.status {
-                    SubmissionStatus::Accepted => self.preview_sweep.reset(),
-                    SubmissionStatus::Held
-                        if matches!(
-                            submission.reason.as_deref(),
-                            Some(
-                                "pane_input_busy"
-                                    | "storage_unavailable"
-                                    | "observer_unavailable"
-                                    | "delivery_budget_exhausted"
-                            )
-                        ) =>
-                    {
-                        self.preview_sweep.back_off(now)
-                    }
-                    SubmissionStatus::Held
-                    | SubmissionStatus::Queued
-                    | SubmissionStatus::Rejected
-                    | SubmissionStatus::Uncertain => {}
                 }
             }
 
@@ -4201,6 +4260,11 @@ pub(crate) mod test_support {
                     .unwrap()
                     .collect::<rusqlite::Result<_>>()
                     .unwrap()
+            }
+
+            /// When the run-wide sweep backoff next allows a sweep, once a failed attempt armed it.
+            pub(crate) fn sweep_backoff_until(&self) -> Option<Instant> {
+                self.turns.preview_sweep.backoff_until
             }
 
             pub(crate) fn eligibility(&self) -> InputEligibility {
@@ -5458,6 +5522,8 @@ mod tests {
     mod scenarios {
         use std::time::Duration;
 
+        use crate::time::Clock;
+
         use crate::coding_agent::ComposerOperation;
         use crate::coding_agent::ProfileCatalog;
         use crate::coding_agent::catalog::LiteralFraming;
@@ -5657,7 +5723,7 @@ mod tests {
         }
 
         #[test]
-        fn a_retried_head_is_delivered_before_a_newer_message() {
+        fn a_retried_head_waits_out_the_run_wide_backoff_and_precedes_a_newer_message() {
             const RETRY: Scenario = Scenario {
                 name: "retried head",
                 screen: IDLE,
@@ -5669,16 +5735,38 @@ mod tests {
                     Step::Message("newer message"),
                     Step::Run(SWEEP_WINDOW),
                     Step::ReleasePane,
-                    Step::Run(Duration::from_secs(10)),
                 ],
                 events: &[],
             };
             let mut runner = RETRY.run();
+            let released = runner.clock.now();
+            let backoff = runner
+                .sweep_backoff_until()
+                .expect("a pane_input_busy hold arms the run-wide backoff");
+            assert!(
+                backoff >= released,
+                "the backoff outlasts the release: {:?}",
+                backoff.duration_since(released)
+            );
+            runner.step(Step::Run(
+                backoff
+                    .duration_since(released)
+                    .saturating_sub(Duration::from_millis(10)),
+            ));
+            assert!(
+                runner.child.written.is_empty(),
+                "no preview byte is written while the backoff is armed"
+            );
+            runner.step(Step::Run(Duration::from_secs(10)));
             let head = runner.preview_line("head behind a busy pane");
             let newer = runner.preview_line("newer message");
             assert_eq!(runner.typed(&head), 1);
             assert_eq!(runner.typed(&newer), 1);
             assert!(runner.typed_at(&head) < runner.typed_at(&newer));
+            assert!(
+                runner.payloads("input_delivery_result").is_empty(),
+                "a held and retried preview publishes no delivery result"
+            );
             assert_eq!(runner.finish(), (0, 0));
         }
 

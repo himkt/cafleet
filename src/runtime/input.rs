@@ -210,6 +210,62 @@ fn storage_failure(cause: &CafleetError) -> bool {
     )
 }
 
+/// What a runner attempt delivers; only prompt and exec attempts reserve a durable receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AttemptKind {
+    Preview { message_id: i64 },
+    Prompt,
+    Exec,
+    Answer,
+}
+
+impl AttemptKind {
+    fn receipt(kind: storage::InputKind) -> Self {
+        match kind {
+            storage::InputKind::Prompt => Self::Prompt,
+            storage::InputKind::Exec => Self::Exec,
+        }
+    }
+
+    fn receipt_kind(self) -> Option<storage::InputKind> {
+        match self {
+            Self::Prompt => Some(storage::InputKind::Prompt),
+            Self::Exec => Some(storage::InputKind::Exec),
+            Self::Preview { .. } | Self::Answer => None,
+        }
+    }
+}
+
+/// An attempt's identity in runner memory.
+#[derive(Debug, Clone)]
+pub(crate) struct AttemptRequest {
+    operation_key: String,
+    kind: AttemptKind,
+    payload_digest: String,
+}
+
+impl AttemptRequest {
+    fn receipt(input: &storage::NewInput) -> Self {
+        Self {
+            operation_key: input.operation_key.clone(),
+            kind: AttemptKind::receipt(input.kind),
+            payload_digest: input.payload_digest.clone(),
+        }
+    }
+
+    /// The durable receipt request of a prompt or exec attempt.
+    fn new_input(&self) -> storage::NewInput {
+        storage::NewInput {
+            operation_key: self.operation_key.clone(),
+            kind: self
+                .kind
+                .receipt_kind()
+                .expect("only prompt and exec attempts reserve a receipt"),
+            payload_digest: self.payload_digest.clone(),
+        }
+    }
+}
+
 /// Runner-owned ordinary input accepted with a durable ready receipt; its literal stays in
 /// memory only.
 #[derive(Clone)]
@@ -240,8 +296,7 @@ enum DeliveryChoice {
 
 struct ComposerInput<'a> {
     operation: ComposerOperation,
-    kind: storage::InputKind,
-    message_id: Option<i64>,
+    kind: AttemptKind,
     literal: &'a str,
 }
 
@@ -424,7 +479,7 @@ impl PendingDelivery {
 
 struct PendingInput {
     reservation: PendingReservation,
-    request: storage::NewInput,
+    request: AttemptRequest,
     bytes: Arc<[u8]>,
     delivery: PendingDelivery,
     deadline: Instant,
@@ -1464,11 +1519,10 @@ impl InputCoordinator {
             );
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
-                request: storage::NewInput {
+                request: AttemptRequest {
                     operation_key: format!("answer:{}:{}", self.run.run_id, input.interaction_id),
-                    kind: storage::InputKind::Answer,
+                    kind: AttemptKind::Answer,
                     payload_digest: crate::digest::sha256_hex(answer.as_bytes()),
-                    message_id: None,
                 },
                 bytes,
                 delivery: PendingDelivery::Permission(selection),
@@ -1966,8 +2020,9 @@ impl InputCoordinator {
             }
             let input = ComposerInput {
                 operation: ComposerOperation::Prompt,
-                kind: storage::InputKind::Preview,
-                message_id: Some(message.message_id),
+                kind: AttemptKind::Preview {
+                    message_id: message.message_id,
+                },
                 literal: &literal,
             };
             let (method, reason, stages) =
@@ -1993,11 +2048,12 @@ impl InputCoordinator {
             self.preview_wait = None;
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
-                request: storage::NewInput {
+                request: AttemptRequest {
                     operation_key: format!("preview:{}:{}", self.run.run_id, message.message_id),
-                    kind: storage::InputKind::Preview,
+                    kind: AttemptKind::Preview {
+                        message_id: message.message_id,
+                    },
                     payload_digest: crate::digest::sha256_hex(literal.as_bytes()),
-                    message_id: Some(message.message_id),
                 },
                 bytes: stages[0].clone(),
                 delivery: PendingDelivery::Composer(Box::new(ComposerDelivery {
@@ -2121,8 +2177,7 @@ impl InputCoordinator {
                         observation,
                         ComposerInput {
                             operation: composer_operation,
-                            kind: input.input_kind,
-                            message_id: None,
+                            kind: AttemptKind::receipt(input.input_kind),
                             literal: &input.literal,
                         },
                         deadline,
@@ -2153,7 +2208,6 @@ impl InputCoordinator {
                 operation_key: input.operation_key.clone(),
                 kind: input.input_kind,
                 payload_digest: digest,
-                message_id: None,
             };
             if let Some(defer_reason) = defer_reason {
                 let reservation = with_database_deadline(conn, deadline, |conn| {
@@ -2197,8 +2251,7 @@ impl InputCoordinator {
                 observation,
                 ComposerInput {
                     operation: composer_operation,
-                    kind: input.input_kind,
-                    message_id: None,
+                    kind: AttemptKind::receipt(input.input_kind),
                     literal: &input.literal,
                 },
                 deadline,
@@ -2215,7 +2268,7 @@ impl InputCoordinator {
             };
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
-                request: new_input,
+                request: AttemptRequest::receipt(&new_input),
                 bytes: stages[0].clone(),
                 delivery: PendingDelivery::Composer(Box::new(ComposerDelivery {
                     method,
@@ -2252,7 +2305,6 @@ impl InputCoordinator {
         let ComposerInput {
             operation,
             kind,
-            message_id,
             literal,
         } = input;
         let composer = match self.run.native_version.as_deref() {
@@ -2276,7 +2328,9 @@ impl InputCoordinator {
             ),
         };
         let render = |base: &str| {
-            if method == storage::DeliveryMethod::Fallback && kind == storage::InputKind::Preview {
+            if method == storage::DeliveryMethod::Fallback
+                && matches!(kind, AttemptKind::Preview { .. })
+            {
                 crate::runtime::preview::fallback_preview_line(base)
             } else {
                 base.to_owned()
@@ -2291,13 +2345,13 @@ impl InputCoordinator {
             {
                 framing = crate::coding_agent::catalog::LiteralFraming::BracketedPaste;
             } else if !plan.plain_literal_allowed(&literal) {
-                if kind != storage::InputKind::Preview {
+                let AttemptKind::Preview { message_id } = kind else {
                     return Ok(DeliveryChoice::PlainLimit(
                         plan.plain_limit_refusal(&literal, &self.run.backend),
                     ));
-                }
+                };
                 let message = with_database_deadline(conn, deadline, |conn| {
-                    crate::broker::get_message(conn, message_id.expect("a preview has its message"))
+                    crate::broker::get_message(conn, message_id)
                 })?;
                 literal = render(&crate::runtime::preview::pointer_preview_line(&message));
             }
@@ -2364,7 +2418,10 @@ impl InputCoordinator {
     fn sweep_preview_message(&self) -> i64 {
         self.pending
             .as_ref()
-            .and_then(|pending| pending.request.message_id)
+            .and_then(|pending| match pending.request.kind {
+                AttemptKind::Preview { message_id } => Some(message_id),
+                AttemptKind::Prompt | AttemptKind::Exec | AttemptKind::Answer => None,
+            })
             .expect("the sweep preview attempt names its message")
     }
 
@@ -2717,8 +2774,11 @@ impl InputCoordinator {
         let Some(head) = self.queue.front() else {
             return Ok(());
         };
-        let (input_id, message_id, operation) =
-            (head.input_id, head.request.message_id, head.operation);
+        let (input_id, kind, operation) = (
+            head.input_id,
+            AttemptKind::receipt(head.request.kind),
+            head.operation,
+        );
         let now = self.services.clock.now();
         let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
             self.deferred_target(conn)
@@ -2762,14 +2822,13 @@ impl InputCoordinator {
             return Ok(());
         }
         if blocker.is_none() {
-            let (kind, literal) = (head.request.kind, head.literal.clone());
+            let literal = head.literal.clone();
             let choice = self.select_delivery(
                 conn,
                 observation,
                 ComposerInput {
                     operation,
                     kind,
-                    message_id,
                     literal: &literal,
                 },
                 deadline,
@@ -2908,7 +2967,7 @@ impl InputCoordinator {
         );
         self.pending = Some(PendingInput {
             reservation: PendingReservation::Installed(key),
-            request: head.request.clone(),
+            request: AttemptRequest::receipt(&head.request),
             bytes: stages[0].clone(),
             delivery: PendingDelivery::Composer(Box::new(ComposerDelivery {
                 method,
@@ -3064,7 +3123,7 @@ impl InputCoordinator {
             _ => return Ok(None),
         };
         let pending = self.pending.take().expect("immediate pending input");
-        if pending.request.kind == storage::InputKind::Preview {
+        if matches!(pending.request.kind, AttemptKind::Preview { .. }) {
             self.operations.remove(&AttemptKey::SweepPreview);
             return Ok(Some(InputControlReply::Submission(SubmissionResult::held(
                 defer_reason,
@@ -3088,7 +3147,7 @@ impl InputCoordinator {
                     storage::reserve_input_with_provenance(
                         conn,
                         &self.run.owner(),
-                        &pending.request,
+                        &pending.request.new_input(),
                         storage::NewReservation {
                             selection: None,
                             defer_reason: Some(defer_reason),
@@ -3106,7 +3165,7 @@ impl InputCoordinator {
         self.queue.push_front(QueuedInput {
             input_id: operation.input_id,
             stalled: false,
-            request: pending.request,
+            request: pending.request.new_input(),
             literal: composer.literal,
             operation: composer.operation,
             attempt_deadline: None,
@@ -3296,7 +3355,7 @@ impl InputCoordinator {
                     stored.run_id == self.run.run_id
                         && stored.operation_key == operation.request.operation_key
                         && stored.payload_digest == operation.request.payload_digest
-                        && stored.kind == operation.request.kind,
+                        && AttemptKind::receipt(stored.kind) == operation.request.kind,
                     "input reservation changed before write",
                 )?;
             }
@@ -3598,7 +3657,6 @@ impl InputCoordinator {
             ComposerInput {
                 operation,
                 kind: request.kind,
-                message_id: request.message_id,
                 literal: &literal,
             },
             deadline,
@@ -3746,7 +3804,7 @@ impl InputCoordinator {
                 (AttemptKey::Answer, receipt_free_record(None))
             }
             PendingDelivery::Composer(composer)
-                if pending.request.kind == storage::InputKind::Preview =>
+                if matches!(pending.request.kind, AttemptKind::Preview { .. }) =>
             {
                 (
                     AttemptKey::SweepPreview,
@@ -3763,7 +3821,7 @@ impl InputCoordinator {
                     storage::reserve_input_with_provenance(
                         conn,
                         &self.run.owner(),
-                        &pending.request,
+                        &pending.request.new_input(),
                         reservation,
                     )
                 })?;
@@ -5534,7 +5592,6 @@ mod tests {
                             literal: LITERAL.into(),
                         },
                     ),
-                    message_id: None,
                 };
                 let mut independent =
                     crate::db::connect(&format!("sqlite:///{}", h.fixture.conn.path().unwrap()))
@@ -6002,6 +6059,87 @@ mod tests {
                         assert_eq!(reply.status, SubmissionStatus::Accepted, "{fixture_id}");
                         assert_eq!(reply.stage, SubmissionStage::Submitted, "{fixture_id}");
                         assert_eq!(stored(host, &reply).stop_cause, None, "{fixture_id}");
+                    });
+                }
+            }
+
+            /// Sends `body` to the run's member and drives the coordinator's receipt-free sweep
+            /// preview of it to its reply, confirming each submit with the idle screen.
+            fn sweep_preview(
+                host: &mut Host,
+                body: &str,
+            ) -> (crate::broker::MessageRecord, SubmissionResult) {
+                host.confirm_submissions = false;
+                let run = host.fixture.run.clone();
+                let message = crate::broker::send_message(
+                    &mut host.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    body,
+                )
+                .unwrap();
+                let until = host.until;
+                let reply = match host
+                    .coordinator
+                    .handle_preview(&mut host.fixture.conn, &message, &host.controller, until)
+                    .unwrap()
+                {
+                    Some(reply) => submitted(reply),
+                    None => finish(host, true),
+                };
+                (message, reply)
+            }
+
+            #[test]
+            fn a_sweep_preview_renders_the_pointer_form_over_the_plain_limit_and_the_fallback_clause_without_a_plan()
+             {
+                use crate::runtime::preview::{
+                    canonical_preview_line, fallback_preview_line, pointer_preview_line,
+                };
+                type Line = fn(&crate::broker::MessageRecord) -> String;
+                /// The case name, its catalog, the message body, the typed line and the bytes
+                /// framing it before and after.
+                type Case = (
+                    &'static str,
+                    ProfileCatalog,
+                    String,
+                    Line,
+                    &'static [u8],
+                    &'static [u8],
+                );
+                let cases: [Case; 2] = [
+                    (
+                        "a preview over the plain limit types its pointer form",
+                        configured("plain", json!({"unit":"bytes","max":1024})),
+                        "あ".repeat(3000),
+                        pointer_preview_line,
+                        b"",
+                        b"~",
+                    ),
+                    (
+                        "a run without a submission plan types the fallback line with its dismissal clause",
+                        catalog().without_submission(
+                            crate::coding_agent::CodingAgent::Codex,
+                            crate::coding_agent::ComposerOperation::Prompt,
+                        ),
+                        "fallback preview body".into(),
+                        |message| fallback_preview_line(&canonical_preview_line(message)),
+                        b"\x1b",
+                        b"\r",
+                    ),
+                ];
+                for (name, catalog, body, line, prefix, submit) in cases {
+                    with_catalog_host(catalog, Vec::new(), |host| {
+                        let (message, reply) = sweep_preview(host, &body);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
+                        let mut expected = prefix.to_vec();
+                        expected.extend_from_slice(line(&message).as_bytes());
+                        expected.extend_from_slice(submit);
+                        assert_eq!(
+                            String::from_utf8_lossy(&host.pty.written),
+                            String::from_utf8_lossy(&expected),
+                            "{name}"
+                        );
                     });
                 }
             }
@@ -7269,7 +7407,7 @@ mod tests {
                     name: &'static str,
                     armed: bool,
                     event: fn(&mut Host),
-                    stops: bool,
+                    cause: Option<storage::StopCause>,
                 }
 
                 const STAGED_EVENTS: &[StagedEvent] = &[
@@ -7277,49 +7415,49 @@ mod tests {
                         name: "an open interaction during the settle",
                         armed: false,
                         event: open_form,
-                        stops: true,
+                        cause: Some(storage::StopCause::InteractionOpen),
                     },
                     StagedEvent {
                         name: "an open interaction once the submit stage is armed",
                         armed: true,
                         event: open_form,
-                        stops: true,
+                        cause: Some(storage::StopCause::InteractionOpen),
                     },
                     StagedEvent {
                         name: "a candidate interaction during the settle",
                         armed: false,
                         event: candidate_form,
-                        stops: true,
+                        cause: Some(storage::StopCause::InteractionCandidate),
                     },
                     StagedEvent {
                         name: "a candidate interaction once the submit stage is armed",
                         armed: true,
                         event: candidate_form,
-                        stops: true,
+                        cause: Some(storage::StopCause::InteractionCandidate),
                     },
                     StagedEvent {
                         name: "a keystroke during the settle",
                         armed: false,
                         event: keystroke,
-                        stops: false,
+                        cause: None,
                     },
                     StagedEvent {
                         name: "a keystroke once the submit stage is armed",
                         armed: true,
                         event: keystroke,
-                        stops: false,
+                        cause: None,
                     },
                     StagedEvent {
                         name: "a lone Escape during the settle",
                         armed: false,
                         event: lone_escape,
-                        stops: false,
+                        cause: None,
                     },
                     StagedEvent {
                         name: "a pointer report during the settle",
                         armed: false,
                         event: pointer_report,
-                        stops: false,
+                        cause: None,
                     },
                 ];
 
@@ -7341,24 +7479,21 @@ mod tests {
                                     host, true,
                                 );
                             let row = stored(host, &reply);
-                            if case.stops {
+                            if let Some(cause) = case.cause {
                                 assert_eq!(
                                     reply.status,
                                     SubmissionStatus::Uncertain,
                                     "{}",
                                     case.name
                                 );
+                                assert_eq!(reply.stage, SubmissionStage::Partial, "{}", case.name);
                                 assert_eq!(
                                     row.state,
                                     storage::InputState::Uncertain,
                                     "{}",
                                     case.name
                                 );
-                                assert!(
-                                    row.stop_cause.is_some(),
-                                    "{}: the stop records its diagnostic",
-                                    case.name
-                                );
+                                assert_eq!(row.stop_cause, Some(cause), "{}", case.name);
                                 assert_eq!(
                                     host.pty.stage_bytes(),
                                     vec![LITERAL.as_bytes().to_vec()],
@@ -7429,7 +7564,11 @@ mod tests {
                             } else {
                                 assert_eq!(reply.status, SubmissionStatus::Uncertain, "{name}");
                                 assert_eq!(row.state, storage::InputState::Uncertain, "{name}");
-                                assert!(row.stop_cause.is_some(), "{name}");
+                                assert_eq!(
+                                    row.stop_cause,
+                                    Some(storage::StopCause::SubmitUnconfirmed),
+                                    "{name}"
+                                );
                             }
                         });
                     }
@@ -7923,7 +8062,7 @@ mod tests {
             }
 
             /// Backdates the queued head's wait past the three-minute stall bound.
-            pub(super) fn backdate_head_since(host: &mut Host, input_id: i64) {
+            pub(super) fn backdate_head_since(host: &mut Host, input_id: i64) -> Instant {
                 let since = host
                     .clock
                     .now()
@@ -7932,6 +8071,7 @@ mod tests {
                 let head = host.coordinator.queue.front_mut().expect("a queued head");
                 assert_eq!(head.input_id, input_id, "only the head carries head_since");
                 head.head_since = Some(since);
+                since
             }
 
             pub(super) fn housekeep(host: &mut Host) {
@@ -8016,7 +8156,7 @@ mod tests {
                 /// Backdates the head past the stall bound, runs housekeeping and checks the single
                 /// cause-free event that names the head, its wait start and one instruction.
                 pub(in crate::runtime::input) fn assert_stalled_once(host: &mut Host, head: i64) {
-                    backdate_head_since(host, head);
+                    let since = backdate_head_since(host, head);
                     housekeep(host);
                     let payload = await_stalled(host, head);
                     assert_eq!(payload["input_id"], head, "{payload}");
@@ -8027,13 +8167,11 @@ mod tests {
                             .is_some_and(|instruction| !instruction.trim().is_empty()),
                         "one instruction: {payload}"
                     );
-                    let waiting = chrono::DateTime::parse_from_rfc3339(
-                        payload["waiting_since"].as_str().unwrap(),
-                    )
-                    .unwrap();
-                    assert!(
-                        chrono::Utc::now().signed_duration_since(waiting)
-                            >= chrono::Duration::seconds(180),
+                    let waited = chrono::Duration::from_std(host.clock.now().duration_since(since))
+                        .expect("bounded stall wait");
+                    assert_eq!(
+                        payload["waiting_since"],
+                        crate::time::format_utc(host.clock.wall_now() - waited),
                         "waiting_since is the head's wait start: {payload}"
                     );
                     housekeep(host);

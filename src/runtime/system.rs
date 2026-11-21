@@ -102,7 +102,10 @@ fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, Run
     }
     let child = spawn_piped(argv)?;
     if let Some(timeout) = timeout {
-        return run_timed(child, timeout.saturating_sub(started.elapsed()));
+        let elapsed = crate::time::SystemClock
+            .now()
+            .saturating_duration_since(started);
+        return run_timed(child, timeout.saturating_sub(elapsed));
     }
     let output = child.wait_with_output().map_err(|e| RunError::Failed {
         stderr: e.to_string(),

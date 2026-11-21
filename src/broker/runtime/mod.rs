@@ -416,7 +416,7 @@ stored_enum!(NotificationState, "member_runtime_events.notification_state", { In
 stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", {
     MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
 });
-stored_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", Answer => "answer" });
+stored_enum!(InputKind, "member_input_operations.kind", { Prompt => "prompt", Exec => "exec" });
 stored_enum!(InputState, "member_input_operations.state", {
     Ready => "ready", InProgress => "in_progress", Accepted => "accepted",
     Uncertain => "uncertain", Settled => "settled"
@@ -615,7 +615,6 @@ pub(crate) struct NewInput {
     pub(crate) operation_key: String,
     pub(crate) kind: InputKind,
     pub(crate) payload_digest: String,
-    pub(crate) message_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -847,7 +846,6 @@ pub(crate) mod test_support {
             owner: &RunOwner,
             key: &str,
             kind: InputKind,
-            message_id: Option<i64>,
         ) -> InputOperation {
             reserve_input(
                 &mut self.conn,
@@ -856,7 +854,6 @@ pub(crate) mod test_support {
                     operation_key: key.into(),
                     kind,
                     payload_digest: "d".repeat(64),
-                    message_id,
                 },
             )
             .unwrap()
@@ -1098,7 +1095,6 @@ mod tests {
                         operation_key: "stale".into(),
                         kind: InputKind::Prompt,
                         payload_digest: "d".repeat(64),
-                        message_id: None
                     }
                 )
                 .is_err(),

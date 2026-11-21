@@ -197,7 +197,7 @@ pub(crate) mod test_support {
 
     /// A virtual clock: time moves only through `advance`, `set_elapsed` and `sleep`, and each
     /// sleep is recorded. Its wall time and `CLOCK_MONOTONIC` readings follow the same elapsed
-    /// time from fixed origins.
+    /// time from their origins.
     pub(crate) struct TestClock {
         origin: Instant,
         state: Mutex<TestClockState>,
@@ -207,6 +207,7 @@ pub(crate) mod test_support {
         elapsed: Duration,
         sleeps: Vec<Duration>,
         shutdown_unit: Duration,
+        wall_origin: chrono::DateTime<chrono::Utc>,
     }
 
     /// The `CLOCK_MONOTONIC` reading at the clock's origin.
@@ -220,12 +221,19 @@ pub(crate) mod test_support {
                     elapsed: Duration::ZERO,
                     sleeps: Vec::new(),
                     shutdown_unit: SHUTDOWN_UNIT,
+                    wall_origin: chrono::Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
                 }),
             }
         }
 
         pub(crate) fn with_shutdown_unit(self, unit: Duration) -> Self {
             self.state().shutdown_unit = unit;
+            self
+        }
+
+        /// The wall time this clock reads at its origin.
+        pub(crate) fn with_wall_origin(self, origin: chrono::DateTime<chrono::Utc>) -> Self {
+            self.state().wall_origin = origin;
             self
         }
 
@@ -257,8 +265,9 @@ pub(crate) mod test_support {
         }
 
         fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
-            let origin = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-            origin + chrono::Duration::from_std(self.elapsed()).expect("test elapsed fits")
+            let state = self.state();
+            state.wall_origin
+                + chrono::Duration::from_std(state.elapsed).expect("test elapsed fits")
         }
 
         fn monotonic_sample(&self) -> Result<MonotonicSample, CafleetError> {
