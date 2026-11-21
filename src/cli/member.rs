@@ -3079,4 +3079,253 @@ mod tests {
             );
         }
     }
+
+    mod observation_surface {
+        use crate::broker::runtime::RunStatus;
+        use crate::broker::runtime::RunnerDiagnosticEntry;
+        use crate::broker::runtime::RunnerDiagnosticSource;
+        use crate::broker::runtime::test_support::Fixture;
+        use crate::cli::member::tests::*;
+        use crate::runtime::observation::GateReason;
+        use crate::runtime::observation::InputEligibility;
+        use crate::runtime::observation::ObservationHealth;
+        use crate::runtime::observation::Visibility;
+        use serde_json::Value;
+        use serde_json::json;
+
+        const OPENED: &str = "2026-11-21T12:04:08.000000+00:00";
+
+        fn healthy() -> ObservationHealth {
+            ObservationHealth {
+                visibility: Visibility::NotVisible,
+                eligibility: InputEligibility::ComposerEmpty,
+                pending_count: 0,
+                gap_count: 0,
+                degraded: false,
+                diagnostic: None,
+                writer_diagnostic: None,
+                gap_open_since: None,
+            }
+        }
+
+        fn degraded() -> ObservationHealth {
+            ObservationHealth {
+                visibility: Visibility::Unknown,
+                eligibility: InputEligibility::Hold(GateReason::Gap),
+                pending_count: 2,
+                gap_count: 3,
+                degraded: true,
+                diagnostic: Some("sink_unavailable".into()),
+                writer_diagnostic: Some("database error: database is locked".into()),
+                gap_open_since: Some(OPENED.into()),
+            }
+        }
+
+        fn registry_runtime() -> Value {
+            json!({"run_id":37,"mode":"auto","status":"running","coverage":"tested","child_pid":4242,"child_start_identity":"child-start"})
+        }
+
+        fn diagnostics() -> Vec<RunnerDiagnosticEntry> {
+            vec![
+                RunnerDiagnosticEntry {
+                    source: RunnerDiagnosticSource::EventWriter,
+                    message: "event writer diagnostic: database is locked".into(),
+                    first_at: "2026-11-21T12:04:00.000000+00:00".into(),
+                    last_at: "2026-11-21T12:05:00.000000+00:00".into(),
+                    count: 4,
+                },
+                RunnerDiagnosticEntry {
+                    source: RunnerDiagnosticSource::Observation,
+                    message: "observation gap opened: sink_unavailable".into(),
+                    first_at: OPENED.into(),
+                    last_at: OPENED.into(),
+                    count: 1,
+                },
+            ]
+        }
+
+        fn keys(value: &Value) -> Vec<&str> {
+            value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect()
+        }
+
+        struct ShowCase {
+            name: &'static str,
+            probe: fn() -> ObservationProbe,
+            probe_name: &'static str,
+            observation: fn() -> Value,
+            error: Option<&'static str>,
+            suffix: &'static str,
+        }
+
+        const SHOW_CASES: &[ShowCase] = &[
+            ShowCase {
+                name: "skipped",
+                probe: || ObservationProbe::Skipped,
+                probe_name: "skipped",
+                observation: || Value::Null,
+                error: None,
+                suffix: " observation=-",
+            },
+            ShowCase {
+                name: "failed",
+                probe: || ObservationProbe::Failed("cannot connect to the runner".into()),
+                probe_name: "failed",
+                observation: || Value::Null,
+                error: Some("cannot connect to the runner"),
+                suffix: " observation=unavailable",
+            },
+            ShowCase {
+                name: "answered before the child started",
+                probe: || ObservationProbe::Answered(None),
+                probe_name: "answered",
+                observation: || Value::Null,
+                error: None,
+                suffix: " observation=pending",
+            },
+            ShowCase {
+                name: "answered healthy",
+                probe: || ObservationProbe::Answered(Some(healthy())),
+                probe_name: "answered",
+                observation: || json!({"visibility":"not_visible","eligibility":"composer_empty","degraded":false,"diagnostic":null,"writer_diagnostic":null,"pending_count":0,"gap_count":0,"gap_open_since":null}),
+                error: None,
+                suffix: " observation=composer_empty",
+            },
+            ShowCase {
+                name: "answered degraded",
+                probe: || ObservationProbe::Answered(Some(degraded())),
+                probe_name: "answered",
+                observation: || json!({"visibility":"unknown","eligibility":"hold:gap","degraded":true,"diagnostic":"sink_unavailable","writer_diagnostic":"database error: database is locked","pending_count":2,"gap_count":3,"gap_open_since":OPENED}),
+                error: None,
+                suffix: " observation=hold:gap degraded",
+            },
+        ];
+
+        #[test]
+        fn member_show_runtime_appends_the_probe_keys_for_each_outcome() {
+            for case in SHOW_CASES {
+                let name = case.name;
+                let runtime = show_runtime(registry_runtime(), &(case.probe)(), &diagnostics());
+                let mut expected_keys = keys(&registry_runtime())
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                expected_keys.extend(
+                    [
+                        "observation_probe",
+                        "observation",
+                        "observation_error",
+                        "diagnostics",
+                    ]
+                    .map(str::to_owned),
+                );
+                assert_eq!(keys(&runtime), expected_keys, "{name}");
+                for key in keys(&registry_runtime()) {
+                    assert_eq!(runtime[key], registry_runtime()[key], "{name}: {key}");
+                }
+                assert_eq!(runtime["observation_probe"], case.probe_name, "{name}");
+                let observation = (case.observation)();
+                assert_eq!(runtime["observation"], observation, "{name}");
+                if !observation.is_null() {
+                    assert_eq!(
+                        keys(&runtime["observation"]),
+                        [
+                            "visibility",
+                            "eligibility",
+                            "degraded",
+                            "diagnostic",
+                            "writer_diagnostic",
+                            "pending_count",
+                            "gap_count",
+                            "gap_open_since"
+                        ],
+                        "{name}"
+                    );
+                }
+                assert_eq!(
+                    runtime["observation_error"],
+                    case.error.map_or(Value::Null, |error| json!(error)),
+                    "{name}"
+                );
+                assert_eq!(
+                    runtime["diagnostics"],
+                    json!([
+                        {"source":"event_writer","message":"event writer diagnostic: database is locked","first_at":"2026-11-21T12:04:00.000000+00:00","last_at":"2026-11-21T12:05:00.000000+00:00","count":4},
+                        {"source":"observation","message":"observation gap opened: sink_unavailable","first_at":OPENED,"last_at":OPENED,"count":1},
+                    ]),
+                    "{name}"
+                );
+                for row in runtime["diagnostics"].as_array().unwrap() {
+                    assert_eq!(
+                        keys(row),
+                        ["source", "message", "first_at", "last_at", "count"],
+                        "{name}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn member_show_text_suffix_names_the_observation_state_and_degradation() {
+            for case in SHOW_CASES {
+                assert_eq!(
+                    observation_suffix(&(case.probe)()),
+                    case.suffix,
+                    "{}",
+                    case.name
+                );
+            }
+        }
+
+        #[test]
+        fn member_show_runtime_without_diagnostics_reports_an_empty_list() {
+            let runtime = show_runtime(registry_runtime(), &ObservationProbe::Skipped, &[]);
+            assert_eq!(runtime["diagnostics"], json!([]));
+        }
+
+        #[test]
+        fn probe_observation_skips_unprobed_statuses_and_fails_without_a_runner() {
+            for (status, probed) in [
+                ("starting", false),
+                ("prepared", false),
+                ("recovering", false),
+                ("exited", false),
+                ("failed", false),
+                ("running", true),
+                ("degraded", true),
+            ] {
+                let mut fixture = Fixture::new();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET status=?1 WHERE run_id=?2",
+                        rusqlite::params![status, fixture.run.run_id],
+                    )
+                    .unwrap();
+                let run =
+                    crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                assert_eq!(run.status, RunStatus::try_from(status).unwrap(), "{status}");
+                let started = Instant::now();
+                let probe = probe_observation(&run, &crate::time::SystemClock);
+                assert!(
+                    started.elapsed() < Duration::from_secs(2),
+                    "{status}: the probe is bounded by its 1 s deadline"
+                );
+                match probe {
+                    ObservationProbe::Skipped => assert!(!probed, "{status}"),
+                    ObservationProbe::Failed(message) => {
+                        assert!(probed, "{status}");
+                        assert!(!message.trim().is_empty(), "{status}");
+                    }
+                    ObservationProbe::Answered(_) => {
+                        panic!("{status}: no runner answers in this fixture")
+                    }
+                }
+            }
+        }
+    }
 }

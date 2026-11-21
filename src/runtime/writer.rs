@@ -1206,17 +1206,18 @@ pub(crate) mod test_support {
         match boundary {
             WriterBoundary::Receive => 0,
             WriterBoundary::Persist => 1,
+            WriterBoundary::Flush => 2,
         }
     }
     #[derive(Debug, Default)]
     pub(crate) struct HookState {
-        pub(crate) paused: [bool; 2],
-        pub(crate) failures: [u64; 2],
-        pub(crate) calls: [u64; 2],
-        pub(crate) first: [Option<u64>; 2],
+        pub(crate) paused: [bool; 3],
+        pub(crate) failures: [u64; 3],
+        pub(crate) calls: [u64; 3],
+        pub(crate) first: [Option<u64>; 3],
         pub(crate) ordinal: u64,
-        pub(crate) busy_call: [Option<u64>; 2],
-        pub(crate) busy: [bool; 2],
+        pub(crate) busy_call: [Option<u64>; 3],
+        pub(crate) busy: [bool; 3],
     }
     #[derive(Default)]
     pub(crate) struct Hooks {
@@ -1232,8 +1233,8 @@ pub(crate) mod test_support {
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.paused = [false; 2];
-            state.busy = [false; 2];
+            state.paused = [false; 3];
+            state.busy = [false; 3];
             drop(state);
             self.changed.notify_all();
         }

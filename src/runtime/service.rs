@@ -3610,7 +3610,6 @@ pub(crate) mod test_support {
             HoldPane,
             ReleasePane,
             Arm(FaultPlan),
-            Clear(FaultPlan),
             /// Every event writer persist fails with a transient busy cause while set.
             FailPersist(bool),
         }
@@ -4040,7 +4039,6 @@ pub(crate) mod test_support {
                         self.held_pane.take().expect("a held pane lock");
                     }
                     Step::Arm(plan) => plan.arm(&mut self.fixture.conn),
-                    Step::Clear(plan) => plan.clear(&mut self.fixture.conn),
                     Step::FailPersist(failing) => self
                         .writer_hooks
                         .fail_persist

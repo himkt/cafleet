@@ -8780,6 +8780,29 @@ mod tests {
         });
     }
 
+    #[test]
+    fn input_eligibility_renders_composer_empty_or_hold_with_its_reason() {
+        for (eligibility, expected) in [
+            (InputEligibility::ComposerEmpty, "composer_empty"),
+            (
+                InputEligibility::Hold(GateReason::Candidate),
+                "hold:candidate",
+            ),
+            (
+                InputEligibility::Hold(GateReason::Interaction),
+                "hold:interaction",
+            ),
+            (InputEligibility::Hold(GateReason::Unknown), "hold:unknown"),
+            (
+                InputEligibility::Hold(GateReason::ObserverUnavailable),
+                "hold:observer_unavailable",
+            ),
+            (InputEligibility::Hold(GateReason::Gap), "hold:gap"),
+        ] {
+            assert_eq!(eligibility.rendering(), expected, "{eligibility:?}");
+        }
+    }
+
     mod observation_contract {
         use crate::runtime::observation::tests::*;
         use crate::runtime::service::test_support::observation_services::count;
@@ -9544,6 +9567,81 @@ mod tests {
                         eprintln!("live case fixture retained writer work: {unfinished:?}");
                     }
                 }
+            }
+
+            #[test]
+            fn health_reports_no_writer_diagnostic_or_gap_start_while_healthy() {
+                let case = LiveCase::new();
+                let health = case.controller.health(&case.writer);
+                assert!(!health.degraded, "{health:?}");
+                assert_eq!(health.writer_diagnostic, None);
+                assert_eq!(health.gap_open_since, None);
+                health.validate().unwrap();
+            }
+
+            #[test]
+            fn health_reports_the_sanitized_writer_diagnostic_and_the_pending_gap_start() {
+                let mut case = LiveCase::new();
+                case.hooks.busy(WriterBoundary::Persist);
+                let release = Release(case.hooks.clone());
+                case.clock.set_elapsed(Duration::from_millis(200));
+                case.terminal.feed(&form("write second.txt")).unwrap();
+                case.controller
+                    .observer(&case.writer, &case.clock)
+                    .observe(&case.terminal.snapshot())
+                    .unwrap();
+                case.clock.set_elapsed(Duration::from_millis(300));
+                case.controller
+                    .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                    .unwrap();
+                wait_until_within(Duration::from_secs(10), || {
+                    case.writer.status().diagnostic.is_some()
+                });
+                case.clock.set_elapsed(Duration::from_millis(400));
+                let opened_at = crate::time::Clock::wall_stamp(&case.clock);
+                case.controller
+                    .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                    .unwrap();
+                let health = case.controller.health(&case.writer);
+                assert_eq!(
+                    health.eligibility,
+                    InputEligibility::Hold(GateReason::Gap),
+                    "{health:?}"
+                );
+                assert!(health.degraded, "{health:?}");
+                assert_eq!(health.diagnostic.as_deref(), Some("sink_unavailable"));
+                let writer = case.writer.status().diagnostic.unwrap();
+                assert_eq!(
+                    health.writer_diagnostic,
+                    Some(crate::broker::runtime::diagnostic_text(&writer)),
+                    "{health:?}"
+                );
+                assert_eq!(health.gap_open_since, Some(opened_at), "{health:?}");
+                health.validate().unwrap();
+                drop(release);
+            }
+
+            #[test]
+            fn health_reports_a_terminal_fenced_gap_without_a_gap_start() {
+                let mut case = LiveCase::new();
+                case.exit(300);
+                wait_until_within(Duration::from_secs(10), || {
+                    committed(&case.fixture) == 3 && case.writer.status().pending_count == 0
+                });
+                case.clock.set_elapsed(Duration::from_millis(400));
+                case.controller
+                    .observer_failed(ObservationFailure::Parser, &case.clock)
+                    .unwrap();
+                let health = case.controller.health(&case.writer);
+                assert_eq!(
+                    health.eligibility,
+                    InputEligibility::Hold(GateReason::Gap),
+                    "{health:?}"
+                );
+                assert!(health.degraded, "{health:?}");
+                assert_eq!(health.writer_diagnostic, None, "{health:?}");
+                assert_eq!(health.gap_open_since, None, "{health:?}");
+                health.validate().unwrap();
             }
 
             #[test]
