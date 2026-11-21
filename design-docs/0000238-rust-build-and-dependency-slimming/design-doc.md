@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
 **Status**: Approved
-**Progress**: 22/37 tasks complete
+**Progress**: 29/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -370,6 +370,27 @@ Before-values were measured on 2026-11-21 in a detached worktree at `27ea540f` (
 
 The first suite run includes an incremental rebuild of about 6 s after the incremental-build measurement restored `now_stamp`.
 
+#### Suite-regression check result
+
+Run on 2026-11-21 in the main checkout on the Step 5 tree, 8 CPUs, with other fleet work loading the host. Each variant used its own `CARGO_TARGET_DIR` under `/tmp`, and no timed run recompiled anything. Wall time is `mise //:test` end to end, and the harness column is the `finished in` value. Between B1 and A1 a macOS-only clippy fix in `src/runtime/process.rs` landed, which leaves the Linux binary's behavior unchanged; both variants were rebuilt before A1. Variant A's `-vv` build (with `CC_ENABLE_DEBUG_OUTPUT=1`, because `cc` prints compile lines only then) compiled `sqlite3.c` with `"-O0"`.
+
+| Round | Run | Variant | Wall | Harness | Load |
+|---|---|---|---|---|---|
+| opt-level 0 | B1 | B | 33.10 s | 31.54 s | 13.47 |
+| opt-level 0 | A1 | A (`opt-level = 0`) | 35.74 s | 34.10 s | 14.74 |
+| opt-level 0 | B2 | B | 32.71 s | 31.02 s | 14.57 |
+| opt-level 0 | A2 | A (`opt-level = 0`) | 34.37 s | 32.69 s | 15.41 |
+| opt-level 0 | B3 | B | 32.51 s | 30.80 s | 13.47 |
+| opt-level 0 | A3 | A (`opt-level = 0`) | 34.03 s | 32.34 s | 13.17 |
+| opt-level 1 | B4 | B | 35.02 s | 33.43 s | 12.48 |
+| opt-level 1 | A4 | A (`opt-level = 1`) | 35.88 s | 34.23 s | 14.82 |
+| opt-level 1 | B5 | B | 32.68 s | 31.00 s | 14.79 |
+| opt-level 1 | A5 | A (`opt-level = 1`) | 33.79 s | 32.12 s | 15.81 |
+| opt-level 1 | B6 | B | 31.54 s | 30.06 s | 11.55 |
+| opt-level 1 | A6 | A (`opt-level = 1`) | 33.09 s | 31.37 s | 13.91 |
+
+At opt-level 0, A's median wall time of 34.37 s exceeds the largest B run, 33.10 s, so A regresses. At opt-level 1, A's median of 33.79 s stays below the largest fresh B run, 35.02 s. **Selected: `libsqlite3-sys` opt-level 1.**
+
 ### Documentation updates
 
 | Target | Change |
@@ -424,17 +445,20 @@ The first suite run includes an incremental rebuild of about 6 s after the incre
 
 ### Step 5: CI test entries
 
-- [ ] Change the `//:test` task's CPU-count command per § CI <!-- completed: -->
-- [ ] Restructure `ci.yml` into the Linux and macOS `lint` and `test` entries, with `CARGO_PROFILE_TEST_OPT_LEVEL=1` on the test step <!-- completed: -->
+- [x] Change the `//:test` task's CPU-count command per § CI <!-- completed: 2026-11-21T11:36 -->
+- [x] Restructure `ci.yml` into the Linux and macOS `lint` and `test` entries, with `CARGO_PROFILE_TEST_OPT_LEVEL=1` on the test step <!-- completed: 2026-11-21T11:36 -->
 - [ ] Push the branch and confirm all four CI entries pass, with the macOS `test` entry running the macOS process-group tests; handle failures per § First macOS CI run <!-- completed: -->
+
+COMMENT(programmer): test `refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it` expects `session.try_wait()` to pin the setuid helper into `session.owned`, but `PtySession::try_wait_with` (src/runtime/process.rs:444-458, documented "Pins the process group only once the leader is a zombie") returns `Ok(None)` while the native `/bin/sh` leader is live, before any `refresh_owned_with` scan; the unit test `try_wait_with_a_live_leader_checks_only_the_leader_and_scans_no_group` asserts exactly that. The only other refreshes run at `spawn` (before the helper exists) and in `signal_verified` (shutdown), so the assertion at process.rs:1022 cannot hold under the current contract, with libproc or kern.proc alike; the test never compiled on macOS before this branch, so it went stale unobserved. `group_members` itself is exercised by the passing `kern_proc_pgrp_lists_a_spawned_group_leader_and_then_nothing`. Proposed test fix (Tester-owned): after the `try_wait` assertion, call `session.refresh_owned().unwrap();` (private, reachable from the in-file `mod tests`) so the test drives `group_members` → `refresh_owned_with` pinning explicitly, and reword the `try_wait` message to state that a live leader keeps the session running. No production change. Please arbitrate.
+COMMENT(director): approved — the Tester applies the proposed test-only fix (explicit `session.refresh_owned()` after the `try_wait` assertion, reworded `try_wait` message); `try_wait_with`'s live-leader contract stays as is.
 
 ### Step 6: Dev/test profiles
 
-- [ ] Build variants B and A and run the alternating B/A suite runs of § Measurements' suite-regression check, recording wall time and load per run <!-- completed: -->
-- [ ] Confirm `-O0` on the `sqlite3.c` compile line of variant A's `cargo test --bin cafleet --no-run -vv` <!-- completed: -->
-- [ ] Apply the check's outcome to `Cargo.toml` (opt-level 0, opt-level 1 after a repeated check, or no override) <!-- completed: -->
-- [ ] Add `[profile.dev.package.cafleet] debug = "line-tables-only"` <!-- completed: -->
-- [ ] `mise //:test` and `mise //:lint` pass <!-- completed: -->
+- [x] Build variants B and A and run the alternating B/A suite runs of § Measurements' suite-regression check, recording wall time and load per run <!-- completed: 2026-11-21T11:59 -->
+- [x] Confirm `-O0` on the `sqlite3.c` compile line of variant A's `cargo test --bin cafleet --no-run -vv` <!-- completed: 2026-11-21T11:59 -->
+- [x] Apply the check's outcome to `Cargo.toml` (opt-level 0, opt-level 1 after a repeated check, or no override) <!-- completed: 2026-11-21T11:59 -->
+- [x] Add `[profile.dev.package.cafleet] debug = "line-tables-only"` <!-- completed: 2026-11-21T11:59 -->
+- [x] `mise //:test` and `mise //:lint` pass <!-- completed: 2026-11-21T11:59 -->
 
 ### Step 7: Single-runner release gate
 

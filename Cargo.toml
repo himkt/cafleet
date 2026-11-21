@@ -27,3 +27,9 @@ tempfile = "3"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.dev.package.libsqlite3-sys]
+opt-level = 1
+
+[profile.dev.package.cafleet]
+debug = "line-tables-only"
