@@ -484,6 +484,7 @@ impl ObservationController {
     fn update(&self, transitions: Vec<TransitionDraft>) -> EpisodeUpdate {
         EpisodeUpdate {
             transitions,
+            next_deadline: self.next_deadline,
             ..EpisodeUpdate::new(self.visibility, self.eligibility)
         }
     }

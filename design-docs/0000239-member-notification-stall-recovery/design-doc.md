@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 9/57 tasks complete
+**Progress**: 11/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -443,8 +443,8 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 2: Deadline fix
 
-- [ ] Apply the `update()` change and add the controller test per § Deadline fix <!-- completed: -->
-- [ ] Change the `uncertain preview` scenario's expected events <!-- completed: -->
+- [x] Apply the `update()` change and add the controller test per § Deadline fix <!-- completed: 2026-11-21T14:06 -->
+- [x] Change the `uncertain preview` scenario's expected events <!-- completed: 2026-11-21T14:06 -->
 
 ### Step 3: Writer step bound
 
