@@ -8,12 +8,20 @@ on:
 
 jobs:
   check:
-    name: ${{ matrix.task }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.task }} (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        task: [lint, test]
+        include:
+          - task: lint
+            runner: ubuntu-latest
+          - task: lint
+            runner: macos-15
+          - task: test
+            runner: ubuntu-latest
+          - task: test
+            runner: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
@@ -27,4 +35,9 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ matrix.task }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-${{ matrix.task }}-
-      - run: mise //:${{ matrix.task }}
+      - if: matrix.task == 'lint'
+        run: mise //:lint
+      - if: matrix.task == 'test'
+        run: mise //:test
+        env:
+          CARGO_PROFILE_TEST_OPT_LEVEL: "1"
