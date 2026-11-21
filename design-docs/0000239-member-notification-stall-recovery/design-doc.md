@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 51/57 tasks complete
+**Progress**: 56/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -506,9 +506,9 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 9: Validation
 
-- [ ] Run `mise //:test` <!-- completed: -->
-- [ ] Run `mise //:lint` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] Run `mise //:test` <!-- completed: 2026-11-21T20:59 -->
+- [x] Run `mise //:lint` <!-- completed: 2026-11-21T20:59 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-21T20:59 -->
 - [ ] Run the § Live verification phases and record each observed value <!-- completed: -->
-- [ ] Search outside `design-docs/` for `WORK_SLICE`, `work_slice`, `unhurried_writer`, `writer_work_slice_ms` and `automatic-held-queue-flush`, and confirm nothing is found <!-- completed: -->
-- [ ] Recheck every § Skills and documentation target against the shipped behavior <!-- completed: -->
+- [x] Search outside `design-docs/` for `WORK_SLICE`, `work_slice`, `unhurried_writer`, `writer_work_slice_ms` and `automatic-held-queue-flush`, and confirm nothing is found <!-- completed: 2026-11-21T20:59 -->
+- [x] Recheck every § Skills and documentation target against the shipped behavior <!-- completed: 2026-11-21T20:59 -->
