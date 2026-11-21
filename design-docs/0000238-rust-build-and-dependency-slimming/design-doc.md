@@ -1,6 +1,6 @@
 # Rust build and dependency slimming
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 37/37 tasks complete
 **Last Updated**: 2026-11-21
 
@@ -511,3 +511,4 @@ Implementers leave the installed `cafleet` untouched, because the executing flee
 |------|---------|
 | 2026-11-21 | Initial draft |
 | 2026-11-21 | Reconcile with design 0000237: ledger DDL anchor, existing SPEC §8 ledger statement and paragraphs, table-driven refusal test, scoped busy budget, dropped removed flake from scope, annotated evaluation references |
+| 2026-11-21 | Implementation complete: all tasks done, measurements and release gate recorded, reviewer and user approved |
