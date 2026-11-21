@@ -926,31 +926,10 @@ fn wrapped_delivery_refusal(
             .expect("a pre-write rejection has its cause");
         return format!("{label} was not dispatched to member {member_id}: {cause}");
     }
-    if result.status == SubmissionStatus::LeftInComposer {
-        let cause = result
-            .reason
-            .as_deref()
-            .expect("a left input has its stop cause");
-        let method = result
-            .delivery
-            .as_ref()
-            .and_then(|delivery| delivery.method)
-            .expect("a left input has its delivery method");
-        let text = if result.stage == crate::runtime::SubmissionStage::EscapeOnly {
-            "Escape was sent but no text was typed."
-        } else {
-            "the typed text stays in the member's composer."
-        };
-        return format!(
-            "{label} delivery to member {member_id} was not submitted: {cause} (method={}); {text} Inspect the pane before retrying.",
-            method.as_str()
-        );
-    }
     let description = match result.status {
         SubmissionStatus::Held => "held",
         SubmissionStatus::Rejected => "rejected",
         SubmissionStatus::Uncertain => "uncertain",
-        SubmissionStatus::LeftInComposer => unreachable!("left inputs have their scoped refusal"),
         SubmissionStatus::Accepted | SubmissionStatus::Queued => {
             unreachable!("submitted and queued results are not refusals")
         }
@@ -996,7 +975,6 @@ fn dispatch_input(
     let request = SubmitInput {
         operation_key: format!("{}:{}:{random}", kind.as_str(), run.run_id),
         input_kind: kind,
-        message_id: None,
         literal: text.into(),
     };
     let result =
@@ -2202,7 +2180,6 @@ mod tests {
                         storage::get_input(&fixture.fixture.conn, *after.last().unwrap()).unwrap();
                     assert_eq!(row.kind, kind);
                     assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(row.message_id, None);
                     let prefix = format!("{}:{}:", kind.as_str(), run.run_id);
                     let random = row
                         .operation_key
@@ -2214,7 +2191,8 @@ mod tests {
                             .bytes()
                             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                     );
-                    let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
+                    let payload =
+                        json!({"kind":kind.as_str(),"literal":literal,"run_id":run.run_id});
                     let digest = crate::digest::sha256_hex(&serde_json::to_vec(&payload).unwrap());
                     assert_eq!(
                         row.payload_digest, digest,
@@ -2349,7 +2327,6 @@ mod tests {
                 let request = SubmitInput {
                     operation_key: row.operation_key.clone(),
                     input_kind: row.kind,
-                    message_id: row.message_id,
                     literal: literal.into(),
                 };
                 let result = submit_wrapped_input(

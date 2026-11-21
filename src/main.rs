@@ -30,7 +30,6 @@ mod cli;
 pub(crate) mod coding_agent;
 pub(crate) mod config;
 pub(crate) mod db;
-pub(crate) mod delivery;
 pub(crate) mod digest;
 mod error;
 pub(crate) mod multiplexer;

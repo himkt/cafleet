@@ -5,6 +5,7 @@ pub(crate) mod input_client;
 mod lifecycle;
 pub(crate) mod observation;
 mod press;
+pub(crate) mod preview;
 mod process;
 pub(crate) mod recovery;
 pub(crate) mod service;

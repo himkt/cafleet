@@ -489,8 +489,7 @@ stored_enum!(InputState, "member_input_operations.state", {
     Uncertain => "uncertain", Settled => "settled"
 });
 stored_enum!(test_values InputDisposition, "member_input_operations.disposition", {
-    Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain",
-    LeftInComposer => "left_in_composer"
+    Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain"
 });
 stored_enum!(StopCause, "member_input_operations.stop_cause", {
     ManualInput => "manual_input", ManualAccountingFailed => "manual_accounting_failed",
@@ -500,13 +499,9 @@ stored_enum!(StopCause, "member_input_operations.stop_cause", {
     SubmitUnconfirmed => "submit_unconfirmed", ShortWrite => "short_write",
     WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
 });
-stored_enum!(LeftStage, "member_input_operations.left_stage", {
-    EscapeOnly => "escape_only", Partial => "partial", LiteralComplete => "literal_complete",
-    Submitted => "submitted"
-});
 
 impl StopCause {
-    pub(crate) fn permits_left_in_composer(self) -> bool {
+    pub(crate) fn is_check_stop(self) -> bool {
         matches!(
             self,
             Self::ManualInput
@@ -719,9 +714,7 @@ pub(crate) struct InputOperation {
     pub(crate) state: InputState,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
-    pub(crate) message_id: Option<i64>,
     pub(crate) disposition: Option<InputDisposition>,
-    pub(crate) preview_attempt: Option<i64>,
     pub(crate) evidence_ref: Option<String>,
     pub(crate) permission_response: Option<PermissionResponseRecord>,
     pub(crate) delivery_method: Option<DeliveryMethod>,
@@ -729,12 +722,10 @@ pub(crate) struct InputOperation {
     pub(crate) deferred_at: Option<String>,
     pub(crate) defer_reason: Option<String>,
     pub(crate) stop_cause: Option<StopCause>,
-    pub(crate) left_stage: Option<LeftStage>,
 }
 
 stored_enum!(DeliveryStatus, "delivery.status", {
     Submitted => "submitted", Queued => "queued", Held => "held", Uncertain => "uncertain",
-    LeftInComposer => "left_in_composer",
     NotSubmitted => "not_submitted", NotApplicable => "not_applicable"
 });
 stored_enum!(DeliveryMethod, "member_input_operations.delivery_method", {
@@ -829,7 +820,6 @@ impl InputOperation {
             && self.operation_key == other.operation_key
             && self.kind == other.kind
             && self.payload_digest == other.payload_digest
-            && self.message_id == other.message_id
             && self.created_at == other.created_at
             && self.permission_response == other.permission_response
     }

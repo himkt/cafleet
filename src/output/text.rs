@@ -36,16 +36,8 @@ pub(crate) fn format_messages(messages: &[MessageRecord]) -> String {
         .join("\n\n")
 }
 
-pub(crate) fn format_message_sent(
-    message: &MessageRecord,
-    input_id: Option<i64>,
-    delivery: &DeliveryProjection,
-) -> String {
-    with_delivery(
-        format!("Message sent.\n{}", format_message(message)),
-        input_id,
-        delivery,
-    )
+pub(crate) fn format_message_sent(message: &MessageRecord) -> String {
+    format!("Message sent.\n{}", format_message(message))
 }
 
 pub(crate) fn format_fleet_list(fleets: &[FleetSummary]) -> String {
@@ -297,7 +289,7 @@ pub(crate) fn format_runtime_event(view: &RuntimeEventView) -> String {
 
 pub(crate) fn format_input_operation(input: &InputOperation) -> String {
     let mut text = format!(
-        "Input: {} run={} kind={} state={} disposition={} message={}",
+        "Input: {} run={} kind={} state={} disposition={}",
         input.input_id,
         input.run_id,
         input.kind.as_str(),
@@ -305,9 +297,6 @@ pub(crate) fn format_input_operation(input: &InputOperation) -> String {
         input
             .disposition
             .map_or("-", |disposition| disposition.as_str()),
-        input
-            .message_id
-            .map_or_else(|| "-".into(), |id| id.to_string())
     );
     if let Some(response) = &input.permission_response {
         let metadata = &response.metadata;
@@ -465,33 +454,12 @@ mod tests {
         }
 
         #[test]
-        fn delivery_text_send_appends_delivery_then_input_only_when_allocated() {
+        fn message_sent_text_is_the_confirmation_line_then_the_envelope() {
             let message = MessageRecord::fixture(9, 2, 3, "hello");
-            let envelope = format_message(&message);
-            let submitted = projection(
-                DeliveryStatus::Submitted,
-                Some(DeliveryMethod::Profile),
-                None,
-            );
             assert_eq!(
-                format_message_sent(&message, Some(4), &submitted),
-                format!(
-                    "Message sent.\n{envelope}\nDelivery: status=submitted method=profile reason=-\nInput: 4"
-                )
+                format_message_sent(&message),
+                format!("Message sent.\n{}", format_message(&message))
             );
-            let director = projection(DeliveryStatus::NotApplicable, None, Some("director_stdout"));
-            assert_eq!(
-                format_message_sent(&message, None, &director),
-                format!(
-                    "Message sent.\n{envelope}\nDelivery: status=not_applicable method=- reason=director_stdout"
-                )
-            );
-            let queued = projection(DeliveryStatus::Queued, None, Some("earlier_input"));
-            let text = format_message_sent(&message, Some(5), &queued);
-            assert!(text.starts_with(&format!(
-                "Message sent.\n{envelope}\nDelivery: status=queued method=- reason=earlier_input\nInput: 5"
-            )));
-            assert!(text.contains("retry"), "{text}");
         }
     }
 

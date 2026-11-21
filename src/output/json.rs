@@ -57,11 +57,10 @@ pub(crate) fn runtime_event(view: &crate::broker::runtime::RuntimeEventView) -> 
 pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> Value {
     json!({"input":{"input_id":row.input_id,"run_id":row.run_id,"operation_key":row.operation_key,
         "kind":row.kind.as_str(),"payload_digest":row.payload_digest,"state":row.state.as_str(),
-        "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
+        "created_at":row.created_at,"updated_at":row.updated_at,
         "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
         "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
-        "stop_cause":row.stop_cause.map(|cause| cause.as_str()),
-        "left_stage":row.left_stage.map(|stage| stage.as_str())}})
+        "stop_cause":row.stop_cause.map(|cause| cause.as_str())}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
@@ -90,16 +89,6 @@ pub(crate) fn listen_closed(member_id: i64, reason: &str) -> Value {
 
 pub(crate) fn message_envelope(row: &MessageRecord) -> Value {
     json!({"message":message(row)})
-}
-
-pub(crate) fn send_outcome(
-    row: &MessageRecord,
-    notification_sent: bool,
-    input_id: Option<i64>,
-    delivery: &crate::broker::runtime::DeliveryProjection,
-) -> Value {
-    json!({"message":message(row),"notification_sent":notification_sent,
-        "input_id":input_id,"delivery":delivery.to_json()})
 }
 
 pub(crate) fn member_prompt(
@@ -531,7 +520,7 @@ mod tests {
             "child_start_identity",
             "effective_policy",
         ];
-        const INPUT_KEYS: [&str; 17] = [
+        const INPUT_KEYS: [&str; 15] = [
             "input_id",
             "run_id",
             "operation_key",
@@ -540,7 +529,6 @@ mod tests {
             "state",
             "created_at",
             "updated_at",
-            "message_id",
             "disposition",
             "evidence_ref",
             "permission_response",
@@ -548,7 +536,6 @@ mod tests {
             "deferred_at",
             "defer_reason",
             "stop_cause",
-            "left_stage",
         ];
 
         #[test]
@@ -587,7 +574,7 @@ mod tests {
             assert_eq!(
                 crate::output::format_input_operation(&receipt.input),
                 format!(
-                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=allow choice=- source=director-auto mode=auto director={} epoch={}",
+                    "Input: {} run={} kind=permission_response state=in_progress disposition=-\nPermission decision: interaction={} event={} decision=allow choice=- source=director-auto mode=auto director={} epoch={}",
                     receipt.input.input_id,
                     fixture.owner.run_id,
                     fixture.request.metadata.interaction_id,
@@ -610,7 +597,7 @@ mod tests {
             assert_eq!(
                 crate::output::format_input_operation(&receipt.input),
                 format!(
-                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=- choice=decline source=director-auto mode=auto director={} epoch={}",
+                    "Input: {} run={} kind=permission_response state=in_progress disposition=-\nPermission decision: interaction={} event={} decision=- choice=decline source=director-auto mode=auto director={} epoch={}",
                     receipt.input.input_id,
                     fixture.owner.run_id,
                     fixture.request.metadata.interaction_id,
@@ -827,7 +814,7 @@ mod tests {
             assert_eq!(
                 crate::output::format_input_operation(&input),
                 format!(
-                    "Input: {} run={} kind=exec state=in_progress disposition=- message=-",
+                    "Input: {} run={} kind=exec state=in_progress disposition=-",
                     input.input_id, owner.run_id
                 )
             );
@@ -850,7 +837,7 @@ mod tests {
             assert_eq!(
                 crate::output::format_input_operation(&caused),
                 format!(
-                    "Input: {} run={} kind=prompt state=uncertain disposition=- message=-",
+                    "Input: {} run={} kind=prompt state=uncertain disposition=-",
                     caused.input_id, owner.run_id
                 )
             );

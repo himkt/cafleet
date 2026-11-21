@@ -3,13 +3,9 @@ use crate::broker::MessageRecord;
 use crate::broker::messaging::InboxClosure;
 use crate::broker::messaging::InboxSnapshot;
 use crate::broker::messaging::listen_snapshot;
-use crate::broker::runtime::DeliveryProjection;
-use crate::broker::runtime::DeliveryStatus;
 use crate::cli::emit;
 use crate::cli::resolve_body;
 use crate::config::Settings;
-use crate::delivery::AttemptEnd;
-use crate::delivery::AttemptOutcome;
 use crate::error::CafleetError;
 use crate::output::format_message;
 use crate::output::format_message_sent;
@@ -117,46 +113,10 @@ pub(crate) fn run(
             let message = crate::db::with_database_budget(conn, deadline, |conn| {
                 broker::send_message(conn, from_member_id, to_member_id, &text)
             })?;
-            let message_id = message.message_id;
-            let outcome = if from_member_id == to_member_id {
-                None
-            } else {
-                match crate::delivery::deliver_pending(
-                    conn,
-                    settings,
-                    to_member_id,
-                    None,
-                    deadline,
-                    &std::collections::BTreeSet::new(),
-                ) {
-                    Ok(outcome) => {
-                        for error in &outcome.notification_errors {
-                            eprintln!("Message {message_id} was persisted. {}", error.error);
-                        }
-                        if let AttemptEnd::Failed(error) = &outcome.end {
-                            eprintln!("Message {message_id} was persisted. {}", error.error);
-                        }
-                        Some(outcome)
-                    }
-                    Err(error) => {
-                        eprintln!("Message {message_id} was persisted. {}", error.message());
-                        None
-                    }
-                }
-            };
-            let notification_sent = outcome
-                .as_ref()
-                .is_some_and(|outcome| outcome.sent.contains(&message_id));
-            let (input_id, delivery) = send_delivery(conn, &message, outcome.as_ref())?;
             emit(
                 json,
-                &crate::output::json::send_outcome(
-                    &message,
-                    notification_sent,
-                    input_id,
-                    &delivery,
-                ),
-                || format_message_sent(&message, input_id, &delivery),
+                &crate::output::json::message_envelope(&message),
+                || format_message_sent(&message),
             )
         }
         MessageCommand::Poll { member_id, json } => {
@@ -186,81 +146,6 @@ pub(crate) fn run(
             )
         }
     }
-}
-
-fn send_delivery(
-    conn: &Connection,
-    message: &crate::broker::MessageRecord,
-    outcome: Option<&AttemptOutcome>,
-) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
-    let projection = |status, method, reason: Option<&str>| DeliveryProjection {
-        status,
-        method,
-        reason: reason.map(str::to_owned),
-    };
-    if message.from_member_id == message.to_member_id {
-        return Ok((
-            None,
-            projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
-        ));
-    }
-    let recipient = match broker::active_member_fleet(conn, message.to_member_id)? {
-        Some(fleet) => broker::get_member(conn, message.to_member_id, fleet)?,
-        None => None,
-    };
-    let Some(recipient) = recipient else {
-        return Ok((
-            None,
-            projection(DeliveryStatus::Held, None, Some("notification_held")),
-        ));
-    };
-    if recipient.kind == crate::broker::MemberKind::Director {
-        return Ok((
-            None,
-            projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
-        ));
-    }
-    if let Some(runtime) = &recipient.runtime {
-        if let Some(attempted) =
-            outcome.and_then(|outcome| outcome.attempted_inputs.get(&message.message_id))
-        {
-            if let Some(input_id) = attempted {
-                let input = crate::broker::runtime::get_input(conn, *input_id)?;
-                if input.run_id != runtime.run.run_id
-                    || input.kind != crate::broker::runtime::InputKind::Preview
-                    || input.message_id != Some(message.message_id)
-                {
-                    return Err(CafleetError::App(
-                        "invocation preview receipt association changed".into(),
-                    ));
-                }
-                let delivery = input.delivery().ok_or_else(|| {
-                    CafleetError::App("invocation preview has no delivery projection".into())
-                })?;
-                return Ok((Some(*input_id), delivery));
-            }
-        } else if let Some(input) = crate::broker::runtime::find_latest_preview_input(
-            conn,
-            runtime.run.run_id,
-            message.message_id,
-        )? && let Some(delivery) = input.delivery()
-        {
-            return Ok((Some(input.input_id), delivery));
-        }
-    }
-    let reason = match outcome {
-        Some(AttemptOutcome {
-            held_reason: Some(reason),
-            ..
-        }) => reason.as_str(),
-        Some(AttemptOutcome {
-            end: AttemptEnd::Failed(_),
-            ..
-        })
-        | None => "notification_failed",
-        Some(_) => "notification_held",
-    };
-    Ok((None, projection(DeliveryStatus::Held, None, Some(reason))))
 }
 
 const WORK_BUDGET: Duration = Duration::from_secs(5);

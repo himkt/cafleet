@@ -142,39 +142,26 @@ CREATE TABLE member_input_operations (
     input_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     operation_key TEXT NOT NULL CHECK(length(trim(operation_key)) > 0),
-    kind TEXT NOT NULL CHECK(kind IN ('preview','prompt','exec','permission_response')),
+    kind TEXT NOT NULL CHECK(kind IN ('prompt','exec','permission_response')),
     payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64 AND payload_digest NOT GLOB '*[^0-9a-f]*'),
     state TEXT NOT NULL CHECK(state IN ('ready','in_progress','accepted','uncertain','settled')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    message_id INTEGER REFERENCES messages(message_id) ON DELETE RESTRICT,
-    disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain','left_in_composer')),
-    preview_attempt INTEGER CHECK((kind = 'preview') = (preview_attempt IS NOT NULL)
-        AND (preview_attempt IS NULL OR preview_attempt >= 1)),
+    disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain')),
     evidence_ref TEXT,
     delivery_method TEXT CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback')),
     delivery_reason TEXT CHECK(delivery_reason IS NULL OR length(trim(delivery_reason)) > 0),
     deferred_at TEXT,
     defer_reason TEXT CHECK((deferred_at IS NULL AND defer_reason IS NULL)
         OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
-            AND kind IN ('preview','prompt','exec'))),
+            AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
         OR (stop_cause IN ('manual_input','manual_accounting_failed','pointer_input',
                           'interaction_candidate','interaction_open','observer_unavailable',
                           'deadline_expired','submit_unconfirmed','short_write','write_failed',
                           'runner_stopped')
             AND state IN ('uncertain','settled'))),
-    left_stage TEXT CHECK(left_stage IS NULL
-        OR left_stage IN ('escape_only','partial','literal_complete','submitted')),
-    CHECK(disposition IS NOT 'left_in_composer'
-        OR (kind IN ('preview','prompt','exec') AND stop_cause IS NOT NULL AND stop_cause IN
-            ('manual_input','manual_accounting_failed','pointer_input','interaction_candidate',
-             'interaction_open','observer_unavailable','deadline_expired','submit_unconfirmed'))),
-    CHECK((disposition IS 'left_in_composer') = (left_stage IS NOT NULL)),
-    CHECK(state != 'uncertain' OR stop_cause IS NULL OR stop_cause != 'submit_unconfirmed'),
     UNIQUE(run_id, operation_key),
-    UNIQUE(run_id, message_id, preview_attempt),
-    CHECK(kind != 'preview' OR message_id IS NOT NULL),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
 

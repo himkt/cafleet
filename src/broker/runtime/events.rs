@@ -184,41 +184,26 @@ fn result_delivery(
     let mut delivery = input
         .delivery()
         .ok_or_else(|| invalid(field, "delivery results describe ordinary inputs"))?;
-    if input.deferred_at.is_none() && input.stop_cause.is_some() && input.left_stage.is_none() {
+    if input.deferred_at.is_none() && input.stop_cause.is_some() {
         delivery.status = DeliveryStatus::Uncertain;
     }
     Ok((input, delivery))
 }
 
-fn validate_result_stage(
-    input: &InputOperation,
-    stage: &Value,
-    field: &str,
-) -> Result<(), CafleetError> {
+fn validate_result_stage(stage: &Value, field: &str) -> Result<(), CafleetError> {
     require(
         stage
             .as_str()
             .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
         field,
         "stage outside its domain",
-    )?;
-    if let Some(left_stage) = input.left_stage {
-        require(
-            stage.as_str() == Some(left_stage.as_str()),
-            field,
-            "stage must match the input receipt's left stage",
-        )?;
-    }
-    Ok(())
+    )
 }
 
 fn result_stop_cause(input: &InputOperation, status: DeliveryStatus) -> Option<StopCause> {
-    input.stop_cause.filter(|_| {
-        matches!(
-            status,
-            DeliveryStatus::Uncertain | DeliveryStatus::LeftInComposer
-        )
-    })
+    input
+        .stop_cause
+        .filter(|_| status == DeliveryStatus::Uncertain)
 }
 
 /// The delivery fields a stored result publishes, checked against its input receipt: an uncertain
@@ -228,6 +213,9 @@ fn published_delivery(
     event: &RuntimeEventRecord,
 ) -> Result<DeliveryFields, CafleetError> {
     let payload = &event.payload_json;
+    if event.kind == RuntimeEventKind::InputDeliveryResult && payload["input_id"].is_null() {
+        return preview_delivery(conn, &get_run(conn, event.run_id)?, payload);
+    }
     let input_id = payload["input_id"]
         .as_i64()
         .ok_or_else(|| invalid("payload_json.input_id", "input identity required"))?;
@@ -250,9 +238,7 @@ fn published_delivery(
     } else {
         matches!(
             published.status,
-            DeliveryStatus::Submitted
-                | DeliveryStatus::NotSubmitted
-                | DeliveryStatus::LeftInComposer
+            DeliveryStatus::Submitted | DeliveryStatus::NotSubmitted
         ) && published == delivery
     };
     require(
@@ -260,15 +246,59 @@ fn published_delivery(
         "payload_json.delivery",
         "delivery must match the input receipt's settled result",
     )?;
-    validate_result_stage(&input, &payload["stage"], "payload_json.stage")?;
+    validate_result_stage(&payload["stage"], "payload_json.stage")?;
     Ok(DeliveryFields {
-        input_id,
-        message_id: input.message_id,
+        input_id: Some(input_id),
+        message_id: None,
         cause: result_stop_cause(&input, published.status),
-        action: left_input_action(conn, &get_run(conn, event.run_id)?, &input)?,
+        action: Value::Null,
         stalled: None,
         delivery: published,
         stage: payload["stage"].clone(),
+    })
+}
+
+/// The fields of an uncertain preview's result, which has no input receipt: the message must be
+/// addressed to the run's member, and the published delivery is uncertain with its method.
+fn preview_delivery(
+    conn: &Connection,
+    run: &RunRecord,
+    record: &Value,
+) -> Result<DeliveryFields, CafleetError> {
+    let message_id = record["message_id"]
+        .as_i64()
+        .ok_or_else(|| invalid("message_id", "an uncertain preview names its message"))?;
+    let message = crate::broker::messaging::get_message(conn, message_id)?;
+    require(
+        message.to_member_id == run.member_id,
+        "message_id",
+        "an uncertain preview addresses the run's member",
+    )?;
+    let method = match record.get("delivery") {
+        Some(delivery) => delivery["method"].clone(),
+        None => record["method"].clone(),
+    };
+    let method = method
+        .as_str()
+        .and_then(|method| DeliveryMethod::try_from(method).ok())
+        .ok_or_else(|| invalid("delivery.method", "an uncertain preview records its method"))?;
+    validate_result_stage(&record["stage"], "stage")?;
+    let cause = record["cause"]["kind"]
+        .as_str()
+        .and_then(|kind| StopCause::try_from(kind).ok())
+        .ok_or_else(|| invalid("cause", "an uncertain preview records its stop cause"))?;
+    Ok(DeliveryFields {
+        input_id: None,
+        message_id: Some(message_id),
+        delivery: DeliveryProjection {
+            status: DeliveryStatus::Uncertain,
+            method: Some(method),
+            reason: None,
+        },
+        stage: record["stage"].clone(),
+        cause: Some(cause),
+        action: Value::Null,
+        stalled: None,
     })
 }
 
@@ -309,6 +339,10 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
         } else if view.event.kind == RuntimeEventKind::InputDeliveryResult {
             let mut cause = json!({"kind":"input_delivery_result",
                 "input_id":payload["input_id"],"stage":payload["stage"]});
+            if payload["input_id"].is_null() {
+                cause["message_id"] = payload["message_id"].clone();
+                cause["method"] = payload["delivery"]["method"].clone();
+            }
             if let Some(diagnostic) = payload.get("cause") {
                 cause["cause"] = diagnostic.clone();
             }
@@ -334,6 +368,18 @@ pub(crate) fn input_delivery_result_cause(
         cause["cause"] = stop_cause_payload(stop_cause);
     }
     cause
+}
+
+/// The runner's internal record of an uncertain preview's result, which has no input receipt:
+/// its message, the delivery method it was typed with, its written stage and its stop cause.
+pub(crate) fn preview_delivery_result_cause(
+    message_id: i64,
+    method: DeliveryMethod,
+    stage: &str,
+    stop_cause: StopCause,
+) -> Value {
+    json!({"kind":"input_delivery_result","input_id":null,"message_id":message_id,
+        "method":method.as_str(),"stage":stage,"cause":stop_cause_payload(stop_cause)})
 }
 
 fn stop_cause_payload(cause: StopCause) -> Value {
@@ -429,7 +475,6 @@ enum StalledBlocker {
 enum StalledCause {
     ImmediateAttempt,
     PendingFinalization,
-    HeldComposer,
     UnresolvedInput,
     DrainPending,
     PaneInputBusy,
@@ -445,7 +490,6 @@ impl StalledCause {
         Ok(match kind {
             "immediate_attempt" => Self::ImmediateAttempt,
             "pending_finalization" => Self::PendingFinalization,
-            "held_composer" => Self::HeldComposer,
             "unresolved_input" => Self::UnresolvedInput,
             "drain_pending" => Self::DrainPending,
             "pane_input_busy" => Self::PaneInputBusy,
@@ -460,9 +504,7 @@ impl StalledCause {
 
     fn blocker(self) -> StalledBlocker {
         match self {
-            Self::HeldComposer | Self::PendingFinalization | Self::UnresolvedInput => {
-                StalledBlocker::Required
-            }
+            Self::PendingFinalization | Self::UnresolvedInput => StalledBlocker::Required,
             Self::ImmediateAttempt => StalledBlocker::Optional,
             Self::DrainPending
             | Self::PaneInputBusy
@@ -552,21 +594,38 @@ fn validate_delivery_cause(transition: &ObservedTransition) -> Result<(), Caflee
         .as_ref()
         .and_then(Value::as_object)
         .ok_or_else(|| invalid("cause_json", "delivery result record required"))?;
-    require(
+    let preview = cause.get("input_id").is_some_and(Value::is_null);
+    let keys: &[&str] = if preview {
+        &["kind", "input_id", "message_id", "method", "stage", "cause"]
+    } else {
+        &["kind", "input_id", "stage", "cause"]
+    };
+    let identified = if preview {
         cause
-            .keys()
-            .all(|key| ["kind", "input_id", "stage", "cause"].contains(&key.as_str()))
-            && cause.get("kind").and_then(Value::as_str) == Some("input_delivery_result")
+            .get("message_id")
+            .and_then(Value::as_i64)
+            .is_some_and(|id| id > 0)
             && cause
-                .get("input_id")
-                .and_then(Value::as_i64)
-                .is_some_and(|id| id > 0)
+                .get("method")
+                .and_then(Value::as_str)
+                .is_some_and(|method| DeliveryMethod::try_from(method).is_ok())
+            && cause.contains_key("cause")
+    } else {
+        cause
+            .get("input_id")
+            .and_then(Value::as_i64)
+            .is_some_and(|id| id > 0)
+    };
+    require(
+        cause.keys().all(|key| keys.contains(&key.as_str()))
+            && cause.get("kind").and_then(Value::as_str) == Some("input_delivery_result")
+            && identified
             && cause
                 .get("stage")
                 .and_then(Value::as_str)
                 .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
         "cause_json",
-        "a delivery result names its input and stage",
+        "a delivery result names its input or preview message and its stage",
     )?;
     if let Some(uncertain) = cause.get("cause") {
         let kind = uncertain
@@ -707,7 +766,7 @@ fn apply_interaction(
 
 /// The public fields an input delivery result adds from its input receipt.
 struct DeliveryFields {
-    input_id: i64,
+    input_id: Option<i64>,
     message_id: Option<i64>,
     delivery: DeliveryProjection,
     stage: Value,
@@ -720,20 +779,6 @@ struct StalledFields {
     blocking_input_id: Option<i64>,
     waiting_since: String,
     cause: Value,
-}
-
-fn input_press_argv(conn: &Connection, run: &RunRecord) -> Result<Value, CafleetError> {
-    let mut argv = vec![
-        "cafleet".to_owned(),
-        "member".into(),
-        "press".into(),
-        run.member_id.to_string(),
-        "--from-member-id".into(),
-        run.director_member_id.to_string(),
-        "Enter".into(),
-    ];
-    argv.extend(action_database_args(conn)?);
-    Ok(json!(argv))
 }
 
 fn action_database_args(conn: &Connection) -> Result<Vec<String>, CafleetError> {
@@ -751,32 +796,6 @@ fn action_database_args(conn: &Connection) -> Result<Vec<String>, CafleetError> 
     })
 }
 
-fn left_input_action(
-    conn: &Connection,
-    run: &RunRecord,
-    input: &InputOperation,
-) -> Result<Value, CafleetError> {
-    let recoverable = input.disposition == Some(InputDisposition::LeftInComposer)
-        && matches!(
-            input.left_stage,
-            Some(LeftStage::LiteralComplete | LeftStage::Submitted)
-        )
-        && matches!(
-            input.stop_cause,
-            Some(
-                StopCause::ObserverUnavailable
-                    | StopCause::DeadlineExpired
-                    | StopCause::SubmitUnconfirmed
-            )
-        );
-    if !recoverable {
-        return Ok(Value::Null);
-    }
-    Ok(json!({"kind":"review_left_input",
-        "instruction":"Capture the member's pane and confirm with member show that no interaction is current. When its composer holds exactly this input's whole text, submit it with press_argv; otherwise ask the user to clear or submit the composer on the member's native surface.",
-        "press_argv":input_press_argv(conn, run)?}))
-}
-
 fn stalled_delivery(
     conn: &Connection,
     run: &RunRecord,
@@ -786,7 +805,7 @@ fn stalled_delivery(
     let input_id = record["input_id"]
         .as_i64()
         .ok_or_else(|| invalid("input_id", "stalled head identity required"))?;
-    let cause = stalled_cause(record)?;
+    stalled_cause(record)?;
     let blocking_input_id = record["blocking_input_id"].as_i64();
     let input = get_input(conn, input_id)?;
     require(
@@ -796,7 +815,7 @@ fn stalled_delivery(
         "input_id",
         "a stalled head is a queued ordinary input of this run",
     )?;
-    let blocking = blocking_input_id
+    blocking_input_id
         .map(|blocking_input_id| {
             let blocking = get_input(conn, blocking_input_id)?;
             require(
@@ -813,23 +832,6 @@ fn stalled_delivery(
             "input_id",
             "a new stalled head must be ready",
         )?;
-    }
-    if cause == StalledCause::HeldComposer {
-        let blocking = blocking
-            .as_ref()
-            .expect("a held-composer cause names its blocker");
-        require(
-            blocking.kind != InputKind::PermissionResponse,
-            "blocking_input_id",
-            "a held composer is held by an ordinary input",
-        )?;
-        if published.is_none() {
-            require(
-                blocking.has_stalled_blocker_provenance(),
-                "blocking_input_id",
-                "a new stalled blocker retains its selected ordinary attempt provenance",
-            )?;
-        }
     }
     let expected_delivery = DeliveryProjection {
         status: DeliveryStatus::Queued,
@@ -858,24 +860,12 @@ fn stalled_delivery(
         .ok_or_else(|| invalid("waiting_since", "timestamp required"))?
         .to_owned();
     rfc3339(&waiting_since, "waiting_since")?;
-    let action = match blocking
-        .as_ref()
-        .filter(|_| cause == StalledCause::HeldComposer)
-    {
-        Some(blocking) => {
-            let left = left_input_action(conn, run, blocking)?;
-            json!({"kind":"review_stalled_input",
-                "instruction":REVIEW_STALLED_INPUT_INSTRUCTION,
-                "inspect_argv":input_show_argv(conn, blocking.input_id)?,
-                "press_argv":left.get("press_argv").cloned().unwrap_or(Value::Null)})
-        }
-        None => json!({"kind":"review_stalled_queue",
-            "instruction":REVIEW_STALLED_QUEUE_INSTRUCTION,
-            "inspect_argv":input_show_argv(conn, input_id)?}),
-    };
+    let action = json!({"kind":"review_stalled_queue",
+        "instruction":REVIEW_STALLED_QUEUE_INSTRUCTION,
+        "inspect_argv":input_show_argv(conn, input_id)?});
     Ok(DeliveryFields {
-        input_id,
-        message_id: input.message_id,
+        input_id: Some(input_id),
+        message_id: None,
         delivery,
         stage: Value::Null,
         cause: None,
@@ -900,7 +890,6 @@ fn input_show_argv(conn: &Connection, input_id: i64) -> Result<Value, CafleetErr
     Ok(json!(argv))
 }
 
-const REVIEW_STALLED_INPUT_INSTRUCTION: &str = "Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.";
 const REVIEW_STALLED_QUEUE_INSTRUCTION: &str = "Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.";
 
 fn payload(
@@ -934,7 +923,9 @@ fn payload(
             payload["cause"] = stop_cause_payload(cause);
         }
         payload["input_id"] = json!(fields.input_id);
-        payload["message_id"] = json!(fields.message_id);
+        if fields.stalled.is_none() {
+            payload["message_id"] = json!(fields.message_id);
+        }
         if let Some(stalled) = &fields.stalled {
             payload["blocking_input_id"] = json!(stalled.blocking_input_id);
             payload["waiting_since"] = json!(stalled.waiting_since);
@@ -1027,33 +1018,41 @@ pub(crate) fn persist_transition_in_transaction(
             .cause_json
             .as_ref()
             .expect("validated delivery results carry their record");
-        let input_id = record["input_id"]
-            .as_i64()
-            .expect("validated delivery result input");
-        let published: Option<i64> = conn
-            .query_row(
-                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind=?2 AND json_extract(payload_json,'$.input_id')=?3",
-                params![run.run_id, transition.kind.as_str(), input_id],
-                |row| row.get(0),
-            )
-            .optional()?;
+        let published: Option<i64> = match record["input_id"].as_i64() {
+            Some(input_id) => conn
+                .query_row(
+                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind=?2 AND json_extract(payload_json,'$.input_id')=?3",
+                    params![run.run_id, transition.kind.as_str(), input_id],
+                    |row| row.get(0),
+                )
+                .optional()?,
+            None => conn
+                .query_row(
+                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind=?2 AND json_type(payload_json,'$.input_id')='null' AND json_extract(payload_json,'$.message_id')=?3",
+                    params![run.run_id, transition.kind.as_str(), record["message_id"].as_i64()],
+                    |row| row.get(0),
+                )
+                .optional()?,
+        };
         if let Some(id) = published {
             return Ok((get_event(conn, id)?.event, false));
         }
         if transition.kind == RuntimeEventKind::InputDeliveryStalled {
             Some(stalled_delivery(conn, run, record, None)?)
-        } else {
+        } else if let Some(input_id) = record["input_id"].as_i64() {
             let (input, delivery) = result_delivery(conn, run.run_id, input_id, "input_id")?;
-            validate_result_stage(&input, &record["stage"], "cause_json.stage")?;
+            validate_result_stage(&record["stage"], "cause_json.stage")?;
             Some(DeliveryFields {
-                input_id,
-                message_id: input.message_id,
+                input_id: Some(input_id),
+                message_id: None,
                 cause: result_stop_cause(&input, delivery.status),
-                action: left_input_action(conn, run, &input)?,
+                action: Value::Null,
                 stalled: None,
                 delivery,
                 stage: record["stage"].clone(),
             })
+        } else {
+            Some(preview_delivery(conn, run, record)?)
         }
     } else {
         None
@@ -3744,29 +3743,18 @@ mod tests {
     mod composer_reliability {
         use crate::broker::runtime::events::tests::*;
 
-        fn stalled_fixture(uncertain: bool) -> (Fixture, RunOwner, InputOperation, InputOperation) {
+        fn stalled_fixture() -> (Fixture, RunOwner, InputOperation, InputOperation) {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             fixture.reserve(&owner);
             let blocker = fixture.input(&owner, "prompt:stalled-blocker", InputKind::Prompt, None);
-            let blocker = if uncertain {
-                storage::record_input_uncertain(
-                    &mut fixture.conn,
-                    &owner,
-                    blocker.input_id,
-                    StopCause::WriteFailed,
-                )
-                .unwrap()
-            } else {
-                storage::record_input_left_in_composer(
-                    &mut fixture.conn,
-                    &owner,
-                    blocker.input_id,
-                    StopCause::SubmitUnconfirmed,
-                    LeftStage::Submitted,
-                )
-                .unwrap()
-            };
+            let blocker = storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                blocker.input_id,
+                StopCause::WriteFailed,
+            )
+            .unwrap();
             let head = fixture.input(&owner, "prompt:stalled-head", InputKind::Prompt, None);
             let head = storage::requeue_zero_byte_immediate(
                 &mut fixture.conn,
@@ -3784,7 +3772,7 @@ mod tests {
                 cause_json: Some(json!({
                     "kind":"input_delivery_stalled", "input_id":head,
                     "blocking_input_id":blocker, "waiting_since":NOW,
-                    "cause":{"kind":"held_composer","detail":null},
+                    "cause":{"kind":"unresolved_input","detail":null},
                 })),
                 ..native_exit(owner.run_id, 1)
             }
@@ -3792,76 +3780,72 @@ mod tests {
 
         #[test]
         fn stalled_events_remain_readable_and_deduplicated_after_head_and_blocker_settlement() {
-            for uncertain in [false, true] {
-                for submitted in [false, true] {
-                    let (mut fixture, owner, blocker, head) = stalled_fixture(uncertain);
-                    let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
-                    let (event, inserted) = storage::persist_transition(
+            for submitted in [false, true] {
+                let (mut fixture, owner, blocker, head) = stalled_fixture();
+                let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
+                let (event, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(inserted);
+                if submitted {
+                    storage::begin_deferred_attempt(
                         &mut fixture.conn,
                         &owner,
-                        &transition,
-                        PersistenceMode::Live,
+                        head.input_id,
+                        DeliveryMethod::Profile,
+                        None,
                     )
                     .unwrap();
-                    assert!(inserted);
-                    if submitted {
-                        storage::begin_deferred_attempt(
-                            &mut fixture.conn,
-                            &owner,
-                            head.input_id,
-                            DeliveryMethod::Profile,
-                            None,
-                        )
-                        .unwrap();
-                        storage::test_support::settle_input(
-                            &mut fixture.conn,
-                            &owner,
-                            head.input_id,
-                            InputState::InProgress,
-                            InputDisposition::Submitted,
-                            "fixture:verified-submit",
-                        )
-                        .unwrap();
-                    } else {
-                        storage::settle_zero_byte_deferred(
-                            &mut fixture.conn,
-                            &owner,
-                            head.input_id,
-                            InputState::Ready,
-                            "target_inactive",
-                        )
-                        .unwrap();
-                    }
-                    if uncertain {
-                        storage::test_support::settle_input(
-                            &mut fixture.conn,
-                            &owner,
-                            blocker.input_id,
-                            InputState::Uncertain,
-                            InputDisposition::NotSubmitted,
-                            "fixture:composer-cleared",
-                        )
-                        .unwrap();
-                    }
-                    let before = durable_state(&fixture.reopen());
-                    let historical = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
-                    assert_eq!(historical.event.payload_json, event.payload_json);
-                    assert_eq!(
-                        historical.event.payload_json["delivery"],
-                        json!({"status":"queued","method":null,"reason":"earlier_input"})
-                    );
-                    let (same, inserted) = storage::persist_transition(
+                    storage::test_support::settle_input(
                         &mut fixture.conn,
                         &owner,
-                        &transition,
-                        PersistenceMode::Live,
+                        head.input_id,
+                        InputState::InProgress,
+                        InputDisposition::Submitted,
+                        "fixture:verified-submit",
                     )
                     .unwrap();
-                    assert!(!inserted);
-                    assert_eq!(same.event_id, event.event_id);
-                    assert_eq!(same.payload_json, event.payload_json);
-                    assert_eq!(durable_state(&fixture.reopen()), before);
+                } else {
+                    storage::settle_zero_byte_deferred(
+                        &mut fixture.conn,
+                        &owner,
+                        head.input_id,
+                        InputState::Ready,
+                        "target_inactive",
+                    )
+                    .unwrap();
                 }
+                storage::test_support::settle_input(
+                    &mut fixture.conn,
+                    &owner,
+                    blocker.input_id,
+                    InputState::Uncertain,
+                    InputDisposition::NotSubmitted,
+                    "fixture:composer-cleared",
+                )
+                .unwrap();
+                let before = durable_state(&fixture.reopen());
+                let historical = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
+                assert_eq!(historical.event.payload_json, event.payload_json);
+                assert_eq!(
+                    historical.event.payload_json["delivery"],
+                    json!({"status":"queued","method":null,"reason":"earlier_input"})
+                );
+                let (same, inserted) = storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                assert!(!inserted);
+                assert_eq!(same.event_id, event.event_id);
+                assert_eq!(same.payload_json, event.payload_json);
+                assert_eq!(durable_state(&fixture.reopen()), before);
             }
         }
 
@@ -3872,7 +3856,7 @@ mod tests {
                 InputState::Accepted,
                 InputState::Settled,
             ] {
-                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let (mut fixture, owner, blocker, head) = stalled_fixture();
                 storage::begin_deferred_attempt(
                     &mut fixture.conn,
                     &owner,
@@ -3914,7 +3898,7 @@ mod tests {
                 );
                 assert_eq!(durable_state(&fixture.reopen()), before);
             }
-            let (mut fixture, owner, blocker, _) = stalled_fixture(true);
+            let (mut fixture, owner, blocker, _) = stalled_fixture();
             let head = fixture.input(&owner, "prompt:unselected-head", InputKind::Prompt, None);
             storage::record_input_state(
                 &mut fixture.conn,
@@ -3938,276 +3922,9 @@ mod tests {
         }
 
         #[test]
-        fn a_new_stalled_event_rejects_ready_accepted_and_unattested_submitted_blockers() {
-            for state in [InputState::Ready, InputState::Accepted, InputState::Settled] {
-                let (mut fixture, owner, _, head) = stalled_fixture(true);
-                let blocker =
-                    fixture.input(&owner, "prompt:ineligible-blocker", InputKind::Prompt, None);
-                match state {
-                    InputState::Ready | InputState::Accepted => {
-                        storage::record_input_state(
-                            &mut fixture.conn,
-                            &owner,
-                            blocker.input_id,
-                            InputState::InProgress,
-                            state,
-                        )
-                        .unwrap();
-                    }
-                    InputState::Settled => {
-                        storage::test_support::settle_input(
-                            &mut fixture.conn,
-                            &owner,
-                            blocker.input_id,
-                            InputState::InProgress,
-                            InputDisposition::Submitted,
-                            "fixture:already-submitted",
-                        )
-                        .unwrap();
-                        assert_eq!(fixture.conn.execute(
-                            "UPDATE member_input_operations SET evidence_ref=NULL WHERE input_id=?1",
-                            [blocker.input_id],
-                        ).unwrap(), 1);
-                    }
-                    _ => unreachable!(),
-                }
-                let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
-                let before = durable_state(&fixture.reopen());
-                assert!(
-                    storage::persist_transition(
-                        &mut fixture.conn,
-                        &owner,
-                        &transition,
-                        PersistenceMode::Live
-                    )
-                    .is_err(),
-                    "{state:?}"
-                );
-                assert_eq!(durable_state(&fixture.reopen()), before);
-            }
-        }
-
-        fn selected_stalled_fixture(
-            kind: InputKind,
-            method: DeliveryMethod,
-        ) -> (Fixture, RunOwner, InputOperation, InputOperation) {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            fixture.reserve(&owner);
-            let mut blocker =
-                fixture.input(&owner, "ordinary:selected-stalled-blocker", kind, None);
-            if method == DeliveryMethod::Fallback {
-                storage::requeue_zero_byte_immediate(
-                    &mut fixture.conn,
-                    &owner,
-                    blocker.input_id,
-                    "composer_busy",
-                )
-                .unwrap();
-                blocker = storage::begin_deferred_attempt(
-                    &mut fixture.conn,
-                    &owner,
-                    blocker.input_id,
-                    method,
-                    Some("idle_timeout"),
-                )
-                .unwrap();
-            }
-            assert_eq!(blocker.delivery_method, Some(method));
-            let head = fixture.input(
-                &owner,
-                "prompt:selected-stalled-head",
-                InputKind::Prompt,
-                None,
-            );
-            let head = storage::requeue_zero_byte_immediate(
-                &mut fixture.conn,
-                &owner,
-                head.input_id,
-                "earlier_input",
-            )
-            .unwrap();
-            (fixture, owner, blocker, head)
-        }
-
-        fn assert_new_stalled_publication(
-            fixture: &mut Fixture,
-            owner: &RunOwner,
-            blocker: &InputOperation,
-            head: &InputOperation,
-        ) -> RuntimeEventRecord {
-            let transition = stalled_transition(owner, head.input_id, blocker.input_id);
-            let (event, inserted) = storage::persist_transition(
-                &mut fixture.conn,
-                owner,
-                &transition,
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            assert!(inserted);
-            assert_eq!(event.run_id, owner.run_id);
-            assert_eq!(event.payload_json["input_id"], head.input_id);
-            assert_eq!(event.payload_json["blocking_input_id"], blocker.input_id);
-            assert_eq!(
-                event.payload_json["delivery"],
-                json!({"status":"queued","method":null,"reason":"earlier_input"})
-            );
-            assert_eq!(
-                storage::get_input(&fixture.conn, blocker.input_id).unwrap(),
-                *blocker
-            );
-            let read = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
-            assert_eq!(read.event.payload_json, event.payload_json);
-            let before = durable_state(&fixture.reopen());
-            let (same, inserted) = storage::persist_transition(
-                &mut fixture.conn,
-                owner,
-                &transition,
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            assert!(!inserted);
-            assert_eq!(same.event_id, event.event_id);
-            assert_eq!(same.payload_json, event.payload_json);
-            assert_eq!(durable_state(&fixture.reopen()), before);
-            event
-        }
-
-        #[test]
-        fn stalled_publication_accepts_selected_in_progress_attempt_provenance() {
-            for kind in [InputKind::Prompt, InputKind::Exec] {
-                for method in [DeliveryMethod::Profile, DeliveryMethod::Fallback] {
-                    let (mut fixture, owner, blocker, head) =
-                        selected_stalled_fixture(kind, method);
-                    assert_eq!(blocker.state, InputState::InProgress);
-                    assert_new_stalled_publication(&mut fixture, &owner, &blocker, &head);
-                }
-            }
-        }
-
-        #[test]
-        fn stalled_publication_after_reconciliation_preserves_selected_attempt_evidence() {
-            for kind in [InputKind::Prompt, InputKind::Exec] {
-                for method in [DeliveryMethod::Profile, DeliveryMethod::Fallback] {
-                    for uncertain in [false, true] {
-                        for disposition in [
-                            InputDisposition::Submitted,
-                            InputDisposition::NotSubmitted,
-                            InputDisposition::AbandonedUncertain,
-                        ] {
-                            let (mut fixture, owner, mut blocker, head) =
-                                selected_stalled_fixture(kind, method);
-                            if uncertain {
-                                blocker = storage::record_input_uncertain(
-                                    &mut fixture.conn,
-                                    &owner,
-                                    blocker.input_id,
-                                    StopCause::WriteFailed,
-                                )
-                                .unwrap();
-                            }
-                            let reconciled = storage::test_support::settle_input(
-                                &mut fixture.conn,
-                                &owner,
-                                blocker.input_id,
-                                blocker.state,
-                                disposition,
-                                "fixture:operator-reconciled-held-attempt",
-                            )
-                            .unwrap();
-                            assert_eq!(reconciled.stop_cause, blocker.stop_cause);
-                            assert_eq!(reconciled.delivery_method, Some(method));
-                            assert_new_stalled_publication(
-                                &mut fixture,
-                                &owner,
-                                &reconciled,
-                                &head,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        #[test]
-        fn stalled_publication_rejects_unselected_reconciliation_despite_nonempty_evidence() {
-            let (mut fixture, owner, blocker, head) =
-                selected_stalled_fixture(InputKind::Prompt, DeliveryMethod::Profile);
-            let ready = storage::requeue_zero_byte_immediate(
-                &mut fixture.conn,
-                &owner,
-                blocker.input_id,
-                "composer_busy",
-            )
-            .unwrap();
-            let unselected = storage::test_support::settle_input(
-                &mut fixture.conn,
-                &owner,
-                blocker.input_id,
-                ready.state,
-                InputDisposition::NotSubmitted,
-                "fixture:proven-zero-byte-reconciliation",
-            )
-            .unwrap();
-            assert_eq!(unselected.delivery_method, None);
-            assert!(
-                unselected
-                    .evidence_ref
-                    .as_ref()
-                    .is_some_and(|value| !value.is_empty())
-            );
-            let before = durable_state(&fixture.reopen());
-            assert!(
-                storage::persist_transition(
-                    &mut fixture.conn,
-                    &owner,
-                    &stalled_transition(&owner, head.input_id, blocker.input_id),
-                    PersistenceMode::Live
-                )
-                .is_err()
-            );
-            assert_eq!(durable_state(&fixture.reopen()), before);
-        }
-
-        #[test]
-        fn stalled_publication_rejects_absent_or_blank_settled_reconciliation_evidence() {
-            for disposition in [
-                InputDisposition::Submitted,
-                InputDisposition::NotSubmitted,
-                InputDisposition::AbandonedUncertain,
-            ] {
-                for evidence in [None, Some("   ")] {
-                    let (mut fixture, owner, blocker, head) =
-                        selected_stalled_fixture(InputKind::Prompt, DeliveryMethod::Profile);
-                    storage::test_support::settle_input(
-                        &mut fixture.conn,
-                        &owner,
-                        blocker.input_id,
-                        blocker.state,
-                        disposition,
-                        "fixture:placeholder-reconciliation",
-                    )
-                    .unwrap();
-                    assert_eq!(fixture.conn.execute("UPDATE member_input_operations SET evidence_ref=?1 WHERE input_id=?2", params![evidence, blocker.input_id]).unwrap(), 1);
-                    let before = durable_state(&fixture.reopen());
-                    assert!(
-                        storage::persist_transition(
-                            &mut fixture.conn,
-                            &owner,
-                            &stalled_transition(&owner, head.input_id, blocker.input_id),
-                            PersistenceMode::Live
-                        )
-                        .is_err()
-                    );
-                    assert_eq!(durable_state(&fixture.reopen()), before);
-                }
-            }
-        }
-
-        #[test]
         fn stalled_event_head_and_blocker_are_bound_independently_to_the_publishing_run() {
             for foreign_head in [false, true] {
-                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let (mut fixture, owner, blocker, head) = stalled_fixture();
                 let sibling = fixture.running_sibling("foreign-stalled-run");
                 let foreign =
                     fixture.input(&sibling, "prompt:foreign-stalled", InputKind::Prompt, None);
@@ -4246,7 +3963,7 @@ mod tests {
 
         #[test]
         fn stalled_publication_rejects_self_and_permission_input_identities() {
-            let (mut fixture, owner, _, head) = stalled_fixture(true);
+            let (mut fixture, owner, _, head) = stalled_fixture();
             let before = durable_state(&fixture.reopen());
             assert!(
                 storage::persist_transition(
@@ -4258,69 +3975,49 @@ mod tests {
                 .is_err()
             );
             assert_eq!(durable_state(&fixture.reopen()), before);
-            for permission_head in [false, true] {
-                let mut response = storage::test_support::ResponseFixture::new();
-                let permission = response.reserve().input;
-                let storage::test_support::ResponseFixture {
-                    mut base, owner, ..
-                } = response;
-                base.reserve(&owner);
-                let blocker = base.input(
-                    &owner,
-                    "prompt:permission-kind-blocker",
-                    InputKind::Prompt,
-                    None,
-                );
-                let blocker = storage::record_input_uncertain(
+            let mut response = storage::test_support::ResponseFixture::new();
+            let permission = response.reserve().input;
+            let storage::test_support::ResponseFixture {
+                mut base, owner, ..
+            } = response;
+            base.reserve(&owner);
+            let blocker = base.input(
+                &owner,
+                "prompt:permission-kind-blocker",
+                InputKind::Prompt,
+                None,
+            );
+            let blocker = storage::record_input_uncertain(
+                &mut base.conn,
+                &owner,
+                blocker.input_id,
+                StopCause::WriteFailed,
+            )
+            .unwrap();
+            assert_eq!(
+                storage::get_input(&base.conn, permission.input_id)
+                    .unwrap()
+                    .kind,
+                InputKind::PermissionResponse
+            );
+            let mut transition = stalled_transition(&owner, permission.input_id, blocker.input_id);
+            transition.event_seq = 2;
+            let before = durable_state(&base.reopen());
+            assert!(
+                storage::persist_transition(
                     &mut base.conn,
                     &owner,
-                    blocker.input_id,
-                    StopCause::WriteFailed,
+                    &transition,
+                    PersistenceMode::Live
                 )
-                .unwrap();
-                let head = base.input(
-                    &owner,
-                    "prompt:permission-kind-head",
-                    InputKind::Prompt,
-                    None,
-                );
-                storage::requeue_zero_byte_immediate(
-                    &mut base.conn,
-                    &owner,
-                    head.input_id,
-                    "earlier_input",
-                )
-                .unwrap();
-                let (head_id, blocker_id) = if permission_head {
-                    (permission.input_id, blocker.input_id)
-                } else {
-                    (head.input_id, permission.input_id)
-                };
-                assert_eq!(
-                    storage::get_input(&base.conn, permission.input_id)
-                        .unwrap()
-                        .kind,
-                    InputKind::PermissionResponse
-                );
-                let mut transition = stalled_transition(&owner, head_id, blocker_id);
-                transition.event_seq = 2;
-                let before = durable_state(&base.reopen());
-                assert!(
-                    storage::persist_transition(
-                        &mut base.conn,
-                        &owner,
-                        &transition,
-                        PersistenceMode::Live
-                    )
-                    .is_err()
-                );
-                assert_eq!(durable_state(&base.reopen()), before);
-            }
+                .is_err()
+            );
+            assert_eq!(durable_state(&base.reopen()), before);
         }
 
         #[test]
         fn stalled_event_readers_validate_the_historical_queued_method_and_reason() {
-            let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+            let (mut fixture, owner, blocker, head) = stalled_fixture();
             let transition = stalled_transition(&owner, head.input_id, blocker.input_id);
             let (event, _) = storage::persist_transition(
                 &mut fixture.conn,
@@ -4560,7 +4257,7 @@ mod tests {
                 blocker_of: impl FnOnce(&InputOperation) -> Option<i64>,
                 detail: Value,
             ) {
-                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let (mut fixture, owner, blocker, head) = stalled_fixture();
                 let blocking = blocker_of(&blocker);
                 let transition =
                     queue_transition(&owner, head.input_id, blocking, kind, detail.clone());
@@ -4610,7 +4307,7 @@ mod tests {
                 kind: &str,
                 blocker_of: impl FnOnce(&InputOperation, &InputOperation) -> Option<i64>,
             ) {
-                let (mut fixture, owner, blocker, head) = stalled_fixture(true);
+                let (mut fixture, owner, blocker, head) = stalled_fixture();
                 let before = durable_state(&fixture.reopen());
                 let transition = queue_transition(
                     &owner,
@@ -4675,7 +4372,7 @@ mod tests {
 
             #[test]
             fn a_retried_stalled_transition_replays_its_cause_and_a_different_cause_conflicts() {
-                let (mut fixture, owner, _, head) = stalled_fixture(true);
+                let (mut fixture, owner, _, head) = stalled_fixture();
                 let transition = queue_transition(
                     &owner,
                     head.input_id,

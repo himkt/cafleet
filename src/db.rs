@@ -1623,8 +1623,13 @@ mod tests {
                 );
             }
             for disposition in crate::broker::runtime::InputDisposition::VALUES {
-                let left = *disposition == "left_in_composer";
-                fixture.conn.execute("UPDATE member_input_operations SET state='settled',disposition=?1,stop_cause=?2,left_stage=?3 WHERE input_id=?4",params![disposition,left.then_some("manual_input"),left.then_some("literal_complete"),input]).unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET state='settled',disposition=?1 WHERE input_id=?2",
+                        params![disposition, input],
+                    )
+                    .unwrap();
             }
         }
 

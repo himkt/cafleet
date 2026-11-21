@@ -30,19 +30,6 @@ impl<'a> PreparedSubmission<'a> {
             deadline,
         })
     }
-
-    pub(crate) fn retirement_request(
-        &self,
-        run: &RunRecord,
-        input_id: i64,
-    ) -> Result<InputControlRequest> {
-        ensure(input_id > 0, "positive retirement input ID required")?;
-        Ok(control_request(
-            run,
-            &self.expiration,
-            InputControlOperation::Receipt(ReceiptAction::Retire { input_id }),
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -177,22 +164,10 @@ fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()>
         run_id > 0 && crate::pane_lock::valid_input(&request.literal),
         "ordinary submission requires a positive run and one nonblank line without control characters",
     )?;
-    match request.input_kind {
-        InputKind::Preview => usage(
-            request.message_id.is_some_and(|id| {
-                storage::preview_attempt_from_key(run_id, id, &request.operation_key).is_ok()
-            }),
-            "preview requires its run-bound message key",
-        )?,
-        InputKind::Prompt | InputKind::Exec => usage(
-            request.message_id.is_none(),
-            "explicit input has no preview message",
-        )?,
-        InputKind::PermissionResponse => {
-            return Err(CafleetError::Usage("ordinary input kind required".into()));
-        }
-    }
-    Ok(())
+    usage(
+        matches!(request.input_kind, InputKind::Prompt | InputKind::Exec),
+        "ordinary input kind required",
+    )
 }
 
 pub(crate) fn find_submission(
@@ -216,9 +191,7 @@ pub(crate) fn find_submission(
                 context.input_id = Some(input.input_id);
                 let digest = storage::input_payload_digest(identity.run_id, request);
                 ensure(
-                    input.kind == request.input_kind
-                        && input.payload_digest == digest
-                        && input.message_id == request.message_id,
+                    input.kind == request.input_kind && input.payload_digest == digest,
                     "conflicting input operation key reuse",
                 )?;
             }
@@ -247,21 +220,6 @@ pub(super) fn durable_outcome(
         (InputState::InProgress | InputState::Uncertain, _) => Some((
             SubmissionStatus::Uncertain,
             SubmissionStage::Unknown,
-            uncertain_reason(input),
-        )),
-        (InputState::Settled, Some(InputDisposition::LeftInComposer)) => Some((
-            SubmissionStatus::LeftInComposer,
-            match input
-                .left_stage
-                .expect("a left input has its durable stage")
-            {
-                crate::broker::runtime::LeftStage::EscapeOnly => SubmissionStage::EscapeOnly,
-                crate::broker::runtime::LeftStage::Partial => SubmissionStage::Partial,
-                crate::broker::runtime::LeftStage::LiteralComplete => {
-                    SubmissionStage::LiteralComplete
-                }
-                crate::broker::runtime::LeftStage::Submitted => SubmissionStage::Submitted,
-            },
             uncertain_reason(input),
         )),
         (InputState::Settled, _) => Some((
@@ -339,11 +297,6 @@ fn validate_reply_against_durable(
                 SubmissionStatus::Uncertain => {
                     matches!(input.state, InputState::InProgress | InputState::Uncertain)
                         && reply.reason == uncertain_reason(input)
-                }
-                SubmissionStatus::LeftInComposer => {
-                    durable_outcome(input).is_some_and(|(status, stage, reason)| {
-                        reply.status == status && reply.stage == stage && reply.reason == reason
-                    })
                 }
                 SubmissionStatus::Held | SubmissionStatus::Rejected => {
                     reply.stage == SubmissionStage::ZeroBytes
@@ -546,9 +499,9 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         })?;
         let input = attempt.request.clone();
         let operation = match input.input_kind {
-            InputKind::Preview | InputKind::Prompt => InputControlOperation::SubmitPrompt(input),
+            InputKind::Prompt => InputControlOperation::SubmitPrompt(input),
             InputKind::Exec => InputControlOperation::SubmitExec(input),
-            InputKind::PermissionResponse => {
+            InputKind::Preview | InputKind::PermissionResponse => {
                 unreachable!("validated ordinary input kind")
             }
         };
@@ -926,9 +879,6 @@ pub(super) fn projection(
                 SubmissionStage::ZeroBytes,
                 Some("operation key is consumed".into()),
             ),
-            InputDisposition::LeftInComposer => {
-                return Err(error("permission responses require uncertain settlement"));
-            }
         },
         InputState::Ready => (
             SubmissionStatus::Held,
@@ -2984,7 +2934,6 @@ mod tests {
         SubmitInput {
             operation_key: format!("prompt:{}:{key}", run.run_id),
             input_kind: InputKind::Prompt,
-            message_id: None,
             literal: format!("external {key} λ"),
         }
     }
@@ -3306,7 +3255,6 @@ mod tests {
             let request = SubmitInput {
                 operation_key: format!("prompt:{}:{}", owner.run_id, "b".repeat(64)),
                 input_kind: InputKind::Prompt,
-                message_id: None,
                 literal: "retained ordinary λ literal".into(),
             };
             let row = storage::test_support::reserve_input(
@@ -3319,7 +3267,7 @@ mod tests {
                         owner.run_id,
                         &request,
                     ),
-                    message_id: request.message_id,
+                    message_id: None,
                 },
             )
             .unwrap();
@@ -3628,17 +3576,15 @@ mod tests {
             "actual ordinary receipt SQL uses the caller connection"
         );
         case.assert_unchanged(changes);
-        for change in ["literal", "kind", "message"] {
+        for change in ["literal", "kind"] {
             let mut request = SubmitInput {
                 operation_key: case.request.operation_key.clone(),
                 input_kind: case.request.input_kind,
-                message_id: case.request.message_id,
                 literal: case.request.literal.clone(),
             };
             match change {
                 "literal" => request.literal.push('!'),
                 "kind" => request.input_kind = InputKind::Exec,
-                "message" => request.message_id = Some(123),
                 _ => unreachable!(),
             }
             let failure = find_submission(&mut case.fixture.conn, &identity, &request, deadline)
@@ -3675,7 +3621,6 @@ mod tests {
         let missing = SubmitInput {
             operation_key: "prompt:missing".into(),
             input_kind: InputKind::Prompt,
-            message_id: None,
             literal: "missing input".into(),
         };
         assert!(

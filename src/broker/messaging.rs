@@ -98,19 +98,17 @@ pub(crate) fn insert_message_validated(
 pub(crate) fn oldest_pending_preview(
     conn: &Connection,
     member_id: i64,
-    attempted: &std::collections::BTreeSet<i64>,
 ) -> Result<Option<MessageRecord>, CafleetError> {
-    let mut statement = conn.prepare(&format!(
-        "SELECT {MESSAGE_COLUMNS} FROM messages \
+    conn.query_row(
+        &format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages \
              WHERE to_member_id=?1 AND {PENDING_PREVIEW} \
-             ORDER BY created_at, message_id"
-    ))?;
-    let mut rows = statement.query_map([member_id], map_message_row)?;
-    rows.find(|row| {
-        row.as_ref()
-            .map_or(true, |message| !attempted.contains(&message.message_id))
-    })
-    .transpose()
+             ORDER BY created_at, message_id LIMIT 1"
+        ),
+        [member_id],
+        map_message_row,
+    )
+    .optional()
     .map_err(CafleetError::from)
 }
 
@@ -770,40 +768,6 @@ mod tests {
     }
 
     #[test]
-    fn preview_selection_skips_attempted_ids_without_hiding_pending_rows() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "selection");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let previous = broker::send_message(&mut conn, director, worker, "previous").unwrap();
-        let next = broker::send_message(&mut conn, director, worker, "next").unwrap();
-        let excluded = std::collections::BTreeSet::from([previous.message_id]);
-        assert_eq!(
-            broker::oldest_pending_preview(&conn, worker, &excluded)
-                .unwrap()
-                .unwrap()
-                .message_id,
-            next.message_id
-        );
-        assert_eq!(
-            broker::oldest_pending_preview(&conn, worker, &std::collections::BTreeSet::new())
-                .unwrap()
-                .unwrap()
-                .message_id,
-            previous.message_id
-        );
-        assert!(
-            broker::oldest_pending_preview(
-                &conn,
-                worker,
-                &std::collections::BTreeSet::from([previous.message_id, next.message_id])
-            )
-            .unwrap()
-            .is_none()
-        );
-    }
-
-    #[test]
     fn oldest_pending_preview_uses_creation_order_and_skips_consumed_and_notified_rows() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
@@ -830,7 +794,7 @@ mod tests {
         conn.execute_batch("UPDATE messages SET created_at='2026-01-01T00:00:00+00:00', status_timestamp='2099-01-01T00:00:00+00:00' WHERE message_id=3;
             UPDATE messages SET created_at='2026-02-01T00:00:00+00:00', status_timestamp='2020-01-01T00:00:00+00:00' WHERE message_id=4;").unwrap();
         assert_eq!(
-            broker::oldest_pending_preview(&conn, worker, &std::collections::BTreeSet::new())
+            broker::oldest_pending_preview(&conn, worker)
                 .unwrap()
                 .unwrap()
                 .message_id,

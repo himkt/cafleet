@@ -164,7 +164,6 @@ stored_enum!(SubmissionStatus, "submission.status", {
     Held => "held",
     Rejected => "rejected",
     Uncertain => "uncertain",
-    LeftInComposer => "left_in_composer",
 });
 stored_enum!(SubmissionStage, "submission.stage", {
     ZeroBytes => "zero_bytes",
@@ -348,7 +347,6 @@ pub(crate) struct PermissionInspection {
 pub(crate) struct SubmitInput {
     pub(crate) operation_key: String,
     pub(crate) input_kind: InputKind,
-    pub(crate) message_id: Option<i64>,
     pub(crate) literal: String,
 }
 #[derive(Serialize, Deserialize)]
@@ -605,15 +603,11 @@ impl InputControlRequest {
                     "valid single-line input literal required",
                 )?;
                 let prompt = matches!(self.operation, InputControlOperation::SubmitPrompt(_));
-                let valid_kind = match (prompt, input.input_kind, input.message_id) {
-                    (true, InputKind::Preview, Some(id)) => id > 0,
-                    (true, InputKind::Prompt, None) | (false, InputKind::Exec, None) => true,
-                    _ => false,
-                };
-                ensure(
-                    valid_kind,
-                    "control input kind and message must match the operation",
-                )
+                let valid_kind = matches!(
+                    (prompt, input.input_kind),
+                    (true, InputKind::Prompt) | (false, InputKind::Exec)
+                );
+                ensure(valid_kind, "control input kind must match the operation")
             }
             InputControlOperation::PermissionInspect(input) => {
                 positive(&[
@@ -2165,14 +2159,13 @@ mod tests {
                 operation: InputControlOperation::SubmitPrompt(SubmitInput {
                     operation_key: "fixture:typed-client".into(),
                     input_kind: InputKind::Prompt,
-                    message_id: None,
                     literal: "literal 世界 '$x'".into(),
                 }),
             }
         }
         fn expected(fixture: &Fixture) -> Value {
             let run = &fixture.run;
-            json!({"protocol_version":1,"kind":"submit_prompt","identity":{"database_identity_json":run.database_identity_json,"fleet_id":run.fleet_id,"member_id":run.member_id,"director_member_id":run.director_member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce},"expires_at_mono_ns":50_000_000_000u64,"operation_key":"fixture:typed-client","input_kind":"prompt","message_id":null,"literal":"literal 世界 '$x'"})
+            json!({"protocol_version":1,"kind":"submit_prompt","identity":{"database_identity_json":run.database_identity_json,"fleet_id":run.fleet_id,"member_id":run.member_id,"director_member_id":run.director_member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce},"expires_at_mono_ns":50_000_000_000u64,"operation_key":"fixture:typed-client","input_kind":"prompt","literal":"literal 世界 '$x'"})
         }
         fn reply(status: &str, stage: &str) -> Vec<u8> {
             let reason = if status == "accepted" {
@@ -2987,10 +2980,10 @@ mod tests {
                 "expires_at_mono_ns":50_000_000_000u64});
             let fields = match kind {
                 "submit_prompt" => {
-                    json!({"operation_key":"fixture:prompt","input_kind":"prompt","message_id":null,"literal":"literal 世界 '$x'"})
+                    json!({"operation_key":"fixture:prompt","input_kind":"prompt","literal":"literal 世界 '$x'"})
                 }
                 "submit_exec" => {
-                    json!({"operation_key":"fixture:exec","input_kind":"exec","message_id":null,"literal":"printf literal"})
+                    json!({"operation_key":"fixture:exec","input_kind":"exec","literal":"printf literal"})
                 }
                 "permission_inspect" => {
                     json!({"interaction_id":12,"event_id":11,"director_member_id":run.director_member_id})
@@ -3186,12 +3179,10 @@ mod tests {
             match request.operation {
                 InputControlOperation::SubmitPrompt(input) => {
                     assert_eq!(input.input_kind, InputKind::Prompt);
-                    assert_eq!(input.message_id, None);
                     assert_eq!(input.literal, value["literal"].as_str().unwrap());
                 }
                 InputControlOperation::SubmitExec(input) => {
                     assert_eq!(input.input_kind, InputKind::Exec);
-                    assert_eq!(input.message_id, None);
                 }
                 InputControlOperation::PermissionInspect(input) => {
                     assert_eq!(input.interaction_id, 12);
@@ -3459,8 +3450,6 @@ mod tests {
         for (kind, field, invalid) in [
             ("submit_prompt", "input_kind", json!("exec")),
             ("submit_exec", "input_kind", json!("prompt")),
-            ("submit_prompt", "message_id", json!(14)),
-            ("submit_exec", "message_id", json!(14)),
             ("submit_prompt", "literal", json!(" ")),
             ("submit_exec", "literal", json!("a\nb")),
             ("submit_prompt", "operation_key", json!(" ")),
