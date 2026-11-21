@@ -3391,7 +3391,7 @@ mod tests {
                 ("running", true),
                 ("degraded", true),
             ] {
-                let mut fixture = Fixture::new();
+                let fixture = Fixture::new();
                 fixture
                     .conn
                     .execute(
