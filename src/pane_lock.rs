@@ -464,8 +464,8 @@ mod tests {
             );
             let sibling_path = fixture._dir.path().join("sibling.db");
             let mut sibling = Connection::open(&sibling_path).unwrap();
-            crate::db::initialize(&mut sibling).unwrap();
             let sibling_url = format!("sqlite:///{}", sibling_path.display());
+            crate::db::initialize(&mut sibling, &sibling_url).unwrap();
             assert!(held.validate_binding(&sibling_url, &placement).is_err());
             let path =
                 crate::pane_lock::lock_path(&configuration.database_url, &placement).unwrap();
@@ -755,8 +755,8 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("registry.db");
             let mut conn = rusqlite::Connection::open(&path).unwrap();
-            crate::db::initialize(&mut conn).unwrap();
             let url = format!("sqlite:///{}", path.display());
+            crate::db::initialize(&mut conn, &url).unwrap();
             (dir, url)
         }
 

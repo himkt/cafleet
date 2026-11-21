@@ -71,7 +71,7 @@ fn prepare_database(settings: &Settings) -> Result<(), CafleetError> {
     let schema = crate::db::classify_selected_schema(&conn, &settings.database_url);
     match schema {
         SchemaState::Missing => {
-            crate::db::initialize(&mut conn)?;
+            crate::db::initialize(&mut conn, &settings.database_url)?;
             crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
             crate::cli::write_output(&format!("Initialized database at {}.", db_file.display()))?;
         }

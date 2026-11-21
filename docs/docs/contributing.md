@@ -33,7 +33,7 @@ mise //:install
 cafleet setup
 ```
 
-Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools, owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`. Run Rust validation with `mise //:test` and `mise //:lint`; `mise //:coverage` reports line coverage of the inline unit tests. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use them.
+Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools, owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`. Run Rust validation with `mise //:test` and `mise //:lint`; `mise //:coverage` reports line coverage of the inline unit tests. CI runs `mise //:lint` and `mise //:test` on Linux and macOS, with `CARGO_PROFILE_TEST_OPT_LEVEL=1` on its test runs; local runs keep opt-level 0 for faster incremental rebuilds. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use them.
 
 ### Installing the skills from your checkout
 
@@ -66,7 +66,7 @@ These herdr references, pinned to commit `5608de0608918aba2f9d501e7793b984a0ca9c
 
 Map herdr’s broad `blocked` state into CAFleet’s typed interaction classes, returned-result observations and input-eligibility states. Questions, trust and update screens retain their own classes; a permission request needs the live operation and choice/input region together. Conflicting strongest rules produce an unknown interaction and preserve the native surface. CAFleet owns its runner, profiles, classification, persistence and notification; herdr APIs remain diagnostic, not runtime detection dependencies.
 
-Use safe PTY/terminal APIs behind deterministic transport traits; the crate sets `unsafe_code = "deny"`. The single exception is the macOS process identity read: one `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID)` call into a fixed, size-checked `kinfo_proc` buffer, carrying an item-scoped `#[allow(unsafe_code)]` with its safety invariants stated inline; add no other unsafe code. Every safe start-time interface applies a same-effective-user check that fails for setuid descendants in the owned process group. The selected PTY and terminal-screen crates are `portable-pty` and `vt100`; resolve compatible versions through Cargo and retain the lockfile. Separate terminal transport, classification and event storage, and preserve bounded shutdown independently of SQLite waits.
+Use safe PTY/terminal APIs behind deterministic transport traits; the crate sets `unsafe_code = "deny"`. The single exception is the macOS `kern.proc` sysctl helper: one `sysctl(CTL_KERN, KERN_PROC, …)` call that serves `KERN_PROC_PID` and `KERN_PROC_PGRP` into size-checked `kinfo_proc` buffers, carrying an item-scoped `#[allow(unsafe_code)]` with its safety invariants stated inline; add no other unsafe code. Every safe start-time interface applies a same-effective-user check that fails for setuid descendants in the owned process group. The selected PTY and terminal-screen crates are `portable-pty` and `vt100`; resolve compatible versions through Cargo and retain the lockfile. Separate terminal transport, classification and event storage, and preserve bounded shutdown independently of SQLite waits.
 
 Evaluate a candidate backend against the role bar before it ships:
 

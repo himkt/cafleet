@@ -3667,7 +3667,7 @@ The binary embeds one complete schema baseline, `assets/migrations/V1__baseline.
 | `member_input_operations` | Durable submission receipts, delivery method/deferral metadata, payload digests and settled replay protection |
 | `refinery_schema_history` | Baseline ledger |
 
-Exact baseline DDL, ending with the ledger table that initialization creates beside it:
+Exact baseline DDL; the baseline itself declares the ledger table as its last statement:
 
 ```sql
 PRAGMA application_id = 1128351289;
@@ -3825,10 +3825,15 @@ CREATE TABLE member_input_operations (
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
 
-CREATE TABLE refinery_schema_history (version INT4 PRIMARY KEY, name VARCHAR(255), applied_on VARCHAR(255), checksum VARCHAR(255));
+CREATE TABLE refinery_schema_history (
+    version INT4 PRIMARY KEY,
+    name VARCHAR(255),
+    applied_on VARCHAR(255),
+    checksum VARCHAR(255)
+);
 ```
 
-Initialization inserts the ledger row with `version` 1 and `name` `'baseline'`; `applied_on` and `checksum` are non-normative, and diagnosis compares `version`, `name` and the column shape.
+Initialization inserts the ledger row with `version` 1 and `name` `'baseline'`. Its `applied_on` is the §5.1 canonical timestamp of initialization, and its `checksum` is the 64-character lowercase hexadecimal SHA-256 digest of the embedded `assets/migrations/V1__baseline.sql` bytes, ledger declaration included. Diagnosis compares only `version`, `name` and the column shape.
 
 Baseline column semantics:
 
@@ -3852,7 +3857,15 @@ A concrete placement selects the shared pane input lock, and duplicate entries t
 
 Runtime records keep their run/member/fleet/Director references after soft deregistration, so history survives member and fleet closure.
 
-Initialization applies the baseline and inserts the `cafleet_database` row for the running version in one transaction, so a failed initialization leaves no identity, table, ledger or version row.
+Initialization runs in one `BEGIN IMMEDIATE` transaction, so concurrent initializers of one file serialize on the SQLite write lock within the connection's busy timeout. Inside that transaction it classifies the file:
+
+| File state | Condition | Result |
+|---|---|---|
+| Empty | No ledger table, application identity zero and no user tables | Applies the baseline and inserts the ledger row and the `cafleet_database` row for the running version, then commits |
+| Baseline | The ledger's `(version, name)` rows are exactly `(1, 'baseline')` | Writes nothing and succeeds |
+| Other | Every other file, including a ledger with zero rows or any row beyond the baseline | Writes nothing and fails with the §6.3 incompatible-format error naming the database path |
+
+A failed initialization leaves no identity, table, ledger or version row, and two concurrent initializations of one empty file both succeed with exactly one ledger row and one version row.
 
 `native_session_json` records a `hermes` run's native session identity for work settlement (§6.7 Hermes work settlement) and is null for every other backend and for a run whose identity is not yet captured.
 

@@ -38,15 +38,12 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            runner: macos-15
             bottle_tag: arm64_sonoma
           - target: x86_64-unknown-linux-musl
-            runner: ubuntu-24.04
             bottle_tag: x86_64_linux
           - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04
             bottle_tag: arm64_linux
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -60,13 +57,8 @@ jobs:
           experimental: true
       - run: rustup target add ${{ matrix.target }}
       - name: Install cargo-zigbuild
-        if: contains(matrix.target, 'musl')
         run: pipx install cargo-zigbuild
-      - name: Build the release binary
-        if: "!contains(matrix.target, 'musl')"
-        run: cargo build --release --target ${{ matrix.target }}
-      - name: Build the release binary (zig-linked musl cross-compile)
-        if: contains(matrix.target, 'musl')
+      - name: Build the release binary (zig-linked cross-compile)
         run: cargo zigbuild --release --target ${{ matrix.target }}
       - name: Package and upload the release archive
         env:

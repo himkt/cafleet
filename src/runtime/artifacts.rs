@@ -871,8 +871,9 @@ mod tests {
     #[test]
     fn runner_artifact_namespace_is_database_adjacent_and_separates_sibling_databases() {
         let first = Fixture::new();
-        let mut second = Connection::open(first._dir.path().join("sibling.db")).unwrap();
-        crate::db::initialize(&mut second).unwrap();
+        let sibling = first._dir.path().join("sibling.db");
+        let mut second = Connection::open(&sibling).unwrap();
+        crate::db::initialize(&mut second, &format!("sqlite:///{}", sibling.display())).unwrap();
         let a =
             RuntimePaths::for_run(&storage::database_identity(&first.conn).unwrap(), 1).unwrap();
         let b = RuntimePaths::for_run(&storage::database_identity(&second).unwrap(), 1).unwrap();

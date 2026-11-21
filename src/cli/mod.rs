@@ -521,7 +521,7 @@ mod tests {
         let path = dir.path().join("registry.db");
         let settings = Settings::for_database(&path);
         let mut conn = crate::db::connect(&settings.database_url).unwrap();
-        crate::db::initialize(&mut conn).unwrap();
+        crate::db::initialize(&mut conn, &settings.database_url).unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
         conn.execute_batch(mutation).unwrap();
         conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
@@ -956,7 +956,7 @@ mod tests {
         std::fs::write(&descriptor, b"{\"schema_version\":1}").unwrap();
         let settings = crate::config::Settings::for_database(&path);
         let mut conn = crate::db::connect(&settings.database_url).unwrap();
-        crate::db::initialize(&mut conn).unwrap();
+        crate::db::initialize(&mut conn, &settings.database_url).unwrap();
         drop(conn);
         let before = std::fs::read(&path).unwrap();
         let args = CliArgs::try_parse_from([

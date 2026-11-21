@@ -7,7 +7,7 @@ edition = "2024"
 unsafe_code = "deny"
 
 [dependencies]
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
 clap = { version = "4", features = ["derive"] }
 nix = { version = "0.31", features = ["signal", "fs", "poll", "term", "process", "user", "socket"] }
 portable-pty = "0.9"
@@ -15,7 +15,6 @@ filedescriptor = "0.8"
 vt100 = "0.18.1"
 rustix = { version = "1", features = ["termios", "time"] }
 signal-hook = "0.4"
-refinery = { version = "0.10", features = ["rusqlite"] }
 regex = "1"
 rusqlite = { version = "0.41", features = ["bundled", "hooks"] }
 semver = "1"
@@ -23,11 +22,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-libproc = "0.15"
-
 [dev-dependencies]
 tempfile = "3"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.dev.package.libsqlite3-sys]
+opt-level = 1
+
+[profile.dev.package.cafleet]
+debug = "line-tables-only"

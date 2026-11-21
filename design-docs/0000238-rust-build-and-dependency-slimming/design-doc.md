@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
-**Status**: Approved
-**Progress**: 0/37 tasks complete
+**Status**: Complete
+**Progress**: 37/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -65,13 +65,12 @@ A Director-led team evaluated a Go rewrite on 2026-11-21, at repository HEAD `4e
 | Replacing `portable-pty`, `filedescriptor` or `chrono` with hand-written code (needs a second `unsafe_code` exception) | no |
 | Splitting the crate into a workspace | no |
 | Finishing design 0000222 (deterministic test timing) | no |
-| The opt-level-0 timing flake `a_flush_is_refused_while_an_immediate_attempt_is_in_flight` | no |
 
 ### Hand-written baseline ledger
 
 #### Ledger DDL
 
-Append the ledger table to `assets/migrations/V1__baseline.sql` and to the `SPEC.md` §8 exact baseline DDL block, after `member_permission_response_claims`. The table keeps `refinery`'s exact name and 4-column shape:
+Append the ledger table to `assets/migrations/V1__baseline.sql`, after `member_input_operations`. `SPEC.md` §8 already lists `refinery_schema_history` and ends its exact baseline DDL with a one-line form of this table; rewrite that statement in the form below so the SPEC block and the embedded file match. The table keeps `refinery`'s exact name and 4-column shape:
 
 ```sql
 CREATE TABLE refinery_schema_history (
@@ -99,7 +98,7 @@ Nothing reads `applied_on` or `checksum`. They record when and from which baseli
 
 The signature becomes `pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<(), CafleetError>`. The URL supplies the incompatible-format path through `crate::db::database_path`, so `initialize` and `classify_selected_schema` report the same `PATH` for the same file, including relative URLs. Every caller passes the URL it connected with. `reference_schema()` and the in-memory test connections pass `"sqlite:///:memory:"`, the form the existing `require_current` test helper already uses.
 
-1. Open `conn.transaction_with_behavior(TransactionBehavior::Immediate)`. The write lock serializes concurrent initializers, and `busy_timeout=5000` from `connect` bounds the wait.
+1. Open `conn.transaction_with_behavior(TransactionBehavior::Immediate)`. The write lock serializes concurrent initializers, and the connection's busy timeout bounds the wait: `busy_timeout=5000` from `connect`, or the scoped budget when the caller runs `initialize` inside `with_database_deadline`.
 2. Read the file state inside the transaction, so the check and the writes share the write lock:
 
    | State | Condition | Result |
@@ -154,9 +153,10 @@ pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<()
 | `baseline_initialization_records_the_identity_ledger_version_and_shape` (extended) | The ledger row is `(1, 'baseline', applied_on, checksum)`. `applied_on` parses with `crate::time::parse_lenient`, and `checksum == crate::digest::sha256_hex(BASELINE_SQL.as_bytes())`. |
 | `repeated_initialization_preserves_all_application_rows` (unchanged) | Re-initialization is a no-op for application rows and the ledger. |
 | `failed_baseline_initialization_rolls_back_identity_tables_and_ledger` (unchanged) | A failed initialization leaves no identity, table, ledger or version row. |
-| New: `initialization_refuses_a_ledger_beyond_the_baseline` | After a `(2, …)` row is inserted, `initialize` fails with the incompatible-format message, and the ledger rows and application rows are unchanged. |
-| New: `initialization_refuses_a_populated_file_without_a_ledger` | A temp file holding one unrelated table and no ledger makes `initialize` fail with the incompatible-format message naming the URL's path, and the file bytes are unchanged. |
+| New: `initialization_refuses_every_other_file` (table-driven over a named case array) | Each case prepares a temp file in the **Other** state: an initialized file with an added `(2, …)` ledger row, an initialized file with its ledger row deleted, and a file holding one unrelated table and no ledger. For every case, `initialize` fails with the incompatible-format message naming the URL's path, and the file bytes are unchanged. Each assertion message names the case. |
 | New: `concurrent_initialization_of_one_fresh_file_applies_the_baseline_once` | Two threads, each with its own `connect`ed connection to one fresh temp file, call `initialize` behind a `std::sync::Barrier`. Both return `Ok`, the ledger holds one row, `cafleet_database` holds one row and `require_current` passes. |
+
+`initialization_refuses_every_other_file` shares the temp-file preparation and byte-snapshot comparison with `assert_incompatible_and_untouched`: extract them into one helper inside `mod tests` that both use. The existing `a_ledger_row_beyond_the_baseline_is_incompatible` keeps covering `classify_schema`; the new test covers `initialize`.
 
 ### macOS process group without `libproc`
 
@@ -331,7 +331,9 @@ Step 1 records each count twice: as is, and with `--prune refinery --prune libpr
 
 Timings vary up to 2× with host load, so each timing is the median of 3 runs on the same host. Record `/proc/loadavg` beside each timing. Only the crate-count gates and the suite-regression check below decide acceptance; the timings are recorded, not gated.
 
-| Metric | Command or source | Evaluation reference |
+The evaluation reference column was measured at `4e8418f8`, before design 0000237 removed about 34k lines and reworked the tests; design 0000237 recorded a 37.6 s local suite wall time at `21ea7be8`. Step 1 measures the current before-values.
+
+| Metric | Command or source | Evaluation reference (`4e8418f8`) |
 |---|---|---|
 | Crate counts | § Dependency-graph gates | 122 / 130 / 139 |
 | Cold test build | `cargo test --bin cafleet --no-run` with a fresh `CARGO_TARGET_DIR` | 87–229 s |
@@ -351,11 +353,80 @@ Record every run, its load and the selected opt-level.
 
 Record the results in this section as a table with metric, before, after and load columns. Add a § Release gate result subsection for the gate outcome.
 
+#### Results
+
+Before-values were measured on 2026-11-21 in a detached worktree at `27ea540f` (cafleet 0.35.4, Rust 1.100.0, 8 CPUs), with the Tester building in parallel. After-values were measured the same day on the final tree at `26f04791` on the same host: crate counts, cold builds and suite runs in the main checkout, and incremental builds in a byte-identical copy of its sources under `/tmp`, so the timing edit never touched the checkout. Load is the `/proc/loadavg` 1-minute value before each run. Cargo 1.100 places the test executable under `<target>/debug/build/cafleet/<hash>/out/cafleet-<hash>`, not `target/debug/deps/`.
+
+| Metric | Before | After | Load per run (before; after) |
+|---|---|---|---|
+| Crate counts (Linux normal / Linux normal+build / darwin normal+build) | 122 / 130 / 139 | 75 / 83 / 82, equal to the Step 1 pruned counts | — |
+| Cold test build (before 125, 112, 96 s; after 70, 70, 67 s) | 112 s | 70 s | 9.60, 7.43, 9.82; 8.70, 11.19, 10.63 |
+| Incremental test build (before 5.72, 5.60, 6.27 s; after 5.32, 5.27, 5.80 s) | 5.72 s | 5.32 s | 8.98, 8.57, 8.01; 10.59, 10.46, 9.77 |
+| Test binary size | 207,265,056 B (198 MiB) | 129,783,288 B (124 MiB) | — |
+| Local suite wall time, `mise //:test` on 8 threads (before 62.1, 33.7, 42.8 s; after 31.3, 30.5, 31.4 s) | 42.8 s | 31.3 s | 7.05, 5.46, 6.33; 8.90, 10.53, 11.70 |
+| Local suite harness time (before 54.3, 32.1, 41.1 s; after 29.2, 29.0, 29.8 s) | 41.1 s | 29.2 s | same runs |
+| CI ubuntu `test` job: before, last `main` run 44897372541 (https://github.com/himkt/cafleet/actions/runs/44897372541) at `8f0a6d6b`; after, PR run 44902706007 (https://github.com/himkt/cafleet/actions/runs/44902706007) at `26f04791` | 215 s job; 163 s `mise //:test` step | 167 s job; 115 s `mise //:test` step | — |
+| CI macOS `test` job, PR run 44902706007 at `26f04791` | — | 206 s job; 161 s `mise //:test` step | — |
+
+The first before-suite run includes an incremental rebuild of about 6 s after the incremental-build measurement restored `now_stamp`. The after-suite runs recompiled nothing.
+
+#### Suite-regression check result
+
+Run on 2026-11-21 in the main checkout on the Step 5 tree, 8 CPUs, with other fleet work loading the host. Each variant used its own `CARGO_TARGET_DIR` under `/tmp`, and no timed run recompiled anything. Wall time is `mise //:test` end to end, and the harness column is the `finished in` value. Between B1 and A1 a macOS-only clippy fix in `src/runtime/process.rs` landed, which leaves the Linux binary's behavior unchanged; both variants were rebuilt before A1. Variant A's `-vv` build (with `CC_ENABLE_DEBUG_OUTPUT=1`, because `cc` prints compile lines only then) compiled `sqlite3.c` with `"-O0"`.
+
+| Round | Run | Variant | Wall | Harness | Load |
+|---|---|---|---|---|---|
+| opt-level 0 | B1 | B | 33.10 s | 31.54 s | 13.47 |
+| opt-level 0 | A1 | A (`opt-level = 0`) | 35.74 s | 34.10 s | 14.74 |
+| opt-level 0 | B2 | B | 32.71 s | 31.02 s | 14.57 |
+| opt-level 0 | A2 | A (`opt-level = 0`) | 34.37 s | 32.69 s | 15.41 |
+| opt-level 0 | B3 | B | 32.51 s | 30.80 s | 13.47 |
+| opt-level 0 | A3 | A (`opt-level = 0`) | 34.03 s | 32.34 s | 13.17 |
+| opt-level 1 | B4 | B | 35.02 s | 33.43 s | 12.48 |
+| opt-level 1 | A4 | A (`opt-level = 1`) | 35.88 s | 34.23 s | 14.82 |
+| opt-level 1 | B5 | B | 32.68 s | 31.00 s | 14.79 |
+| opt-level 1 | A5 | A (`opt-level = 1`) | 33.79 s | 32.12 s | 15.81 |
+| opt-level 1 | B6 | B | 31.54 s | 30.06 s | 11.55 |
+| opt-level 1 | A6 | A (`opt-level = 1`) | 33.09 s | 31.37 s | 13.91 |
+
+At opt-level 0, A's median wall time of 34.37 s exceeds the largest B run, 33.10 s, so A regresses. At opt-level 1, A's median of 33.79 s stays below the largest fresh B run, 35.02 s. **Selected: `libsqlite3-sys` opt-level 1.**
+
+#### Release gate result
+
+**Outcome: passed.** Both gate jobs succeeded in two runs, so `release.yml` adopts § Adopted shape.
+
+| Run | Head | `darwin-zigbuild` build step | `darwin-zigbuild` | `darwin-zigbuild-smoke` |
+|---|---|---|---|---|
+| 44902139006 (https://github.com/himkt/cafleet/actions/runs/44902139006) | `93be0503` | 70 s | success | success |
+| 44901914139 (https://github.com/himkt/cafleet/actions/runs/44901914139) | `11e6026d` | 69 s | success | success |
+
+The zig-linked darwin build step took 69–70 s, against 111 s for the 0.35.4 native darwin build step. The smoke step of run 44901914139 printed these lines on `macos-15` (macOS 15.8.2, arm64), with no SDK supplied:
+
+```text
+./cafleet: valid on disk
+./cafleet: satisfies its Designated Requirement
+cafleet 0.35.4
+Initialized database at /Users/runner/work/_temp/smoke.db.
+[]
+```
+
+`setup` also installed every backend's skills and assets under the temporary `HOME` and skipped the Hermes plugin because the runner has no `hermes` binary.
+
+#### macOS first-run failures
+
+The first macOS CI runs, 44900304239 and 44900813380, failed one lint entry and two tests. All three were fixed in this PR, and run 44902139006 (https://github.com/himkt/cafleet/actions/runs/44902139006) at `93be0503` passed all four `lint` and `test` entries, the macOS process-group tests included.
+
+| Entry | Failure | Cause | Resolution |
+|---|---|---|---|
+| `lint (macos-15)` | `clippy::chunks_exact_to_as_chunks` at `src/runtime/process.rs` `.chunks_exact(KINFO_PROC_BYTES)` | This design's new macOS `group_members` (§ First macOS CI run case 1) | Split the records with `as_chunks::<KINFO_PROC_BYTES>()`, which also yields the partial-record remainder that the length check uses |
+| `test (macos-15)` | `refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it` panicked at `src/runtime/process.rs:1022`: `session.owned.get(&pid)` was `None` for the live `/usr/bin/su` helper | Pre-existing stale test: `try_wait` scans the group only after the leader exits, so the live-leader call never pinned the helper. The test had not compiled on macOS before this branch | Test-only fix that drives the ownership refresh explicitly; `group_members` was unchanged |
+| `test (macos-15)` | `a_busy_layout_lock_fails_member_delete_and_leaves_run_pane_and_row_unchanged` panicked at `src/cli/member.rs:3065`: waited 6.43 ms < 300 ms | Pre-existing: the test depended on a host `tmux`, which `macos-15` lacks | The user chose a fix in this PR; the test was rewritten onto the fake tmux runner |
+
 ### Documentation updates
 
 | Target | Change |
 |---|---|
-| `SPEC.md` §8 | Add the ledger DDL to the exact baseline DDL. Replace the paragraph "The binary appends `INSERT INTO cafleet_database…` … applies both in one transaction" with the outcome of § `initialize` algorithm: one `BEGIN IMMEDIATE` transaction, and the empty, baseline and other file states with their results. State the ledger row values. |
+| `SPEC.md` §8 | Rewrite the existing one-line `refinery_schema_history` statement to match `V1__baseline.sql`, and change "ending with the ledger table that initialization creates beside it" to state that the baseline itself declares the ledger. Replace the paragraph "Initialization applies the baseline and inserts the `cafleet_database` row for the running version in one transaction, …" with the outcome of § `initialize` algorithm: one `BEGIN IMMEDIATE` transaction, and the empty, baseline and other file states with their results. Replace "`applied_on` and `checksum` are non-normative" with the normative row values in implementation-neutral terms: `applied_on` is the canonical storage timestamp of initialization and `checksum` is the lowercase SHA-256 hex of the embedded baseline file; diagnosis still compares only `version`, `name` and the column shape. |
 | `docs/docs/contributing.md` Rust safety paragraph | The single unsafe exception becomes the macOS `kern.proc` sysctl helper serving `KERN_PROC_PID` and `KERN_PROC_PGRP` into size-checked `kinfo_proc` buffers, still item-scoped with its safety invariants inline |
 | `docs/docs/contributing.md` validation paragraph | Add: CI runs `mise //:test` on Linux and macOS with `CARGO_PROFILE_TEST_OPT_LEVEL=1`; local runs keep opt-level 0 for faster incremental rebuilds |
 | `CLAUDE.md` | "an embedded refinery schema baseline" becomes "an embedded SQL schema baseline" |
@@ -371,64 +442,64 @@ Record the results in this section as a table with metric, before, after and loa
 
 ### Step 1: Record baseline measurements
 
-- [ ] Record the as-is and pruned crate counts from § Dependency-graph gates in § Measurements <!-- completed: -->
-- [ ] Measure cold test build, incremental test build, test binary size and local suite wall time (3 runs each, with load) on the unchanged tree, and record them <!-- completed: -->
-- [ ] Record the ubuntu `test` job duration of the latest `main` CI run <!-- completed: -->
+- [x] Record the as-is and pruned crate counts from § Dependency-graph gates in § Measurements <!-- completed: 2026-11-21T11:26 -->
+- [x] Measure cold test build, incremental test build, test binary size and local suite wall time (3 runs each, with load) on the unchanged tree, and record them <!-- completed: 2026-11-21T11:26 -->
+- [x] Record the ubuntu `test` job duration of the latest `main` CI run <!-- completed: 2026-11-21T11:26 -->
 
 ### Step 2: Update documentation
 
-- [ ] `SPEC.md` §8: add the ledger DDL to the exact baseline DDL, and replace the initialization paragraph per § Documentation updates <!-- completed: -->
-- [ ] `docs/docs/contributing.md`: update the Rust safety paragraph and the validation paragraph <!-- completed: -->
-- [ ] `CLAUDE.md`: replace "refinery schema baseline" with "SQL schema baseline" <!-- completed: -->
-- [ ] Confirm that `README.md`, `assets/skills/`, `.claude/rules/` and `docs/docs/concepts/storage.md` need no change <!-- completed: -->
+- [x] `SPEC.md` §8: add the ledger DDL to the exact baseline DDL, and replace the initialization paragraph per § Documentation updates <!-- completed: 2026-11-21T11:27 -->
+- [x] `docs/docs/contributing.md`: update the Rust safety paragraph and the validation paragraph <!-- completed: 2026-11-21T11:27 -->
+- [x] `CLAUDE.md`: replace "refinery schema baseline" with "SQL schema baseline" <!-- completed: 2026-11-21T11:27 -->
+- [x] Confirm that `README.md`, `assets/skills/`, `.claude/rules/` and `docs/docs/concepts/storage.md` need no change <!-- completed: 2026-11-21T11:27 -->
 
 ### Step 3: Hand-written baseline ledger
 
-- [ ] Append the `refinery_schema_history` DDL to `assets/migrations/V1__baseline.sql` <!-- completed: -->
-- [ ] Add the `ledger_state` helper and use it in `classify_schema` <!-- completed: -->
-- [ ] Rewrite `initialize` per § `initialize` algorithm, including the `database_url` parameter and the `is_empty_file` helper, and delete `baseline()` <!-- completed: -->
-- [ ] Pass the connected database URL at every `initialize` call site <!-- completed: -->
-- [ ] Extend `baseline_initialization_records_the_identity_ledger_version_and_shape` and add the three new ledger tests <!-- completed: -->
-- [ ] Remove `refinery` from `Cargo.toml`; `cargo check` drops its packages from `Cargo.lock` <!-- completed: -->
-- [ ] `mise //:test` and `mise //:lint` pass <!-- completed: -->
+- [x] Append the `refinery_schema_history` DDL to `assets/migrations/V1__baseline.sql` <!-- completed: 2026-11-21T11:32 -->
+- [x] Add the `ledger_state` helper and use it in `classify_schema` <!-- completed: 2026-11-21T11:32 -->
+- [x] Rewrite `initialize` per § `initialize` algorithm, including the `database_url` parameter and the `is_empty_file` helper, and delete `baseline()` <!-- completed: 2026-11-21T11:32 -->
+- [x] Pass the connected database URL at every `initialize` call site <!-- completed: 2026-11-21T11:32 -->
+- [x] Extend `baseline_initialization_records_the_identity_ledger_version_and_shape` and add `initialization_refuses_every_other_file` and `concurrent_initialization_of_one_fresh_file_applies_the_baseline_once` <!-- completed: 2026-11-21T11:32 -->
+- [x] Remove `refinery` from `Cargo.toml`; `cargo check` drops its packages from `Cargo.lock` <!-- completed: 2026-11-21T11:32 -->
+- [x] `mise //:test` and `mise //:lint` pass <!-- completed: 2026-11-21T11:32 -->
 
 ### Step 4: Remove `libproc` and trim `chrono` features
 
-- [ ] Replace `kinfo_proc_bytes` with the `kern_proc` helper and move the PID read onto its named local buffer <!-- completed: -->
-- [ ] Rewrite the macOS `group_members` per § `group_members` on macOS <!-- completed: -->
-- [ ] Add `kern_proc_pgrp_lists_a_spawned_group_leader_and_then_nothing` <!-- completed: -->
-- [ ] Remove the macOS open-file observation from `post_refusal_lock_diagnostic` <!-- completed: -->
-- [ ] Delete the macOS `libproc` dependency table and refresh `Cargo.lock` <!-- completed: -->
-- [ ] Declare `chrono` with `default-features = false, features = ["std", "now"]` per § Darwin framework links <!-- completed: -->
-- [ ] `mise //:test` and `mise //:lint` pass on Linux; Step 5's macOS `lint` and `test` entries validate the macOS code <!-- completed: -->
-- [ ] Verify the crate-count gates and the absence of `refinery`, `libproc`, `bindgen`, `clang-sys`, `iana-time-zone` and `core-foundation-sys` in `Cargo.lock` <!-- completed: -->
+- [x] Replace `kinfo_proc_bytes` with the `kern_proc` helper and move the PID read onto its named local buffer <!-- completed: 2026-11-21T11:35 -->
+- [x] Rewrite the macOS `group_members` per § `group_members` on macOS <!-- completed: 2026-11-21T11:35 -->
+- [x] Add `kern_proc_pgrp_lists_a_spawned_group_leader_and_then_nothing` <!-- completed: 2026-11-21T11:35 -->
+- [x] Remove the macOS open-file observation from `post_refusal_lock_diagnostic` <!-- completed: 2026-11-21T11:35 -->
+- [x] Delete the macOS `libproc` dependency table and refresh `Cargo.lock` <!-- completed: 2026-11-21T11:35 -->
+- [x] Declare `chrono` with `default-features = false, features = ["std", "now"]` per § Darwin framework links <!-- completed: 2026-11-21T11:35 -->
+- [x] `mise //:test` and `mise //:lint` pass on Linux; Step 5's macOS `lint` and `test` entries validate the macOS code <!-- completed: 2026-11-21T11:35 -->
+- [x] Verify the crate-count gates and the absence of `refinery`, `libproc`, `bindgen`, `clang-sys`, `iana-time-zone` and `core-foundation-sys` in `Cargo.lock` <!-- completed: 2026-11-21T11:35 -->
 
 ### Step 5: CI test entries
 
-- [ ] Change the `//:test` task's CPU-count command per § CI <!-- completed: -->
-- [ ] Restructure `ci.yml` into the Linux and macOS `lint` and `test` entries, with `CARGO_PROFILE_TEST_OPT_LEVEL=1` on the test step <!-- completed: -->
-- [ ] Push the branch and confirm all four CI entries pass, with the macOS `test` entry running the macOS process-group tests; handle failures per § First macOS CI run <!-- completed: -->
+- [x] Change the `//:test` task's CPU-count command per § CI <!-- completed: 2026-11-21T11:36 -->
+- [x] Restructure `ci.yml` into the Linux and macOS `lint` and `test` entries, with `CARGO_PROFILE_TEST_OPT_LEVEL=1` on the test step <!-- completed: 2026-11-21T11:36 -->
+- [x] Push the branch and confirm all four CI entries pass, with the macOS `test` entry running the macOS process-group tests; handle failures per § First macOS CI run (all four passed in run 44902139006 at `93be0503`; see § macOS first-run failures) <!-- completed: 2026-11-21T12:12 -->
 
 ### Step 6: Dev/test profiles
 
-- [ ] Build variants B and A and run the alternating B/A suite runs of § Measurements' suite-regression check, recording wall time and load per run <!-- completed: -->
-- [ ] Confirm `-O0` on the `sqlite3.c` compile line of variant A's `cargo test --bin cafleet --no-run -vv` <!-- completed: -->
-- [ ] Apply the check's outcome to `Cargo.toml` (opt-level 0, opt-level 1 after a repeated check, or no override) <!-- completed: -->
-- [ ] Add `[profile.dev.package.cafleet] debug = "line-tables-only"` <!-- completed: -->
-- [ ] `mise //:test` and `mise //:lint` pass <!-- completed: -->
+- [x] Build variants B and A and run the alternating B/A suite runs of § Measurements' suite-regression check, recording wall time and load per run <!-- completed: 2026-11-21T11:59 -->
+- [x] Confirm `-O0` on the `sqlite3.c` compile line of variant A's `cargo test --bin cafleet --no-run -vv` <!-- completed: 2026-11-21T11:59 -->
+- [x] Apply the check's outcome to `Cargo.toml` (opt-level 0, opt-level 1 after a repeated check, or no override) <!-- completed: 2026-11-21T11:59 -->
+- [x] Add `[profile.dev.package.cafleet] debug = "line-tables-only"` <!-- completed: 2026-11-21T11:59 -->
+- [x] `mise //:test` and `mise //:lint` pass <!-- completed: 2026-11-21T11:59 -->
 
 ### Step 7: Single-runner release gate
 
-- [ ] Add the temporary `darwin-zigbuild` and `darwin-zigbuild-smoke` jobs to `ci.yml` and push <!-- completed: -->
-- [ ] Record the gate run URL, the darwin build-step duration and the outcome in § Release gate result <!-- completed: -->
-- [ ] On pass, convert `release.yml` to the adopted shape; on failure, leave `release.yml` unchanged <!-- completed: -->
-- [ ] Remove both temporary jobs from `ci.yml` <!-- completed: -->
+- [x] Add the temporary `darwin-zigbuild` and `darwin-zigbuild-smoke` jobs to `ci.yml` and push <!-- completed: 2026-11-21T12:01 -->
+- [x] Record the gate run URL, the darwin build-step duration and the outcome in § Release gate result <!-- completed: 2026-11-21T12:09 -->
+- [x] On pass, convert `release.yml` to the adopted shape; on failure, leave `release.yml` unchanged <!-- completed: 2026-11-21T12:09 -->
+- [x] Remove both temporary jobs from `ci.yml` <!-- completed: 2026-11-21T12:09 -->
 
 ### Step 8: After-measurements and final validation
 
-- [ ] Measure every § Measurements metric on the final tree (3 runs each, with load) and record before/after <!-- completed: -->
-- [ ] Record the PR's ubuntu and macOS `test` job durations <!-- completed: -->
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass, and every CI entry passes on the PR <!-- completed: -->
+- [x] Measure every § Measurements metric on the final tree (3 runs each, with load) and record before/after <!-- completed: 2026-11-21T12:20 -->
+- [x] Record the PR's ubuntu and macOS `test` job durations <!-- completed: 2026-11-21T12:20 -->
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass, and every CI entry passes on the PR <!-- completed: 2026-11-21T12:20 -->
 
 Implementers leave the installed `cafleet` untouched, because the executing fleet runs on it. After the execute fleet is deleted, the Director reinstalls the CLI with `mise //:install`.
 
@@ -439,3 +510,5 @@ Implementers leave the installed `cafleet` untouched, because the executing flee
 | Date | Changes |
 |------|---------|
 | 2026-11-21 | Initial draft |
+| 2026-11-21 | Reconcile with design 0000237: ledger DDL anchor, existing SPEC §8 ledger statement and paragraphs, table-driven refusal test, scoped busy budget, dropped removed flake from scope, annotated evaluation references |
+| 2026-11-21 | Implementation complete: all tasks done, measurements and release gate recorded, reviewer and user approved |
