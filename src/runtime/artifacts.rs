@@ -57,7 +57,6 @@ pub(crate) struct RuntimePaths {
     pub(crate) descriptor: PathBuf,
     pub(crate) control_socket: PathBuf,
     pub(crate) owner_lock: PathBuf,
-    pub(crate) outbox: PathBuf,
 }
 impl RuntimePaths {
     pub(crate) fn for_run(identity: &Value, run_id: i64) -> Result<Self> {
@@ -86,7 +85,6 @@ impl RuntimePaths {
             namespace_manifest: namespace_dir.join("identity.json"),
             descriptor: run_dir.join("launch.json"),
             owner_lock: run_dir.join("owner.lock"),
-            outbox: run_dir.join("events.outbox"),
             control_socket,
             run_dir,
             namespace_dir,
@@ -223,7 +221,11 @@ pub(crate) struct RunArtifacts {
 impl RunArtifacts {
     #[cfg(test)]
     pub(crate) fn create(conn: &mut Connection, run_id: i64) -> Result<Self> {
-        Self::create_with_deadline(conn, run_id, Instant::now() + Duration::from_secs(5))
+        Self::create_with_deadline(
+            conn,
+            run_id,
+            crate::time::Clock::now(&crate::time::SystemClock) + Duration::from_secs(5),
+        )
     }
     pub(crate) fn create_with_deadline(
         conn: &mut Connection,
@@ -264,7 +266,6 @@ impl RunArtifacts {
                 ))
             })?;
         let lock = open_private(&paths.owner_lock, true)?;
-        open_private(&paths.outbox, true)?;
         let dir_id = identity(&private_metadata(&paths.run_dir, uid(), 0o700, true)?);
         let lock_id = identity(&lock.metadata().map_err(io_error)?);
         with_database_deadline(conn, deadline, |conn| {
@@ -391,8 +392,15 @@ impl RunLock {
         process: ProcessIdentity,
         deadline: Instant,
     ) -> Result<RunOwner> {
-        self.transfer_to_reconciler_checked(conn, expected, process, deadline, |_| Ok(()))
-            .map(|run| run.owner())
+        self.transfer_to_reconciler_checked(
+            conn,
+            expected,
+            process,
+            deadline,
+            |_| Ok(()),
+            &crate::time::SystemClock,
+        )
+        .map(|run| run.owner())
     }
     pub(super) fn transfer_to_reconciler_checked(
         &self,
@@ -401,6 +409,7 @@ impl RunLock {
         process: ProcessIdentity,
         deadline: Instant,
         check: impl FnOnce(&Connection) -> Result<()>,
+        clock: &dyn crate::time::Clock,
     ) -> Result<RunRecord> {
         with_database_deadline(conn, deadline, |conn| {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -418,7 +427,7 @@ impl RunLock {
                 self.validate(&tx, &expected.owner())?;
                 crate::runtime::recovery::advance_recovery_owner(&tx, expected, &process)?
             };
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             tx.commit()?;
             Ok(next)
         })
@@ -441,15 +450,16 @@ impl RunLock {
     /// The run-lock counterpart of [`crate::pane_lock::PaneLock::acquire_released`].
     #[cfg(test)]
     pub(crate) fn acquire_released(conn: &Connection, owner: &RunOwner) -> Result<Option<Self>> {
-        let until = Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
+        let until = crate::time::Clock::now(&crate::time::SystemClock)
+            + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
         loop {
             if let Some(lock) = Self::acquire(conn, owner)? {
                 return Ok(Some(lock));
             }
-            if Instant::now() >= until {
+            if crate::time::Clock::now(&crate::time::SystemClock) >= until {
                 return Ok(None);
             }
-            std::thread::sleep(Duration::from_millis(50));
+            crate::time::Clock::sleep(&crate::time::SystemClock, Duration::from_millis(50));
         }
     }
     pub(crate) fn validate(&self, conn: &Connection, owner: &RunOwner) -> Result<()> {
@@ -473,7 +483,8 @@ impl RunLock {
             conn,
             owner,
             process,
-            Instant::now() + Duration::from_secs(5),
+            crate::time::Clock::now(&crate::time::SystemClock) + Duration::from_secs(5),
+            &crate::time::SystemClock,
         )
     }
     pub(crate) fn transfer_to_runner_with_deadline(
@@ -482,6 +493,7 @@ impl RunLock {
         owner: &RunOwner,
         process: ProcessIdentity,
         deadline: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<RunOwner> {
         ensure(
             owner.owner_kind == OwnerKind::Creator,
@@ -494,7 +506,7 @@ impl RunLock {
                 .owner_epoch
                 .checked_add(1)
                 .ok_or_else(|| error("owner epoch exhausted"))?;
-            let changed=tx.execute("UPDATE member_runs SET owner_epoch=?1,owner_kind='runner',owner_pid=?2,owner_start_identity=?3,runner_pid=?2,runner_start_identity=?3,last_health_at=?4 WHERE run_id=?5 AND owner_epoch=?6 AND owner_kind='creator'",params![epoch,process.pid,process.start_identity,crate::time::now_stamp(),owner.run_id,owner.owner_epoch])?;
+            let changed=tx.execute("UPDATE member_runs SET owner_epoch=?1,owner_kind='runner',owner_pid=?2,owner_start_identity=?3,runner_pid=?2,runner_start_identity=?3,last_health_at=?4 WHERE run_id=?5 AND owner_epoch=?6 AND owner_kind='creator'",params![epoch,process.pid,process.start_identity,clock.wall_stamp(),owner.run_id,owner.owner_epoch])?;
             ensure(changed == 1, "creator ownership transfer lost CAS")?;
             let next = storage::get_run(&tx, owner.run_id)?.owner();
             tx.commit()?;
@@ -519,6 +531,7 @@ fn validated_paths(
     run: &RunRecord,
     lock: &RunLock,
     until: Instant,
+    clock: &dyn crate::time::Clock,
 ) -> Result<RuntimePaths> {
     let paths = with_database_deadline(conn, until, |conn| {
         let current = storage::get_run(conn, run.run_id)?;
@@ -535,12 +548,16 @@ fn validated_paths(
         run.owner_pid == process.pid && run.owner_start_identity == process.start_identity,
         "descriptor access requires the current runtime owner",
     )?;
-    check_deadline(Instant::now(), until)?;
+    check_deadline(clock.now(), until)?;
     Ok(paths)
 }
 
-fn read_bounded(file: &mut File, until: Instant) -> Result<Vec<u8>> {
-    check_deadline(Instant::now(), until)?;
+fn read_bounded(
+    file: &mut File,
+    until: Instant,
+    clock: &dyn crate::time::Clock,
+) -> Result<Vec<u8>> {
+    check_deadline(clock.now(), until)?;
     ensure(
         file.metadata().map_err(io_error)?.len() <= DESCRIPTOR_LIMIT,
         "launch descriptor exceeds private size limit",
@@ -555,7 +572,7 @@ fn read_bounded(file: &mut File, until: Instant) -> Result<Vec<u8>> {
         bytes.len() as u64 <= DESCRIPTOR_LIMIT,
         "launch descriptor exceeds private size limit",
     )?;
-    check_deadline(Instant::now(), until)?;
+    check_deadline(clock.now(), until)?;
     Ok(bytes)
 }
 
@@ -574,14 +591,15 @@ impl RecoveryDescriptor {
         run: &RunRecord,
         lock: &RunLock,
         until: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<Self> {
-        let path = validated_paths(conn, run, lock, until)?.descriptor;
+        let path = validated_paths(conn, run, lock, until, clock)?.descriptor;
         if !present(&path)? {
             return Ok(Self { path, pinned: None });
         }
         let mut file = open_private(&path, false)?;
         let file_identity = identity(&file.metadata().map_err(io_error)?);
-        let bytes = read_bounded(&mut file, until)?;
+        let bytes = read_bounded(&mut file, until, clock)?;
         let descriptor = LaunchDescriptor::parse(&bytes)?;
         let recorded = &descriptor.identity;
         ensure(
@@ -599,7 +617,7 @@ impl RecoveryDescriptor {
             digest: Sha256::digest(&bytes).into(),
         };
         validate_named(&path, &pinned)?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(clock.now(), until)?;
         Ok(Self {
             path,
             pinned: Some(pinned),
@@ -612,9 +630,10 @@ impl RecoveryDescriptor {
         run: &RunRecord,
         lock: &RunLock,
         until: Instant,
+        clock: &dyn crate::time::Clock,
         unlink: impl FnOnce(&Path, Instant) -> Result<()>,
     ) -> Result<()> {
-        let paths = validated_paths(conn, run, lock, until)?;
+        let paths = validated_paths(conn, run, lock, until, clock)?;
         ensure(paths.descriptor == self.path, "descriptor pathname changed")?;
         if !present(&self.path)? {
             self.pinned = None;
@@ -625,17 +644,17 @@ impl RecoveryDescriptor {
             .as_mut()
             .ok_or_else(|| error("descriptor appeared after absence was pinned"))?;
         validate_named(&self.path, pinned)?;
-        let bytes = read_bounded(&mut pinned.file, until)?;
+        let bytes = read_bounded(&mut pinned.file, until, clock)?;
         let digest: [u8; 32] = Sha256::digest(&bytes).into();
         ensure(
             digest == pinned.digest,
             "descriptor content changed before unlink",
         )?;
         validate_named(&self.path, pinned)?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(clock.now(), until)?;
         unlink(&self.path, until)?;
         ensure(!present(&self.path)?, "descriptor remains after unlink")?;
-        check_deadline(Instant::now(), until)?;
+        check_deadline(clock.now(), until)?;
         self.pinned = None;
         Ok(())
     }
@@ -650,11 +669,20 @@ mod tests {
     use crate::runtime::recovery::test_support::descriptor::owned_bytes;
     use crate::runtime::recovery::test_support::descriptor::secret_free;
     use crate::runtime::recovery::test_support::*;
+    use crate::time::Clock as _;
+    use crate::time::test_support::TestClock;
     use std::time::Duration;
     use std::time::Instant;
+
+    /// The virtual clock descriptor pin and removal read their deadlines from.
+    fn clock() -> TestClock {
+        TestClock::starting_at(Instant::now())
+    }
+
     #[test]
     fn runner_recovery_historical_descriptor_pin_remove_uses_the_supplied_connection_budget() {
         for takeovers in [1, 2] {
+            let clock = clock();
             let mut case = described_run();
             let lock = case.held.as_ref().unwrap().clone();
             for _ in 0..takeovers {
@@ -670,19 +698,19 @@ mod tests {
             assert!(case.fixture.run.owner_epoch > 1);
             let before = case.fixture.run.clone();
             let path = case.artifacts.paths.descriptor.clone();
-            let until = Instant::now() + Duration::from_secs(1);
+            let until = clock.now() + Duration::from_secs(1);
             let mut attempts = 0;
             with_database_deadline(&mut case.fixture.conn, until, |conn| {
-                let mut pinned = RecoveryDescriptor::pin(conn, &before, &lock, until)?;
+                let mut pinned = RecoveryDescriptor::pin(conn, &before, &lock, until, &clock)?;
                 assert!(
                     load_descriptor(conn, &path).is_err(),
                     "launch-time reading still requires exact creator ownership"
                 );
-                pinned.remove(conn, &before, &lock, until, |selected, deadline| {
+                pinned.remove(conn, &before, &lock, until, &clock, |selected, deadline| {
                     attempts += 1;
                     assert_eq!(selected, path.as_path());
                     assert_eq!(deadline, until);
-                    assert!(Instant::now() < deadline);
+                    assert!(clock.now() < deadline, "{takeovers} takeovers");
                     std::fs::remove_file(selected)
                         .map_err(|_| CafleetError::App("owned descriptor removal failed".into()))
                 })
@@ -699,6 +727,7 @@ mod tests {
 
     #[test]
     fn runner_recovery_descriptor_pin_drop_preserves_path_for_explicit_completion() {
+        let clock = clock();
         let mut case = described_run();
         let bytes = owned_bytes(&case);
         let lock = case.held.as_ref().unwrap().clone();
@@ -706,7 +735,8 @@ mod tests {
             &mut case.fixture.conn,
             &case.fixture.run,
             &lock,
-            Instant::now() + Duration::from_secs(1),
+            clock.now() + Duration::from_secs(1),
+            &clock,
         )
         .unwrap();
         drop(pinned);
@@ -719,20 +749,24 @@ mod tests {
     #[test]
     fn runner_recovery_descriptor_remove_revalidates_owner_and_expired_deadline_before_dispatch() {
         for changed in ["epoch", "deadline"] {
+            let clock = clock();
             let mut case = described_run();
             let before = descriptor_identity(&case.artifacts.paths.descriptor);
             let lock = case.held.as_ref().unwrap().clone();
-            let until = Instant::now() + Duration::from_secs(1);
-            let mut pinned =
-                RecoveryDescriptor::pin(&mut case.fixture.conn, &case.fixture.run, &lock, until)
-                    .unwrap();
+            let until = clock.now() + Duration::from_secs(1);
+            let mut pinned = RecoveryDescriptor::pin(
+                &mut case.fixture.conn,
+                &case.fixture.run,
+                &lock,
+                until,
+                &clock,
+            )
+            .unwrap();
             if changed == "epoch" {
                 bump_epoch(&case.fixture.conn, case.fixture.run.run_id);
             }
             let deadline = if changed == "deadline" {
-                Instant::now()
-                    .checked_sub(Duration::from_millis(1))
-                    .unwrap()
+                clock.now().checked_sub(Duration::from_millis(1)).unwrap()
             } else {
                 until
             };
@@ -742,6 +776,7 @@ mod tests {
                 &case.fixture.run,
                 &lock,
                 deadline,
+                &clock,
                 |_, _| {
                     dispatched = true;
                     Ok(())
@@ -749,32 +784,40 @@ mod tests {
             );
             let error: CafleetError = match result {
                 Err(error) => error,
-                Ok(()) => panic!("changed descriptor removal precondition fails before dispatch"),
+                Ok(()) => panic!("changed {changed} fails descriptor removal before dispatch"),
             };
             secret_free(&error.message());
-            assert!(!dispatched);
+            assert!(!dispatched, "{changed}");
             assert_eq!(
                 descriptor_identity(&case.artifacts.paths.descriptor),
-                before
+                before,
+                "{changed}"
             );
         }
     }
 
     #[test]
     fn runner_recovery_actual_descriptor_unlink_closure_failure_preserves_file_and_retries() {
+        let clock = clock();
         let mut case = described_run();
         let bytes = owned_bytes(&case);
         let lock = case.held.as_ref().unwrap().clone();
-        let until = Instant::now() + Duration::from_secs(1);
-        let mut pinned =
-            RecoveryDescriptor::pin(&mut case.fixture.conn, &case.fixture.run, &lock, until)
-                .unwrap();
+        let until = clock.now() + Duration::from_secs(1);
+        let mut pinned = RecoveryDescriptor::pin(
+            &mut case.fixture.conn,
+            &case.fixture.run,
+            &lock,
+            until,
+            &clock,
+        )
+        .unwrap();
         let mut attempts = 0;
         let result: TestResult<()> = pinned.remove(
             &mut case.fixture.conn,
             &case.fixture.run,
             &lock,
             until,
+            &clock,
             |_, deadline| {
                 attempts += 1;
                 assert_eq!(deadline, until);
@@ -804,6 +847,7 @@ mod tests {
                 &case.fixture.run,
                 &lock,
                 until,
+                &clock,
                 |path, deadline| {
                     attempts += 1;
                     assert_eq!(deadline, until);
@@ -835,7 +879,6 @@ mod tests {
         assert_ne!(a.namespace_dir, b.namespace_dir);
         assert_ne!(a.run_dir, b.run_dir);
         assert_ne!(a.control_socket, b.control_socket);
-        assert_ne!(a.outbox, b.outbox);
         assert_eq!(
             a.namespace_dir.parent().unwrap(),
             std::fs::canonicalize(first._dir.path())
@@ -1004,68 +1047,66 @@ mod tests {
         }
     }
 
-    #[test]
-    fn runner_descriptor_load_rejects_malformed_or_identity_mismatched_input() {
-        for damage in ["json", "nonce", "epoch", "run", "database"] {
-            let mut fixture = Fixture::new();
-            let artifacts = fixture.artifacts();
-            let descriptor = LaunchDescriptor::new(&fixture.run, fixture.spec()).unwrap();
-            artifacts.write_descriptor(&descriptor).unwrap();
-            let mut value: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(&artifacts.paths.descriptor).unwrap())
+    /// One way a written launch descriptor is damaged before it is loaded again.
+    #[derive(Clone, Copy, Debug)]
+    enum Damage {
+        Malformed,
+        Nonce,
+        Epoch,
+        Run,
+        Database,
+        WorldReadable,
+        Symlink,
+    }
+
+    const DESCRIPTOR_DAMAGES: &[(&str, Damage)] = &[
+        ("malformed JSON", Damage::Malformed),
+        ("a different launch nonce", Damage::Nonce),
+        ("a different owner epoch", Damage::Epoch),
+        ("a different run", Damage::Run),
+        ("a different database instance", Damage::Database),
+        ("world-readable permissions", Damage::WorldReadable),
+        ("a symlink to the moved descriptor", Damage::Symlink),
+    ];
+
+    fn damage_descriptor(fixture: &Fixture, artifacts: &RunArtifacts, damage: Damage) {
+        let path = &artifacts.paths.descriptor;
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        match damage {
+            Damage::Malformed => return std::fs::write(path, b"{").unwrap(),
+            Damage::WorldReadable => {
+                return std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
                     .unwrap();
-            match damage {
-                "json" => {
-                    std::fs::write(&artifacts.paths.descriptor, b"{").unwrap();
-                }
-                "nonce" => {
-                    value["launch_nonce"] = json!("b".repeat(64));
-                }
-                "epoch" => {
-                    value["owner_epoch"] = json!(fixture.run.owner_epoch + 1);
-                }
-                "run" => {
-                    value["run_id"] = json!(fixture.run.run_id + 1);
-                }
-                "database" => {
-                    value["database_identity_json"]["instance_id"] = json!("0".repeat(32));
-                }
-                _ => unreachable!(),
             }
-            if damage != "json" {
-                std::fs::write(
-                    &artifacts.paths.descriptor,
-                    serde_json::to_vec(&value).unwrap(),
-                )
-                .unwrap();
+            Damage::Symlink => {
+                let moved = artifacts.paths.run_dir.join("moved-descriptor");
+                std::fs::rename(path, &moved).unwrap();
+                return symlink(&moved, path).unwrap();
             }
-            assert!(
-                load_descriptor(&fixture.conn, &artifacts.paths.descriptor).is_err(),
-                "{damage}"
-            );
+            Damage::Nonce => value["launch_nonce"] = json!("b".repeat(64)),
+            Damage::Epoch => value["owner_epoch"] = json!(fixture.run.owner_epoch + 1),
+            Damage::Run => value["run_id"] = json!(fixture.run.run_id + 1),
+            Damage::Database => {
+                value["database_identity_json"]["instance_id"] = json!("0".repeat(32))
+            }
         }
+        std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
     }
 
     #[test]
-    fn runner_descriptor_load_rejects_symlinks_and_world_readable_launch_input() {
-        for symlinked in [false, true] {
+    fn runner_descriptor_load_refuses_every_damaged_or_mismatched_launch_input() {
+        for &(name, damage) in DESCRIPTOR_DAMAGES {
             let mut fixture = Fixture::new();
             let artifacts = fixture.artifacts();
             artifacts
                 .write_descriptor(&LaunchDescriptor::new(&fixture.run, fixture.spec()).unwrap())
                 .unwrap();
-            if symlinked {
-                let moved = artifacts.paths.run_dir.join("moved-descriptor");
-                std::fs::rename(&artifacts.paths.descriptor, &moved).unwrap();
-                symlink(&moved, &artifacts.paths.descriptor).unwrap();
-            } else {
-                std::fs::set_permissions(
-                    &artifacts.paths.descriptor,
-                    std::fs::Permissions::from_mode(0o644),
-                )
-                .unwrap();
-            }
-            assert!(load_descriptor(&fixture.conn, &artifacts.paths.descriptor).is_err());
+            damage_descriptor(&fixture, &artifacts, damage);
+            assert!(
+                load_descriptor(&fixture.conn, &artifacts.paths.descriptor).is_err(),
+                "{name}"
+            );
         }
     }
 
@@ -1283,7 +1324,18 @@ mod tests {
                 lock.validate(&fixture.conn, &owner).unwrap();
             }
             assert!(
-                storage::reserve_event_sequences(&mut fixture.conn, &original.owner()).is_err()
+                storage::persist_transition(
+                    &mut fixture.conn,
+                    &original.owner(),
+                    &crate::broker::runtime::test_support::opening(
+                        original.run_id,
+                        1,
+                        1,
+                        crate::broker::runtime::test_support::metadata()
+                    ),
+                    storage::PersistenceMode::Live
+                )
+                .is_err()
             );
         }
 
@@ -1360,6 +1412,8 @@ mod tests {
         use crate::runtime::recovery::test_support::descriptor::owned_bytes;
         use crate::runtime::recovery::test_support::descriptor::secret_free;
         use crate::runtime::recovery::test_support::descriptor::write_private;
+        use crate::time::Clock as _;
+        use crate::time::test_support::TestClock;
         use serde_json::Value;
         use serde_json::json;
         use std::io::Write;
@@ -1378,23 +1432,27 @@ mod tests {
         }
 
         fn pin(case: &mut Case) -> TestResult<RecoveryDescriptor> {
+            let clock = TestClock::starting_at(Instant::now());
             let lock = case.held.as_ref().unwrap().clone();
             RecoveryDescriptor::pin(
                 &mut case.fixture.conn,
                 &case.fixture.run,
                 &lock,
-                Instant::now() + Duration::from_secs(1),
+                clock.now() + Duration::from_secs(1),
+                &clock,
             )
         }
 
         fn remove(case: &mut Case, pinned: &mut RecoveryDescriptor) -> (TestResult<()>, bool) {
+            let clock = TestClock::starting_at(Instant::now());
             let lock = case.held.as_ref().unwrap().clone();
             let mut dispatched = false;
             let result = pinned.remove(
                 &mut case.fixture.conn,
                 &case.fixture.run,
                 &lock,
-                Instant::now() + Duration::from_secs(1),
+                clock.now() + Duration::from_secs(1),
+                &clock,
                 |path, _| {
                     dispatched = true;
                     std::fs::remove_file(path)

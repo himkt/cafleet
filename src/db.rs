@@ -676,6 +676,45 @@ pub(crate) mod test_support {
         }
     }
 
+    /// A storage fault a test arms and clears. `Abort` installs a trigger in the database file,
+    /// so every connection's matching statement fails with `message`; `RefuseCommit` turns each
+    /// commit on the arming connection into a rollback.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum FaultPlan {
+        Abort {
+            trigger: &'static str,
+            on: &'static str,
+            message: &'static str,
+        },
+        RefuseCommit,
+    }
+
+    impl FaultPlan {
+        pub(crate) fn arm(self, conn: &mut Connection) {
+            match self {
+                Self::Abort {
+                    trigger,
+                    on,
+                    message,
+                } => conn
+                    .execute_batch(&format!(
+                        "CREATE TRIGGER {trigger} {on} BEGIN SELECT RAISE(ABORT,'{message}'); END"
+                    ))
+                    .unwrap(),
+                Self::RefuseCommit => conn.commit_hook(Some(|| true)).unwrap(),
+            }
+        }
+
+        pub(crate) fn clear(self, conn: &mut Connection) {
+            match self {
+                Self::Abort { trigger, .. } => conn
+                    .execute_batch(&format!("DROP TRIGGER {trigger}"))
+                    .unwrap(),
+                Self::RefuseCommit => conn.commit_hook(None::<fn() -> bool>).unwrap(),
+            }
+        }
+    }
+
     pub(crate) fn wal_snapshot(database: &Path) -> [(PathBuf, Vec<u8>); 3] {
         ["", "-wal", "-shm"].map(|suffix| {
             let path = PathBuf::from(format!("{}{suffix}", database.display()));
@@ -791,7 +830,6 @@ mod tests {
             "SELECT * FROM members ORDER BY member_id",
             "SELECT * FROM member_placements ORDER BY member_id",
             "SELECT message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at FROM messages ORDER BY message_id",
-            "SELECT * FROM asset_installs ORDER BY coding_agent, path",
             "SELECT * FROM sqlite_sequence ORDER BY name",
         ].map(|sql| rows(conn, sql)).into()
     }
@@ -812,8 +850,7 @@ mod tests {
                  INSERT INTO messages(message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at) VALUES
                     (7, 1, 2, 'created-7', 'input_required', 'status-7', 'pending unicode 世界', NULL),
                     (8, 1, 2, 'created-8', 'input_required', 'status-8', 'notified', 'notified-8'),
-                    (9, 2, 1, 'created-9', 'completed', 'status-9', 'completed', NULL);
-                 INSERT INTO asset_installs VALUES('claude', '/preserved/config', 'installed');"
+                    (9, 2, 1, 'created-9', 'completed', 'status-9', 'completed', NULL);"
             ).unwrap();
         assert!(schema_matches(&conn).unwrap());
         require_current(&conn).unwrap();
@@ -867,14 +904,12 @@ mod tests {
 
     #[test]
     fn composer_receipt_required_columns_are_checked_without_modifying_the_selected_database() {
-        for column in ["stop_cause", "preview_attempt", "left_stage"] {
-            assert_incompatible_and_untouched("missing-composer-receipt-column.db", |conn| {
-                conn.execute_batch(&format!(
-                    "ALTER TABLE member_input_operations RENAME COLUMN {column} TO missing_{column}"
-                ))
-                .unwrap();
-            });
-        }
+        assert_incompatible_and_untouched("missing-composer-receipt-column.db", |conn| {
+            conn.execute_batch(
+                "ALTER TABLE member_input_operations RENAME COLUMN stop_cause TO missing_stop_cause",
+            )
+            .unwrap();
+        });
     }
 
     #[test]
@@ -970,7 +1005,7 @@ mod tests {
         for damage in [
             "DROP INDEX idx_messages_to_member_status_ts",
             "DROP INDEX idx_messages_to_member_status_ts; CREATE INDEX idx_messages_to_member_status_ts ON messages(from_member_id, status_timestamp)",
-            "DROP TABLE asset_installs",
+            "DROP TABLE member_placements",
             "DELETE FROM cafleet_database",
         ] {
             let conn = initialized_conn();
@@ -983,9 +1018,9 @@ mod tests {
     fn structural_reference_checks_required_keys_types_defaults_and_foreign_keys() {
         for (table, original, replacement) in [
             (
-                "asset_installs",
-                "PRIMARY KEY (coding_agent, path)",
-                "PRIMARY KEY (coding_agent)",
+                "member_placements",
+                "member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members",
+                "member_id INTEGER NOT NULL REFERENCES members",
             ),
             ("members", "name TEXT NOT NULL", "name TEXT"),
             ("messages", "text TEXT NOT NULL", "text INTEGER NOT NULL"),
@@ -1228,13 +1263,13 @@ mod tests {
                 self.conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
              database_identity_json,launch_nonce,runtime_path,resolved_mode,mode_source,
-             permission_argv_json,event_evidence,coverage,status,
+             permission_argv_json,coverage,status,
              owner_epoch,owner_kind,owner_pid,owner_start_identity,
-             cleanup_state,event_seq_reserved_through,native_session_json)
+             cleanup_state,native_session_json)
              VALUES(?1,?2,?3,?7,?4,?5,'/isolated/runtime','never','default',
              '[\"--ask-for-approval\",\"never\",\"--sandbox\",\"workspace-write\"]',
-             'metadata','unknown',?6,1,'creator',1234,'fixture-owner',
-             'incomplete',0,?8)",
+             'unknown',?6,1,'creator',1234,'fixture-owner',
+             'incomplete',?8)",
             params![self.member,self.fleet,self.director,
                 json!({"canonical_path": self.conn.path().unwrap(), "instance_id": "a".repeat(32), "device":1,"inode":2}).to_string(),
                 "b".repeat(64),status,backend,native_session_json],
@@ -1366,10 +1401,8 @@ mod tests {
                 ("owner_kind", "member"),
                 ("cleanup_state", "unknown"),
                 ("coverage", "universal"),
-                ("event_evidence", "raw"),
                 ("backend", "bogus"),
                 ("database_identity_json", "[]"),
-                ("effective_policy_json", "[]"),
                 ("permission_argv_json", "{}"),
                 ("cleanup_diagnostics_json", "{}"),
                 ("runtime_dir_identity_json", "[]"),
@@ -1398,15 +1431,6 @@ mod tests {
                     "{field}"
                 );
             }
-            assert!(
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET event_seq_reserved_through=-1 WHERE run_id=?1",
-                        [run]
-                    )
-                    .is_err()
-            );
         }
 
         #[test]
@@ -1625,8 +1649,13 @@ mod tests {
                 );
             }
             for disposition in crate::broker::runtime::InputDisposition::VALUES {
-                let left = *disposition == "left_in_composer";
-                fixture.conn.execute("UPDATE member_input_operations SET state='settled',disposition=?1,stop_cause=?2,left_stage=?3 WHERE input_id=?4",params![disposition,left.then_some("manual_input"),left.then_some("literal_complete"),input]).unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET state='settled',disposition=?1 WHERE input_id=?2",
+                        params![disposition, input],
+                    )
+                    .unwrap();
             }
         }
 

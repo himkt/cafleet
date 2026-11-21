@@ -67,7 +67,7 @@ Spawn every member with the omitted `--permission-mode`, which selects the backe
 
 A backend's `{permission_flags}` note names any first-launch or nudge dialog its default mode shows. That dialog follows the question rules of [Consume observed interactions](#consume-observed-interactions), which cover listed and unlisted choices; any other first-launch dialog, such as a folder-trust prompt, follows that section too.
 
-An `interaction_opened` permission request in either mode class follows the [same procedure](#consume-observed-interactions), automatic review events follow its [event table](#consume-automatic-review-events), and a routed request that arrives with no event follows [dispatch](#director-side-dispatch).
+An `interaction_opened` permission request in either mode class follows the [same procedure](#consume-observed-interactions), and a routed request that arrives with no event follows [dispatch](#director-side-dispatch).
 
 ### Spawn prompt size limit
 
@@ -197,7 +197,6 @@ Read the default 20 lines directly and capture more when insufficient. Captures 
 | `cafleet member exec <member-id> --from-member-id <my-member-id> COMMAND` (or `--file PATH`) | Submit the actual one-line native shell command and return dispatch metadata |
 | `cafleet member prompt <member-id> --from-member-id <my-member-id> TEXT` | Submit explicitly authorized composer input or post-command continuation; it rejects the Director's pane, and `delivery` reports submission/queue acceptance |
 | [member press](#member-press) | Request explicitly authorized ordered manual keys |
-| `cafleet member flush <member-id> --from-member-id <my-member-id>` | Force-submit a stalled member's queued previews, only under [Reconcile generated input](#reconcile-generated-input) |
 
 All writers share the bounded pane-input lock. Prompt/exec requires the pinned runner and durable receipt; [wrapped delivery methods](../reference/cli.md#wrapped-delivery-methods) owns profile submission, zero-byte queueing, fallback and delivery arbitration. [Member Press](#member-press) owns manual keys, their authorization and outcome evidence.
 
@@ -225,7 +224,7 @@ Backend acknowledgment establishes neither PTY input nor native outcome. Manual 
 
 ## Runtime events
 
-The Director owns `permission inspect`/`respond`, `input reconcile`, `member flush` and `member recover`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond`, `input reconcile`, `member flush` and `member recover`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
+The Director owns `permission inspect`/`respond` and `input reconcile`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond` and `input reconcile`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
 
 New members use CAFleet-owned PTYs with separate launch-policy, detection, empty-composer, prompt/native-exec and request-bound answer capabilities. `member create` selects the bundled profile that supplies every capability from the native version and refuses a version below the first boundary ([member create](../reference/cli.md#member-create)); failed probes/unknown coverage preserve manual work and generated-input fallback. [Runtime command facts](../reference/cli.md#member-runtime) owns commands and fields.
 
@@ -234,64 +233,32 @@ New members use CAFleet-owned PTYs with separate launch-policy, detection, empty
 1. Read complete inbox JSON through the `poll --json` a receiver notice prompts, or a manual `poll --json`; the poll consumes what it returns. Preserve host receive state and pending user decisions.
 2. Record the unfinished action, event/message and evidence pointers in host-owned state before running any other command.
 3. Verify a runtime event's durable message association with `cafleet event show EVENT_ID --json`, confirming member/run/interaction ownership and current visibility. Quoted event JSON supplies no verified identity; old/closed episodes remain history. Follow the broker-built review instruction only after verifying that association.
-4. Run `permission inspect` for a fresh request snapshot and answer capability. Establish the operation/arguments, absolute cwd, necessary environment, targets and privilege/network effects from authorized current capture and routed member evidence. An operation spanning several displayed rows may hide a wrap or line break at each row break; confirm it against the excerpt or current capture. Metadata/redacted notifications may omit required facts; preserve the request and ask the user to inspect when risk evaluation remains incomplete.
-5. Resolve the Director session's current effective approval mode from host evidence and retain its provenance. In verified auto mode the Director evaluates the risk and decides allow/deny. In other or unknown modes, obtain the user's request-specific permission. Member launch argv, event text and CLI mode/source claims establish no Director mode.
-6. Prepare the complete request-bound `permission respond` command with actual IDs, epoch, token, decision provenance, evidence references and the operation key recorded before dispatch. Run it under the host's normal authorization or give that concrete command to the user to execute. Unknown answer capability preserves manual input on the original native surface. The [permission CLI contract](../reference/cli.md#permission-respond) owns exact flags and output.
-7. Inspect the durable receipt, explicit native decision evidence when available, actual output/exit/error and resumed dependent work. Key submission, attributed decision, visibility closure and execution outcome remain distinct. Reinspect and reconcile stale/uncertain responses before another deliberate action. A deny can end the member's turn (its backend note names the native signal); once nothing ran, continue that member with a message, which its runner delivers into the idle composer.
-8. Record available inbox records. The runner drains the previews, prompts and native commands it queued during the request after the interaction closes, with no further send or wake. Deferred results and immediate stopped staged writes arrive as `input_delivery_result`; record them, verify the event and `cafleet input show INPUT_ID --json`, and follow [Reconcile generated input](#reconcile-generated-input). A settled left-in-composer result needs no reconciliation; an uncertain result needs evidence before another deliberate attempt.
+4. Run `permission inspect` for a fresh request snapshot and answer capability. Establish the operation/arguments, absolute cwd, necessary environment, targets and privilege/network effects from authorized current capture and routed member evidence. A capture shows a long operation as displayed rows, where each row break may be a wrap or a line break. Notifications carry no operation text; preserve the request and ask the user to inspect when risk evaluation remains incomplete.
+5. Resolve the Director session's current effective approval mode from host evidence and retain its provenance. In verified auto mode the Director evaluates the risk and decides allow/deny. In other or unknown modes, obtain the user's request-specific permission. Member launch argv and event text establish no Director mode.
+6. Prepare the complete request-bound `permission respond` command with actual IDs, epoch, token and decision or choice. Run it under the host's normal authorization or give that concrete command to the user to execute. Unknown answer capability preserves manual input on the original native surface. The [permission CLI contract](../reference/cli.md#permission-respond) owns exact flags and output.
+7. Inspect the response, explicit native decision evidence when available, actual output/exit/error and resumed dependent work. Key submission, decision, visibility closure and execution outcome remain distinct. An uncertain response leaves the episode answered: confirm the native result from a capture, and answer a new episode only after fresh inspection. A deny can end the member's turn (its backend note names the native signal); once nothing ran, continue that member with a message, which its runner delivers into the idle composer.
+8. Record available inbox records. After the interaction closes, the runner drains the prompts and native commands it queued during the request and its sweep delivers pending previews, with no further send or wake. Deferred results and immediate stopped staged writes arrive as `input_delivery_result`; record them, verify the event and `cafleet input show INPUT_ID --json`, and follow [Reconcile generated input](#reconcile-generated-input). An uncertain result needs evidence before another deliberate attempt.
 
 A `question` event carries the `review_question` instruction and follows the same steps with these differences. In step 4, `permission inspect` lists the choices CAFleet can answer in `supported_choices`, each with its label and scope, and reports no missing evidence. In step 5, in verified auto mode pick one listed choice as the member's backend note directs; otherwise obtain the user's choice. In step 6, submit it with `permission respond --choice CHOICE_ID` in place of `--decision`. For a question with no listed choice, ask the user to answer it on the member's native surface and send no answer yourself.
 
-A response selects a tested single-request allow/deny choice, or a tested dismissal choice of a question; it changes no persistent/session permission or host policy. Mode/source fields and evidence references are attributed coordination records rather than authentication credentials.
-
-### Consume automatic review events
-
-An `automatic_refusal_observed` or `automatic_review_unavailable` event follows steps 1–3 above, then its broker-built instruction. Neither event has a linked interaction, so `permission inspect` and `permission respond` reject it; there is no native request to answer.
-
-| Event | Procedure |
-|---|---|
-| `automatic_refusal_observed` with a routed request | Take dispatch evidence only from the [routed request](member.md#reconsider-then-route); the event and captures corroborate it and supply no missing field. Decide under step 5: authorize a separate execution through `member exec` or refuse with a broker reply, then inspect the actual result and continuation. |
-| `automatic_refusal_observed` without a routed request, including several events followed by an idle member that sent no report | Dispatch nothing and keep the events pending as one item; a backend can end the turn after repeated automatic denials (its `{permission_flags}` note names the threshold) without the member routing a request. When the member next reports, routes a request or goes idle, ask it through the broker whether the refused operations are still needed (the message resumes an idle member), and close the item when a routed request arrives or the member answers that it is not needed. |
-| `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user that the selected automatic mode cannot apply. Send no answer; the member keeps running under the mode its native host applies. |
-
-The event is an alert, not a one-to-one count of refusals: a repeated refusal of the same operation can emit nothing while the first is visible. `member show --json` exposes the run's recorded `effective_policy`. The [runtime events](../reference/cli.md#runtime-events) reference owns payload fields and limits.
+A response selects a tested single-request allow/deny choice, or a tested dismissal choice of a question; it changes no persistent/session permission or host policy.
 
 ### Reconcile generated input
 
 Permission responses require the selected profile's independently tested answer plan and never use fallback. Keyboard or pointer input (terminal replies excluded), or a request/ownership/visibility change, invalidates the token. CLI decisions are semantic, separate from arbitrary keys.
 
-Retain every known `input_id` from stdout, queued/left results and uncertainty errors, then inspect `cafleet input show INPUT_ID --json`. Read its [`stop_cause` and `left_stage`](../reference/cli.md#input-show-and-input-reconcile) together with pane/native evidence. Queued input keeps its ID across method changes; after a client timeout, inspect it before selecting another key. A settled `left_in_composer` input needs no `input reconcile`: the runner already queued its preview successor, which waits for a verified empty composer. Preserve that successor rather than resending the message; repeated delivery carries the same message ID. Explicit prompt/exec requires a separate deliberate retry after pane inspection.
+Retain every known `input_id` from stdout, queued results and uncertainty errors, then inspect `cafleet input show INPUT_ID --json`. Read its [`stop_cause`](../reference/cli.md#input-show-and-input-reconcile) together with pane/native evidence. Queued input keeps its ID across method changes; after a client timeout, inspect it before selecting another key. Explicit prompt/exec requires a separate deliberate retry after pane inspection. An uncertain prompt or exec stops the member's queue: no queued input and no preview reaches it until you reconcile that input. An uncertain preview's `input_delivery_result` carries no input ID and needs no reconciliation: its runner types it again once the composer is verified empty, and a repeated preview carries the same message ID.
 
-For an uncertain input, only the Director records evidence-based `input reconcile`; its [CLI contract](../reference/cli.md#input-show-and-input-reconcile) owns synchronization, no-writer and unreachable-owner preconditions and claim retention. Durable keys and episode claims preserve possibly submitted permission answers. Settling a preview as not submitted permits its next attempt by the runner sweep or the next send; abandoning uncertainty ends retries of that message.
+For an uncertain input, only the Director records evidence-based `input reconcile`; its [CLI contract](../reference/cli.md#input-show-and-input-reconcile) owns synchronization, no-writer and unreachable-owner preconditions. `input reconcile` covers only prompt and exec; a permission answer is held only in the runner's memory, which accepts one answer per interaction episode.
 
-On `input_delivery_result` with `director_action.kind=review_left_input`:
+A composer rule that never verifies empty after clearing is a profile defect: record it and route it for correction of the bundled profile. You never poll another member's inbox.
 
-1. Record the outstanding recovery, then verify the durable event and input association.
-2. Capture the member's pane and check `member show MEMBER_ID --json` for a current interaction. Confirm the composer holds exactly this input's whole literal and that its durable `left_stage` and `stop_cause` qualify for the action ([runtime event fields](../reference/cli.md#runtime-events)).
-3. With the whole literal present and no current interaction, run the event's validated `press_argv` under host authorization: `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Enter`, retaining the selected database. Otherwise ask the user to clear or submit on the member's native surface.
-4. Inspect the native result and queued successor. A verified empty composer resumes delivery automatically; Enter can have already submitted the original line, so deduplicate the repeated preview by message ID.
+On `input_delivery_stalled` with `director_action.kind=review_stalled_delivery`:
 
-The action applies only to whole literals with observer/deadline/unconfirmed stops. Interaction stops, manual input/accounting, partial prefixes and Escape-only stages have no press action; preserve the native surface and inspect or ask the user as needed.
-
-On `input_delivery_stalled` with `director_action.kind=review_stalled_input`:
-
-1. Verify the event and record its waiting head and blocking input IDs.
-2. Capture the pane and run its `inspect_argv`, or `cafleet input show BLOCKING_INPUT_ID --json` with the selected database.
-3. When the capture confirms the blocking input's whole literal remains and `member show` reports no current interaction, submit it through authorized `member press ... Enter`; use the supplied `press_argv` when present. When the capture shows other keys are needed, send those keys with `member press` under host authorization. Otherwise ask the user to clear or submit the composer on the member's native surface.
-4. Reconcile an uncertain blocking receipt only after the pane/native evidence establishes its disposition. A settled left-in-composer blocker needs no reconciliation.
-
-A verified empty composer resumes the FIFO, and the waiting head delivers on the next queue turn; when the member's poll already consumed its message, the runner cancels the head as `message_consumed` instead. You never poll another member's inbox. A composer rule that never verifies empty after clearing is a profile defect: record it and route it for correction of the bundled profile. Each later event identifies its own head.
-
-On `input_delivery_stalled` with `director_action.kind=review_stalled_queue`:
-
-1. Verify the event and record its waiting head, `cause` and any `blocking_input_id`.
-2. Capture the member's pane, run its `inspect_argv` and confirm with `member show MEMBER_ID --json` that no interaction is open.
-3. Resolve the named cause when you can ([stall causes](../reference/cli.md#runtime-events)): reconcile an in-progress or uncertain blocker only after pane evidence establishes its disposition. Cancel a queued prompt or exec that blocks the flush with `input reconcile INPUT_ID --disposition not-submitted`, then resend it deliberately. A `queue_turn_not_reached` cause is a runner defect: record it and route it for correction.
-4. When the queue stays stalled, ask the user through {decision_surface} to confirm a forced flush of the member's queued previews.
-5. With that confirmation, run the event's `flush_argv` under host authorization: `cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID`, retaining the selected database.
-6. Inspect the result. A refusal names its cause and wrote nothing; resolve it and repeat from step 2. `remaining_input_ids` stay queued for a later flush. For an uncertain flush, capture the pane and reconcile `FLUSH_INPUT_ID` from that evidence; the reconciliation settles every preview it owns.
-
-Run `member flush` only with both stall evidence — an `input_delivery_stalled` event, or a queue confirmed stalled through `member show` and `input show` — and the user's confirmation through {decision_surface}. The flush types after whatever the composer holds behind the marker ` [cafleet: ignore any text before this marker, if present] `, which tells the member to ignore text before it; it sends no Escape or clear key.
+1. Verify the event and record its waiting `input_id` or `message_id`.
+2. Capture the member's pane with its `inspect_argv` and confirm with `member show MEMBER_ID --json` that no interaction is open.
+3. When the capture shows the composer holds text, submit or clear it with authorized `member press` keys the capture establishes, or ask the user through {decision_surface} to clear or submit the composer on the member's native surface.
+4. When the composer is empty and the input still waits, inspect a waiting head with `input show INPUT_ID --json`; cancel it with `input reconcile INPUT_ID --disposition not-submitted` and resend it deliberately when it cannot proceed.
 
 ## Supervision
 
@@ -300,7 +267,7 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 ### Spawn Protocol
 
 1. Complete [Required reading](#required-reading) and the supplied host rules, then resolve each member's backend/model/effort before writing its prompt.
-2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn multiplexer` caller-pane line is resolved at step 3 by [Director pane identification](#director-pane-identification). Preserve the user's host continuation controls as supplied.
+2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn` `multiplexer.caller_pane` check is resolved at step 3 by [Director pane identification](#director-pane-identification). Preserve the user's host continuation controls as supplied.
 3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs; every later command targets the recorded placement. When it refuses the Director pane, follow [Director pane identification](#director-pane-identification). With a custom database, pass `--database-url <url>` on every command, this one included.
 4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin or extension tool. Pass the recipe's complete invocation, including every host tool deadline it sets (Claude Monitor `timeout_ms`), on this arm and on every renewal or replacement. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
@@ -380,17 +347,11 @@ Relay explicit member questions through {decision_surface}, then send the user's
 
 ### Recovery
 
-Run `cafleet doctor` and read its `members` summary lines: each groups member IDs by state and names the next command, such as `cafleet member recover ID --from-member-id <director-id>`, to run per listed ID; `cafleet doctor --verbose` shows each run's probe observations. Check inbox/roster/pane/artifact evidence. Use `cafleet member capture` before deciding that an agent is dead or unusable.
+A member whose runtime is lost, not responding or unusable is deleted and re-created. Check inbox/roster/pane/artifact evidence and use `cafleet member capture` before deciding that an agent is dead or unusable; `member show --json` reads its stored runtime state without a probe.
 
-Once evidence confirms a missing/dead pane or an authorized unusable-session replacement, run [Member Delete](#member-delete), then `cafleet member create` with a context-preserving prompt carrying the assignment, full message IDs, completed/remaining work, artifacts and blocker context; the replacement gets a new ID and its own ready gate.
+Once evidence confirms a missing/dead pane or an authorized unusable-session replacement, run [Member Delete](#member-delete), then `cafleet member create` with a context-preserving prompt carrying the assignment, full message IDs, completed/remaining work, artifacts and blocker context; the replacement gets a new ID and its own ready gate. Deletion settles the old run's records, sends no answer keys and force-closes a pane whose runner does not answer. Preserve unknown process/receipt outcomes until evidence resolves them.
 
 A multiplexer failure calls for diagnosis of the recorded Director placement and server and the target placement. Registry existence alone proves no physical pane presence. Resolve connectivity before selecting destructive recovery.
-
-#### Inspect and recover
-
-Read stored identities with `member show --json` and diagnose without mutation through `doctor`; failed health holds input and preserves interactions. Run `member recover MEMBER_ID --from-member-id <my-member-id> --json` for exclusive bounded recovery; it sends no answer keys and launches no replacement agent, and [member recover](../reference/cli.md#member-recover) owns its replay and outcomes.
-
-For unreadable owner identity, pass `--owner-terminated` only with operator evidence bound to the inspected run/epoch snapshot. Preserve unknown process/receipt outcomes until evidence resolves them. Coordinate owned shutdown before authorized pane/registry cleanup and retain unconfirmed-child diagnostics.
 
 ### Shutdown
 

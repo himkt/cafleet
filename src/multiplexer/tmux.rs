@@ -169,18 +169,6 @@ impl Multiplexer for TmuxMultiplexer {
         self.core.send_keys(&argv, deadline)
     }
 
-    fn send_text(
-        &self,
-        pane_id: &str,
-        text: &str,
-        deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError> {
-        let argv = self
-            .core
-            .argv(&["tmux", "send-keys", "-t", pane_id, "-l", text]);
-        self.core.send_text(&argv, deadline)
-    }
-
     fn window_height(&self, window_id: &str, _anchors: &[String]) -> Result<i64, MultiplexerError> {
         let out = self.display(window_id, "#{window_height}")?;
         out.trim()
@@ -408,63 +396,52 @@ mod tests {
     }
 
     #[test]
-    fn pane_process_reads_the_pane_pid_on_the_recorded_server() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Ok("%3|400625\n".to_string()));
-        assert_eq!(
-            on_server(runner.clone()).pane_process("%3").unwrap(),
-            Some(400625)
-        );
-        assert_eq!(
-            runner.run_argvs(),
-            vec![tmux(&[
-                "display-message",
-                "-p",
-                "-t",
-                "%3",
-                "#{pane_id}|#{pane_pid}",
-            ])]
-        );
-    }
-
-    #[test]
-    fn pane_process_of_an_empty_or_other_pane_id_is_none() {
-        for reply in ["|\n", "|400625\n", "%4|400625\n", "%30|400625\n"] {
+    fn pane_process_reads_the_pid_of_the_matching_pane_only() {
+        for (name, reply, expected) in [
+            ("matching pane", Ok("%3|400625\n"), Ok(Some(400625))),
+            ("empty pane id and pid", Ok("|\n"), Ok(None)),
+            ("empty pane id", Ok("|400625\n"), Ok(None)),
+            ("other pane", Ok("%4|400625\n"), Ok(None)),
+            ("pane id with the same prefix", Ok("%30|400625\n"), Ok(None)),
+            ("non-integer pid", Ok("%3|abc\n"), Err("%3|abc")),
+            ("empty pid", Ok("%3|\n"), Err("%3|")),
+            ("zero pid", Ok("%3|0\n"), Err("%3|0")),
+            ("negative pid", Ok("%3|-5\n"), Err("%3|-5")),
+            ("pid with a suffix", Ok("%3|12x\n"), Err("%3|12x")),
+            (
+                "command failure",
+                Err("no server running on /tmp/tmux-1000/default"),
+                Err(""),
+            ),
+        ] {
             let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok(reply.to_string()));
+            runner.respond(reply.map(String::from).map_err(failed_error));
+            let result = on_server(runner.clone()).pane_process("%3");
+            match expected {
+                Ok(pid) => assert_eq!(result.unwrap(), pid, "{name}"),
+                Err(detail) => {
+                    let error = result.unwrap_err().to_string();
+                    assert!(error.contains(detail), "{name}: {error}");
+                    if reply.is_ok() {
+                        assert!(
+                            error.starts_with("unexpected tmux display-message output: "),
+                            "{name}: {error}"
+                        );
+                    }
+                }
+            }
             assert_eq!(
-                on_server(runner.clone()).pane_process("%3").unwrap(),
-                None,
-                "{reply:?}"
-            );
-            assert_eq!(runner.run_argvs().len(), 1);
-        }
-    }
-
-    #[test]
-    fn pane_process_with_a_matching_pane_and_a_non_positive_integer_pid_fails() {
-        for reply in ["%3|abc\n", "%3|\n", "%3|0\n", "%3|-5\n", "%3|12x\n"] {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok(reply.to_string()));
-            let error = on_server(runner)
-                .pane_process("%3")
-                .unwrap_err()
-                .to_string();
-            assert!(
-                error.starts_with("unexpected tmux display-message output: ")
-                    && error.contains(reply.trim_end()),
-                "{reply:?}: {error}"
+                runner.run_argvs(),
+                vec![tmux(&[
+                    "display-message",
+                    "-p",
+                    "-t",
+                    "%3",
+                    "#{pane_id}|#{pane_pid}",
+                ])],
+                "{name}"
             );
         }
-    }
-
-    #[test]
-    fn pane_process_propagates_a_command_failure() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "no server running on /tmp/tmux-1000/default".to_string(),
-        }));
-        assert!(on_server(runner).pane_process("%3").is_err());
     }
 
     #[test]
@@ -540,195 +517,179 @@ mod tests {
         call
     }
 
-    fn failed(stderr: &str) -> Result<String, RunError> {
-        Err(RunError::Failed {
+    fn failed_error(stderr: &str) -> RunError {
+        RunError::Failed {
             stderr: stderr.into(),
-        })
+        }
+    }
+
+    fn failed(stderr: &str) -> Result<String, RunError> {
+        Err(failed_error(stderr))
     }
 
     mod spawn {
         use crate::multiplexer::tmux::tests::*;
 
+        struct SpawnCase {
+            name: &'static str,
+            target: PaneTarget,
+            title: &'static str,
+            replies: Vec<Result<String, RunError>>,
+            spawned: (&'static str, &'static str),
+            calls: Vec<Vec<String>>,
+        }
+
+        fn ok(reply: &str) -> Result<String, RunError> {
+            Ok(reply.into())
+        }
+
         #[test]
-        fn a_column_with_members_splits_below_its_last_pane_then_names_and_equalizes() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("%9\n".into()));
-            runner.succeed(1);
-            runner.respond(Ok("%0|0\n%2|61\n%5|61\n%9|61\n".into()));
-            runner.succeed(1);
-            let spawned = on_server(runner.clone())
-                .spawn_member_pane(
-                    &column(ColumnSide::Right, &["%2", "%5"], &["%0"]),
-                    "drafter",
-                    CWD,
-                    &command(),
-                )
-                .unwrap();
-            assert_eq!(
-                spawned,
-                SpawnedPane {
-                    pane_id: "%9".into(),
-                    window_id: "@1".into(),
+        fn spawn_member_pane_splits_names_and_equalizes_each_target() {
+            let split_below = |target: &str| {
+                with_command(&[
+                    "split-window",
+                    "-v",
+                    "-d",
+                    "-t",
+                    target,
+                    "-P",
+                    "-F",
+                    "#{pane_id}",
+                ])
+            };
+            let cases = [
+                SpawnCase {
+                    name: "a column with members splits below its last pane",
+                    target: column(ColumnSide::Right, &["%2", "%5"], &["%0"]),
+                    title: "drafter",
+                    replies: vec![
+                        ok("%9\n"),
+                        ok(""),
+                        ok("%0|0\n%2|61\n%5|61\n%9|61\n"),
+                        ok(""),
+                    ],
+                    spawned: ("%9", "@1"),
+                    calls: vec![
+                        split_below("%5"),
+                        tmux(&["select-pane", "-t", "%9", "-T", "drafter"]),
+                        tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
+                        tmux(&["select-layout", "-E", "-t", "%2"]),
+                    ],
+                },
+                SpawnCase {
+                    name: "an empty right column takes a full-height right half and needs no layout",
+                    target: column(ColumnSide::Right, &[], &["%0"]),
+                    title: "drafter",
+                    replies: vec![ok("%9\n"), ok(""), ok("%0|0\n%9|61\n")],
+                    spawned: ("%9", "@1"),
+                    calls: vec![
+                        with_command(&[
+                            "split-window",
+                            "-h",
+                            "-f",
+                            "-l",
+                            "50%",
+                            "-d",
+                            "-t",
+                            "%0",
+                            "-P",
+                            "-F",
+                            "#{pane_id}",
+                        ]),
+                        tmux(&["select-pane", "-t", "%9", "-T", "drafter"]),
+                        tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
+                    ],
+                },
+                SpawnCase {
+                    name: "an empty left column takes a full-height left half before the other column",
+                    target: column(ColumnSide::Left, &[], &["%3", "%4"]),
+                    title: "reviewer",
+                    replies: vec![ok("%9\n"), ok(""), ok("%9|0\n%3|61\n%4|61\n"), ok("")],
+                    spawned: ("%9", "@1"),
+                    calls: vec![
+                        with_command(&[
+                            "split-window",
+                            "-h",
+                            "-f",
+                            "-b",
+                            "-l",
+                            "50%",
+                            "-d",
+                            "-t",
+                            "%3",
+                            "-P",
+                            "-F",
+                            "#{pane_id}",
+                        ]),
+                        tmux(&["select-pane", "-t", "%9", "-T", "reviewer"]),
+                        tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
+                        tmux(&["select-layout", "-E", "-t", "%3"]),
+                    ],
+                },
+                SpawnCase {
+                    name: "a new window opens detached and named in the session with the cwd",
+                    target: new_window(),
+                    title: "tester",
+                    replies: vec![ok("@6|%12\n"), ok(""), ok("%12|0\n")],
+                    spawned: ("%12", "@6"),
+                    calls: vec![
+                        with_command(&[
+                            "new-window",
+                            "-d",
+                            "-t",
+                            "main:",
+                            "-n",
+                            "cafleet-3-1",
+                            "-c",
+                            CWD,
+                            "-P",
+                            "-F",
+                            "#{window_id}|#{pane_id}",
+                        ]),
+                        tmux(&["select-pane", "-t", "%12", "-T", "tester"]),
+                        tmux(&["list-panes", "-t", "@6", "-F", LIST_FORMAT]),
+                    ],
+                },
+                SpawnCase {
+                    name: "equalization runs once per column of two or more panes",
+                    target: column(ColumnSide::Right, &["%10", "%11"], &["%7", "%8"]),
+                    title: "worker",
+                    replies: vec![
+                        ok("%9\n"),
+                        ok(""),
+                        ok("%7|0\n%8|0\n%9|61\n%10|61\n%11|61\n"),
+                        ok(""),
+                        ok(""),
+                    ],
+                    spawned: ("%9", "@1"),
+                    calls: vec![
+                        split_below("%11"),
+                        tmux(&["select-pane", "-t", "%9", "-T", "worker"]),
+                        tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
+                        tmux(&["select-layout", "-E", "-t", "%7"]),
+                        tmux(&["select-layout", "-E", "-t", "%9"]),
+                    ],
+                },
+            ];
+            for case in cases {
+                let runner = FakeRunner::with_binary("tmux");
+                for reply in case.replies {
+                    runner.respond(reply);
                 }
-            );
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    with_command(&[
-                        "split-window",
-                        "-v",
-                        "-d",
-                        "-t",
-                        "%5",
-                        "-P",
-                        "-F",
-                        "#{pane_id}"
-                    ]),
-                    tmux(&["select-pane", "-t", "%9", "-T", "drafter"]),
-                    tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
-                    tmux(&["select-layout", "-E", "-t", "%2"]),
-                ]
-            );
-        }
-
-        #[test]
-        fn an_empty_right_column_takes_a_full_height_right_half_beside_the_other_column() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("%9\n".into()));
-            runner.succeed(1);
-            runner.respond(Ok("%0|0\n%9|61\n".into()));
-            let spawned = on_server(runner.clone())
-                .spawn_member_pane(
-                    &column(ColumnSide::Right, &[], &["%0"]),
-                    "drafter",
-                    CWD,
-                    &command(),
-                )
-                .unwrap();
-            assert_eq!(spawned.pane_id, "%9");
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    with_command(&[
-                        "split-window",
-                        "-h",
-                        "-f",
-                        "-l",
-                        "50%",
-                        "-d",
-                        "-t",
-                        "%0",
-                        "-P",
-                        "-F",
-                        "#{pane_id}",
-                    ]),
-                    tmux(&["select-pane", "-t", "%9", "-T", "drafter"]),
-                    tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
-                ],
-                "single-pane columns need no select-layout"
-            );
-        }
-
-        #[test]
-        fn an_empty_left_column_takes_a_full_height_left_half_before_the_other_column() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("%9\n".into()));
-            runner.succeed(1);
-            runner.respond(Ok("%9|0\n%3|61\n%4|61\n".into()));
-            runner.succeed(1);
-            on_server(runner.clone())
-                .spawn_member_pane(
-                    &column(ColumnSide::Left, &[], &["%3", "%4"]),
-                    "reviewer",
-                    CWD,
-                    &command(),
-                )
-                .unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    with_command(&[
-                        "split-window",
-                        "-h",
-                        "-f",
-                        "-b",
-                        "-l",
-                        "50%",
-                        "-d",
-                        "-t",
-                        "%3",
-                        "-P",
-                        "-F",
-                        "#{pane_id}",
-                    ]),
-                    tmux(&["select-pane", "-t", "%9", "-T", "reviewer"]),
-                    tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
-                    tmux(&["select-layout", "-E", "-t", "%3"]),
-                ]
-            );
-        }
-
-        #[test]
-        fn a_new_window_opens_detached_named_in_the_session_with_the_cwd() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("@6|%12\n".into()));
-            runner.succeed(1);
-            runner.respond(Ok("%12|0\n".into()));
-            let spawned = on_server(runner.clone())
-                .spawn_member_pane(&new_window(), "tester", CWD, &command())
-                .unwrap();
-            assert_eq!(
-                spawned,
-                SpawnedPane {
-                    pane_id: "%12".into(),
-                    window_id: "@6".into(),
-                }
-            );
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    with_command(&[
-                        "new-window",
-                        "-d",
-                        "-t",
-                        "main:",
-                        "-n",
-                        "cafleet-3-1",
-                        "-c",
-                        CWD,
-                        "-P",
-                        "-F",
-                        "#{window_id}|#{pane_id}",
-                    ]),
-                    tmux(&["select-pane", "-t", "%12", "-T", "tester"]),
-                    tmux(&["list-panes", "-t", "@6", "-F", LIST_FORMAT]),
-                ]
-            );
-        }
-
-        #[test]
-        fn equalization_runs_once_per_column_of_two_or_more_panes() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("%9\n".into()));
-            runner.succeed(1);
-            runner.respond(Ok("%7|0\n%8|0\n%9|61\n%10|61\n%11|61\n".into()));
-            runner.succeed(2);
-            on_server(runner.clone())
-                .spawn_member_pane(
-                    &column(ColumnSide::Right, &["%10", "%11"], &["%7", "%8"]),
-                    "worker",
-                    CWD,
-                    &command(),
-                )
-                .unwrap();
-            let calls = runner.run_argvs();
-            assert_eq!(
-                calls[3..],
-                [
-                    tmux(&["select-layout", "-E", "-t", "%7"]),
-                    tmux(&["select-layout", "-E", "-t", "%9"]),
-                ]
-            );
+                let spawned = on_server(runner.clone())
+                    .spawn_member_pane(&case.target, case.title, CWD, &command())
+                    .unwrap();
+                assert_eq!(
+                    spawned,
+                    SpawnedPane {
+                        pane_id: case.spawned.0.into(),
+                        window_id: case.spawned.1.into(),
+                    },
+                    "{}",
+                    case.name
+                );
+                assert_eq!(runner.run_argvs(), case.calls, "{}", case.name);
+            }
         }
 
         #[test]
@@ -768,63 +729,62 @@ mod tests {
         }
 
         #[test]
-        fn a_failed_or_empty_split_reply_leaves_pane_cleanup_unknown() {
-            for reply in [Ok("   \n".to_string()), failed("split failed")] {
+        fn a_failed_or_malformed_creation_reply_leaves_pane_cleanup_unknown() {
+            let split = || column(ColumnSide::Right, &["%2"], &["%0"]);
+            for (name, target, reply, message) in [
+                (
+                    "blank split reply",
+                    split(),
+                    ok("   \n"),
+                    "pane ID unknown; pane cleanup unconfirmed",
+                ),
+                (
+                    "failed split",
+                    split(),
+                    failed("split failed"),
+                    "pane ID unknown; pane cleanup unconfirmed",
+                ),
+                (
+                    "empty new-window reply",
+                    new_window(),
+                    ok("\n"),
+                    "unexpected tmux new-window output: ",
+                ),
+                (
+                    "new-window reply without a pane",
+                    new_window(),
+                    ok("@6\n"),
+                    "unexpected tmux new-window output: \"@6",
+                ),
+                (
+                    "new-window reply with an empty pane",
+                    new_window(),
+                    ok("@6|\n"),
+                    "unexpected tmux new-window output: \"@6|",
+                ),
+                (
+                    "new-window reply without a window",
+                    new_window(),
+                    ok("|%12\n"),
+                    "unexpected tmux new-window output: \"|%12",
+                ),
+                (
+                    "failed new-window",
+                    new_window(),
+                    failed("no server running"),
+                    "",
+                ),
+            ] {
                 let runner = FakeRunner::with_binary("tmux");
                 runner.respond(reply);
                 let error = on_server(runner.clone())
-                    .spawn_member_pane(
-                        &column(ColumnSide::Right, &["%2"], &["%0"]),
-                        "drafter",
-                        CWD,
-                        &command(),
-                    )
+                    .spawn_member_pane(&target, "drafter", CWD, &command())
                     .unwrap_err();
-                assert_eq!(error.pane_cleanup(), Some(&PaneCleanup::Unknown));
-                assert!(
-                    error
-                        .to_string()
-                        .contains("pane ID unknown; pane cleanup unconfirmed")
-                );
-                assert_eq!(runner.run_argvs().len(), 1);
+                assert_eq!(error.pane_cleanup(), Some(&PaneCleanup::Unknown), "{name}");
+                let text = error.to_string();
+                assert!(text.contains(message), "{name}: {text}");
+                assert_eq!(runner.run_argvs().len(), 1, "{name}");
             }
-        }
-
-        #[test]
-        fn a_malformed_new_window_reply_leaves_pane_cleanup_unknown() {
-            for reply in ["\n", "@6\n", "@6|\n", "|%12\n"] {
-                let runner = FakeRunner::with_binary("tmux");
-                runner.respond(Ok(reply.into()));
-                let error = on_server(runner.clone())
-                    .spawn_member_pane(&new_window(), "tester", CWD, &command())
-                    .unwrap_err();
-                assert_eq!(
-                    error.pane_cleanup(),
-                    Some(&PaneCleanup::Unknown),
-                    "{reply:?}"
-                );
-                let message = error.to_string();
-                assert!(
-                    message.starts_with(&format!("unexpected tmux new-window output: {reply:?}"))
-                        || message.starts_with(&format!(
-                            "unexpected tmux new-window output: {:?}",
-                            reply.trim()
-                        )),
-                    "{reply:?}: {message}"
-                );
-                assert_eq!(runner.run_argvs().len(), 1, "{reply:?}");
-            }
-        }
-
-        #[test]
-        fn a_failed_new_window_command_leaves_pane_cleanup_unknown() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(failed("no server running"));
-            let error = on_server(runner.clone())
-                .spawn_member_pane(&new_window(), "tester", CWD, &command())
-                .unwrap_err();
-            assert_eq!(error.pane_cleanup(), Some(&PaneCleanup::Unknown));
-            assert_eq!(runner.run_argvs().len(), 1);
         }
     }
 
@@ -835,120 +795,121 @@ mod tests {
 
         #[test]
         fn rename_window_targets_the_recorded_socket_and_concrete_window() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.succeed(1);
-            on_server(runner.clone())
-                .rename_window("@17", "cafleet-42-0")
-                .unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![tmux(&["rename-window", "-t", "@17", "cafleet-42-0"])]
-            );
-        }
-
-        #[test]
-        fn rename_window_propagates_command_failure() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(failed("rename denied"));
-            let error = on_server(runner.clone())
-                .rename_window("@17", "cafleet-42-0")
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("rename denied"), "{error}");
-            assert_eq!(
-                runner.run_argvs(),
-                vec![tmux(&["rename-window", "-t", "@17", "cafleet-42-0"])]
-            );
+            for (name, reply, denied) in [
+                ("rename succeeds", Ok(String::new()), false),
+                ("rename fails", failed("rename denied"), true),
+            ] {
+                let runner = FakeRunner::with_binary("tmux");
+                runner.respond(reply);
+                let result = on_server(runner.clone()).rename_window("@17", "cafleet-42-0");
+                match result {
+                    Ok(()) => assert!(!denied, "{name}"),
+                    Err(error) => {
+                        assert!(denied, "{name}");
+                        assert!(
+                            error.to_string().contains("rename denied"),
+                            "{name}: {error}"
+                        );
+                    }
+                }
+                assert_eq!(
+                    runner.run_argvs(),
+                    vec![tmux(&["rename-window", "-t", "@17", "cafleet-42-0"])],
+                    "{name}"
+                );
+            }
         }
 
         #[test]
         fn window_name_reads_the_named_window_and_keeps_every_separator_after_the_first() {
-            for (reply, expected) in [
-                ("@1|main\n", "main"),
-                ("@1|\n", ""),
-                ("@1|agents|left\n", "agents|left"),
-                ("@1| agents | left \n", " agents | left "),
-                ("@1|agents\r\n", "agents\r"),
-                ("@1|agents\n\n", "agents\n"),
-                ("@1|\r\n\n", "\r\n"),
+            for (name, reply, expected) in [
+                ("plain name", Ok("@1|main\n"), Ok("main")),
+                ("empty name", Ok("@1|\n"), Ok("")),
+                (
+                    "name with a separator",
+                    Ok("@1|agents|left\n"),
+                    Ok("agents|left"),
+                ),
+                (
+                    "name with spaces",
+                    Ok("@1| agents | left \n"),
+                    Ok(" agents | left "),
+                ),
+                ("name ending in CR", Ok("@1|agents\r\n"), Ok("agents\r")),
+                (
+                    "name with a trailing blank line",
+                    Ok("@1|agents\n\n"),
+                    Ok("agents\n"),
+                ),
+                ("name of CR LF", Ok("@1|\r\n\n"), Ok("\r\n")),
+                ("blank reply", Ok("\n"), Err(true)),
+                ("empty reply", Ok(""), Err(true)),
+                ("reply without a window", Ok("main\n"), Err(true)),
+                ("other window", Ok("@2|main\n"), Err(true)),
+                ("empty window id", Ok("|main\n"), Err(true)),
+                ("command failure", Err("no server running"), Err(false)),
             ] {
                 let runner = FakeRunner::with_binary("tmux");
-                runner.respond(Ok(reply.into()));
-                assert_eq!(
-                    on_server(runner.clone()).window_name("@1").unwrap(),
-                    expected,
-                    "{reply:?}"
-                );
+                runner.respond(reply.map(String::from).map_err(failed_error));
+                let result = on_server(runner.clone()).window_name("@1");
+                match expected {
+                    Ok(expected) => assert_eq!(result.unwrap(), expected, "{name}"),
+                    Err(output) => {
+                        let error = result.unwrap_err().to_string();
+                        assert_eq!(
+                            error.starts_with("unexpected tmux display-message output: "),
+                            output,
+                            "{name}: {error}"
+                        );
+                    }
+                }
                 assert_eq!(
                     runner.run_argvs(),
-                    vec![tmux(&["display-message", "-p", "-t", "@1", NAME_FORMAT])]
+                    vec![tmux(&["display-message", "-p", "-t", "@1", NAME_FORMAT])],
+                    "{name}"
                 );
             }
-        }
-
-        #[test]
-        fn window_name_rejects_an_empty_or_other_window_reply() {
-            for reply in ["\n", "", "main\n", "@2|main\n", "|main\n"] {
-                let runner = FakeRunner::with_binary("tmux");
-                runner.respond(Ok(reply.into()));
-                let error = on_server(runner).window_name("@1").unwrap_err().to_string();
-                assert!(
-                    error.starts_with("unexpected tmux display-message output: "),
-                    "{reply:?}: {error}"
-                );
-            }
-        }
-
-        #[test]
-        fn window_name_propagates_a_command_failure() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(failed("no server running"));
-            assert!(on_server(runner).window_name("@1").is_err());
         }
 
         #[test]
         fn window_height_reads_the_window_by_id_and_ignores_the_anchors() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("120\n".into()));
-            assert_eq!(
-                on_server(runner.clone())
-                    .window_height("@4", &argv(&["%5", "%6"]))
-                    .unwrap(),
-                120
-            );
-            assert_eq!(
-                runner.run_argvs(),
-                vec![tmux(&[
-                    "display-message",
-                    "-p",
-                    "-t",
-                    "@4",
-                    "#{window_height}"
-                ])]
-            );
-        }
-
-        #[test]
-        fn window_height_rejects_an_empty_or_non_positive_integer_reply() {
-            for reply in ["\n", "", "abc\n", "0\n", "-3\n", "12x\n", "4.5\n"] {
+            for (name, reply, expected) in [
+                ("positive height", Ok("120\n"), Ok(120)),
+                ("blank reply", Ok("\n"), Err(true)),
+                ("empty reply", Ok(""), Err(true)),
+                ("non-integer", Ok("abc\n"), Err(true)),
+                ("zero", Ok("0\n"), Err(true)),
+                ("negative", Ok("-3\n"), Err(true)),
+                ("integer with a suffix", Ok("12x\n"), Err(true)),
+                ("fraction", Ok("4.5\n"), Err(true)),
+                ("command failure", Err("no server running"), Err(false)),
+            ] {
                 let runner = FakeRunner::with_binary("tmux");
-                runner.respond(Ok(reply.into()));
-                let error = on_server(runner)
-                    .window_height("@4", &[])
-                    .unwrap_err()
-                    .to_string();
-                assert!(
-                    error.starts_with("unexpected tmux display-message output: "),
-                    "{reply:?}: {error}"
+                runner.respond(reply.map(String::from).map_err(failed_error));
+                let result = on_server(runner.clone()).window_height("@4", &argv(&["%5", "%6"]));
+                match expected {
+                    Ok(expected) => assert_eq!(result.unwrap(), expected, "{name}"),
+                    Err(output) => {
+                        let error = result.unwrap_err().to_string();
+                        assert_eq!(
+                            error.starts_with("unexpected tmux display-message output: "),
+                            output,
+                            "{name}: {error}"
+                        );
+                    }
+                }
+                assert_eq!(
+                    runner.run_argvs(),
+                    vec![tmux(&[
+                        "display-message",
+                        "-p",
+                        "-t",
+                        "@4",
+                        "#{window_height}"
+                    ])],
+                    "{name}"
                 );
             }
-        }
-
-        #[test]
-        fn window_height_propagates_a_command_failure() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(failed("no server running"));
-            assert!(on_server(runner).window_height("@4", &[]).is_err());
         }
     }
 
@@ -956,71 +917,76 @@ mod tests {
         use crate::multiplexer::tmux::tests::*;
 
         #[test]
-        fn compensation_kill_closes_then_equalizes_every_column_of_the_given_window() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.succeed(1);
-            runner.respond(Ok("%0|0\n%2|61\n%3|61\n".into()));
-            runner.succeed(1);
-            on_server(runner.clone()).kill_pane("%7", "@1").unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    tmux(&["kill-pane", "-t", "%7"]),
-                    tmux(&["list-panes", "-t", "@1", "-F", LIST_FORMAT]),
-                    tmux(&["select-layout", "-E", "-t", "%2"]),
-                ]
-            );
-        }
-
-        #[test]
-        fn kill_pane_tolerates_only_pane_gone_close_failures() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(failed("No Such Pane: %5"));
-            runner.respond(Ok("%0|0\n".into()));
-            on_server(runner.clone()).kill_pane("%5", "@1").unwrap();
-            assert_eq!(runner.run_argvs()[0], tmux(&["kill-pane", "-t", "%5"]));
-
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(failed("server exited unexpectedly"));
-            assert!(
-                on_server(runner.clone()).kill_pane("%5", "@1").is_err(),
-                "close never swallows a non-pane-gone failure"
-            );
-            assert_eq!(runner.run_argvs().len(), 1);
-        }
-
-        #[test]
-        fn kill_pane_restoration_is_best_effort() {
-            for (list, layout) in [
-                (failed("server exited unexpectedly"), None),
+        fn kill_pane_closes_then_equalizes_the_window_and_tolerates_only_a_gone_pane() {
+            let kill = |pane: &str| tmux(&["kill-pane", "-t", pane]);
+            let list = |window: &str| tmux(&["list-panes", "-t", window, "-F", LIST_FORMAT]);
+            let layout = |pane: &str| tmux(&["select-layout", "-E", "-t", pane]);
+            for (name, pane, window, replies, closes, calls) in [
                 (
-                    Ok("%0|0\n%2|61\n%3|61\n".to_string()),
-                    Some(failed("layout boom")),
+                    "close then equalize every column",
+                    "%7",
+                    "@1",
+                    vec![
+                        Ok(String::new()),
+                        Ok("%0|0\n%2|61\n%3|61\n".into()),
+                        Ok(String::new()),
+                    ],
+                    true,
+                    vec![kill("%7"), list("@1"), layout("%2")],
+                ),
+                (
+                    "a gone pane still restores the window",
+                    "%5",
+                    "@1",
+                    vec![failed("No Such Pane: %5"), Ok("%0|0\n".into())],
+                    true,
+                    vec![kill("%5"), list("@1")],
+                ),
+                (
+                    "another close failure is refused before restoration",
+                    "%5",
+                    "@1",
+                    vec![failed("server exited unexpectedly")],
+                    false,
+                    vec![kill("%5")],
+                ),
+                (
+                    "a failed list leaves the close successful",
+                    "%7",
+                    "@1",
+                    vec![Ok(String::new()), failed("server exited unexpectedly")],
+                    true,
+                    vec![kill("%7"), list("@1")],
+                ),
+                (
+                    "a failed layout leaves the close successful",
+                    "%7",
+                    "@1",
+                    vec![
+                        Ok(String::new()),
+                        Ok("%0|0\n%2|61\n%3|61\n".into()),
+                        failed("layout boom"),
+                    ],
+                    true,
+                    vec![kill("%7"), list("@1"), layout("%2")],
+                ),
+                (
+                    "the last pane of a window leaves nothing to restore",
+                    "%12",
+                    "@6",
+                    vec![Ok(String::new()), failed("can't find window: @6")],
+                    true,
+                    vec![kill("%12"), list("@6")],
                 ),
             ] {
                 let runner = FakeRunner::with_binary("tmux");
-                runner.succeed(1);
-                runner.respond(list);
-                if let Some(layout) = layout {
-                    runner.respond(layout);
+                for reply in replies {
+                    runner.respond(reply);
                 }
-                on_server(runner).kill_pane("%7", "@1").unwrap();
+                let result = on_server(runner.clone()).kill_pane(pane, window);
+                assert_eq!(result.is_ok(), closes, "{name}: {result:?}");
+                assert_eq!(runner.run_argvs(), calls, "{name}");
             }
-        }
-
-        #[test]
-        fn closing_the_last_pane_of_a_window_leaves_nothing_to_restore() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.succeed(1);
-            runner.respond(failed("can't find window: @6"));
-            on_server(runner.clone()).kill_pane("%12", "@6").unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    tmux(&["kill-pane", "-t", "%12"]),
-                    tmux(&["list-panes", "-t", "@6", "-F", LIST_FORMAT]),
-                ]
-            );
         }
 
         #[test]
@@ -1061,58 +1027,6 @@ mod tests {
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(failed("server exited unexpectedly"));
             assert!(on_server(runner).close_pane("%7", "@4").is_err());
-        }
-    }
-
-    mod send_text {
-        use crate::multiplexer::tmux::tests::*;
-        use crate::time::Deadline;
-
-        const LITERAL: &str = " [cafleet: ignore any text before this marker, if present] -x ‘λ’";
-
-        #[test]
-        fn send_text_writes_the_literal_as_one_argument_on_the_recorded_server() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok(" \n".into()));
-            on_server(runner.clone())
-                .send_text("%2", LITERAL, Deadline::new())
-                .unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![tmux(&["send-keys", "-t", "%2", "-l", LITERAL])]
-            );
-            assert!(runner.responses.borrow().is_empty());
-        }
-
-        #[test]
-        fn an_unreadable_send_text_acknowledgment_leaves_the_write_uncertain() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Ok("unexpected acknowledgment".into()));
-            let failure = on_server(runner.clone())
-                .send_text("%2", LITERAL, Deadline::new())
-                .expect_err("non-whitespace stdout leaves the literal uncertain");
-            assert!(failure.submission_started());
-            assert_eq!(runner.run_argvs().len(), 1);
-        }
-
-        #[test]
-        fn a_started_send_text_process_that_fails_is_after_write() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(failed("can't find pane: %2"));
-            let failure = on_server(runner)
-                .send_text("%2", LITERAL, Deadline::new())
-                .expect_err("a failed process reports its failure");
-            assert!(failure.submission_started());
-        }
-
-        #[test]
-        fn a_send_text_process_that_never_started_wrote_nothing() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.respond(Err(RunError::NotStarted("spawn refused".into())));
-            let failure = on_server(runner)
-                .send_text("%2", LITERAL, Deadline::new())
-                .expect_err("an unstarted process reports its failure");
-            assert!(!failure.submission_started());
         }
     }
 }

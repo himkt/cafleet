@@ -1,8 +1,6 @@
 use crate::broker::runtime as storage;
-use crate::broker::runtime::DecisionSource;
 use crate::broker::runtime::DeliveryProjection;
 use crate::broker::runtime::DeliveryStatus;
-use crate::broker::runtime::DirectorMode;
 use crate::broker::runtime::InputDisposition;
 use crate::broker::runtime::InputKind;
 use crate::broker::runtime::InputState;
@@ -14,7 +12,6 @@ use crate::coding_agent::catalog::AnswerKey;
 use crate::coding_agent::catalog::ChoiceScope;
 use crate::coding_agent::catalog::valid_choice_id;
 use crate::runtime::*;
-use rusqlite::Connection;
 use serde::Deserializer;
 use serde::de::DeserializeOwned;
 use serde::de::IgnoredAny;
@@ -164,13 +161,10 @@ stored_enum!(SubmissionStatus, "submission.status", {
     Held => "held",
     Rejected => "rejected",
     Uncertain => "uncertain",
-    LeftInComposer => "left_in_composer",
 });
 stored_enum!(SubmissionStage, "submission.stage", {
     ZeroBytes => "zero_bytes",
-    EscapeOnly => "escape_only",
     Partial => "partial",
-    LiteralComplete => "literal_complete",
     Submitted => "submitted",
     Unknown => "unknown",
 });
@@ -228,11 +222,6 @@ pub(crate) struct PermissionRespondInput {
     pub(crate) request_token: String,
     #[serde(flatten, with = "answer_wire")]
     pub(crate) key: AnswerKey,
-    pub(crate) decision_source: DecisionSource,
-    pub(crate) director_mode: DirectorMode,
-    pub(crate) mode_evidence_ref: String,
-    pub(crate) decision_evidence_ref: String,
-    pub(crate) operation_key: String,
 }
 impl PermissionRespondInput {
     pub(crate) fn inspection(&self) -> PermissionInspectInput {
@@ -243,6 +232,8 @@ impl PermissionRespondInput {
         }
     }
 }
+/// A permission answer's reply. Its `submission` carries the status, stage, output sequence and
+/// reason; a permission answer has no input receipt, so `input_id` and `delivery` are absent.
 #[derive(Deserialize)]
 pub(crate) struct PermissionResponseResult {
     #[serde(flatten)]
@@ -254,7 +245,6 @@ pub(crate) struct PermissionResponseResult {
     pub(crate) event_id: i64,
     #[serde(flatten, with = "answer_wire")]
     pub(crate) key: AnswerKey,
-    pub(crate) decision_source: DecisionSource,
 }
 
 /// The wire's separate `decision` and `choice` fields, exactly one of them non-null.
@@ -348,7 +338,6 @@ pub(crate) struct PermissionInspection {
 pub(crate) struct SubmitInput {
     pub(crate) operation_key: String,
     pub(crate) input_kind: InputKind,
-    pub(crate) message_id: Option<i64>,
     pub(crate) literal: String,
 }
 #[derive(Serialize, Deserialize)]
@@ -368,51 +357,6 @@ pub(crate) enum ReceiptAction {
         evidence_ref: String,
     },
 }
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum FlushWriteOutcome {
-    Acknowledged,
-    NotStarted,
-    Uncertain,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub(crate) enum FlushAction {
-    Reserve {
-        director_member_id: i64,
-        #[serde(rename = "reservation_expires_at_mono_ns")]
-        expires_at_mono_ns: u64,
-    },
-    Settle {
-        flush_input_id: i64,
-        outcome: FlushWriteOutcome,
-    },
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum FlushReply {
-    Refused {
-        cause: String,
-    },
-    Empty,
-    Reserved {
-        flush_input_id: i64,
-        literal: String,
-        submit_key: String,
-        settle_ms: u64,
-        flushed_input_ids: Vec<i64>,
-        message_ids: Vec<i64>,
-        remaining_input_ids: Vec<i64>,
-    },
-    Settled {
-        flush_input_id: i64,
-    },
-    NotOutstanding {
-        flush_input_id: i64,
-        state: InputState,
-        disposition: Option<InputDisposition>,
-    },
-}
 #[derive(Serialize, Deserialize)]
 pub(crate) struct InputControlRequest {
     pub(crate) identity: ControlIdentity,
@@ -428,7 +372,6 @@ pub(crate) enum InputControlOperation {
     PermissionInspect(PermissionInspectInput),
     PermissionRespond(PermissionRespondInput),
     Receipt(ReceiptAction),
-    Flush(FlushAction),
 }
 pub(crate) enum ReceiptReply {
     Missing,
@@ -448,7 +391,6 @@ pub(crate) enum InputControlReply {
     Inspection(Box<PermissionInspection>),
     PermissionResponse(PermissionResponseResult),
     Receipt(ReceiptReply),
-    Flush(FlushReply),
 }
 
 struct UniqueValue(Value);
@@ -561,7 +503,6 @@ impl<'de> Deserialize<'de> for InputRoute {
                                     | "permission_inspect"
                                     | "permission_respond"
                                     | "receipt"
-                                    | "flush"
                             )
                         });
                     } else {
@@ -653,15 +594,11 @@ impl InputControlRequest {
                     "valid single-line input literal required",
                 )?;
                 let prompt = matches!(self.operation, InputControlOperation::SubmitPrompt(_));
-                let valid_kind = match (prompt, input.input_kind, input.message_id) {
-                    (true, InputKind::Preview, Some(id)) => id > 0,
-                    (true, InputKind::Prompt, None) | (false, InputKind::Exec, None) => true,
-                    _ => false,
-                };
-                ensure(
-                    valid_kind,
-                    "control input kind and message must match the operation",
-                )
+                let valid_kind = matches!(
+                    (prompt, input.input_kind),
+                    (true, InputKind::Prompt) | (false, InputKind::Exec)
+                );
+                ensure(valid_kind, "control input kind must match the operation")
             }
             InputControlOperation::PermissionInspect(input) => {
                 positive(&[
@@ -695,24 +632,8 @@ impl InputControlRequest {
                 evidence_ref,
                 ..
             }) => {
-                validate_permission_reference(evidence_ref)?;
+                validate_evidence_reference(evidence_ref)?;
                 positive(&[*input_id])
-            }
-            InputControlOperation::Flush(FlushAction::Reserve {
-                director_member_id,
-                expires_at_mono_ns,
-            }) => {
-                ensure(
-                    *director_member_id == identity.director_member_id,
-                    "control Director identity mismatch",
-                )?;
-                ensure(
-                    *expires_at_mono_ns > 0,
-                    "positive flush reservation expiration required",
-                )
-            }
-            InputControlOperation::Flush(FlushAction::Settle { flush_input_id, .. }) => {
-                positive(&[*flush_input_id])
             }
         }
     }
@@ -825,7 +746,6 @@ enum ResultWire {
     Inspection { request: Value },
     PermissionResponse { response: Value },
     Receipt { receipt: ReceiptWire },
-    Flush { flush: FlushReply },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -907,7 +827,7 @@ fn validate_inspection(inspection: &PermissionInspection) -> Result<()> {
                 && inspection.classification == Some(InteractionClass::Question)),
         "control inspection choices belong only to a question",
     )?;
-    crate::broker::runtime::evidence::validate(&inspection.evidence)
+    crate::broker::runtime::validate_evidence(&inspection.evidence)
         .map_err(|_| error("invalid control inspection evidence"))
 }
 
@@ -932,7 +852,10 @@ fn validate_reply(reply: &InputControlReply) -> Result<()> {
         InputControlReply::Submission(submission) => validate_submission(submission),
         InputControlReply::Inspection(inspection) => validate_inspection(inspection),
         InputControlReply::PermissionResponse(response) => {
-            positive_input(&response.submission)?;
+            ensure(
+                response.submission.input_id.is_none() && response.submission.delivery.is_none(),
+                "a permission response carries no input receipt",
+            )?;
             positive(&[
                 response.member_id,
                 response.run_id,
@@ -957,30 +880,6 @@ fn validate_reply(reply: &InputControlReply) -> Result<()> {
         InputControlReply::Receipt(
             ReceiptReply::Retired { input_id } | ReceiptReply::Settled { input_id },
         ) => positive(&[*input_id]),
-        InputControlReply::Flush(FlushReply::Refused { cause }) => {
-            ensure(!cause.trim().is_empty(), "a flush refusal names its cause")
-        }
-        InputControlReply::Flush(FlushReply::Empty) => Ok(()),
-        InputControlReply::Flush(FlushReply::Reserved {
-            flush_input_id,
-            flushed_input_ids,
-            message_ids,
-            remaining_input_ids,
-            ..
-        }) => {
-            positive(&[*flush_input_id])?;
-            positive(flushed_input_ids)?;
-            positive(message_ids)?;
-            positive(remaining_input_ids)?;
-            ensure(
-                !flushed_input_ids.is_empty() && flushed_input_ids.len() == message_ids.len(),
-                "a flush reservation pairs each preview with its message",
-            )
-        }
-        InputControlReply::Flush(
-            FlushReply::Settled { flush_input_id }
-            | FlushReply::NotOutstanding { flush_input_id, .. },
-        ) => positive(&[*flush_input_id]),
     }
 }
 
@@ -1018,7 +917,6 @@ fn decode_result(result: ResultWire) -> Result<InputControlReply> {
             ReceiptWire::Retired { input_id, .. } => ReceiptReply::Retired { input_id },
             ReceiptWire::Settled { input_id, .. } => ReceiptReply::Settled { input_id },
         }),
-        ResultWire::Flush { flush } => InputControlReply::Flush(flush),
     })
 }
 
@@ -1061,7 +959,6 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
                 && result.run_id == input.expected_run_id
                 && result.owner_epoch == input.expected_owner_epoch
                 && result.key == input.key
-                && result.decision_source == input.decision_source
         }
         (InputControlOperation::Receipt(action), InputControlReply::Receipt(result)) => {
             match (action, result) {
@@ -1079,23 +976,6 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
                     },
                     ReceiptReply::Settled { input_id },
                 ) => expected == input_id,
-                _ => false,
-            }
-        }
-        (InputControlOperation::Flush(action), InputControlReply::Flush(result)) => {
-            match (action, result) {
-                (
-                    FlushAction::Reserve { .. },
-                    FlushReply::Refused { .. } | FlushReply::Empty | FlushReply::Reserved { .. },
-                ) => true,
-                (
-                    FlushAction::Settle {
-                        flush_input_id: expected,
-                        ..
-                    },
-                    FlushReply::Settled { flush_input_id }
-                    | FlushReply::NotOutstanding { flush_input_id, .. },
-                ) => expected == flush_input_id,
                 _ => false,
             }
         }
@@ -1154,9 +1034,6 @@ fn encode_result(reply: &InputControlReply) -> Result<ResultWire> {
                 },
             },
         },
-        InputControlReply::Flush(flush) => ResultWire::Flush {
-            flush: flush.clone(),
-        },
     })
 }
 
@@ -1173,9 +1050,9 @@ pub(in crate::runtime) fn encode_input_reply(
     encode_reply(result)
 }
 
-pub(super) fn pause(deadline: Instant) -> Result<()> {
-    check_deadline(Instant::now(), deadline)?;
-    nap_until(deadline);
+pub(super) fn pause(deadline: Instant, clock: &dyn crate::time::Clock) -> Result<()> {
+    check_deadline(clock.now(), deadline)?;
+    nap_until(clock, deadline);
     Ok(())
 }
 pub(super) struct ControlClient {
@@ -1194,15 +1071,28 @@ impl ControlClient {
     pub(crate) fn stream_mut(&mut self) -> &mut UnixStream {
         &mut self.stream
     }
-    pub(super) fn connect(path: &Path, deadline: Instant) -> Result<Self> {
-        Self::connect_in_phase(path, deadline, EndpointPhase::Ready)
+    pub(super) fn connect(
+        path: &Path,
+        deadline: Instant,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<Self> {
+        Self::connect_in_phase(path, deadline, EndpointPhase::Ready, clock)
     }
 
-    pub(super) fn connect_starting(path: &Path, deadline: Instant) -> Result<Self> {
-        Self::connect_in_phase(path, deadline, EndpointPhase::Starting)
+    pub(super) fn connect_starting(
+        path: &Path,
+        deadline: Instant,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<Self> {
+        Self::connect_in_phase(path, deadline, EndpointPhase::Starting, clock)
     }
 
-    fn connect_in_phase(path: &Path, deadline: Instant, phase: EndpointPhase) -> Result<Self> {
+    fn connect_in_phase(
+        path: &Path,
+        deadline: Instant,
+        phase: EndpointPhase,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<Self> {
         use nix::sys::socket::AddressFamily;
         use nix::sys::socket::SockFlag;
         use nix::sys::socket::SockType;
@@ -1210,14 +1100,14 @@ impl ControlClient {
         use nix::sys::socket::connect;
         use nix::sys::socket::socket;
         loop {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             let meta = match std::fs::symlink_metadata(path) {
                 Ok(meta) => meta,
                 Err(cause)
                     if cause.kind() == ErrorKind::NotFound
                         && matches!(phase, EndpointPhase::Starting) =>
                 {
-                    pause(deadline)?;
+                    pause(deadline, clock)?;
                     continue;
                 }
                 Err(cause) => return Err(io_error(cause)),
@@ -1228,7 +1118,7 @@ impl ControlClient {
             )?;
             if meta.mode() & 0o777 != 0o600 {
                 if matches!(phase, EndpointPhase::Starting) {
-                    pause(deadline)?;
+                    pause(deadline, clock)?;
                     continue;
                 }
                 return Err(error("private control socket identity required"));
@@ -1257,11 +1147,11 @@ impl ControlClient {
                         decoder: ControlDecoder::new(),
                     });
                 }
-                Err(nix::errno::Errno::EAGAIN) => pause(deadline)?,
+                Err(nix::errno::Errno::EAGAIN) => pause(deadline, clock)?,
                 Err(nix::errno::Errno::ECONNREFUSED | nix::errno::Errno::ENOENT)
                     if matches!(phase, EndpointPhase::Starting) =>
                 {
-                    pause(deadline)?;
+                    pause(deadline, clock)?;
                 }
                 Err(cause) => return Err(io_error(cause)),
             }
@@ -1271,40 +1161,47 @@ impl ControlClient {
         &mut self,
         request: &LifecycleRequest,
         deadline: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<Value> {
         let bytes = encode_control_frame(&wire(request)?)?;
-        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let frame = self.exchange_bytes(&bytes, deadline, clock)?;
         decode_reply(frame.body())
     }
     pub(super) fn exchange_input(
         &mut self,
         request: &InputControlRequest,
         deadline: Instant,
+        clock: &dyn crate::time::Clock,
     ) -> Result<InputControlReply> {
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(clock.now(), deadline)?;
         let bytes = encode_input_request(request)?;
-        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let frame = self.exchange_bytes(&bytes, deadline, clock)?;
         let reply = decode_input_reply(frame.body(), request)?;
-        check_deadline(Instant::now(), deadline)?;
+        check_deadline(clock.now(), deadline)?;
         Ok(reply)
     }
-    fn exchange_bytes(&mut self, bytes: &[u8], deadline: Instant) -> Result<AdmittedControlFrame> {
+    fn exchange_bytes(
+        &mut self,
+        bytes: &[u8],
+        deadline: Instant,
+        clock: &dyn crate::time::Clock,
+    ) -> Result<AdmittedControlFrame> {
         let mut offset = 0;
         while offset < bytes.len() {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             match self.stream.write(&bytes[offset..]) {
                 Ok(0) => return Err(error("control endpoint disconnected during write")),
                 Ok(count) => offset += count,
                 Err(cause)
                     if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
                 {
-                    pause(deadline)?
+                    pause(deadline, clock)?
                 }
                 Err(cause) => return Err(io_error(cause)),
             }
         }
         loop {
-            check_deadline(Instant::now(), deadline)?;
+            check_deadline(clock.now(), deadline)?;
             let mut bytes = [0; 4096];
             match self.stream.read(&mut bytes) {
                 Ok(0) => {
@@ -1312,7 +1209,7 @@ impl ControlClient {
                     return Err(error("control endpoint disconnected before reply"));
                 }
                 Ok(count) => {
-                    let observed_at = Instant::now();
+                    let observed_at = clock.now();
                     let frames = self.decoder.feed_admitted(&bytes[..count], observed_at)?;
                     if !frames.is_empty() {
                         ensure(frames.len() == 1, "unexpected multiple control replies")?;
@@ -1323,7 +1220,7 @@ impl ControlClient {
                 Err(cause)
                     if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
                 {
-                    pause(deadline)?
+                    pause(deadline, clock)?
                 }
                 Err(cause) => return Err(io_error(cause)),
             }
@@ -1334,18 +1231,21 @@ pub(super) fn request(
     run: &RunRecord,
     request: LifecycleRequest,
     deadline: Instant,
+    clock: &dyn crate::time::Clock,
 ) -> Result<Value> {
     let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
-    ControlClient::connect(&paths.control_socket, deadline)?.exchange(&request, deadline)
+    ControlClient::connect(&paths.control_socket, deadline, clock)?
+        .exchange(&request, deadline, clock)
 }
 
 pub(crate) fn request_shutdown(
     conn: &mut rusqlite::Connection,
     run: &RunRecord,
     deadline: Instant,
+    clock: &dyn crate::time::Clock,
 ) -> Result<ShutdownOutcome> {
     validate_run_paths(conn, run)?;
-    let result = request(run, LifecycleRequest::shutdown(run), deadline)?;
+    let result = request(run, LifecycleRequest::shutdown(run), deadline, clock)?;
     let outcome: ShutdownOutcome = serde_json::from_value(result).map_err(io_error)?;
     let current = storage::get_run(conn, run.run_id)?;
     ensure(
@@ -1398,8 +1298,12 @@ impl HealthSnapshot {
         }
     }
 }
-pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-    let reply = request(run, LifecycleRequest::health(run), deadline)?;
+pub(crate) fn probe_health(
+    run: &RunRecord,
+    deadline: Instant,
+    clock: &dyn crate::time::Clock,
+) -> Result<HealthSnapshot> {
+    let reply = request(run, LifecycleRequest::health(run), deadline, clock)?;
     HealthSnapshot::decode(reply, run)
 }
 /// A doctor row's status, ordered by severity.
@@ -1420,223 +1324,6 @@ impl CheckStatus {
             Self::Error => "error",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MemberState {
-    Running,
-    NotResponding,
-    LostRuntime,
-    InterruptedLaunch,
-    AgentExited,
-    DeletedWithLeftoverRuntime,
-    CheckFailed,
-    NotChecked,
-    Ended,
-}
-
-impl MemberState {
-    /// Summary order of the states doctor prints; `Ended` is hidden from the summary.
-    pub(crate) const SUMMARY_ORDER: [Self; 8] = [
-        Self::Running,
-        Self::NotResponding,
-        Self::LostRuntime,
-        Self::InterruptedLaunch,
-        Self::AgentExited,
-        Self::DeletedWithLeftoverRuntime,
-        Self::CheckFailed,
-        Self::NotChecked,
-    ];
-
-    pub(crate) fn token(self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::NotResponding => "not_responding",
-            Self::LostRuntime => "lost_runtime",
-            Self::InterruptedLaunch => "interrupted_launch",
-            Self::AgentExited => "agent_exited",
-            Self::DeletedWithLeftoverRuntime => "deleted_with_leftover_runtime",
-            Self::CheckFailed => "check_failed",
-            Self::NotChecked => "not_checked",
-            Self::Ended => "ended",
-        }
-    }
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::NotResponding => "not responding",
-            Self::LostRuntime => "lost runtime",
-            Self::InterruptedLaunch => "interrupted launch",
-            Self::AgentExited => "agent exited",
-            Self::DeletedWithLeftoverRuntime => "deleted with leftover runtime",
-            Self::CheckFailed => "could not be checked",
-            Self::NotChecked => "not checked (time limit)",
-            Self::Ended => "ended",
-        }
-    }
-
-    pub(crate) fn status(self) -> CheckStatus {
-        match self {
-            Self::Running => CheckStatus::Ok,
-            Self::NotChecked | Self::Ended => CheckStatus::Info,
-            Self::CheckFailed => CheckStatus::Error,
-            Self::NotResponding
-            | Self::LostRuntime
-            | Self::InterruptedLaunch
-            | Self::AgentExited
-            | Self::DeletedWithLeftoverRuntime => CheckStatus::Warn,
-        }
-    }
-
-    /// Next commands with `ID` standing for the member ID and `DIRECTOR` for its fleet's
-    /// Director ID.
-    pub(crate) fn next_commands(self) -> &'static [&'static str] {
-        const RECOVER: &str = "cafleet member recover ID --from-member-id DIRECTOR";
-        match self {
-            Self::Running | Self::Ended => &[],
-            Self::NotResponding | Self::InterruptedLaunch | Self::DeletedWithLeftoverRuntime => {
-                &[RECOVER]
-            }
-            Self::LostRuntime => &[RECOVER, "cafleet member delete ID"],
-            Self::AgentExited => &["cafleet member delete ID"],
-            Self::CheckFailed => &["cafleet doctor --verbose"],
-            Self::NotChecked => &["cafleet member show ID"],
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-enum OwnerLockProbe {
-    Held,
-    Free,
-    Failed(String),
-}
-
-#[derive(Debug, Clone)]
-enum HealthProbe {
-    Answered,
-    Skipped,
-    Failed(String),
-}
-
-enum RuntimeProbes {
-    InvalidPaths(String),
-    Observed {
-        descriptor_leftover: bool,
-        lock: OwnerLockProbe,
-        health: HealthProbe,
-    },
-}
-
-impl RuntimeProbes {
-    pub(crate) fn classify(self) -> RuntimeDiagnosis {
-        let (descriptor_leftover, lock, health) = match self {
-            Self::InvalidPaths(cause) => {
-                return RuntimeDiagnosis {
-                    state: MemberState::InterruptedLaunch,
-                    diagnostics: vec![format!("runtime files are invalid: {cause}")],
-                };
-            }
-            Self::Observed {
-                descriptor_leftover,
-                lock,
-                health,
-            } => (descriptor_leftover, lock, health),
-        };
-        let held = match lock {
-            OwnerLockProbe::Held => true,
-            OwnerLockProbe::Free => false,
-            OwnerLockProbe::Failed(cause) => {
-                return RuntimeDiagnosis {
-                    state: MemberState::CheckFailed,
-                    diagnostics: vec![cause],
-                };
-            }
-        };
-        let mut diagnostics = Vec::new();
-        if descriptor_leftover {
-            diagnostics.push("launch descriptor left over".to_owned());
-        }
-        diagnostics.push(
-            if held {
-                "owner lock is held"
-            } else {
-                "owner lock is free"
-            }
-            .to_owned(),
-        );
-        let health_state = match health {
-            HealthProbe::Answered => {
-                diagnostics.push("runtime answered the health probe".to_owned());
-                MemberState::Running
-            }
-            HealthProbe::Skipped => MemberState::NotChecked,
-            HealthProbe::Failed(cause) => {
-                diagnostics.push(format!("runtime did not answer the health probe: {cause}"));
-                if held {
-                    MemberState::NotResponding
-                } else {
-                    MemberState::LostRuntime
-                }
-            }
-        };
-        let state = if descriptor_leftover {
-            MemberState::InterruptedLaunch
-        } else {
-            health_state
-        };
-        RuntimeDiagnosis { state, diagnostics }
-    }
-}
-
-pub(crate) struct RuntimeDiagnosis {
-    pub(crate) state: MemberState,
-    pub(crate) diagnostics: Vec<String>,
-}
-/// Diagnoses `run_id` through its own read-only connection to the registry file at `source`.
-pub(crate) fn diagnose_runtime_at(
-    source: &str,
-    run_id: i64,
-    deadline: Instant,
-) -> Result<RuntimeDiagnosis> {
-    let mut observed = crate::db::connect_read_only(&format!("sqlite:///{source}"))?;
-    with_database_deadline(&mut observed, deadline, |conn| {
-        diagnose_runtime_observed(conn, run_id, deadline)
-    })
-}
-fn diagnose_runtime_observed(
-    conn: &Connection,
-    run_id: i64,
-    deadline: Instant,
-) -> Result<RuntimeDiagnosis> {
-    check_deadline(Instant::now(), deadline)?;
-    let run = storage::get_run(conn, run_id)?;
-    let probes = match validate_run_paths(conn, &run) {
-        Ok(paths) => {
-            let descriptor_leftover = paths.descriptor.try_exists().map_err(io_error)?;
-            let lock = match RunLock::acquire(conn, &run.owner()) {
-                Ok(Some(_)) => OwnerLockProbe::Free,
-                Ok(None) => OwnerLockProbe::Held,
-                Err(cause) => OwnerLockProbe::Failed(cause.message().into_owned()),
-            };
-            let health = if Instant::now() < deadline {
-                match probe_health(&run, deadline) {
-                    Ok(_) => HealthProbe::Answered,
-                    Err(cause) => HealthProbe::Failed(cause.to_string()),
-                }
-            } else {
-                HealthProbe::Skipped
-            };
-            RuntimeProbes::Observed {
-                descriptor_leftover,
-                lock,
-                health,
-            }
-        }
-        Err(cause) => RuntimeProbes::InvalidPaths(cause.to_string()),
-    };
-    Ok(probes.classify())
 }
 
 #[cfg(test)]
@@ -1883,10 +1570,6 @@ mod tests {
             statuses.map(CheckStatus::as_str),
             ["ok", "info", "warn", "error"]
         );
-        assert_eq!(MemberState::Running.status(), CheckStatus::Ok);
-        assert_eq!(MemberState::CheckFailed.status(), CheckStatus::Error);
-        assert_eq!(MemberState::LostRuntime.status(), CheckStatus::Warn);
-        assert_eq!(MemberState::Ended.status(), CheckStatus::Info);
     }
 
     mod input_frames_tests {
@@ -2235,7 +1918,7 @@ mod tests {
                             write_fixture_bytes(&mut stream, &[byte], deadline);
                         }
                     });
-                    let observed = probe_health(&run, deadline);
+                    let observed = probe_health(&run, deadline, &crate::time::SystemClock);
                     assert_eq!(observed.is_ok(), valid, "{observed:?}");
                     if let Ok(health) = observed {
                         assert_eq!(health.output_seq, 7);
@@ -2275,14 +1958,13 @@ mod tests {
                 operation: InputControlOperation::SubmitPrompt(SubmitInput {
                     operation_key: "fixture:typed-client".into(),
                     input_kind: InputKind::Prompt,
-                    message_id: None,
                     literal: "literal 世界 '$x'".into(),
                 }),
             }
         }
         fn expected(fixture: &Fixture) -> Value {
             let run = &fixture.run;
-            json!({"protocol_version":1,"kind":"submit_prompt","identity":{"database_identity_json":run.database_identity_json,"fleet_id":run.fleet_id,"member_id":run.member_id,"director_member_id":run.director_member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce},"expires_at_mono_ns":50_000_000_000u64,"operation_key":"fixture:typed-client","input_kind":"prompt","message_id":null,"literal":"literal 世界 '$x'"})
+            json!({"protocol_version":1,"kind":"submit_prompt","identity":{"database_identity_json":run.database_identity_json,"fleet_id":run.fleet_id,"member_id":run.member_id,"director_member_id":run.director_member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce},"expires_at_mono_ns":50_000_000_000u64,"operation_key":"fixture:typed-client","input_kind":"prompt","literal":"literal 世界 '$x'"})
         }
         fn reply(status: &str, stage: &str) -> Vec<u8> {
             let reason = if status == "accepted" {
@@ -2407,7 +2089,6 @@ mod tests {
                 Ok(InputControlReply::Inspection(_)) => "Ok(Inspection)".into(),
                 Ok(InputControlReply::PermissionResponse(_)) => "Ok(PermissionResponse)".into(),
                 Ok(InputControlReply::Receipt(_)) => "Ok(Receipt)".into(),
-                Ok(InputControlReply::Flush(reply)) => format!("Ok(Flush {reply:?})"),
             }
         }
         /// Runs `work` as a scoped peer while `exchange` runs here, then stops and joins the peer.
@@ -2450,7 +2131,7 @@ mod tests {
             let until = Instant::now() + Duration::from_secs(1);
             let stop = AtomicBool::new(false);
             write_peer(&mut peer, response, &stop, until).unwrap();
-            let result = client.exchange_input(&request(fixture), until);
+            let result = client.exchange_input(&request(fixture), until, &crate::time::SystemClock);
             let actual = read_request(&mut peer, &stop, until).unwrap();
             (result, actual)
         }
@@ -2484,8 +2165,11 @@ mod tests {
                     })
                 },
                 || {
-                    client
-                        .exchange_input(&request(&fixture), Instant::now() + Duration::from_secs(1))
+                    client.exchange_input(
+                        &request(&fixture),
+                        Instant::now() + Duration::from_secs(1),
+                        &crate::time::SystemClock,
+                    )
                 },
             );
             accepted(result);
@@ -2516,7 +2200,8 @@ mod tests {
             let stop = AtomicBool::new(false);
             write_peer(&mut peer, &good[..good.len() - 1], &stop, until).unwrap();
             peer.shutdown(Shutdown::Write).unwrap();
-            let result = client.exchange_input(&request(&fixture), until);
+            let result =
+                client.exchange_input(&request(&fixture), until, &crate::time::SystemClock);
             let actual = read_request(&mut peer, &stop, until).unwrap();
             assert!(result.is_err());
             assert_eq!(actual, expected(&fixture));
@@ -2528,7 +2213,11 @@ mod tests {
             let expired = Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .unwrap();
-            assert!(client.exchange_input(&request(&fixture), expired).is_err());
+            assert!(
+                client
+                    .exchange_input(&request(&fixture), expired, &crate::time::SystemClock)
+                    .is_err()
+            );
             let mut byte = [0];
             let observation_deadline = Instant::now() + Duration::from_millis(100);
             loop {
@@ -2574,7 +2263,11 @@ mod tests {
                     })
                 },
                 || {
-                    let result = client.exchange_input(&request(&fixture), deadline);
+                    let result = client.exchange_input(
+                        &request(&fixture),
+                        deadline,
+                        &crate::time::SystemClock,
+                    );
                     returned = Some(Instant::now());
                     result
                 },
@@ -2689,8 +2382,13 @@ mod tests {
                     })
                 },
                 || {
-                    let mut client = ControlClient::connect(&path, deadline).unwrap();
-                    let result = client.exchange_input(&request(&fixture), deadline);
+                    let mut client =
+                        ControlClient::connect(&path, deadline, &crate::time::SystemClock).unwrap();
+                    let result = client.exchange_input(
+                        &request(&fixture),
+                        deadline,
+                        &crate::time::SystemClock,
+                    );
                     returned_at = Some(Instant::now());
                     returned_signal.store(true, Ordering::Release);
                     result
@@ -2762,7 +2460,11 @@ mod tests {
                     }
                 };
                 let started = Instant::now();
-                let result = probe_health(&endpoint.fixture.run, started + Duration::from_secs(1));
+                let result = probe_health(
+                    &endpoint.fixture.run,
+                    started + Duration::from_secs(1),
+                    &crate::time::SystemClock,
+                );
                 assert!(result.is_err(), "{result:?}");
                 assert!(started.elapsed() < Duration::from_millis(500));
                 if matches!(interval, StartupInterval::BeforePrivateMode) {
@@ -2786,7 +2488,14 @@ mod tests {
         let _server = SilentServer::start(&artifacts.paths.control_socket);
         let before = std::fs::read(fixture.conn.path().unwrap()).unwrap();
         let start = Instant::now();
-        assert!(probe_health(&fixture.run, start + Duration::from_millis(80)).is_err());
+        assert!(
+            probe_health(
+                &fixture.run,
+                start + Duration::from_millis(80),
+                &crate::time::SystemClock
+            )
+            .is_err()
+        );
         assert!(start.elapsed() < Duration::from_millis(750));
         assert_eq!(std::fs::read(fixture.conn.path().unwrap()).unwrap(), before);
     }
@@ -2795,7 +2504,7 @@ mod tests {
         use crate::runtime::control::tests::*;
 
         fn wire(run: &RunRecord) -> serde_json::Value {
-            json!({"identity":ControlIdentity::from_run(run),"runner":{"pid":run.runner_pid.unwrap(),"start_identity":run.runner_start_identity.as_ref().unwrap()},"child":{"pid":run.child_pid.unwrap(),"start_identity":run.child_start_identity.as_ref().unwrap()},"output_seq":17,"observation":{"visibility":"unknown","eligibility":{"state":"hold","reason":"unknown"},"pending_count":0,"pending_evidence":false,"gap_count":0,"degraded":false,"diagnostic":null}})
+            json!({"identity":ControlIdentity::from_run(run),"runner":{"pid":run.runner_pid.unwrap(),"start_identity":run.runner_start_identity.as_ref().unwrap()},"child":{"pid":run.child_pid.unwrap(),"start_identity":run.child_start_identity.as_ref().unwrap()},"output_seq":17,"observation":{"visibility":"unknown","eligibility":{"state":"hold","reason":"unknown"},"pending_count":0,"gap_count":0,"degraded":false,"diagnostic":null}})
         }
 
         #[test]
@@ -2816,7 +2525,6 @@ mod tests {
                 let mut value = wire(&fixture.run);
                 value["observation"]["visibility"] = json!(visibility);
                 value["observation"]["pending_count"] = json!(130);
-                value["observation"]["pending_evidence"] = json!(true);
                 value["observation"]["degraded"] = json!(true);
                 value["observation"]["diagnostic"] = json!("sink_unavailable");
                 let decoded = HealthSnapshot::decode(value, &fixture.run).unwrap();
@@ -2876,7 +2584,6 @@ mod tests {
                 "obscured",
                 "unknown",
                 "pending_count",
-                "pending_evidence",
                 "degraded",
             ] {
                 let mut value = wire(&fixture.run);
@@ -2884,7 +2591,7 @@ mod tests {
                 value["observation"]["eligibility"] = json!({"state":"composer_empty"});
                 match field {
                     "pending_count" => value["observation"][field] = json!(1),
-                    "pending_evidence" | "degraded" => value["observation"][field] = json!(true),
+                    "degraded" => value["observation"][field] = json!(true),
                     _ => value["observation"]["visibility"] = json!(field),
                 }
                 assert!(
@@ -2916,141 +2623,7 @@ mod tests {
         }
     }
 
-    mod recovery_entry {
-        use std::io::Write;
-        use std::os::unix::fs::MetadataExt;
-        use std::path::PathBuf;
-
-        use crate::runtime::control::tests::*;
-
-        const SPOOL_CANARY: &[u8] = b"private-recovery-diagnosis-canary:not-a-complete-valid-frame";
-
-        fn registry_snapshot(conn: &Connection) -> Vec<crate::db::test_support::TableSnapshot> {
-            crate::db::test_support::table_snapshot(conn, |_| true)
-        }
-
-        #[derive(Debug, PartialEq)]
-        struct FileSnapshot {
-            path: PathBuf,
-            device: u64,
-            inode: u64,
-            mode: u32,
-            bytes: Vec<u8>,
-        }
-
-        #[derive(Debug, PartialEq)]
-        struct OwnedArtifacts {
-            directories: Vec<(PathBuf, u64, u64, u32)>,
-            files: Vec<FileSnapshot>,
-        }
-
-        fn owned_snapshot(
-            fixture: &Fixture,
-            artifacts: &RunArtifacts,
-            held: &RunLock,
-        ) -> OwnedArtifacts {
-            held.validate(&fixture.conn, &fixture.run.owner()).unwrap();
-            let directories = [&artifacts.paths.namespace_dir, &artifacts.paths.run_dir]
-                .into_iter()
-                .map(|path| {
-                    let metadata = std::fs::symlink_metadata(path).unwrap();
-                    assert!(metadata.is_dir());
-                    (
-                        path.clone(),
-                        metadata.dev(),
-                        metadata.ino(),
-                        metadata.mode(),
-                    )
-                })
-                .collect();
-            let files = [
-                &artifacts.paths.namespace_manifest,
-                &artifacts.paths.owner_lock,
-                &artifacts.paths.outbox,
-                &artifacts.paths.descriptor,
-            ]
-            .into_iter()
-            .map(|path| {
-                let metadata = std::fs::symlink_metadata(path).unwrap();
-                assert!(metadata.is_file());
-                FileSnapshot {
-                    path: path.clone(),
-                    device: metadata.dev(),
-                    inode: metadata.ino(),
-                    mode: metadata.mode(),
-                    bytes: std::fs::read(path).unwrap(),
-                }
-            })
-            .collect();
-            OwnedArtifacts { directories, files }
-        }
-
-        fn seed_owned_spool(fixture: &Fixture, artifacts: &RunArtifacts, held: &RunLock) {
-            held.validate(&fixture.conn, &fixture.run.owner()).unwrap();
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&artifacts.paths.outbox)
-                .unwrap();
-            file.write_all(SPOOL_CANARY).unwrap();
-            file.sync_all().unwrap();
-            artifacts
-                .write_descriptor(&LaunchDescriptor::new(&fixture.run, fixture.spec()).unwrap())
-                .unwrap();
-        }
-
-        fn diagnose_without_content_effects(fixture: &Fixture, expected_lock: &str) {
-            let started = Instant::now();
-            let diagnosis = crate::runtime::control::diagnose_runtime_at(
-                fixture.conn.path().unwrap(),
-                fixture.run.run_id,
-                started + Duration::from_millis(80),
-            )
-            .unwrap();
-            assert!(started.elapsed() < Duration::from_millis(750));
-            assert_eq!(diagnosis.state, MemberState::InterruptedLaunch);
-            assert_eq!(
-                diagnosis.diagnostics[..2],
-                ["launch descriptor left over", expected_lock]
-            );
-            let text = diagnosis.diagnostics.join("\n");
-            assert!(!text.contains(std::str::from_utf8(SPOOL_CANARY).unwrap()));
-        }
-
-        #[test]
-        fn runner_recovery_entry_doctor_preserves_held_owner_corrupt_spool_rows_and_identities() {
-            let mut fixture = Fixture::new();
-            let (artifacts, held) = activate(&mut fixture);
-            seed_owned_spool(&fixture, &artifacts, &held);
-            let before_rows = registry_snapshot(&fixture.conn);
-            let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
-            diagnose_without_content_effects(&fixture, "owner lock is held");
-            assert_eq!(registry_snapshot(&fixture.conn), before_rows);
-            assert_eq!(
-                owned_snapshot(&fixture, &artifacts, &held),
-                before_artifacts
-            );
-        }
-
-        #[test]
-        fn runner_recovery_entry_doctor_preserves_available_owner_corrupt_spool_without_takeover() {
-            let mut fixture = Fixture::new();
-            let (artifacts, held) = activate(&mut fixture);
-            seed_owned_spool(&fixture, &artifacts, &held);
-            let before_rows = registry_snapshot(&fixture.conn);
-            let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
-            drop(held);
-            diagnose_without_content_effects(&fixture, "owner lock is free");
-            let held = RunLock::acquire_released(&fixture.conn, &fixture.run.owner())
-                .unwrap()
-                .expect("diagnosis releases its probe and preserves the original owner identity");
-            assert_eq!(registry_snapshot(&fixture.conn), before_rows);
-            assert_eq!(
-                owned_snapshot(&fixture, &artifacts, &held),
-                before_artifacts
-            );
-        }
-    }
+    mod recovery_entry {}
 
     use serde_json::Value;
 
@@ -3058,7 +2631,7 @@ mod tests {
         fixture: Fixture,
     }
 
-    const OPERATIONS: [(&str, Option<&str>); 9] = [
+    const OPERATIONS: [(&str, Option<&str>); 7] = [
         ("submit_prompt", None),
         ("submit_exec", None),
         ("permission_inspect", None),
@@ -3066,8 +2639,6 @@ mod tests {
         ("receipt", Some("query")),
         ("receipt", Some("retire")),
         ("receipt", Some("reconcile")),
-        ("flush", Some("reserve")),
-        ("flush", Some("settle")),
     ];
 
     #[test]
@@ -3100,33 +2671,23 @@ mod tests {
                 "expires_at_mono_ns":50_000_000_000u64});
             let fields = match kind {
                 "submit_prompt" => {
-                    json!({"operation_key":"fixture:prompt","input_kind":"prompt","message_id":null,"literal":"literal 世界 '$x'"})
+                    json!({"operation_key":"fixture:prompt","input_kind":"prompt","literal":"literal 世界 '$x'"})
                 }
                 "submit_exec" => {
-                    json!({"operation_key":"fixture:exec","input_kind":"exec","message_id":null,"literal":"printf literal"})
+                    json!({"operation_key":"fixture:exec","input_kind":"exec","literal":"printf literal"})
                 }
                 "permission_inspect" => {
                     json!({"interaction_id":12,"event_id":11,"director_member_id":run.director_member_id})
                 }
                 "permission_respond" => {
                     json!({"interaction_id":12,"event_id":11,"director_member_id":run.director_member_id,
-                    "expected_run_id":run.run_id,"expected_owner_epoch":run.owner_epoch,"request_token":"a".repeat(64),"decision":"allow","choice":null,
-                    "decision_source":"director-auto","director_mode":"auto","mode_evidence_ref":"fixture:mode","decision_evidence_ref":"fixture:decision","operation_key":"fixture:response"})
+                    "expected_run_id":run.run_id,"expected_owner_epoch":run.owner_epoch,"request_token":"a".repeat(64),"decision":"allow","choice":null})
                 }
                 "receipt" => match action.expect("receipt fixture specifies its action") {
                     "query" => json!({"action":"query","operation_key":"fixture:query"}),
                     "retire" => json!({"action":"retire","input_id":13}),
                     "reconcile" => {
                         json!({"action":"reconcile","input_id":13,"expected_state":"uncertain","disposition":"submitted","evidence_ref":"fixture:settlement"})
-                    }
-                    _ => unreachable!(),
-                },
-                "flush" => match action.expect("flush fixture specifies its action") {
-                    "reserve" => {
-                        json!({"action":"reserve","director_member_id":run.director_member_id,"reservation_expires_at_mono_ns":40_000_000_000u64})
-                    }
-                    "settle" => {
-                        json!({"action":"settle","flush_input_id":15,"outcome":"acknowledged"})
                     }
                     _ => unreachable!(),
                 },
@@ -3140,7 +2701,7 @@ mod tests {
         }
         fn inspection(&self, supported: bool) -> Value {
             let run = &self.fixture.run;
-            let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({
+            let evidence=crate::broker::runtime::metadata_evidence(&json!({
                 "backend":"codex","native_version":run.native_version,"rule_id":"fixture-wire-evidence","screen_seq":2,
                 "operation":null,"choices":null,"excerpt":null,"truncated":false
             })).unwrap();
@@ -3180,8 +2741,8 @@ mod tests {
         }
         fn response(&self) -> Value {
             let run = &self.fixture.run;
-            json!({"status":"accepted","input_id":13,"member_id":run.member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,
-                "interaction_id":12,"event_id":11,"decision":"allow","choice":null,"decision_source":"director-auto","stage":"submitted","output_seq":2,"reason":null})
+            json!({"status":"accepted","member_id":run.member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,
+                "interaction_id":12,"event_id":11,"decision":"allow","choice":null,"stage":"submitted","output_seq":2,"reason":null})
         }
         fn choice_response(&self, choice: &str) -> Value {
             let mut value = self.response();
@@ -3193,14 +2754,22 @@ mod tests {
     fn bytes(value: &Value) -> Vec<u8> {
         serde_json::to_vec(value).unwrap()
     }
+    #[track_caller]
     fn decoded(value: &Value) -> InputControlRequest {
-        decode_input_request(&bytes(value)).unwrap()
+        decode_input_request(&bytes(value))
+            .unwrap_or_else(|error| panic!("{value} decodes: {error}"))
     }
+    /// The decoder accepts `good` and refuses `bad`; a failure names the caller's line and the
+    /// refused case's bytes.
+    #[track_caller]
     fn rejection(good: &Value, bad: &[u8]) -> CafleetError {
         decoded(good);
         match decode_input_request(bad) {
             Err(error) => error,
-            Ok(_) => panic!("invalid original request rejects"),
+            Ok(_) => panic!(
+                "invalid original request rejects: {}",
+                String::from_utf8_lossy(bad)
+            ),
         }
     }
     fn prefix(value: &Value, fields: &str) -> Vec<u8> {
@@ -3248,14 +2817,20 @@ mod tests {
         result[field] = payload;
         json!({"protocol_version":1,"result":result})
     }
+    #[track_caller]
     fn decoded_reply(good: &Value, request: &Value) -> InputControlReply {
-        decode_input_reply(&bytes(good), &decoded(request)).unwrap()
+        decode_input_reply(&bytes(good), &decoded(request))
+            .unwrap_or_else(|error| panic!("{good} decodes for {request}: {error}"))
     }
+    /// The decoder accepts `good` and refuses `bad` for `request`; a failure names the caller's
+    /// line and the refused case's bytes.
+    #[track_caller]
     fn reject_reply(good: &Value, bad: &[u8], request: &Value) {
         decoded_reply(good, request);
         assert!(
             decode_input_reply(bad, &decoded(request)).is_err(),
-            "invalid original reply rejects"
+            "invalid original reply rejects: {}",
+            String::from_utf8_lossy(bad)
         );
     }
     fn assert_submission(actual: &SubmissionResult, expected: &Value) {
@@ -3308,12 +2883,10 @@ mod tests {
             match request.operation {
                 InputControlOperation::SubmitPrompt(input) => {
                     assert_eq!(input.input_kind, InputKind::Prompt);
-                    assert_eq!(input.message_id, None);
                     assert_eq!(input.literal, value["literal"].as_str().unwrap());
                 }
                 InputControlOperation::SubmitExec(input) => {
                     assert_eq!(input.input_kind, InputKind::Exec);
-                    assert_eq!(input.message_id, None);
                 }
                 InputControlOperation::PermissionInspect(input) => {
                     assert_eq!(input.interaction_id, 12);
@@ -3341,37 +2914,12 @@ mod tests {
                     assert_eq!(disposition, InputDisposition::Submitted);
                     assert_eq!(evidence_ref, "fixture:settlement");
                 }
-                InputControlOperation::Flush(FlushAction::Reserve {
-                    director_member_id,
-                    expires_at_mono_ns,
-                }) => {
-                    assert_eq!(director_member_id, case.fixture.run.director_member_id);
-                    assert_eq!(expires_at_mono_ns, 40_000_000_000);
-                }
-                InputControlOperation::Flush(FlushAction::Settle {
-                    flush_input_id,
-                    outcome,
-                }) => {
-                    assert_eq!(flush_input_id, 15);
-                    assert_eq!(outcome, FlushWriteOutcome::Acknowledged);
-                }
             }
             assert!(matches!(
                 decode_service_request(&bytes(&value)).unwrap(),
                 ServiceControlRequest::Input(_)
             ));
         }
-        let mut preview = case.request("submit_prompt", None);
-        preview["input_kind"] = json!("preview");
-        preview["message_id"] = json!(14);
-        assert!(matches!(
-            decoded(&preview).operation,
-            InputControlOperation::SubmitPrompt(SubmitInput {
-                input_kind: InputKind::Preview,
-                message_id: Some(14),
-                ..
-            })
-        ));
         let identity = case.request("submit_prompt", None)["identity"].clone();
         for (kind, field) in [
             ("health", None),
@@ -3571,15 +3119,9 @@ mod tests {
         decoded(&huge);
         huge["event_id"] = json!(u64::try_from(i64::MAX).unwrap() + 1);
         rejection(&good, &bytes(&huge));
-        for (field, invalid) in [
-            ("decision", "ALLOW"),
-            ("decision_source", "director_auto"),
-            ("director_mode", "AUTO"),
-        ] {
-            let mut bad = good.clone();
-            bad[field] = json!(invalid);
-            rejection(&good, &bytes(&bad));
-        }
+        let mut bad = good.clone();
+        bad["decision"] = json!("ALLOW");
+        rejection(&good, &bytes(&bad));
         for (kind, action, field, invalid) in [
             ("submit_prompt", None, "input_kind", "permission_response"),
             ("receipt", Some("query"), "action", "unknown"),
@@ -3606,8 +3148,6 @@ mod tests {
         for (kind, field, invalid) in [
             ("submit_prompt", "input_kind", json!("exec")),
             ("submit_exec", "input_kind", json!("prompt")),
-            ("submit_prompt", "message_id", json!(14)),
-            ("submit_exec", "message_id", json!(14)),
             ("submit_prompt", "literal", json!(" ")),
             ("submit_exec", "literal", json!("a\nb")),
             ("submit_prompt", "operation_key", json!(" ")),
@@ -3623,12 +3163,6 @@ mod tests {
             bad["literal"] = json!(format!("a{}b", char::from(byte)));
             rejection(&good, &bytes(&bad));
         }
-        let mut preview = good.clone();
-        preview["input_kind"] = json!("preview");
-        preview["message_id"] = json!(14);
-        decoded(&preview);
-        preview["message_id"] = Value::Null;
-        rejection(&good, &bytes(&preview));
         let good = case.request("permission_respond", None);
         for (field, invalid) in [
             ("expected_run_id", json!(case.fixture.run.run_id + 1)),
@@ -3637,39 +3171,12 @@ mod tests {
                 json!(case.fixture.run.owner_epoch + 1),
             ),
             ("director_member_id", json!(case.fixture.run.member_id)),
-            ("director_mode", json!("manual")),
             ("request_token", json!("A".repeat(64))),
             ("request_token", json!("a".repeat(63))),
         ] {
             let mut bad = good.clone();
             bad[field] = invalid;
             rejection(&good, &bytes(&bad));
-        }
-        for field in ["mode_evidence_ref", "decision_evidence_ref"] {
-            let mut edge = good.clone();
-            edge[field] = json!("界".repeat(682) + "ab");
-            decoded(&edge);
-            for byte in (0u8..=31).chain(std::iter::once(127)) {
-                let mut bad = good.clone();
-                bad[field] = json!(format!("fixture:{}ref", char::from(byte)));
-                rejection(&good, &bytes(&bad));
-            }
-            for invalid in [
-                " ".into(),
-                "x".repeat(2049),
-                "a\nb".into(),
-                "界".repeat(683),
-            ] {
-                let mut bad = good.clone();
-                bad[field] = json!(invalid);
-                rejection(&good, &bytes(&bad));
-            }
-        }
-        for mode in ["auto", "manual", "unknown"] {
-            let mut valid = good.clone();
-            valid["decision_source"] = json!("user");
-            valid["director_mode"] = json!(mode);
-            decoded(&valid);
         }
     }
     #[test]
@@ -3697,23 +3204,8 @@ mod tests {
     #[test]
     fn invalid_request_diagnostics_keep_payload_canaries_private() {
         let mut good = Case::new().request("permission_respond", None);
-        let canaries = [
-            "PRIVATE_KEY_7d69".into(),
-            "12bd".repeat(16),
-            "PRIVATE_MODE_981e".into(),
-            "PRIVATE_DECISION_773a".into(),
-        ];
-        for (field, canary) in [
-            "operation_key",
-            "request_token",
-            "mode_evidence_ref",
-            "decision_evidence_ref",
-        ]
-        .into_iter()
-        .zip(&canaries)
-        {
-            good[field] = json!(canary);
-        }
+        let canaries = ["12bd".repeat(16)];
+        good["request_token"] = json!(canaries[0]);
         for field in ["request_token", "decision", "expected_run_id"] {
             let mut bad = good.clone();
             bad[field] = json!("PRIVATE_INVALID_8d14");
@@ -3808,7 +3300,7 @@ mod tests {
             InputControlReply::PermissionResponse(actual) => actual,
             _ => panic!("response result has exact kind"),
         };
-        assert_eq!(actual.submission.input_id, Some(13));
+        assert_eq!(actual.submission.input_id, None);
         assert_eq!(actual.submission.status, SubmissionStatus::Accepted);
         assert_eq!(actual.submission.stage, SubmissionStage::Submitted);
         assert_eq!(actual.submission.output_seq, Some(2));
@@ -3819,7 +3311,6 @@ mod tests {
         assert_eq!(actual.interaction_id, 12);
         assert_eq!(actual.event_id, 11);
         assert_eq!(actual.key, AnswerKey::Decision(PermissionDecision::Allow));
-        assert_eq!(actual.decision_source, DecisionSource::DirectorAuto);
         let mut nested = good.clone();
         nested["result"]["response"]["submission"] = submission("accepted", "submitted", Some(13));
         reject_reply(&good, &bytes(&nested), &request);
@@ -4019,7 +3510,6 @@ mod tests {
             ),
         ] {
             response["status"] = json!("rejected");
-            response["input_id"] = Value::Null;
             response["stage"] = json!("zero_bytes");
             response["output_seq"] = Value::Null;
             response["reason"] = json!(reason);
@@ -4319,11 +3809,9 @@ mod tests {
                 reject_reply(&good, &bytes(&bad), &request);
             }
             if payload == "response" {
-                for (field, value) in [("decision", "deny"), ("decision_source", "user")] {
-                    let mut bad = good.clone();
-                    bad["result"][payload][field] = json!(value);
-                    reject_reply(&good, &bytes(&bad), &request);
-                }
+                let mut bad = good.clone();
+                bad["result"][payload]["decision"] = json!("deny");
+                reject_reply(&good, &bytes(&bad), &request);
             }
         }
         let request = case.request("receipt", Some("query"));
@@ -4395,7 +3883,7 @@ mod tests {
                 assert_eq!(result_keys(&encoded, "request"),"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,supported_choices,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
             }
             if request["kind"] == "permission_respond" {
-                assert_eq!(result_keys(&encoded, "response"),"status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,decision_source,stage,output_seq,reason".split(',').collect::<Vec<_>>());
+                assert_eq!(result_keys(&encoded, "response"),"status,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,stage,output_seq,reason".split(',').collect::<Vec<_>>());
             }
         }
         let expected = json!({"protocol_version":1,"error":"fixture failure"});
@@ -4584,219 +4072,122 @@ mod tests {
             }
         }
 
-        #[test]
-        fn identity_decode_requires_each_owning_database_identity_field() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["canonical_path", "instance_id", "device", "inode"] {
-                let mut bad = good.clone();
-                bad["identity"]["database_identity_json"]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove(field)
-                    .unwrap();
-                reject_decode(&good, &bad, field);
-            }
+        fn bad_instance_ids() -> Vec<Value> {
+            bad_hex(32)
         }
 
+        fn bad_nonces() -> Vec<Value> {
+            bad_hex(64)
+        }
+
+        #[derive(Clone, Copy)]
+        enum Slot {
+            Database(&'static str),
+            LaunchNonce,
+        }
+
+        #[derive(Clone, Copy)]
+        enum Invalid {
+            Absent,
+            Values(fn() -> Vec<Value>),
+        }
+
+        /// An owning identity slot and the invalid contents both the decoder and the encoder of
+        /// a constructed request refuse without leaking private identity text.
+        struct InvalidIdentity {
+            name: &'static str,
+            slot: Slot,
+            invalid: Invalid,
+        }
+
+        const INVALID_IDENTITIES: &[InvalidIdentity] = &[
+            InvalidIdentity {
+                name: "a database identity without canonical_path",
+                slot: Slot::Database("canonical_path"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a database identity without instance_id",
+                slot: Slot::Database("instance_id"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a database identity without device",
+                slot: Slot::Database("device"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a database identity without inode",
+                slot: Slot::Database("inode"),
+                invalid: Invalid::Absent,
+            },
+            InvalidIdentity {
+                name: "a canonical_path that is not an absolute string",
+                slot: Slot::Database("canonical_path"),
+                invalid: Invalid::Values(bad_paths),
+            },
+            InvalidIdentity {
+                name: "an instance_id that is not 32 ASCII hex characters",
+                slot: Slot::Database("instance_id"),
+                invalid: Invalid::Values(bad_instance_ids),
+            },
+            InvalidIdentity {
+                name: "a device that is not an unsigned 64-bit integer",
+                slot: Slot::Database("device"),
+                invalid: Invalid::Values(bad_numbers),
+            },
+            InvalidIdentity {
+                name: "an inode that is not an unsigned 64-bit integer",
+                slot: Slot::Database("inode"),
+                invalid: Invalid::Values(bad_numbers),
+            },
+            InvalidIdentity {
+                name: "a launch nonce that is not 64 ASCII hex characters",
+                slot: Slot::LaunchNonce,
+                invalid: Invalid::Values(bad_nonces),
+            },
+        ];
+
         #[test]
-        fn identity_decode_requires_an_absolute_string_database_path() {
+        fn identity_decode_and_encode_refuse_every_invalid_owning_identity_privately() {
             let case = Case::new();
             let good = control(&case);
-            for (field, values) in [
-                ("canonical_path", bad_paths()),
-                ("instance_id", bad_hex(32)),
-            ] {
-                for (index, value) in values.into_iter().enumerate() {
+            for row in INVALID_IDENTITIES {
+                let replacements: Vec<Option<Value>> = match row.invalid {
+                    Invalid::Absent => vec![None],
+                    Invalid::Values(values) => values().into_iter().map(Some).collect(),
+                };
+                for (index, replacement) in replacements.into_iter().enumerate() {
+                    let label = format!("{}: value {index}", row.name);
                     let mut bad = good.clone();
-                    bad["identity"]["database_identity_json"][field] = value;
-                    reject_decode(&good, &bad, &format!("{field} {index}"));
-                }
-            }
-        }
-
-        #[test]
-        fn identity_decode_requires_an_unsigned_64_bit_device() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["device", "inode"] {
-                for (index, value) in bad_numbers().into_iter().enumerate() {
-                    let mut bad = good.clone();
-                    bad["identity"]["database_identity_json"][field] = value;
-                    reject_decode(&good, &bad, &format!("{field} {index}"));
-                }
-            }
-        }
-
-        #[test]
-        fn identity_decode_requires_a_64_character_ascii_hex_launch_nonce() {
-            let case = Case::new();
-            let good = control(&case);
-            for (index, value) in bad_hex(64).into_iter().enumerate() {
-                let mut bad = good.clone();
-                bad["identity"]["launch_nonce"] = value;
-                reject_decode(&good, &bad, &format!("launch_nonce {index}"));
-            }
-        }
-
-        #[test]
-        fn identity_encoder_requires_each_owning_database_identity_field() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["canonical_path", "instance_id", "device", "inode"] {
-                let mut database = good["identity"]["database_identity_json"].clone();
-                database.as_object_mut().unwrap().remove(field).unwrap();
-                reject_encode(&good, database, &case.fixture.run.launch_nonce, field);
-            }
-        }
-
-        #[test]
-        fn identity_encoder_validates_constructed_database_path_and_instance_id() {
-            let case = Case::new();
-            let good = control(&case);
-            for (field, values) in [
-                ("canonical_path", bad_paths()),
-                ("instance_id", bad_hex(32)),
-            ] {
-                for (index, value) in values.into_iter().enumerate() {
                     let mut database = good["identity"]["database_identity_json"].clone();
-                    database[field] = value;
-                    reject_encode(
-                        &good,
-                        database,
-                        &case.fixture.run.launch_nonce,
-                        &format!("{field} {index}"),
-                    );
+                    let mut nonce = Some(case.fixture.run.launch_nonce.clone());
+                    match (row.slot, replacement) {
+                        (Slot::Database(field), None) => {
+                            bad["identity"]["database_identity_json"]
+                                .as_object_mut()
+                                .unwrap()
+                                .remove(field)
+                                .unwrap();
+                            database.as_object_mut().unwrap().remove(field).unwrap();
+                        }
+                        (Slot::Database(field), Some(value)) => {
+                            bad["identity"]["database_identity_json"][field] = value.clone();
+                            database[field] = value;
+                        }
+                        (Slot::LaunchNonce, Some(value)) => {
+                            nonce = value.as_str().map(str::to_owned);
+                            bad["identity"]["launch_nonce"] = value;
+                        }
+                        (Slot::LaunchNonce, None) => {
+                            unreachable!("{label}: a request always carries a launch nonce")
+                        }
+                    }
+                    reject_decode(&good, &bad, &label);
+                    if let Some(nonce) = nonce {
+                        reject_encode(&good, database, &nonce, &label);
+                    }
                 }
-            }
-        }
-
-        #[test]
-        fn identity_encoder_validates_constructed_unsigned_device_and_inode() {
-            let case = Case::new();
-            let good = control(&case);
-            for field in ["device", "inode"] {
-                for (index, value) in bad_numbers().into_iter().enumerate() {
-                    let mut database = good["identity"]["database_identity_json"].clone();
-                    database[field] = value;
-                    reject_encode(
-                        &good,
-                        database,
-                        &case.fixture.run.launch_nonce,
-                        &format!("{field} {index}"),
-                    );
-                }
-            }
-        }
-
-        #[test]
-        fn identity_encoder_validates_a_constructed_launch_nonce() {
-            let case = Case::new();
-            let good = control(&case);
-            for value in bad_hex(64) {
-                if let Some(nonce) = value.as_str() {
-                    reject_encode(
-                        &good,
-                        good["identity"]["database_identity_json"].clone(),
-                        nonce,
-                        "launch_nonce",
-                    );
-                }
-            }
-        }
-    }
-
-    mod runtime_diagnosis {
-        use crate::runtime::control::*;
-
-        fn observed(
-            descriptor_leftover: bool,
-            lock: OwnerLockProbe,
-            health: HealthProbe,
-        ) -> RuntimeDiagnosis {
-            RuntimeProbes::Observed {
-                descriptor_leftover,
-                lock,
-                health,
-            }
-            .classify()
-        }
-
-        fn refused() -> HealthProbe {
-            HealthProbe::Failed("member runtime: ECONNREFUSED: Connection refused".into())
-        }
-
-        fn lock_failure() -> OwnerLockProbe {
-            OwnerLockProbe::Failed("owner lock identity changed".into())
-        }
-
-        #[test]
-        fn a_leftover_descriptor_is_an_interrupted_launch_before_any_health_outcome() {
-            const REFUSED: &str = "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused";
-            let cases: Vec<(RuntimeDiagnosis, MemberState, &[&str])> = vec![
-                (
-                    RuntimeProbes::InvalidPaths("namespace manifest is missing".into()).classify(),
-                    MemberState::InterruptedLaunch,
-                    &["runtime files are invalid: namespace manifest is missing"],
-                ),
-                (
-                    observed(true, OwnerLockProbe::Held, HealthProbe::Answered),
-                    MemberState::InterruptedLaunch,
-                    &[
-                        "launch descriptor left over",
-                        "owner lock is held",
-                        "runtime answered the health probe",
-                    ],
-                ),
-                (
-                    observed(true, OwnerLockProbe::Free, HealthProbe::Skipped),
-                    MemberState::InterruptedLaunch,
-                    &["launch descriptor left over", "owner lock is free"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Held, HealthProbe::Answered),
-                    MemberState::Running,
-                    &["owner lock is held", "runtime answered the health probe"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Free, HealthProbe::Answered),
-                    MemberState::Running,
-                    &["owner lock is free", "runtime answered the health probe"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Held, refused()),
-                    MemberState::NotResponding,
-                    &["owner lock is held", REFUSED],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Free, refused()),
-                    MemberState::LostRuntime,
-                    &["owner lock is free", REFUSED],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Held, HealthProbe::Skipped),
-                    MemberState::NotChecked,
-                    &["owner lock is held"],
-                ),
-                (
-                    observed(false, OwnerLockProbe::Free, HealthProbe::Skipped),
-                    MemberState::NotChecked,
-                    &["owner lock is free"],
-                ),
-                (
-                    observed(false, lock_failure(), HealthProbe::Answered),
-                    MemberState::CheckFailed,
-                    &["owner lock identity changed"],
-                ),
-                (
-                    observed(true, lock_failure(), refused()),
-                    MemberState::CheckFailed,
-                    &["owner lock identity changed"],
-                ),
-            ];
-            for (diagnosis, state, phrases) in cases {
-                assert_eq!(diagnosis.state, state, "{:?}", diagnosis.diagnostics);
-                assert_eq!(diagnosis.diagnostics, phrases);
             }
         }
     }

@@ -4,8 +4,6 @@ use crate::cli::emit;
 use crate::cli::nonblank;
 use crate::coding_agent::catalog::AnswerKey;
 use crate::error::CafleetError;
-use crate::runtime::validate_operation_key;
-use crate::runtime::validate_permission_reference;
 use crate::runtime::validate_request_token;
 use clap::Subcommand;
 use clap::builder::PossibleValuesParser;
@@ -188,21 +186,6 @@ pub(crate) enum PermissionCommand {
         /// The tested choice that answers a question.
         #[arg(long, value_parser = choice_id)]
         choice: Option<String>,
-        /// Who made the decision.
-        #[arg(long, value_parser = stored_enum::<runtime::DecisionSource>(runtime::DecisionSource::VALUES))]
-        decision_source: runtime::DecisionSource,
-        /// The Director session's effective approval mode.
-        #[arg(long, value_parser = stored_enum::<runtime::DirectorMode>(runtime::DirectorMode::VALUES))]
-        director_mode: runtime::DirectorMode,
-        /// Evidence reference for the Director mode.
-        #[arg(long, value_parser = checked(validate_permission_reference))]
-        mode_evidence_ref: String,
-        /// Evidence reference for the decision.
-        #[arg(long, value_parser = checked(validate_permission_reference))]
-        decision_evidence_ref: String,
-        /// Idempotency key of this response.
-        #[arg(long, value_parser = checked(validate_operation_key))]
-        operation_key: String,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -251,11 +234,6 @@ pub(crate) fn permission(
             request_token,
             decision,
             choice,
-            decision_source,
-            director_mode,
-            mode_evidence_ref,
-            decision_evidence_ref,
-            operation_key,
             json,
         } => {
             let key = match (decision, choice) {
@@ -274,11 +252,6 @@ pub(crate) fn permission(
                     expected_owner_epoch,
                     request_token,
                     key,
-                    decision_source,
-                    director_mode,
-                    mode_evidence_ref,
-                    decision_evidence_ref,
-                    operation_key,
                 },
                 deadline,
                 &mut crate::runtime::input_client::NativeInputHost,
@@ -296,51 +269,31 @@ pub(crate) fn permission(
                 .submission
                 .reason
                 .as_deref()
-                .expect("a nonaccepted historical projection supplies its reason");
-            let mut message = format!(
+                .expect("a nonaccepted permission response supplies its reason");
+            Err(CafleetError::App(format!(
                 "permission response {} for interaction {}: {}",
                 response.submission.status.as_str(),
                 interaction_id,
                 reason
-            );
-            if let Some(input_id) = response.submission.input_id {
-                message.push_str(&format!(" (input_id={input_id})"));
-            }
-            Err(CafleetError::App(message))
+            )))
         }
     }
 }
 
-pub(crate) fn permission_preflight(command: &PermissionCommand) -> Result<(), CafleetError> {
-    if let PermissionCommand::Respond {
-        decision_source,
-        director_mode,
-        ..
-    } = command
-    {
-        crate::runtime::validate_permission_attribution(*decision_source, *director_mode)?;
-    }
-    Ok(())
-}
 pub(crate) fn permission_error(command: &PermissionCommand, source: CafleetError) -> CafleetError {
-    let (run_id, interaction_id, operation_key) = match command {
-        PermissionCommand::Inspect { interaction_id, .. } => (None, Some(*interaction_id), None),
+    let (run_id, interaction_id) = match command {
+        PermissionCommand::Inspect { interaction_id, .. } => (None, Some(*interaction_id)),
         PermissionCommand::Respond {
             expected_run_id,
             interaction_id,
-            operation_key,
             ..
-        } => (
-            Some(*expected_run_id),
-            Some(*interaction_id),
-            Some(operation_key.clone()),
-        ),
+        } => (Some(*expected_run_id), Some(*interaction_id)),
     };
     crate::runtime::InputContext {
         run_id,
         interaction_id,
         input_id: None,
-        operation_key,
+        operation_key: None,
     }
     .failure(source)
     .into()
@@ -353,7 +306,6 @@ mod tests {
     use crate::cli::runtime::*;
     use crate::cli::test_support::assert_usage_rejected;
     use crate::cli::test_support::usage_error;
-    use crate::coding_agent::catalog::AnswerKey;
     use crate::config::Settings;
     use crate::pane_lock::PaneLock;
     use crate::time::Deadline;
@@ -377,7 +329,6 @@ mod tests {
                         operation_key: "exec:cli-receipt-history".into(),
                         kind: storage::InputKind::Exec,
                         payload_digest: "d".repeat(64),
-                        message_id: None,
                     },
                 )
                 .unwrap();
@@ -472,57 +423,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn uncertain_permission_respond_reply_reports_the_recorded_write_failed_reason() {
-        use crate::runtime::input_client::test_support::Case;
-        use crate::runtime::input_client::test_support::Retained;
-        let mut case = Case::new(Retained::Uncertain);
-        let input = case.command();
-        let (decision, choice) = match &input.key {
-            AnswerKey::Decision(decision) => (Some(*decision), None),
-            AnswerKey::Choice(choice) => (None, Some(choice.clone())),
-        };
-        let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        assert_eq!(
-            receipt.input.stop_cause,
-            Some(storage::StopCause::WriteFailed)
-        );
-        let error = permission(
-            &mut case.fixture.conn,
-            &case.settings,
-            PermissionCommand::Respond {
-                interaction_id: input.interaction_id,
-                event_id: input.event_id,
-                director_member_id: input.director_member_id,
-                expected_run_id: input.expected_run_id,
-                expected_owner_epoch: input.expected_owner_epoch,
-                request_token: input.request_token.clone(),
-                decision,
-                choice,
-                decision_source: input.decision_source,
-                director_mode: input.director_mode,
-                mode_evidence_ref: input.mode_evidence_ref.clone(),
-                decision_evidence_ref: input.decision_evidence_ref.clone(),
-                operation_key: input.operation_key.clone(),
-                json: true,
-            },
-            Deadline::until(Instant::now() + Duration::from_secs(1)),
-        )
-        .unwrap_err();
-        assert_eq!(
-            error.message(),
-            format!(
-                "permission response uncertain for interaction {}: write_failed (input_id={})",
-                input.interaction_id, case.input_id
-            )
-        );
-        assert_eq!(
-            storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
-            receipt,
-            "a repeated reply leaves the receipt unchanged"
-        );
-    }
-
     mod permission_entry {
         use crate::cli::runtime::tests::*;
 
@@ -559,16 +459,6 @@ mod tests {
                 &"a".repeat(64),
                 "--decision",
                 "allow",
-                "--decision-source",
-                "director-auto",
-                "--director-mode",
-                "auto",
-                "--mode-evidence-ref",
-                "fixture:mode",
-                "--decision-evidence-ref",
-                "fixture:decision",
-                "--operation-key",
-                "fixture:response-1",
             ]
             .into_iter()
             .map(String::from)
@@ -621,25 +511,6 @@ mod tests {
             }
         }
 
-        #[test]
-        fn permission_respond_accepts_each_semantic_decision_and_valid_source_mode_pair() {
-            for decision in storage::PermissionDecision::VALUES {
-                let mut pairs = vec![("director-auto", "auto")];
-                pairs.extend(
-                    storage::DirectorMode::VALUES
-                        .iter()
-                        .map(|mode| ("user", *mode)),
-                );
-                for (source, mode) in pairs {
-                    let mut args = respond();
-                    set(&mut args, "--decision", decision);
-                    set(&mut args, "--decision-source", source);
-                    set(&mut args, "--director-mode", mode);
-                    accepted(&args);
-                }
-            }
-        }
-
         fn respond_choice(choice: &str) -> Vec<String> {
             let mut args = respond();
             let index = args
@@ -668,7 +539,31 @@ mod tests {
         }
 
         #[test]
-        fn permission_respond_accepts_a_choice_in_place_of_a_decision() {
+        fn permission_respond_parses_exactly_one_valid_decision_or_choice() {
+            type Answer = (Option<storage::PermissionDecision>, Option<String>);
+            let with = |mut args: Vec<String>, extra: [&str; 2]| {
+                args.extend(extra.map(String::from));
+                args
+            };
+            let with_token = |token: &str| {
+                let mut args = respond();
+                set(&mut args, "--request-token", token);
+                args
+            };
+            let mut neither = respond();
+            let index = neither.iter().position(|arg| arg == "--decision").unwrap();
+            neither.drain(index..index + 2);
+            let mut cases: Vec<(String, Vec<String>, Option<Answer>)> = Vec::new();
+            for decision in storage::PermissionDecision::VALUES {
+                let mut args = respond();
+                set(&mut args, "--decision", decision);
+                let parsed = storage::PermissionDecision::try_from(*decision).unwrap();
+                cases.push((
+                    format!("decision {decision}"),
+                    args,
+                    Some((Some(parsed), None)),
+                ));
+            }
             for choice in [
                 "decline",
                 "not-now",
@@ -676,49 +571,40 @@ mod tests {
                 "a",
                 &"a".repeat(64),
             ] {
-                let args = respond_choice(choice);
-                accepted(&args);
-                assert_eq!(
-                    parsed_answer(&args),
-                    (None, Some(choice.to_owned())),
-                    "{choice}"
-                );
+                cases.push((
+                    format!("choice {choice}"),
+                    respond_choice(choice),
+                    Some((None, Some(choice.to_owned()))),
+                ));
             }
-            assert_eq!(
-                parsed_answer(&respond()),
-                (Some(storage::PermissionDecision::Allow), None)
-            );
-        }
-
-        #[test]
-        fn permission_respond_requires_exactly_one_of_a_decision_and_a_choice() {
-            let mut both = respond();
-            both.extend(["--choice".into(), "decline".into()]);
-            rejected(&both);
-            let mut both_choice_first = respond_choice("decline");
-            both_choice_first.extend(["--decision".into(), "deny".into()]);
-            rejected(&both_choice_first);
-            let mut neither = respond();
-            let index = neither.iter().position(|arg| arg == "--decision").unwrap();
-            neither.drain(index..index + 2);
-            rejected(&neither);
-            let mut repeated = respond_choice("decline");
-            repeated.extend(["--choice".into(), "not-now".into()]);
-            rejected(&repeated);
-        }
-
-        #[test]
-        fn permission_respond_validates_each_checked_flag() {
-            rejected(&respond_choice("Decline"));
-            for (field, value) in [
-                ("--request-token", "A".repeat(64)),
-                ("--mode-evidence-ref", " ".into()),
-                ("--decision-evidence-ref", "fixture:\u{7}:reference".into()),
-                ("--operation-key", " ".into()),
+            for (name, args) in [
+                (
+                    "decision then choice",
+                    with(respond(), ["--choice", "decline"]),
+                ),
+                (
+                    "choice then decision",
+                    with(respond_choice("decline"), ["--decision", "deny"]),
+                ),
+                ("neither", neither),
+                (
+                    "repeated choice",
+                    with(respond_choice("decline"), ["--choice", "not-now"]),
+                ),
+                ("choice outside the id shape", respond_choice("Decline")),
+                ("uppercase request token", with_token(&"A".repeat(64))),
+                ("short request token", with_token(&"a".repeat(63))),
             ] {
-                let mut args = respond();
-                set(&mut args, field, &value);
-                rejected(&args);
+                cases.push((name.to_owned(), args, None));
+            }
+            for (name, args, expected) in cases {
+                match expected {
+                    Some(answer) => {
+                        accepted(&args);
+                        assert_eq!(parsed_answer(&args), answer, "{name}");
+                    }
+                    None => rejected(&args),
+                }
             }
         }
 
@@ -750,44 +636,8 @@ mod tests {
                     "--expected-run-id",
                     "--expected-owner-epoch",
                     "--request-token",
-                    "--decision-source",
-                    "--director-mode",
-                    "--mode-evidence-ref",
-                    "--decision-evidence-ref",
-                    "--operation-key",
                 ],
             );
-        }
-
-        #[test]
-        fn permission_response_rejects_invalid_decision_source_and_mode_enums() {
-            for (field, values) in [
-                ("--decision", ["", "approved", "yes", "Allow"]),
-                ("--decision-source", ["", "director_auto", "member", "User"]),
-                ("--director-mode", ["", "AUTO", "never", "on-request"]),
-            ] {
-                for value in values {
-                    let mut args = respond();
-                    set(&mut args, field, value);
-                    rejected(&args);
-                }
-            }
-        }
-
-        #[test]
-        fn permission_preflight_refuses_director_auto_attribution_outside_auto_mode() {
-            let mut manual = respond();
-            set(&mut manual, "--director-mode", "manual");
-            let failure = permission_preflight(&parsed(&manual)).unwrap_err();
-            assert!(
-                matches!(&failure, CafleetError::Usage(message) if message == "director-auto requires auto mode"),
-                "{}",
-                failure.message()
-            );
-            set(&mut manual, "--decision-source", "user");
-            permission_preflight(&parsed(&manual)).unwrap();
-            permission_preflight(&parsed(&respond())).unwrap();
-            permission_preflight(&parsed(&inspect())).unwrap();
         }
     }
 
@@ -806,69 +656,72 @@ mod tests {
     }
 
     #[test]
-    fn input_reconcile_accepts_exact_cli_dispositions_with_evidence() {
-        for disposition in ["submitted", "not-submitted", "abandoned-uncertain"] {
-            assert!(
-                CliArgs::try_parse_from([
-                    "cafleet",
-                    "input",
-                    "reconcile",
-                    "17",
-                    "--from-member-id",
-                    "1",
-                    "--disposition",
-                    disposition,
-                    "--evidence-ref",
-                    "audit:inspected-receipt",
-                    "--json",
-                ])
-                .is_ok(),
-                "{disposition}"
-            );
+    fn input_reconcile_requires_an_exact_disposition_nonempty_evidence_and_a_positive_id() {
+        fn reconcile<'a>(
+            id: &'a str,
+            disposition: Option<&'a str>,
+            evidence: Option<&'a str>,
+        ) -> Vec<&'a str> {
+            let mut args = vec!["input", "reconcile", id, "--from-member-id", "1"];
+            if let Some(disposition) = disposition {
+                args.extend(["--disposition", disposition]);
+            }
+            if let Some(evidence) = evidence {
+                args.extend(["--evidence-ref", evidence]);
+            }
+            args
         }
-    }
-
-    #[test]
-    fn input_reconcile_requires_valid_disposition_and_nonempty_evidence() {
-        for args in [
-            vec!["input", "reconcile", "17", "--disposition", "submitted"],
-            vec![
-                "input",
-                "reconcile",
-                "17",
-                "--evidence-ref",
-                "audit:missing-choice",
-            ],
-            vec![
-                "input",
-                "reconcile",
-                "17",
-                "--disposition",
-                "approved",
-                "--evidence-ref",
-                "audit:x",
-            ],
-            vec![
-                "input",
-                "reconcile",
-                "17",
-                "--disposition",
+        let evidence = Some("audit:inspected-receipt");
+        for (name, args, accepted) in [
+            (
                 "submitted",
-                "--evidence-ref",
-                "   ",
-            ],
-            vec![
-                "input",
-                "reconcile",
-                "0",
-                "--disposition",
-                "submitted",
-                "--evidence-ref",
-                "audit:x",
-            ],
+                reconcile("17", Some("submitted"), evidence),
+                true,
+            ),
+            (
+                "not submitted",
+                reconcile("17", Some("not-submitted"), evidence),
+                true,
+            ),
+            (
+                "abandoned uncertain",
+                reconcile("17", Some("abandoned-uncertain"), evidence),
+                true,
+            ),
+            (
+                "missing evidence",
+                reconcile("17", Some("submitted"), None),
+                false,
+            ),
+            (
+                "missing disposition",
+                reconcile("17", None, Some("audit:missing-choice")),
+                false,
+            ),
+            (
+                "unknown disposition",
+                reconcile("17", Some("approved"), Some("audit:x")),
+                false,
+            ),
+            (
+                "blank evidence",
+                reconcile("17", Some("submitted"), Some("   ")),
+                false,
+            ),
+            (
+                "zero input id",
+                reconcile("0", Some("submitted"), Some("audit:x")),
+                false,
+            ),
         ] {
-            let args = [args, vec!["--from-member-id", "1"]].concat();
-            assert_eq!(usage_error(&args).exit_code(), 2, "{args:?}");
+            if accepted {
+                let mut argv = vec!["cafleet"];
+                argv.extend(&args);
+                argv.push("--json");
+                assert!(CliArgs::try_parse_from(argv).is_ok(), "{name}");
+            } else {
+                assert_eq!(usage_error(&args).exit_code(), 2, "{name}");
+            }
         }
     }
 }

@@ -3,13 +3,9 @@ use crate::broker::MessageRecord;
 use crate::broker::messaging::InboxClosure;
 use crate::broker::messaging::InboxSnapshot;
 use crate::broker::messaging::listen_snapshot;
-use crate::broker::runtime::DeliveryProjection;
-use crate::broker::runtime::DeliveryStatus;
 use crate::cli::emit;
 use crate::cli::resolve_body;
 use crate::config::Settings;
-use crate::delivery::AttemptEnd;
-use crate::delivery::AttemptOutcome;
 use crate::error::CafleetError;
 use crate::output::format_message;
 use crate::output::format_message_sent;
@@ -117,46 +113,10 @@ pub(crate) fn run(
             let message = crate::db::with_database_budget(conn, deadline, |conn| {
                 broker::send_message(conn, from_member_id, to_member_id, &text)
             })?;
-            let message_id = message.message_id;
-            let outcome = if from_member_id == to_member_id {
-                None
-            } else {
-                match crate::delivery::deliver_pending(
-                    conn,
-                    settings,
-                    to_member_id,
-                    None,
-                    deadline,
-                    &std::collections::BTreeSet::new(),
-                ) {
-                    Ok(outcome) => {
-                        for error in &outcome.notification_errors {
-                            eprintln!("Message {message_id} was persisted. {}", error.error);
-                        }
-                        if let AttemptEnd::Failed(error) = &outcome.end {
-                            eprintln!("Message {message_id} was persisted. {}", error.error);
-                        }
-                        Some(outcome)
-                    }
-                    Err(error) => {
-                        eprintln!("Message {message_id} was persisted. {}", error.message());
-                        None
-                    }
-                }
-            };
-            let notification_sent = outcome
-                .as_ref()
-                .is_some_and(|outcome| outcome.sent.contains(&message_id));
-            let (input_id, delivery) = send_delivery(conn, &message, outcome.as_ref())?;
             emit(
                 json,
-                &crate::output::json::send_outcome(
-                    &message,
-                    notification_sent,
-                    input_id,
-                    &delivery,
-                ),
-                || format_message_sent(&message, input_id, &delivery),
+                &crate::output::json::message_envelope(&message),
+                || format_message_sent(&message),
             )
         }
         MessageCommand::Poll { member_id, json } => {
@@ -186,81 +146,6 @@ pub(crate) fn run(
             )
         }
     }
-}
-
-fn send_delivery(
-    conn: &Connection,
-    message: &crate::broker::MessageRecord,
-    outcome: Option<&AttemptOutcome>,
-) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
-    let projection = |status, method, reason: Option<&str>| DeliveryProjection {
-        status,
-        method,
-        reason: reason.map(str::to_owned),
-    };
-    if message.from_member_id == message.to_member_id {
-        return Ok((
-            None,
-            projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
-        ));
-    }
-    let recipient = match broker::active_member_fleet(conn, message.to_member_id)? {
-        Some(fleet) => broker::get_member(conn, message.to_member_id, fleet)?,
-        None => None,
-    };
-    let Some(recipient) = recipient else {
-        return Ok((
-            None,
-            projection(DeliveryStatus::Held, None, Some("notification_held")),
-        ));
-    };
-    if recipient.kind == crate::broker::MemberKind::Director {
-        return Ok((
-            None,
-            projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
-        ));
-    }
-    if let Some(runtime) = &recipient.runtime {
-        if let Some(attempted) =
-            outcome.and_then(|outcome| outcome.attempted_inputs.get(&message.message_id))
-        {
-            if let Some(input_id) = attempted {
-                let input = crate::broker::runtime::get_input(conn, *input_id)?;
-                if input.run_id != runtime.run.run_id
-                    || input.kind != crate::broker::runtime::InputKind::Preview
-                    || input.message_id != Some(message.message_id)
-                {
-                    return Err(CafleetError::App(
-                        "invocation preview receipt association changed".into(),
-                    ));
-                }
-                let delivery = input.delivery().ok_or_else(|| {
-                    CafleetError::App("invocation preview has no delivery projection".into())
-                })?;
-                return Ok((Some(*input_id), delivery));
-            }
-        } else if let Some(input) = crate::broker::runtime::find_latest_preview_input(
-            conn,
-            runtime.run.run_id,
-            message.message_id,
-        )? && let Some(delivery) = input.delivery()
-        {
-            return Ok((Some(input.input_id), delivery));
-        }
-    }
-    let reason = match outcome {
-        Some(AttemptOutcome {
-            held_reason: Some(reason),
-            ..
-        }) => reason.as_str(),
-        Some(AttemptOutcome {
-            end: AttemptEnd::Failed(_),
-            ..
-        })
-        | None => "notification_failed",
-        Some(_) => "notification_held",
-    };
-    Ok((None, projection(DeliveryStatus::Held, None, Some(reason))))
 }
 
 const WORK_BUDGET: Duration = Duration::from_secs(5);
@@ -630,32 +515,16 @@ fn with_nonblocking(
 
 const CODEX_QUEUE_BUDGET: Duration = Duration::from_secs(10);
 const LISTEN_RECORD_PREFIX: &str = "[cafleet listen record] ";
-const FULL_QUEUE_REFUSAL: &str = "queue cannot contain more than";
-const FULL_QUEUE_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 #[cfg(not(test))]
 fn codex_queue_budget() -> Duration {
     CODEX_QUEUE_BUDGET
 }
 
-#[cfg(not(test))]
-fn full_queue_retry_interval() -> Duration {
-    FULL_QUEUE_RETRY_INTERVAL
-}
-
 /// A test-built listener takes a shortened queue budget, in milliseconds, from its environment.
 #[cfg(test)]
 fn codex_queue_budget() -> Duration {
     millis_override("CAFLEET_TEST_CODEX_QUEUE_BUDGET_MS", CODEX_QUEUE_BUDGET)
-}
-
-/// A test-built listener takes a shortened retry interval, in milliseconds, from its environment.
-#[cfg(test)]
-fn full_queue_retry_interval() -> Duration {
-    millis_override(
-        "CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS",
-        FULL_QUEUE_RETRY_INTERVAL,
-    )
 }
 
 #[cfg(test)]
@@ -690,10 +559,9 @@ fn run_forwarder(
             thread,
             session: &session,
         },
-        ready: false,
         session_exited: false,
     };
-    let result = with_nonblocking(descriptor.as_fd(), || {
+    with_nonblocking(descriptor.as_fd(), || {
         listen(
             &SystemClock,
             &mut SessionBoundListener {
@@ -709,11 +577,7 @@ fn run_forwarder(
             timeout,
             &next,
         )
-    });
-    match result {
-        Err(error) if output.ready => Err(output.queue.closed_notice(error)),
-        result => result,
-    }
+    })
 }
 
 struct SessionBoundListener<'a> {
@@ -762,29 +626,23 @@ fn pin_codex_session() -> Result<Option<crate::runtime::ProcessIdentity>, Caflee
 struct CodexForwarding<'a> {
     stdout: DescriptorOutput<'a>,
     queue: CodexQueue<'a>,
-    ready: bool,
     session_exited: bool,
 }
 
 impl ListenOutput for CodexForwarding<'_> {
     fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<Delivery, CafleetError> {
         match record["event"].as_str() {
-            Some("ready") => {
-                let delivery = self.stdout.emit(record, deadline)?;
-                self.ready = true;
-                Ok(delivery)
-            }
-            Some("pending") => match self.queue.attempt(record)? {
-                Attempt::Accepted => Ok(Delivery::Delivered),
-                Attempt::FullQueue => Ok(Delivery::Refused),
-                Attempt::SessionExited => {
+            Some("ready") => self.stdout.emit(record, deadline),
+            Some("pending") => match self.queue.forward(record)? {
+                Forwarding::Accepted => Ok(Delivery::Delivered),
+                Forwarding::SessionExited => {
                     self.session_exited = true;
                     Ok(Delivery::Refused)
                 }
             },
             Some("closed") => {
                 let session_ended = record["reason"] != "session_exited"
-                    && self.queue.forward_closing(record)? == Forwarding::SessionExited;
+                    && self.queue.forward(record)? == Forwarding::SessionExited;
                 let substitute;
                 let record = if session_ended {
                     let member_id = record["member_id"]
@@ -819,16 +677,8 @@ enum Forwarding {
     SessionExited,
 }
 
-enum Attempt {
-    Accepted,
-    FullQueue,
-    /// The attempt failed after the pinned session ended, so the record has no reader.
-    SessionExited,
-}
-
 enum QueueFailure {
     Exit(String),
-    FullQueue(String),
     Deadline,
 }
 
@@ -839,56 +689,16 @@ struct CodexQueue<'a> {
 }
 
 impl CodexQueue<'_> {
-    fn attempt(&self, record: &Value) -> Result<Attempt, CafleetError> {
+    /// Queues `record` once; a failed attempt ends forwarding.
+    fn forward(&self, record: &Value) -> Result<Forwarding, CafleetError> {
         match self.queue(&format!("{LISTEN_RECORD_PREFIX}{record}")) {
-            Ok(()) => Ok(Attempt::Accepted),
-            Err(QueueFailure::FullQueue(_)) => Ok(Attempt::FullQueue),
-            Err(QueueFailure::Deadline | QueueFailure::Exit(_))
-                if pinned_session_exited(self.session)? =>
-            {
-                Ok(Attempt::SessionExited)
-            }
+            Ok(()) => Ok(Forwarding::Accepted),
+            Err(_) if pinned_session_exited(self.session)? => Ok(Forwarding::SessionExited),
             Err(QueueFailure::Deadline) => Err(CafleetError::App(self.deadline_diagnostic())),
             Err(QueueFailure::Exit(cause)) => Err(CafleetError::App(format!(
                 "failed to forward record to codex thread {}: {cause}",
                 self.thread
             ))),
-        }
-    }
-
-    /// Queues a closing record, retrying it while the thread's queue is full for as long as
-    /// the pinned session lives.
-    fn forward_closing(&self, record: &Value) -> Result<Forwarding, CafleetError> {
-        loop {
-            match self.attempt(record)? {
-                Attempt::Accepted => return Ok(Forwarding::Accepted),
-                Attempt::SessionExited => return Ok(Forwarding::SessionExited),
-                Attempt::FullQueue => {
-                    std::thread::sleep(full_queue_retry_interval());
-                    if pinned_session_exited(self.session)? {
-                        return Ok(Forwarding::SessionExited);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Makes one bounded attempt to tell the session that reception ended, keeping `error`.
-    fn closed_notice(&self, error: CafleetError) -> CafleetError {
-        let notice = format!("[cafleet listen closed] exit 1: {}", error.message());
-        match self.queue(&notice) {
-            Ok(()) => error,
-            Err(failure) => {
-                let cause = match failure {
-                    QueueFailure::Exit(cause) | QueueFailure::FullQueue(cause) => cause,
-                    QueueFailure::Deadline => self.deadline_diagnostic(),
-                };
-                CafleetError::App(format!(
-                    "{}\nfailed to forward the closed notice to codex thread {}: {cause}",
-                    error.message(),
-                    self.thread
-                ))
-            }
         }
     }
 
@@ -943,14 +753,9 @@ impl CodexQueue<'_> {
             .and_then(Result::ok)
             .map(|text| text.trim().to_owned())
             .filter(|text| !text.is_empty());
-        Err(match stderr {
-            Some(text) if text.lines().any(|line| line.contains(FULL_QUEUE_REFUSAL)) => {
-                QueueFailure::FullQueue(text)
-            }
-            stderr => {
-                QueueFailure::Exit(stderr.unwrap_or_else(|| format!("codex exited with {status}")))
-            }
-        })
+        Err(QueueFailure::Exit(
+            stderr.unwrap_or_else(|| format!("codex exited with {status}")),
+        ))
     }
 }
 
@@ -958,273 +763,51 @@ impl CodexQueue<'_> {
 mod tests {
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
-    use crate::broker::runtime::DeliveryMethod;
     use crate::cli::message::*;
     use crate::db::test_support::migrated_conn;
 
-    mod composer_reliability {
-        use crate::broker::runtime as storage;
-        use crate::cli::message::tests::*;
-
-        fn preview(
-            fixture: &mut storage::test_support::Fixture,
-            message: &MessageRecord,
-        ) -> storage::InputOperation {
-            let owner = fixture.run.owner();
-            let request = crate::runtime::SubmitInput {
-                operation_key: storage::preview_operation_key(owner.run_id, message.message_id, 1)
-                    .unwrap(),
-                input_kind: storage::InputKind::Preview,
-                message_id: Some(message.message_id),
-                literal: crate::delivery::canonical_preview_line(message),
-            };
-            storage::test_support::reserve_input(
-                &mut fixture.conn,
-                &owner,
-                &storage::NewInput {
-                    operation_key: request.operation_key.clone(),
-                    kind: request.input_kind,
-                    payload_digest: storage::input_payload_digest(owner.run_id, &request),
-                    message_id: request.message_id,
-                },
-            )
-            .unwrap()
-        }
-
-        fn message(fixture: &mut storage::test_support::Fixture, text: &str) -> MessageRecord {
-            broker::send_message(&mut fixture.conn, fixture.director, fixture.member, text).unwrap()
-        }
+    mod runner_pull {
+        use crate::runtime::service::test_support::input_service::*;
 
         #[test]
-        fn send_projects_this_invocations_left_attempt_instead_of_its_ready_successor() {
-            let mut fixture = storage::test_support::Fixture::new();
-            let owner = fixture.activate();
-            let message = message(&mut fixture, "private left preview");
-            let input = preview(&mut fixture, &message);
-            let (left, next) = storage::settle_left_and_queue_redelivery(
-                &mut fixture.conn,
-                &owner,
-                input.input_id,
-                storage::StopCause::SubmitUnconfirmed,
-                storage::LeftStage::Submitted,
-            )
-            .unwrap();
-            let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
-            outcome
-                .attempted_inputs
-                .insert(message.message_id, Some(left.input_id));
-            let (id, delivery) = send_delivery(&fixture.conn, &message, Some(&outcome)).unwrap();
-            assert_eq!(id, Some(left.input_id));
-            assert_eq!(
-                delivery,
-                projection(
-                    DeliveryStatus::LeftInComposer,
-                    Some(DeliveryMethod::Profile),
-                    None
-                )
-            );
-            let json = crate::output::json::send_outcome(&message, false, id, &delivery);
-            assert_eq!(json["input_id"], left.input_id);
-            assert_eq!(json["delivery"]["status"], "left_in_composer");
-            assert_ne!(json["input_id"], next.input_id);
-        }
-
-        #[test]
-        fn unattempted_messages_project_their_latest_ready_successor() {
-            let mut fixture = storage::test_support::Fixture::new();
-            let owner = fixture.activate();
-            let message = message(&mut fixture, "unattempted latest preview");
-            let input = preview(&mut fixture, &message);
-            let (_, next) = storage::settle_left_and_queue_redelivery(
-                &mut fixture.conn,
-                &owner,
-                input.input_id,
-                storage::StopCause::ManualInput,
-                storage::LeftStage::LiteralComplete,
-            )
-            .unwrap();
-            let outcome = AttemptOutcome::ended(AttemptEnd::Held);
-            assert_eq!(
-                send_delivery(&fixture.conn, &message, Some(&outcome)).unwrap(),
-                (
-                    Some(next.input_id),
-                    projection(DeliveryStatus::Queued, None, Some("redelivery")),
-                )
-            );
-        }
-
-        #[test]
-        fn an_attempt_with_no_receipt_keeps_its_own_hold_instead_of_a_later_receipt() {
-            let mut fixture = storage::test_support::Fixture::new();
-            let owner = fixture.activate();
-            let message = message(&mut fixture, "receipt created after a held invocation");
-            let input = preview(&mut fixture, &message);
-            let mut outcome = AttemptOutcome::ended(AttemptEnd::Held);
-            outcome.held_reason = Some("observer_unavailable".into());
-            outcome.attempted_inputs.insert(message.message_id, None);
-            storage::requeue_zero_byte_immediate(
-                &mut fixture.conn,
-                &owner,
-                input.input_id,
-                "interaction_open",
-            )
-            .unwrap();
-            assert_eq!(
-                send_delivery(&fixture.conn, &message, Some(&outcome)).unwrap(),
-                (
-                    None,
-                    projection(DeliveryStatus::Held, None, Some("observer_unavailable")),
-                )
-            );
-        }
-
-        #[test]
-        fn recorded_input_ids_require_the_exact_preview_message_and_kind() {
-            let mut fixture = storage::test_support::Fixture::new();
-            let owner = fixture.activate();
-            let requested = message(&mut fixture, "requested message");
-            let other = message(&mut fixture, "other message");
-            let other_preview = preview(&mut fixture, &other);
-            let prompt = fixture.input(
-                &owner,
-                "prompt:wrong-kind",
-                storage::InputKind::Prompt,
-                None,
-            );
-            for input_id in [other_preview.input_id, prompt.input_id, i64::MAX] {
-                let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
-                outcome
-                    .attempted_inputs
-                    .insert(requested.message_id, Some(input_id));
-                assert!(
-                    send_delivery(&fixture.conn, &requested, Some(&outcome)).is_err(),
-                    "recorded input {input_id} must bind this preview"
+        fn message_send_stores_the_message_and_writes_no_byte_to_the_recipients_child() {
+            with_input_service(|fixture, _| {
+                let run = fixture.fixture.run.clone();
+                let url = format!("sqlite:///{}", fixture.fixture.conn.path().unwrap());
+                let (from, to) = (
+                    run.director_member_id.to_string(),
+                    run.member_id.to_string(),
                 );
-            }
-        }
-
-        #[test]
-        fn recorded_input_ids_require_the_current_recipient_run() {
-            let mut fixture = storage::test_support::Fixture::new();
-            fixture.activate();
-            let requested = message(&mut fixture, "requested run");
-            let previous = preview(&mut fixture, &requested);
-            fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET status='exited',ended_at=?1 WHERE run_id=?2",
-                    rusqlite::params![crate::time::now_stamp(), fixture.run.run_id],
+                crate::cli::run_args(
+                    [
+                        "cafleet",
+                        "--database-url",
+                        &url,
+                        "message",
+                        "send",
+                        "--from-member-id",
+                        &from,
+                        "--to-member-id",
+                        &to,
+                        "stored for the runner",
+                    ]
+                    .map(std::ffi::OsString::from),
                 )
                 .unwrap();
-            let mut replacement = storage::test_support::Fixture::spec(
-                &fixture.conn,
-                fixture.fleet,
-                fixture.director,
-                fixture.member,
-            );
-            replacement.launch_nonce = "b".repeat(64);
-            replacement.runtime_path.push_str("-replacement");
-            fixture.run =
-                storage::test_support::create_run(&mut fixture.conn, &replacement).unwrap();
-            fixture.activate();
-            assert_ne!(fixture.run.run_id, previous.run_id);
-            assert_eq!(previous.kind, storage::InputKind::Preview);
-            assert_eq!(previous.message_id, Some(requested.message_id));
-            let mut outcome = AttemptOutcome::ended(AttemptEnd::NoPending);
-            outcome
-                .attempted_inputs
-                .insert(requested.message_id, Some(previous.input_id));
-            assert!(send_delivery(&fixture.conn, &requested, Some(&outcome)).is_err());
+                assert!(input_service_records(fixture).is_empty());
+                let (status, notified_at): (String, Option<String>) = fixture
+                    .fixture
+                    .conn
+                    .query_row(
+                        "SELECT status_state,notified_at FROM messages WHERE to_member_id=?1 AND text='stored for the runner'",
+                        [run.member_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                assert_eq!(status, "input_required");
+                assert_eq!(notified_at, None);
+            });
         }
-    }
-
-    fn projection(
-        status: DeliveryStatus,
-        method: Option<DeliveryMethod>,
-        reason: Option<&str>,
-    ) -> DeliveryProjection {
-        DeliveryProjection {
-            status,
-            method,
-            reason: reason.map(str::to_owned),
-        }
-    }
-
-    #[test]
-    fn send_delivery_reports_self_sends_and_the_root_director() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "branches");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        for (from, to, expected) in [
-            (
-                director,
-                director,
-                projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
-            ),
-            (
-                worker,
-                director,
-                projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
-            ),
-        ] {
-            let message = broker::send_message(&mut conn, from, to, "branch").unwrap();
-            assert_eq!(
-                send_delivery(&conn, &message, None).unwrap(),
-                (None, expected),
-                "{from} -> {to}"
-            );
-        }
-    }
-
-    #[test]
-    fn send_delivery_reports_a_wrapped_self_send_and_the_queued_preview_receipt() {
-        let mut fixture = crate::runtime::test_support::Fixture::new();
-        let run = fixture.run.clone();
-        let message = broker::send_message(
-            &mut fixture.conn,
-            run.director_member_id,
-            run.member_id,
-            "queued",
-        )
-        .unwrap();
-        fixture
-            .conn
-            .execute(
-                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,message_id,preview_attempt,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'preview',?3,'ready',?4,1,?5,?5,?5,'interaction_open')",
-                rusqlite::params![
-                    run.run_id,
-                    crate::broker::runtime::preview_operation_key(run.run_id, message.message_id, 1).unwrap(),
-                    "d".repeat(64),
-                    message.message_id,
-                    "2026-10-30T10:00:00Z",
-                ],
-            )
-            .unwrap();
-        let receipt = fixture.conn.last_insert_rowid();
-        assert_eq!(
-            send_delivery(&fixture.conn, &message, None).unwrap(),
-            (
-                Some(receipt),
-                projection(DeliveryStatus::Queued, None, Some("interaction_open"))
-            )
-        );
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "deregistered");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let committed = broker::send_message(&mut conn, director, worker, "committed").unwrap();
-        assert!(
-            crate::broker::members::test_support::deregister_member(&mut conn, worker).unwrap()
-        );
-        assert_eq!(
-            send_delivery(&conn, &committed, None)
-                .expect("a committed send reports its record after the recipient is gone"),
-            (
-                None,
-                projection(DeliveryStatus::Held, None, Some("notification_held"))
-            )
-        );
     }
 
     use crate::cli::message::run_on_descriptor;
@@ -1298,7 +881,7 @@ mod tests {
         F: FnMut(Duration, usize) -> Result<InboxSnapshot, CafleetError>,
     {
         fn snapshot(&mut self, deadline: Deadline) -> Result<InboxSnapshot, CafleetError> {
-            let now = self.clock.elapsed.get();
+            let now = self.clock.elapsed();
             self.snapshots
                 .push((now, deadline.remaining_at(self.clock.now())?));
             assert!(
@@ -1376,7 +959,7 @@ mod tests {
             if refuse {
                 if pending {
                     self.refused
-                        .push((self.clock.elapsed.get(), self.snapshot_ids.borrow().clone()));
+                        .push((self.clock.elapsed(), self.snapshot_ids.borrow().clone()));
                 }
                 return Ok(Delivery::Refused);
             }
@@ -1384,7 +967,7 @@ mod tests {
                 self.notice_ids.push(self.snapshot_ids.borrow().clone());
             }
             self.records.push(record.clone());
-            self.delivered_at.push(self.clock.elapsed.get());
+            self.delivered_at.push(self.clock.elapsed());
             Ok(Delivery::Delivered)
         }
     }
@@ -1472,37 +1055,45 @@ mod tests {
         use crate::cli::message::tests::*;
 
         #[test]
-        fn an_omitted_database_url_appends_nothing() {
-            assert_eq!(poll_command(7, None), "cafleet message poll 7 --json");
-        }
-
-        #[test]
-        fn a_database_url_of_only_safe_characters_is_appended_verbatim() {
-            assert_eq!(
-                poll_command(7, Some("sqlite:///tmp/fleet.db")),
-                "cafleet message poll 7 --json --database-url sqlite:///tmp/fleet.db"
-            );
+        fn the_next_poll_command_appends_the_database_url_quoted_only_when_needed() {
             let every_safe_class = "sqlite:///Home/u_1/~x/a-b.c@d%e+f=g,h.db";
-            assert_eq!(
-                poll_command(42, Some(every_safe_class)),
-                format!("cafleet message poll 42 --json --database-url {every_safe_class}")
-            );
-        }
-
-        #[test]
-        fn a_database_url_with_a_space_is_single_quoted() {
-            assert_eq!(
-                poll_command(7, Some("sqlite:///tmp/my fleet.db")),
-                "cafleet message poll 7 --json --database-url 'sqlite:///tmp/my fleet.db'"
-            );
-        }
-
-        #[test]
-        fn a_single_quote_in_the_database_url_is_closed_escaped_and_reopened() {
-            assert_eq!(
-                poll_command(7, Some("sqlite:///tmp/it's.db")),
-                r"cafleet message poll 7 --json --database-url 'sqlite:///tmp/it'\''s.db'"
-            );
+            for (name, member, url, expected) in [
+                (
+                    "omitted database URL",
+                    7,
+                    None,
+                    "cafleet message poll 7 --json".to_owned(),
+                ),
+                (
+                    "only safe characters",
+                    7,
+                    Some("sqlite:///tmp/fleet.db"),
+                    "cafleet message poll 7 --json --database-url sqlite:///tmp/fleet.db"
+                        .to_owned(),
+                ),
+                (
+                    "every safe character class",
+                    42,
+                    Some(every_safe_class),
+                    format!("cafleet message poll 42 --json --database-url {every_safe_class}"),
+                ),
+                (
+                    "a space",
+                    7,
+                    Some("sqlite:///tmp/my fleet.db"),
+                    "cafleet message poll 7 --json --database-url 'sqlite:///tmp/my fleet.db'"
+                        .to_owned(),
+                ),
+                (
+                    "a single quote closed, escaped and reopened",
+                    7,
+                    Some("sqlite:///tmp/it's.db"),
+                    r"cafleet message poll 7 --json --database-url 'sqlite:///tmp/it'\''s.db'"
+                        .to_owned(),
+                ),
+            ] {
+                assert_eq!(poll_command(member, url), expected, "{name}");
+            }
         }
 
         #[test]
@@ -1547,7 +1138,7 @@ mod tests {
             ]
         );
         assert_eq!(notices(&output), [vec![10]]);
-        assert_eq!(*clock.sleeps.borrow(), vec![Duration::from_secs(1); 3]);
+        assert_eq!(clock.sleeps(), vec![Duration::from_secs(1); 3]);
         assert_eq!(
             io.snapshots
                 .iter()
@@ -1677,21 +1268,25 @@ mod tests {
         }
 
         #[test]
-        #[should_panic(expected = "only a pending notice may be refused")]
-        fn a_refused_ready_record_panics() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::new(&clock);
-            output.refused_event = Some("ready");
-            listen_over(&clock, &mut output, 2, |_| Vec::new());
-        }
-
-        #[test]
-        #[should_panic(expected = "only a pending notice may be refused")]
-        fn a_refused_closed_record_panics() {
-            let clock = test_clock();
-            let mut output = RecordingOutput::new(&clock);
-            output.refused_event = Some("closed");
-            listen_over(&clock, &mut output, 2, |_| Vec::new());
+        fn refusing_a_ready_or_closed_record_panics() {
+            for event in ["ready", "closed"] {
+                let refused = std::panic::catch_unwind(|| {
+                    let clock = test_clock();
+                    let mut output = RecordingOutput::new(&clock);
+                    output.refused_event = Some(event);
+                    listen_over(&clock, &mut output, 2, |_| Vec::new());
+                });
+                let payload = refused.expect_err(event);
+                let message = payload
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or_default();
+                assert!(
+                    message.contains("only a pending notice may be refused"),
+                    "{event}: {message}"
+                );
+            }
         }
 
         mod consuming_polls {
@@ -1727,7 +1322,7 @@ mod tests {
                         self.snapshots < 2_000,
                         "a held notice must allow idle sleeps"
                     );
-                    let now = self.clock.elapsed.get().as_secs();
+                    let now = self.clock.elapsed().as_secs();
                     while let Some((at, act)) = self.script.get(self.applied)
                         && *at <= now
                     {
@@ -1973,9 +1568,9 @@ mod tests {
             NEXT,
         )
         .unwrap();
-        assert_eq!(clock.elapsed.get(), Duration::from_millis(2500));
+        assert_eq!(clock.elapsed(), Duration::from_millis(2500));
         assert_eq!(
-            *clock.sleeps.borrow(),
+            clock.sleeps(),
             [
                 Duration::from_secs(1),
                 Duration::from_secs(1),
@@ -2012,7 +1607,7 @@ mod tests {
             NEXT,
         )
         .unwrap();
-        assert_eq!(clock.elapsed.get(), Duration::from_secs(8));
+        assert_eq!(clock.elapsed(), Duration::from_secs(8));
         assert_eq!(
             notices(&output),
             (0..8).map(|id| vec![id]).collect::<Vec<_>>(),
@@ -2110,7 +1705,7 @@ mod tests {
         let mut output = RecordingOutput::new(&clock);
         let mut io = ScriptedInbox::new(&clock, &output, |_, check| {
             assert_eq!(check, 1);
-            clock.elapsed.set(Duration::from_secs(2));
+            clock.set_elapsed(Duration::from_secs(2));
             Ok(open(Vec::new()))
         });
         assert!(matches!(
@@ -2466,9 +2061,7 @@ mod tests {
         const THREAD: &str = "019a5c3e-7f21-7c11-9d3b-2b6f0c8e4a10";
         const RECORD_PREFIX: &str = "[cafleet listen record] ";
         const QUEUE_BUDGET_MS: &str = "CAFLEET_TEST_CODEX_QUEUE_BUDGET_MS";
-        const RETRY_MS: &str = "CAFLEET_TEST_CODEX_FULL_QUEUE_RETRY_MS";
         const QUEUE_BUDGET: Duration = Duration::from_millis(1000);
-        const RETRY: Duration = Duration::from_millis(100);
         const FULL_QUEUE_REFUSAL: &str = "printf '%s\\n' '⚠ install out of sync' 'Error: queue cannot contain more than 100 submissions (code -32600)' >&2\nexit 1";
 
         /// Appends the stub's argv to the log: fields end with US, invocations with RS.
@@ -2586,7 +2179,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                     )
                     .env("RUST_BACKTRACE", "0")
                     .env(QUEUE_BUDGET_MS, QUEUE_BUDGET.as_millis().to_string())
-                    .env(RETRY_MS, RETRY.as_millis().to_string())
                     .envs(env.iter().copied())
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
@@ -2632,19 +2224,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                             .map(str::to_owned)
                             .collect()
                     })
-                    .collect()
-            }
-
-            /// Gaps between consecutive `codex` invocations, as stamped by [`full_queue_codex`].
-            fn invocation_gaps(&self) -> Vec<Duration> {
-                let stamps = self
-                    .read("codex.log.times")
-                    .lines()
-                    .map(|line| line.parse::<u64>().unwrap())
-                    .collect::<Vec<_>>();
-                stamps
-                    .windows(2)
-                    .map(|pair| Duration::from_nanos(pair[1] - pair[0]))
                     .collect()
             }
 
@@ -2799,19 +2378,12 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             format!("{LOG_ARGV}\nexit 0")
         }
 
-        /// Accepts only the closed notice and answers every record with `record_reply`.
-        fn codex_refusing_records(record_reply: &str) -> String {
-            format!(
-                "{LOG_ARGV}\ncase \"$*\" in\n  *'[cafleet listen closed]'*) exit 0 ;;\nesac\n{record_reply}"
-            )
-        }
-
-        /// Accepts only the closed notice and holds every record until the test creates
-        /// [`RELEASE`], then answers it with `record_reply`.
+        /// Holds every record until the test creates [`RELEASE`], then answers it with
+        /// `record_reply`.
         fn codex_failing_released_records(record_reply: &str) -> String {
-            codex_refusing_records(&format!(
-                "while [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; do sleep 0.05; done\n{record_reply}"
-            ))
+            format!(
+                "{LOG_ARGV}\nwhile [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; do sleep 0.05; done\n{record_reply}"
+            )
         }
 
         const RELEASE: &str = "codex.log.release";
@@ -2829,20 +2401,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 "{}",
                 forwarder.stderr()
             );
-        }
-
-        /// Stamps every invocation, answers the first `refusals` (every one when `None`) with
-        /// Codex's full-queue refusal, and runs `then` for the rest.
-        fn full_queue_codex(refusals: Option<u32>, then: &str) -> String {
-            let refuse = match refusals {
-                Some(refusals) => {
-                    format!("if [ \"$count\" -le {refusals} ]; then\n{FULL_QUEUE_REFUSAL}\nfi")
-                }
-                None => FULL_QUEUE_REFUSAL.to_owned(),
-            };
-            format!(
-                "{LOG_ARGV}\ndate +%s%N >>\"$CAFLEET_TEST_CODEX_LOG.times\"\ncount=$(( $(cat \"$CAFLEET_TEST_CODEX_LOG.count\" 2>/dev/null || echo 0) + 1 ))\nprintf '%s' \"$count\" >\"$CAFLEET_TEST_CODEX_LOG.count\"\n{refuse}\n{then}"
-            )
         }
 
         fn assert_stdout_has_no_forwarded_records(forwarder: &Forwarder, broker: &Broker) {
@@ -2963,7 +2521,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         }
 
         #[test]
-        fn a_codex_queue_past_its_deadline_is_killed_and_the_closed_notice_names_the_deadline() {
+        fn a_codex_queue_past_its_deadline_is_killed_and_ends_forwarding_with_its_diagnostic() {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
             broker.send(worker, director, "slow");
@@ -2971,7 +2529,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             let forwarder = start(
                 &broker,
                 &listen_args(director, None),
-                Some(&codex_refusing_records("exec sleep 30")),
+                Some(&format!("{LOG_ARGV}\nexec sleep 30")),
                 Launch::Session,
             );
             assert_eq!(forwarder.wait_exit(Duration::from_secs(10)), 1);
@@ -2989,188 +2547,51 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 "{}",
                 forwarder.stderr()
             );
-            let forwarded = forwarder.forwarded();
-            assert_eq!(forwarded.len(), 2, "{forwarded:?}");
             assert_eq!(
-                forwarded[1],
-                queued(&format!("[cafleet listen closed] exit 1: {diagnostic}"))
+                forwarder.forwarded(),
+                [queued(&pending_text(&broker, director))],
+                "the timed-out record is the only invocation"
             );
             assert_stdout_has_no_forwarded_records(&forwarder, &broker);
         }
 
         #[test]
-        fn a_failed_closed_notice_keeps_the_original_diagnostic_and_exit_one() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            broker.send(worker, director, "unforwardable");
-            let forwarder = start(
-                &broker,
-                &listen_args(director, None),
-                Some(&format!(
-                    "{LOG_ARGV}\nprintf '%s\\n' 'codex unavailable' >&2\nexit 4"
-                )),
-                Launch::Session,
-            );
-            assert_eq!(forwarder.wait_exit(Duration::from_secs(25)), 1);
-            let stderr = forwarder.stderr();
-            assert!(
-                stderr.contains(&format!(
-                    "failed to forward record to codex thread {THREAD}: "
-                )),
-                "{stderr}"
-            );
-            assert!(
-                stderr.contains(&format!(
-                    "failed to forward the closed notice to codex thread {THREAD}: "
-                )),
-                "{stderr}"
-            );
-            let forwarded = forwarder.forwarded();
-            assert_eq!(
-                forwarded.len(),
-                2,
-                "one record attempt and one notice: {forwarded:?}"
-            );
-            assert!(forwarded[1][4].starts_with("[cafleet listen closed] exit 1: "));
-        }
-
-        #[test]
-        fn a_refused_notice_is_retried_each_second_from_the_current_pending_set_until_accepted() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            for body in ["first", "second"] {
-                broker.send(worker, director, body);
+        fn a_non_zero_codex_queue_exit_ends_forwarding_after_its_one_attempt() {
+            for (reply, cause) in [
+                (
+                    "printf '%s\\n' 'codex unavailable' >&2\nexit 4".to_owned(),
+                    "codex unavailable",
+                ),
+                (
+                    FULL_QUEUE_REFUSAL.to_owned(),
+                    "queue cannot contain more than 100 submissions",
+                ),
+            ] {
+                let mut broker = broker();
+                let (director, worker) = (broker.director, broker.worker);
+                broker.send(worker, director, "unforwardable");
+                let forwarder = start(
+                    &broker,
+                    &listen_args(director, None),
+                    Some(&format!("{LOG_ARGV}\n{reply}")),
+                    Launch::Session,
+                );
+                assert_eq!(forwarder.wait_exit(Duration::from_secs(10)), 1, "{cause}");
+                let stderr = forwarder.stderr();
+                let diagnostic = stderr
+                    .find(&format!(
+                        "failed to forward record to codex thread {THREAD}: "
+                    ))
+                    .map(|start| &stderr[start..])
+                    .unwrap_or_else(|| panic!("{cause}: {stderr}"));
+                assert!(diagnostic.contains(cause), "{stderr}");
+                assert_eq!(
+                    forwarder.forwarded(),
+                    [queued(&pending_text(&broker, director))],
+                    "{cause}: one attempt and no closed notice"
+                );
+                assert_stdout_has_no_forwarded_records(&forwarder, &broker);
             }
-            let forwarder = start(
-                &broker,
-                &listen_args(director, Some(5)),
-                Some(&full_queue_codex(Some(2), "exit 0")),
-                Launch::Session,
-            );
-            forwarder.wait_forwarded(1);
-            broker.send(worker, director, "third");
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(15)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            let notice = queued(&pending_text(&broker, director));
-            assert_eq!(
-                forwarder.forwarded(),
-                [
-                    notice.clone(),
-                    notice.clone(),
-                    notice,
-                    queued(&closed_text(director, "timeout")),
-                ],
-                "two refusals, one acceptance, then the closing record"
-            );
-            let gaps = forwarder.invocation_gaps();
-            assert!(
-                gaps[..2].iter().all(|gap| *gap >= Duration::from_secs(1)),
-                "a refused notice waits the listener's one-second idle interval: {gaps:?}"
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(director, broker.fleet),
-                    crate::output::json::listen_closed(director, "timeout"),
-                ]
-            );
-        }
-
-        /// Answers every `pending` notice with Codex's full-queue refusal and accepts the rest.
-        fn codex_refusing_notices() -> String {
-            format!(
-                "{LOG_ARGV}\ncase \"$*\" in\n  *'\"event\":\"pending\"'*)\n{FULL_QUEUE_REFUSAL}\n;;\nesac\nexit 0"
-            )
-        }
-
-        #[test]
-        fn a_refused_notice_whose_ids_are_polled_during_refusals_is_abandoned() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "polled while refused");
-            let forwarder = start(
-                &broker,
-                &listen_args(director, Some(5)),
-                Some(&codex_refusing_notices()),
-                Launch::Session,
-            );
-            forwarder.wait_forwarded(2);
-            assert_eq!(
-                broker::poll_messages(&broker.conn, director)
-                    .unwrap()
-                    .iter()
-                    .map(|consumed| consumed.message_id)
-                    .collect::<Vec<_>>(),
-                [message]
-            );
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(15)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            let notice = queued(&pending_text(&broker, director));
-            assert_eq!(
-                forwarder.forwarded(),
-                [
-                    notice.clone(),
-                    notice,
-                    queued(&closed_text(director, "timeout")),
-                ],
-                "no notice is attempted once the pending set is empty"
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(director, broker.fleet),
-                    crate::output::json::listen_closed(director, "timeout"),
-                ]
-            );
-        }
-
-        #[test]
-        fn the_pinned_session_ending_during_a_full_queue_wait_closes_the_listener_with_session_exited()
-         {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            broker.send(worker, director, "waiting");
-            let mut forwarder = start(
-                &broker,
-                &listen_args(director, None),
-                Some(&full_queue_codex(None, "exit 0")),
-                Launch::Session,
-            );
-            forwarder.wait_forwarded(2);
-            forwarder.end_session();
-            let ended = Instant::now();
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(5)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            assert!(
-                ended.elapsed() < Duration::from_secs(3),
-                "{:?}",
-                ended.elapsed()
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(director, broker.fleet),
-                    crate::output::json::listen_closed(director, "session_exited"),
-                ]
-            );
-            let notice = queued(&pending_text(&broker, director));
-            let forwarded = forwarder.forwarded();
-            assert!(
-                forwarded.iter().all(|invocation| *invocation == notice),
-                "only the refused notice is attempted, with no closed notice: {forwarded:?}"
-            );
         }
 
         #[test]
@@ -3237,155 +2658,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 [queued(&closed_text(worker, "member_inactive"))],
                 "no closed notice goes to the exited session"
             );
-        }
-
-        /// Deregisters `worker` under a running forwarder and waits until its closing record has
-        /// been refused for more than the five-second closing output budget.
-        fn refuse_the_closing_record_past_five_seconds(forwarder: &Forwarder, broker: &mut Broker) {
-            forwarder.wait_ready();
-            assert!(
-                crate::broker::members::test_support::deregister_member(
-                    &mut broker.conn,
-                    broker.worker
-                )
-                .unwrap()
-            );
-            let closed = Instant::now();
-            forwarder.wait_for(
-                "closing-record refusals past 6 s",
-                Duration::from_secs(20),
-                |forwarder| {
-                    closed.elapsed() >= Duration::from_secs(6) && forwarder.forwarded().len() >= 2
-                },
-            );
-            assert_eq!(
-                forwarder.status(),
-                None,
-                "a refused closing record keeps the forwarder alive: {}",
-                forwarder.stderr()
-            );
-        }
-
-        fn assert_only_the_closing_record_was_retried(forwarder: &Forwarder, worker: i64) {
-            let closing = queued(&closed_text(worker, "member_inactive"));
-            let forwarded = forwarder.forwarded();
-            assert!(
-                forwarded.len() >= 10 && forwarded.iter().all(|attempt| *attempt == closing),
-                "{forwarded:?}"
-            );
-            let gaps = forwarder.invocation_gaps();
-            assert!(
-                gaps.iter().all(|gap| *gap >= RETRY),
-                "each closing retry waits the retry interval: {gaps:?}"
-            );
-        }
-
-        #[test]
-        fn a_refused_closing_record_retries_until_the_pinned_session_ends_and_closes_with_session_exited()
-         {
-            let mut broker = broker();
-            let worker = broker.worker;
-            let mut forwarder = start(
-                &broker,
-                &listen_args(worker, None),
-                Some(&full_queue_codex(None, "exit 0")),
-                Launch::Session,
-            );
-            refuse_the_closing_record_past_five_seconds(&forwarder, &mut broker);
-            forwarder.end_session();
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(5)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            assert_closed_with_session_exited(&forwarder, &broker, worker);
-            assert_only_the_closing_record_was_retried(&forwarder, worker);
-        }
-
-        #[test]
-        fn a_closing_record_refused_for_more_than_five_seconds_is_written_to_stdout_after_acceptance()
-         {
-            let mut broker = broker();
-            let worker = broker.worker;
-            let forwarder = start(
-                &broker,
-                &listen_args(worker, None),
-                Some(&format!(
-                    "{LOG_ARGV}\ndate +%s%N >>\"$CAFLEET_TEST_CODEX_LOG.times\"\nif [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; then\n{FULL_QUEUE_REFUSAL}\nfi\nexit 0"
-                )),
-                Launch::Session,
-            );
-            refuse_the_closing_record_past_five_seconds(&forwarder, &mut broker);
-            std::fs::write(forwarder.file(RELEASE), "").unwrap();
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(5)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            assert_eq!(
-                forwarder.stdout_records(),
-                [
-                    crate::output::json::listen_ready(worker, broker.fleet),
-                    crate::output::json::listen_closed(worker, "member_inactive"),
-                ]
-            );
-            assert_only_the_closing_record_was_retried(&forwarder, worker);
-        }
-
-        #[test]
-        fn a_non_full_queue_failure_after_a_refusal_fails_without_another_wait() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            broker.send(worker, director, "refused");
-            let wait = Duration::from_secs(3);
-            let forwarder = start_with_env(
-                &broker,
-                &listen_args(director, None),
-                Some(&full_queue_codex(
-                    Some(1),
-                    &format!(
-                        "case \"$*\" in\n  *'[cafleet listen closed]'*) exit 0 ;;\nesac\nprintf '%s\\n' 'thread {THREAD} not found' >&2\nexit 2"
-                    ),
-                )),
-                Launch::Session,
-                &[(RETRY_MS, &wait.as_millis().to_string())],
-            );
-            assert_eq!(forwarder.wait_exit(Duration::from_secs(15)), 1);
-            let stderr = forwarder.stderr();
-            let diagnostic = stderr
-                .lines()
-                .find(|line| {
-                    line.contains(&format!(
-                        "failed to forward record to codex thread {THREAD}: "
-                    ))
-                })
-                .unwrap_or_else(|| panic!("{stderr}"));
-            assert!(
-                diagnostic.contains(&format!("thread {THREAD} not found")),
-                "{stderr}"
-            );
-            let notice = queued(&pending_text(&broker, director));
-            let forwarded = forwarder.forwarded();
-            assert_eq!(forwarded.len(), 3, "{forwarded:?}");
-            assert_eq!(forwarded[..2], [notice.clone(), notice]);
-            assert!(
-                forwarded[2][4].starts_with(&format!(
-                    "[cafleet listen closed] exit 1: failed to forward record to codex thread {THREAD}: "
-                )) && forwarded[2][4].contains(&format!("thread {THREAD} not found")),
-                "{forwarded:?}"
-            );
-            let gaps = forwarder.invocation_gaps();
-            assert!(
-                gaps[0] >= Duration::from_secs(1) && gaps[0] < wait,
-                "a refused notice waits the listener's idle interval, not the closing retry interval: {gaps:?}"
-            );
-            assert!(
-                gaps[1] < Duration::from_secs(1),
-                "only the full-queue refusal waits: {gaps:?}"
-            );
-            assert_stdout_has_no_forwarded_records(&forwarder, &broker);
         }
 
         #[test]

@@ -29,14 +29,14 @@ Run `cafleet setup` after installation. The same classifier guards normal comman
 Each cafleet version starts from a fresh database, so no fleets, messages or runtime history carry across an upgrade:
 
 1. Finish and delete your active fleets before upgrading.
-2. After upgrading, run `cafleet setup` once. It creates the version's `~/.local/share/cafleet/cafleet_<VERSION>.db` and records the asset installations there; until then `cafleet doctor` reports the database as absent.
+2. After upgrading, run `cafleet setup` once. It creates the version's `~/.local/share/cafleet/cafleet_<VERSION>.db` and installs the embedded assets; until then `cafleet doctor` reports the database as absent.
 3. Create your fleets anew.
 
 Database files of earlier versions in `~/.local/share/cafleet/` stay in place, byte for byte; delete them by hand when you no longer need them. With an explicit `--database-url`, point it at a new empty path, or delete the old file by hand, then run `cafleet setup`.
 
-## Assets-install recording
+## Installed assets
 
-`asset_installs` records the CLI version for each coding-agent/config-path pair. Setup upserts it after installing that backend's embedded skills and any preset or plugin, and `cafleet doctor` reports the recorded asset version at each backend's resolved path. Operator customizations belong outside setup-owned assets.
+Setup writes each backend's embedded skills and any preset or plugin, and `cafleet doctor` compares every installed file with the embedded copy at each backend's resolved path. Operator customizations belong outside setup-owned assets.
 
 ## Retention and pane locks
 
@@ -46,4 +46,4 @@ Deregistration and fleet deletion retain message history while active query path
 
 Member runners keep a private runtime namespace beside the canonical database, separate for each database file and instance; replacing the database file at the same pathname fences old runners. The [runner boundary contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#runner-boundary-and-creation-transaction) owns paths, permissions, validation and runtime-record recovery.
 
-Terminal transport continues independently of database contention. Events become durable at SQLite commit; a flushed outbox frame is recoverable pending delivery. Metadata evidence stores no screen-derived text or hidden-text hash; explicit redacted evidence applies the configured policy before every persisted field. The [storage pressure contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#storage-pressure-and-durability-boundary) defines bounded pressure and exclusive recovery.
+Terminal transport continues independently of database contention. Events become durable at SQLite commit, and a runner crash loses only transitions that had not committed. Event evidence stores no screen-derived text or hidden-text hash. The [storage pressure contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#storage-pressure-and-durability-boundary) defines bounded pressure and exclusive recovery.

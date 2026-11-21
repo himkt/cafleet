@@ -15,7 +15,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 
 Broker queries return typed records; CLI presenters construct wire output. Shared diagnosis validates database identity and schema. Keep durable storage separate from synchronous notification, runner-owned preview retries, input ownership and multiplexer I/O. Required state fails at its read boundary. Preserve process pipe draining, owned-child cleanup, pane ownership compensation and layout cleanup.
 
-Every Rust test is an in-file unit test; [Test placement](https://github.com/himkt/cafleet/blob/main/.claude/rules/code-quality.md#test-placement) owns the convention.
+Every Rust test is an in-file unit test. Related cases form one table-driven test over a named case array; runner tests take time from the injected clock and use real time only when they drive real processes, PTYs, sockets or locks; and runner behavior is driven through the runtime scenario harness, which asserts events, rows and child bytes. [Test placement](https://github.com/himkt/cafleet/blob/main/.claude/rules/code-quality.md#test-placement) owns the convention.
 
 ## Development
 
@@ -33,7 +33,7 @@ mise //:install
 cafleet setup
 ```
 
-Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools, owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`. Run Rust validation with `mise //:test` and `mise //:lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use them.
+Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools, owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`. Run Rust validation with `mise //:test` and `mise //:lint`; `mise //:coverage` reports line coverage of the inline unit tests. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use them.
 
 ### Installing the skills from your checkout
 
@@ -79,11 +79,10 @@ Evaluate a candidate backend against the role bar before it ships:
 | Capability | Required native evidence |
 |---|---|
 | Permission detection | Live captures of each permission form the claimed policies reach. |
-| Automatic review annotations | Captures of each automatic refusal and unavailable-review notice in the idle, working and overlay states where the native host shows them. |
 | Composer plans | For prompt and native exec each, empty-composer, typed-literal and post-submit captures with separate literal and submit-key stages. |
 | Request-bound answers | Allow and deny pre-stage captures and a continuation capture for each decision. Pin single-request semantics, focus/key stages, request-token revalidation and human/output race behavior. |
 
-Every claimed detector/composer/answer capability requires CAFleet-owned positive and adversarial replay fixtures, including redraw, wrapping, fragmented ANSI/UTF-8, alternate screens, competing forms and quoted transcript false positives. Every capture is real native PTY evidence from a native version within the profile's interval on each registered multiplexer, including concurrent output/input and the observed-state race boundary. A submission plan is measured, not an assumed Enter mapping. [SPEC §6.9 Native acceptance and coverage](https://github.com/himkt/cafleet/blob/main/SPEC.md#native-acceptance-and-coverage) owns the minimum policies, evidence fields and fault cases. A launch-help probe supplies no detector/composer/answer claim; missing minimum native evidence fails feature acceptance.
+Every claimed detector/composer/answer capability requires CAFleet-owned positive and adversarial replay fixtures, including redraw, wrapping, fragmented ANSI/UTF-8, alternate screens, competing forms and quoted transcript false positives. Every capture is real native PTY evidence from a native version within the profile's interval on each registered multiplexer, including concurrent output/input and the observed-state race boundary. A submission plan is measured, not an assumed Enter mapping. [Release acceptance](#release-acceptance) owns the minimum policies, evidence fields and fault cases. A launch-help probe supplies no detector/composer/answer claim; missing minimum native evidence fails feature acceptance.
 
 ### Run a CAFleet subscribe probe
 
@@ -129,3 +128,86 @@ Classify each run as follows; the 240-second turn bound leaves 60 seconds of the
 | Fail | A valid run in which any probe ID was first returned only after the listener exited, or was never returned by a notice-prompted poll. |
 
 A mechanism with three invalid runs is recorded as "not established" with the invalidating cause.
+
+## Testing and release acceptance
+
+[SPEC §9 Testing strategy](https://github.com/himkt/cafleet/blob/main/SPEC.md#9-testing-strategy) states the conformance levels; this section covers how the CAFleet test suite and release process check them.
+
+### Bundled catalog provenance checks
+
+The bundled-catalog guard tests in `src/coding_agent/catalog.rs` check every provenance rule of [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) against the embedded catalog, so a build whose bundled backend files fail them does not pass `mise //:test`. The guard validates every catalog fixture entry, including screens that no profile capability cites. The production catalog loader skips the contents of the `fixtures` registry and of every `fixture_ids` value, so only the guard reads them, and fixture validation shares the SemVer comparison of profile selection. The guard reports these errors:
+
+| Condition | Error |
+|---|---|
+| The source file is absent from the test suite's fixture bytes | `bundled fixture bytes are not embedded` |
+| File `schema_version` differs from `1`, `provenance` differs from `native`, or `backend` differs from the entry | `bundled fixture file identity differs from its catalog entry` |
+| The entry's `id` is absent from `screens` | `bundled fixture screen is missing` |
+| A `screens` key has no catalog fixture entry | `bundled fixture file holds an uncited screen` |
+| The canonical screen digest differs from the entry's `sha256` | `bundled fixture digest mismatch for <ID>: catalog <SHA>, computed <SHA>` |
+| Screen `rows` or `cols` differ from the entry | `bundled fixture identity differs from its catalog entry` |
+| A pattern-bearing field (a rule matcher, frame guard, region matcher, `prompt_pattern` or any other pattern the catalog decoder compiles) contains a Perl class or boundary (`\s \S \d \D \w \W \b \B`) or an escape outside the [pattern syntax](https://github.com/himkt/cafleet/blob/main/SPEC.md#pattern-syntax) | The profile, rule ID and construct, for example `` claude 2.1.302 rule claude-bash-command: `\s` `` |
+
+Synthetic fixtures exercise rule and capability validation in the test suite. The guard rejects them for the bundled catalog, and explicitly selected test catalogs that use them pass the same provenance rules.
+
+### Native screen fixture capture
+
+The capture-to-fixture conversion inserts the converted screen under its catalog fixture `id` in `assets/profiles/native/<backend>.json`. It derives `cell_backgrounds` from the capture grid's per-cell `bg` and `cell_styles` from its per-cell faint and foreground attributes, and fixture replay applies each run's background and style before writing its row text. The terminal-screen parser gives a continuation cell default attributes whenever its leading cell receives a wide character, both on the runtime screen and in replay, so replay writes a run's attributes onto the leading cell and leaves the continuation cell to the parser. [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the fixture file format.
+
+### Storage deadline mechanisms
+
+The SQLite mechanisms below enforce the storage deadlines that SPEC states as outcomes:
+
+- A `message listen` snapshot uses scoped busy waiting and an execution progress handler every 1,000 VM instructions, checking the deadline before and after prepare and execution, before and after decoding each row, and before commit. Every path restores busy handling and removes the listener-owned progress handler, preserving cleanup failures alongside the original cause.
+- A runner SQLite attempt replaces the connection's default five-second busy wait with its bounded budget, cancels long-running statements within that deadline and restores the prior handler and connection hooks after the attempt.
+
+### Release acceptance
+
+Acceptance evidence for every declared detector, composer and answer capability consists of synthetic terminal replay and real native PTYs on each registered multiplexer.
+
+The release minimum is a real interactive permission request under Claude's native `default` policy and under Codex's native `on-request` policy with `workspace-write`, each on both tmux and herdr. Acceptance records pin exact installed CLI versions to their corresponding bundled profiles, and their permitted disposable fixtures actually reach the native approval surface. Every minimum case demonstrates blocked-model-independent detection, a committed actionable event/inbox record, Director consumption and a preserved original request. Separate fresh requests cover verified Director-auto allow and deny, user-authorized responses under non-auto/unknown modes, manual original-surface input and a user-executed complete bound command. The records show zero response bytes before required user permission. Missing native availability, unknown coverage or an unobserved required case fails overall feature acceptance; unknown coverage is only the compatibility path for other versions/backends. Additional profiles retain their own declared acceptance gates.
+
+Automatic-mode acceptance covers Claude `auto` and Codex `approve-for-me` on both tmux and herdr, with automatic review available for the account and model: the omitted-default launch, an auto-approved fixture, an auto-refused fixture whose refusal the member routes to the Director, and, where the native host shows one, an escalated form answered allow and deny. A later-version case repeats the launch, auto-approved, auto-refused and escalated cases on a native version above its profile's `min_version`, recording the selected profile and each UI difference that failed to match. A fixture that does not produce its intended screen is a recorded limit for that backend, not a pass.
+
+Minimum-version delivery acceptance covers every bundled backend on each registered multiplexer, using isolated native sessions and databases and benign marker commands:
+
+| Case | Required evidence |
+|---|---|
+| Threshold selection | Equal/between/above/below boundaries, catalog permutation, multiple backends, numeric component ordering, prerelease ordering, build-metadata ties, malformed thresholds and failed probes |
+| Complete profile reuse | Detection, both composer operations and each available semantic answer resolve the same profile and retain actual run/capture identities |
+| Native operation plans | Prompt preview and direct prompt create a native user turn; native exec runs a harmless marker command and exposes its result, with literal-to-submit timing recorded |
+| Fallback operation | Missing plan and failed-probe cases show the rule-5 fallback sequence of [SPEC Delivery method and interaction priority](https://github.com/himkt/cafleet/blob/main/SPEC.md#delivery-method-and-interaction-priority) and explicit fallback results |
+| Busy composer | A busy composer with an executable plan follows rule 4 (`composer_busy` with zero bytes and profile drain once empty, previews pending) without any Escape; a working member with an empty composer row receives profile delivery |
+| Interaction deferral | Permission and question remain open with no Escape/literal bytes; answering on the original native surface yields closure, the queued prompt first and then the pending preview, without another send |
+| Adversarial transition | A candidate or superseding interaction appearing during chunks/settles stops the write at its complete prefix, keyboard/pointer input there leaves the write running, and observer/owner loss and partial stages follow the complete-prefix stop outcomes |
+| Durable retry | A queued prompt or exec drains by fallback and retains one ID/digest after composer changes and repeated queries; duplicate keys, conflicting digests, lost replies and storage failures avoid duplicate dispatch |
+| Deferred failure and liveness | After closure with a busy pane lock and no further output/commands, the runner timer either delivers when the lock frees or publishes not submitted at the deadline; temporary storage/observer failure and terminal-commit recovery preserve FIFO/result visibility |
+| Schema and reporting | Fresh-baseline initialization, canonical digest validation, referential integrity, sequence preservation, self-send/no-pane output and durable reason/state projection for ordinary and history receipts |
+
+Composer-submit acceptance uses the installed evidence versions on both tmux and herdr for every bundled backend. Each record verifies versions from the capturing server's pane and records commands, screen fixtures and timings:
+
+| Case | Required result |
+|---|---|
+| Pointer at 0.3 s | Hover, wheel and click during the settle or between literal chunks leave the write running and it submits; permission tokens/stages are revoked |
+| Keyboard `x` at 0.3 s | The write continues and the mixed literal is submitted; post-submit verification records the outcome |
+| Plain threshold | Codex previews of 1007 and 1037 bytes and Hermes previews of 2027 and 2057 characters submit using measured framing or pointer rendering |
+| Positive short writes | Japanese previews of 7987 and 12085 bytes continue chunks and submit within 5 s |
+| Ineffective submit key | Post-submit verification ends as `uncertain/submit_unconfirmed`, stage `submitted` |
+| FIFO stop | After an uncertain prompt or exec, neither a queued exec nor a sweep preview writes a byte until `input reconcile` settles it, on runs with and without composer verification |
+| Hermes deletion | Drafts of 2057 characters and 8192 scalars clear and work settlement completes; the larger draft clears within 10 s |
+
+Unit coverage replays each unsubmitted-literal fixture through post-submit verification and obtains `submit_unconfirmed`, and exercises interaction stops, close-stage failures, schema constraints and projection/recovery actions. Measurements establish submitted native input separately from model consumption, permission decisions and command completion.
+
+Live acceptance records carry the source/installed CAFleet version, native CLI version, native configuration/mode, detector and answer profiles, request identity/token, receipt/stage, multiplexer, terminal size, cwd and metadata evidence. They include a permitted operation, an ordinary command failure after allow, an actual permission refusal, an approval that blocks the model, both supported answer routes and observed continuation. The exercised cases cover stale tokens/epochs/events, same/different operation keys, a second answer for an already answered episode, partial writes/lost replies, redraw, fragmented ANSI/UTF-8, primary/alternate screens, resize, title-only prompts, question/trust/update screens, transcript quotes, identical requests, concurrent human/output/input, slow display, database locks, event-channel pressure, startup compensation, runner hard kill and deletion. Unavailable native modes or unobserved cases remain explicit coverage limits and cannot pass that profile's release gate.
+
+Acceptance also covers these transport, lifecycle and persistence cases:
+
+- Exact child argv for the selected native policy, with native/managed restrictions and sandbox boundaries preserved.
+- Equal run IDs across sibling databases, and replacement at an unchanged path.
+- A held write transaction and a long statement, showing that restoration and exit are independent of the connection's default timeout.
+- A child exiting while its descendant holds the slave, exit during a stalled display and a locked database, and deadline-bounded terminal restoration.
+- Timeout followed by the original runner's recovery, and concurrent recovery attempts.
+- A command containing a known secret, which is absent from every database/message field.
+- Hard kill with uncommitted transitions, loss closure after a committed opening, concurrent recovery, interruption during recovery, and deregistration before recovery with archived rather than fabricated inbox records.
+- A live unlinked lock resolved by `member delete`, verified death, unknown identity reporting `live_or_unreachable` and concurrent database-only recovery.
+- Cross-invocation accepted-then-failed-stamp recovery, queued-then-drained delivery after interaction closure, disconnected partial writes, receipt retirement followed by a delayed request, and a lost explicit-command stdout result.
+- Every registered backend's omitted-policy argv and each adapter-declared explicit policy.

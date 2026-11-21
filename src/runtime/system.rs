@@ -4,7 +4,7 @@
 use crate::coding_agent::SpawnProbe;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::RunError;
-use crate::multiplexer::TimedRunError;
+use crate::time::Clock as _;
 use nix::fcntl::FcntlArg;
 use nix::fcntl::OFlag;
 use nix::fcntl::fcntl;
@@ -66,10 +66,6 @@ impl CommandRunner for SystemRunner {
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
         run_process(argv, Some(timeout))
     }
-
-    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-        run_process_until(argv, deadline)
-    }
 }
 
 fn spawn_piped(argv: &[String]) -> Result<Child, RunError> {
@@ -100,13 +96,16 @@ fn decode(status: ExitStatus, stdout: &[u8], stderr: &[u8]) -> Result<String, Ru
 }
 
 fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
-    let started = Instant::now();
+    let started = crate::time::SystemClock.now();
     if timeout.is_some_and(|timeout| timeout.is_zero()) {
         return Err(RunError::deadline_expired());
     }
     let child = spawn_piped(argv)?;
     if let Some(timeout) = timeout {
-        return run_timed(child, timeout.saturating_sub(started.elapsed()));
+        let elapsed = crate::time::SystemClock
+            .now()
+            .saturating_duration_since(started);
+        return run_timed(child, timeout.saturating_sub(elapsed));
     }
     let output = child.wait_with_output().map_err(|e| RunError::Failed {
         stderr: e.to_string(),
@@ -114,101 +113,14 @@ fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, Run
     decode(output.status, &output.stdout, &output.stderr)
 }
 
-const COMMAND_CLEANUP_RESERVE: Duration = Duration::from_millis(250);
-
-fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-    let started = Instant::now();
-    let cutoff = deadline
-        .checked_sub(COMMAND_CLEANUP_RESERVE)
-        .filter(|cutoff| *cutoff > started)
-        .ok_or_else(TimedRunError::before_launch)?;
-    let child = spawn_piped(argv).map_err(|source| TimedRunError {
-        source,
-        cleanup_diagnostics: Vec::new(),
-    })?;
-    let mut owned = OwnedChild {
-        child,
-        reaped: false,
-        cleanup_deadline: Some(deadline),
-        cleanup_attempted: false,
-    };
-    let result = collect_until(&mut owned, cutoff, usize::MAX)
-        .map_err(RunError::from)
-        .and_then(|output| {
-            if Instant::now() >= cutoff {
-                return Err(RunError::Timeout);
-            }
-            decode(output.status, &output.stdout, &output.stderr)
-        });
-    result.map_err(|source| TimedRunError {
-        source,
-        cleanup_diagnostics: owned.cleanup_absolute(),
-    })
-}
-
 struct OwnedChild {
     child: Child,
     reaped: bool,
-    cleanup_deadline: Option<Instant>,
-    cleanup_attempted: bool,
-}
-
-impl OwnedChild {
-    fn cleanup_absolute(&mut self) -> Vec<String> {
-        let deadline = self
-            .cleanup_deadline
-            .expect("absolute cleanup retains its original deadline");
-        assert!(
-            !self.cleanup_attempted,
-            "absolute cleanup is attempted once"
-        );
-        self.cleanup_attempted = true;
-        drop(self.child.stdout.take());
-        drop(self.child.stderr.take());
-        let mut diagnostics = Vec::new();
-        if self.reaped {
-            return diagnostics;
-        }
-        let pid = self.child.id();
-        if let Err(error) = retry_interrupted(|| self.child.kill()) {
-            diagnostics.push(format!("cleanup failed for child {pid} kill: {error}"));
-        }
-        loop {
-            let Some(_) = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|left| !left.is_zero())
-            else {
-                diagnostics.push(format!("cleanup unconfirmed for child {pid}: original command deadline expired before reap"));
-                break;
-            };
-            match retry_interrupted(|| self.child.try_wait()) {
-                Ok(Some(_)) => {
-                    self.reaped = true;
-                    break;
-                }
-                Ok(None) => crate::runtime::nap_until(deadline),
-                Err(error) => {
-                    diagnostics.push(format!("cleanup failed for child {pid} try_wait: {error}"));
-                    diagnostics.push(format!(
-                        "cleanup unconfirmed for child {pid}: status inspection failed"
-                    ));
-                    break;
-                }
-            }
-        }
-        diagnostics
-    }
 }
 
 impl Drop for OwnedChild {
     fn drop(&mut self) {
-        if self.cleanup_deadline.is_some() {
-            if !self.cleanup_attempted {
-                for diagnostic in self.cleanup_absolute() {
-                    let _ = writeln!(io::stderr().lock(), "{diagnostic}");
-                }
-            }
-        } else if !self.reaped {
+        if !self.reaped {
             let _ = self.child.kill();
             let _ = retry_interrupted(|| self.child.wait());
         }
@@ -225,12 +137,10 @@ fn retry_interrupted<T>(mut action: impl FnMut() -> io::Result<T>) -> io::Result
 }
 
 fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
-    let started = Instant::now();
+    let started = crate::time::SystemClock.now();
     let mut owned = OwnedChild {
         child,
         reaped: false,
-        cleanup_deadline: None,
-        cleanup_attempted: false,
     };
     let result = collect_until(&mut owned, started + timeout, usize::MAX).map_err(RunError::from);
     match result {
@@ -324,8 +234,6 @@ pub(crate) fn run_until_exit(
     let mut owned = OwnedChild {
         child,
         reaped: false,
-        cleanup_deadline: None,
-        cleanup_attempted: false,
     };
     collect_until(&mut owned, deadline, cap)
 }
@@ -394,7 +302,7 @@ fn collect_until(
     let mut status = None;
     loop {
         let left = deadline
-            .checked_duration_since(Instant::now())
+            .checked_duration_since(crate::time::SystemClock.now())
             .filter(|left| !left.is_zero())
             .ok_or(BoundedFailure::Deadline {
                 exited: status.is_some(),
@@ -862,61 +770,6 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.to_string(), "original wait failure");
         assert_eq!(attempts, 1);
-    }
-
-    #[test]
-    fn press_absolute_runner_reserves_cleanup_and_reaps_the_actual_direct_child() {
-        let fixture = ProcessFixture::new();
-        let argv = vec![
-            "/bin/sh".into(),
-            "-c".into(),
-            "printf '%s' \"$$\" > \"$1/pid\"\nexec sleep 4".into(),
-            "cafleet-absolute-press-test".into(),
-            fixture.dir.path().to_str().unwrap().into(),
-        ];
-        let not_started =
-            SystemRunner.run_until(&argv, Instant::now() + Duration::from_millis(200));
-        let not_started = match not_started {
-            Ok(_) => panic!("insufficient cleanup reserve starts no process"),
-            Err(cause) => cause,
-        };
-        assert!(matches!(not_started.source, RunError::NotStarted(_)));
-        assert!(not_started.cleanup_diagnostics.is_empty());
-        assert!(!fixture.dir.path().join("pid").exists());
-
-        let started = Instant::now();
-        let until = started + Duration::from_secs(2);
-        let result = SystemRunner.run_until(&argv, until);
-        let returned = Instant::now();
-        let observed = result
-            .as_ref()
-            .cloned()
-            .map_err(|cause| cause.source.clone());
-        fixture.assert_direct_child_reaped(&observed);
-        let cause = match result {
-            Ok(_) => panic!("the direct child outlives the collection budget"),
-            Err(cause) => cause,
-        };
-        assert!(
-            matches!(cause.source, RunError::Timeout),
-            "{:?}",
-            cause.source
-        );
-        assert!(
-            cause.cleanup_diagnostics.is_empty(),
-            "{:?}",
-            cause.cleanup_diagnostics
-        );
-        assert!(
-            returned >= until - Duration::from_millis(350),
-            "elapsed={:?}",
-            returned - started
-        );
-        assert!(
-            returned <= until - Duration::from_millis(150),
-            "elapsed={:?}",
-            returned - started
-        );
     }
 
     mod bounded_run {

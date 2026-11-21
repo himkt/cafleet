@@ -2,11 +2,7 @@ use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::catalog::Capture;
-use crate::coding_agent::catalog::ComposerDraft;
-use crate::coding_agent::catalog::ComposerDraftSpec;
 use crate::coding_agent::catalog::CursorRule;
-use crate::coding_agent::catalog::DraftFirst;
-use crate::coding_agent::catalog::DraftLast;
 use crate::coding_agent::catalog::FocusStyle;
 use crate::coding_agent::catalog::MarginRows;
 use crate::coding_agent::catalog::MatcherScope;
@@ -30,9 +26,6 @@ pub(crate) enum ObservationKind {
     PermissionContinuation,
     ComposerEmpty,
     Unknown,
-    AutomaticRefusal,
-    AutomaticReviewUnavailable,
-    AutomaticReviewAvailable,
 }
 
 impl TryFrom<String> for ObservationKind {
@@ -51,9 +44,6 @@ impl ObservationKind {
             "permission_continuation" => Self::PermissionContinuation,
             "composer_empty" => Self::ComposerEmpty,
             "unknown" => Self::Unknown,
-            "automatic_refusal" => Self::AutomaticRefusal,
-            "automatic_review_unavailable" => Self::AutomaticReviewUnavailable,
-            "automatic_review_available" => Self::AutomaticReviewAvailable,
             _ => return Err(CafleetError::Usage("invalid profile observation".into())),
         })
     }
@@ -63,18 +53,7 @@ impl ObservationKind {
             Self::PermissionContinuation => "permission_continuation",
             Self::ComposerEmpty => "composer_empty",
             Self::Unknown => "unknown",
-            Self::AutomaticRefusal => "automatic_refusal",
-            Self::AutomaticReviewUnavailable => "automatic_review_unavailable",
-            Self::AutomaticReviewAvailable => "automatic_review_available",
         }
-    }
-    pub(crate) fn is_annotation(self) -> bool {
-        matches!(
-            self,
-            Self::AutomaticRefusal
-                | Self::AutomaticReviewUnavailable
-                | Self::AutomaticReviewAvailable
-        )
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,33 +84,6 @@ pub(crate) struct ScreenObservation {
     pub(crate) verified_noninteraction: bool,
     pub(crate) output_seq: u64,
     pub(crate) continues_rule_id: Option<String>,
-    pub(crate) annotations: Vec<AnnotationBlock>,
-    pub(crate) guarded_annotation_rules: Vec<String>,
-}
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct AnnotationFingerprint {
-    rule_id: String,
-    shown: String,
-}
-#[derive(Clone)]
-pub(crate) struct AnnotationBlock {
-    pub(crate) kind: ObservationKind,
-    pub(crate) rule_id: String,
-    pub(crate) matched_region: ScreenRegion,
-    pub(crate) raw_evidence: Value,
-    pub(crate) fingerprint: AnnotationFingerprint,
-}
-fn normalized_shown(text: &str, row_margin: Option<&str>) -> String {
-    let mut rows = text.split('\n');
-    let mut joined = rows.next().expect("split yields a first row").to_owned();
-    for row in rows {
-        joined.push_str(
-            row_margin
-                .and_then(|margin| row.strip_prefix(margin))
-                .unwrap_or(row),
-        );
-    }
-    joined.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 pub(crate) struct Detector {
     backend: CodingAgent,
@@ -310,7 +262,6 @@ struct Matched<'a> {
     region: ScreenRegion,
     operation: Option<String>,
     choices: Vec<String>,
-    mode: Option<String>,
     excerpt: String,
     focuses: BTreeMap<String, String>,
     matcher_lines: BTreeMap<String, usize>,
@@ -350,27 +301,6 @@ fn frame_guard_holds(rule: &Rule, lines: &[LogicalLine]) -> bool {
             .reject
             .iter()
             .any(|pattern| lines.iter().any(|line| pattern.is_match(&line.text)))
-}
-fn match_annotation_blocks<'a>(
-    rule: &'a Rule,
-    screen: &ScreenSnapshot,
-    lines: &[LogicalLine],
-) -> Vec<Matched<'a>> {
-    if !frame_guard_holds(rule, lines) {
-        return Vec::new();
-    }
-    let mut blocks = Vec::new();
-    let mut next_free = 0;
-    for candidate in qualifying_regions(rule, screen, lines) {
-        if candidate.0 < next_free {
-            continue;
-        }
-        if let Some(block) = extract(rule, lines, candidate) {
-            next_free = candidate.1 + 1;
-            blocks.push(block);
-        }
-    }
-    blocks
 }
 fn qualifying_regions(
     rule: &Rule,
@@ -436,97 +366,6 @@ fn region_candidates(
         }
     }
     regions
-}
-/// Reads the draft from the live composer region. Each start row's region ends at the first
-/// end-pattern row that leaves the selected draft rows inside it; the live region is the single such region that satisfies the cursor
-/// rule and holds no other start-pattern row, unless the row above it also matches the start
-/// pattern, which makes it a continuation of a composer whose every row repeats the marker. The
-/// draft is its selected rows without the prompt marker or suggestion-styled cells, trailing
-/// blanks trimmed and blank edge rows dropped.
-pub(super) fn composer_draft(spec: &ComposerDraftSpec, screen: &ScreenSnapshot) -> ComposerDraft {
-    let Ok(lines) = clipped_logical_lines(screen, &BTreeMap::new()) else {
-        return ComposerDraft::Unreadable;
-    };
-    let opens = |index: usize| spec.region.start.is_match(&lines[index].text);
-    let any_cursor = Region {
-        cursor: CursorRule::Any,
-        ..spec.region.clone()
-    };
-    let framed = usize::from(
-        spec.rows.first == DraftFirst::AfterStart || spec.rows.last == DraftLast::BeforeEnd,
-    );
-    let mut nearest = BTreeMap::new();
-    for (start, end, _) in region_candidates(&any_cursor, None, screen, &lines) {
-        if end >= start + framed {
-            nearest.entry(start).or_insert(end);
-        }
-    }
-    let live: Vec<_> = region_candidates(&spec.region, None, screen, &lines)
-        .into_iter()
-        .filter(|&(start, end, _)| nearest.get(&start) == Some(&end))
-        .filter(|&(start, end, _)| !(start + 1..end).any(opens))
-        .collect();
-    let [(start, _, region)] = live[..] else {
-        return ComposerDraft::Unreadable;
-    };
-    if start > 0 && opens(start - 1) {
-        return ComposerDraft::Unreadable;
-    }
-    let first = match spec.rows.first {
-        DraftFirst::Start => region.top,
-        DraftFirst::AfterStart => region.top + 1,
-    };
-    let last = match spec.rows.last {
-        DraftLast::End => region.bottom,
-        DraftLast::BeforeEnd => region.bottom - 1,
-    };
-    let mut rows = Vec::new();
-    for row in first..last {
-        let cells: Vec<_> = (0..screen.cols)
-            .filter_map(|col| screen.screen.cell(row, col))
-            .filter(|cell| !cell.is_wide_continuation())
-            .map(|cell| {
-                let text = if cell.has_contents() {
-                    cell.contents()
-                } else {
-                    " "
-                };
-                (
-                    text,
-                    spec.suggestion
-                        .is_some_and(|style| suggestion_cell(cell, style)),
-                )
-            })
-            .collect();
-        let mut skip = 0;
-        if row == first
-            && let Some(prompt) = &spec.prompt
-        {
-            let raw: String = cells.iter().map(|(text, _)| *text).collect();
-            let Some(found) = prompt.find(&raw).filter(|found| found.start() == 0) else {
-                return ComposerDraft::Unreadable;
-            };
-            let mut consumed = 0;
-            while consumed < found.end() {
-                consumed += cells[skip].0.len();
-                skip += 1;
-            }
-        }
-        let text: String = cells[skip..]
-            .iter()
-            .filter(|(_, suggested)| !suggested)
-            .map(|(text, _)| *text)
-            .collect();
-        rows.push(text.trim_end().to_owned());
-    }
-    let Some(top) = rows.iter().position(|row| !row.is_empty()) else {
-        return ComposerDraft::Readable(String::new());
-    };
-    let bottom = rows
-        .iter()
-        .rposition(|row| !row.is_empty())
-        .expect("a nonblank row exists");
-    ComposerDraft::Readable(rows[top..=bottom].join("\n"))
 }
 /// Whether every cell from `col` to the row's last non-blank cell carries the suggestion style.
 fn suggestion_only(screen: &ScreenSnapshot, row: u16, col: u16, style: SuggestionStyle) -> bool {
@@ -647,7 +486,7 @@ fn extract<'a>(
         Some(reference) => {
             let value = captured(reference, &values)?;
             let plain = reference.row_margin.is_none() && reference.row_trailer.is_none();
-            Some(if plain || rule.kind.is_annotation() {
+            Some(if plain {
                 value
             } else {
                 displayed_rows(&value, reference)?
@@ -660,17 +499,11 @@ fn extract<'a>(
         .iter()
         .map(|choice| captured(&choice.label, &values))
         .collect::<Option<Vec<_>>>()?;
-    let mode = values
-        .values()
-        .find_map(|named| named.get("mode"))
-        .filter(|mode| !mode.is_empty())
-        .cloned();
     Some(Matched {
         rule,
         region,
         operation,
         choices,
-        mode,
         excerpt: region_text,
         focuses,
         matcher_lines,
@@ -853,51 +686,6 @@ impl Detector {
             profile: catalog.matching(backend, version).cloned(),
         }
     }
-    fn annotation_blocks(
-        &self,
-        profile: &Profile,
-        screen: &ScreenSnapshot,
-        lines: &ScreenLines,
-        unmatched_evidence: &Value,
-    ) -> Vec<AnnotationBlock> {
-        let Some(group) = &profile.annotations else {
-            return Vec::new();
-        };
-        let mut blocks = profile
-            .rules
-            .iter()
-            .filter(|rule| group.rules.contains(&rule.id))
-            .flat_map(|rule| match_annotation_blocks(rule, screen, lines.of(rule)))
-            .map(|matched| {
-                let mut raw_evidence = evidence(
-                    unmatched_evidence,
-                    matched.rule,
-                    matched.operation.as_deref(),
-                    &matched.excerpt,
-                );
-                raw_evidence["observed_mode"] = json!(matched.mode);
-                AnnotationBlock {
-                    kind: matched.rule.kind,
-                    fingerprint: AnnotationFingerprint {
-                        rule_id: matched.rule.id.clone(),
-                        shown: normalized_shown(
-                            matched.operation.as_deref().unwrap_or(&matched.excerpt),
-                            matched
-                                .rule
-                                .operation
-                                .as_ref()
-                                .and_then(|capture| capture.row_margin.as_deref()),
-                        ),
-                    },
-                    rule_id: matched.rule.id.clone(),
-                    matched_region: matched.region,
-                    raw_evidence,
-                }
-            })
-            .collect::<Vec<_>>();
-        blocks.sort_by_key(|block| (block.matched_region.top, block.rule_id.clone()));
-        blocks
-    }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
         let mut observation = ScreenObservation {
             kind: ObservationKind::Unknown,
@@ -909,27 +697,11 @@ impl Detector {
             verified_noninteraction: false,
             output_seq: screen.screen_seq,
             continues_rule_id: None,
-            annotations: Vec::new(),
-            guarded_annotation_rules: Vec::new(),
         };
         let Some(profile) = &self.profile else {
             return Ok(observation);
         };
         let lines = ScreenLines::new(screen, profile)?;
-        observation.annotations =
-            self.annotation_blocks(profile, screen, &lines, &observation.raw_evidence);
-        observation.guarded_annotation_rules = profile
-            .rules
-            .iter()
-            .filter(|rule| {
-                profile
-                    .annotations
-                    .as_ref()
-                    .is_some_and(|group| group.rules.contains(&rule.id))
-                    && frame_guard_holds(rule, lines.of(rule))
-            })
-            .map(|rule| rule.id.clone())
-            .collect();
         let mut matched = profile
             .rules
             .iter()
@@ -2715,55 +2487,68 @@ mod tests {
         }
 
         #[test]
-        fn a_faint_suggestion_after_the_prompt_is_an_empty_composer() {
-            let screen = composer(&format!("{FAINT}fix the failing build"), 2);
-            assert_eq!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn an_indexed_foreground_suggestion_after_the_prompt_is_an_empty_composer() {
-            let screen = composer(&format!("{GREY}fix the failing build"), 2);
-            assert_eq!(kind(grey(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn a_bare_prompt_with_the_cursor_after_it_is_an_empty_composer() {
-            assert_eq!(
-                kind(faint(), &composer("", 2)),
-                ObservationKind::ComposerEmpty
-            );
-        }
-
-        #[test]
-        fn a_typed_draft_in_the_default_style_is_not_an_empty_composer() {
-            let screen = composer("fix the failing build", 23);
-            assert_ne!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn typed_text_followed_by_a_suggestion_is_not_an_empty_composer() {
-            let screen = composer(&format!("fix{FAINT} the failing build"), 5);
-            assert_ne!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn a_suggestion_with_the_cursor_away_from_the_prompt_is_not_an_empty_composer() {
+        fn only_a_suggestion_in_the_declared_style_with_the_cursor_after_the_prompt_is_empty() {
+            let faint_suggestion = format!("{FAINT}fix the failing build");
+            let grey_suggestion = format!("{GREY}fix the failing build");
+            let cases = [
+                (
+                    "faint suggestion",
+                    faint(),
+                    composer(&faint_suggestion, 2),
+                    true,
+                ),
+                (
+                    "indexed foreground suggestion",
+                    grey(),
+                    composer(&grey_suggestion, 2),
+                    true,
+                ),
+                (
+                    "bare prompt with the cursor after it",
+                    faint(),
+                    composer("", 2),
+                    true,
+                ),
+                (
+                    "typed draft in the default style",
+                    faint(),
+                    composer("fix the failing build", 23),
+                    false,
+                ),
+                (
+                    "typed text followed by a suggestion",
+                    faint(),
+                    composer(&format!("fix{FAINT} the failing build"), 5),
+                    false,
+                ),
+                (
+                    "faint text under a foreground rule",
+                    grey(),
+                    composer(&faint_suggestion, 2),
+                    false,
+                ),
+                (
+                    "foreground text under a faint rule",
+                    faint(),
+                    composer(&grey_suggestion, 2),
+                    false,
+                ),
+            ];
+            for (name, style, screen, empty) in cases {
+                assert_eq!(
+                    kind(style, &screen) == ObservationKind::ComposerEmpty,
+                    empty,
+                    "{name}"
+                );
+            }
             for cursor_col in [0, 1, 3, 23] {
-                let screen = composer(&format!("{FAINT}fix the failing build"), cursor_col);
+                let screen = composer(&faint_suggestion, cursor_col);
                 assert_ne!(
                     kind(faint(), &screen),
                     ObservationKind::ComposerEmpty,
-                    "cursor at column {cursor_col}"
+                    "suggestion with the cursor at column {cursor_col}"
                 );
             }
-        }
-
-        #[test]
-        fn text_in_another_style_than_the_rule_declares_is_not_an_empty_composer() {
-            let faint_text = composer(&format!("{FAINT}fix the failing build"), 2);
-            assert_ne!(kind(grey(), &faint_text), ObservationKind::ComposerEmpty);
-            let grey_text = composer(&format!("{GREY}fix the failing build"), 2);
-            assert_ne!(kind(faint(), &grey_text), ObservationKind::ComposerEmpty);
         }
     }
 
@@ -4280,15 +4065,10 @@ mod tests {
                 ObservationKind::Interaction(InteractionClass::PermissionRequest)
             );
             assert!(observed.fingerprint.is_some());
-            assert_eq!(observed.annotations.len(), 1);
         }
         assert!(
             first.fingerprint == second.fingerprint,
             "the permission request keeps its identity across profile boundaries"
-        );
-        assert!(
-            first.annotations[0].fingerprint == second.annotations[0].fingerprint,
-            "the annotation keeps its identity across profile boundaries"
         );
     }
 
@@ -4486,157 +4266,6 @@ mod tests {
         assert!(matches!(value.kind, ObservationKind::Unknown));
         assert!(matches!(value.match_evidence, MatchEvidence::Absent));
         assert!(value.fingerprint.is_none());
-    }
-
-    mod annotation {
-        use crate::coding_agent::catalog::test_support::annotation::*;
-        use crate::coding_agent::detector::tests::*;
-        fn observe_lines(definition: &Value, rows: &[&str]) -> ScreenObservation {
-            let rows = rows.iter().map(|row| (*row).to_owned()).collect::<Vec<_>>();
-            observation(definition, &terminal(&rows, 80, false).snapshot())
-        }
-
-        fn refusal_screen(operations: &[&str]) -> Vec<String> {
-            let mut rows = Vec::new();
-            for operation in operations {
-                rows.push(format!("Refused: {operation}"));
-                rows.push("Refusal end".to_owned());
-            }
-            rows.push("Live footer".to_owned());
-            rows
-        }
-        #[test]
-        fn annotation_detector_yields_every_qualifying_block_in_row_order_beside_the_primary() {
-            let definition = annotated();
-            let observed = observe_lines(
-                &definition,
-                &refusal_screen(&["write one.txt", "write two.txt"])
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-            );
-            assert_eq!(observed.kind, ObservationKind::Unknown);
-            assert_eq!(observed.rule_id, "unmatched-screen");
-            assert_eq!(observed.annotations.len(), 2);
-            let operations = observed
-                .annotations
-                .iter()
-                .map(|block| block.raw_evidence["operation"].clone())
-                .collect::<Vec<_>>();
-            assert_eq!(operations, [json!("write one.txt"), json!("write two.txt")]);
-            for block in &observed.annotations {
-                assert_eq!(block.kind, ObservationKind::AutomaticRefusal);
-                assert_eq!(block.rule_id, REFUSAL);
-                assert_eq!(block.raw_evidence["rule_id"], REFUSAL);
-            }
-            let (first, second) = (
-                observed.annotations[0].matched_region,
-                observed.annotations[1].matched_region,
-            );
-            assert!(first.bottom <= second.top, "{first:?} {second:?}");
-            assert!(observed.annotations[0].fingerprint != observed.annotations[1].fingerprint);
-            let single = observe_lines(
-                &definition,
-                &refusal_screen(&["write one.txt"])
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-            );
-            assert_eq!(single.annotations.len(), 1);
-            assert!(single.annotations[0].fingerprint == observed.annotations[0].fingerprint);
-        }
-
-        #[test]
-        fn annotation_detector_leaves_the_primary_observation_unchanged() {
-            let mut rows = vec![
-                "Live footer".to_owned(),
-                "Refused: write outside.txt".to_owned(),
-                "Refusal end".to_owned(),
-            ];
-            rows.extend(lines("write disposable.txt"));
-            let screen = terminal(&rows, 80, false).snapshot();
-            let plain = observation(&definitions(), &screen);
-            let annotated = observation(&annotated(), &screen);
-            assert_eq!(
-                annotated.kind,
-                ObservationKind::Interaction(InteractionClass::PermissionRequest)
-            );
-            assert_eq!(annotated.kind, plain.kind);
-            assert_eq!(annotated.rule_id, plain.rule_id);
-            assert_eq!(annotated.match_evidence, plain.match_evidence);
-            assert_eq!(annotated.raw_evidence, plain.raw_evidence);
-            assert_eq!(
-                annotated.verified_noninteraction,
-                plain.verified_noninteraction
-            );
-            assert!(annotated.fingerprint == plain.fingerprint);
-            assert!(plain.annotations.is_empty());
-            assert_eq!(annotated.annotations.len(), 1);
-            assert_eq!(
-                annotated.annotations[0].raw_evidence["operation"],
-                "write outside.txt"
-            );
-        }
-
-        #[test]
-        fn annotation_detector_reports_each_annotation_kind_with_its_own_rule() {
-            let observed = observe_lines(
-                &annotated(),
-                &[
-                    "Automatic review unavailable",
-                    "Mode: automatic",
-                    "Live footer",
-                ],
-            );
-            let mut kinds = observed
-                .annotations
-                .iter()
-                .map(|block| (block.rule_id.clone(), block.kind))
-                .collect::<Vec<_>>();
-            kinds.sort_by(|a, b| a.0.cmp(&b.0));
-            assert_eq!(
-                kinds,
-                [
-                    (
-                        AVAILABLE.to_owned(),
-                        ObservationKind::AutomaticReviewAvailable
-                    ),
-                    (
-                        UNAVAILABLE.to_owned(),
-                        ObservationKind::AutomaticReviewUnavailable
-                    ),
-                ]
-            );
-            for block in &observed.annotations {
-                assert_eq!(block.raw_evidence["operation"], Value::Null);
-            }
-        }
-
-        #[test]
-        fn annotation_detector_frame_guard_rejects_non_live_frames_and_undecorated_quotes() {
-            let definition = annotated();
-            let without_footer =
-                observe_lines(&definition, &["Refused: write one.txt", "Refusal end"]);
-            assert!(without_footer.annotations.is_empty());
-            let viewer = observe_lines(
-                &definition,
-                &[
-                    "Transcript viewer",
-                    "Refused: write one.txt",
-                    "Refusal end",
-                    "Live footer",
-                ],
-            );
-            assert!(viewer.annotations.is_empty());
-            let quoted = observe_lines(
-                &definition,
-                &["The model said Refused: write one.txt", "Live footer"],
-            );
-            assert!(quoted.annotations.is_empty());
-            let undecorated =
-                observe_lines(&definition, &["Refused: write one.txt", "Live footer"]);
-            assert!(undecorated.annotations.is_empty());
-        }
     }
 
     mod operation_rows {

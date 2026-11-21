@@ -183,179 +183,186 @@ mod tests {
         }
     }
 
+    struct SlotCase {
+        name: String,
+        fleet_id: i64,
+        windows: Vec<WindowOccupancy>,
+        last_window_ordinal: i64,
+        expected: SlotChoice,
+    }
+
+    fn slot_case(
+        name: &str,
+        windows: Vec<WindowOccupancy>,
+        last_window_ordinal: i64,
+        expected: SlotChoice,
+    ) -> SlotCase {
+        SlotCase {
+            name: name.into(),
+            fleet_id: FLEET,
+            windows,
+            last_window_ordinal,
+            expected,
+        }
+    }
+
     #[test]
-    fn the_director_window_right_column_fills_up_to_its_capacity() {
-        for members in 0..4 {
-            assert_eq!(
-                choose_slot(FLEET, &[director_window(60, members)], 0),
+    fn choose_slot_takes_the_first_column_below_capacity_or_the_next_window_ordinal() {
+        let director_fill = (0..4).map(|members| {
+            slot_case(
+                &format!("director window holding {members} of 4 members"),
+                vec![director_window(60, members)],
+                0,
                 existing(0, ColumnSide::Right),
-                "{members} members"
-            );
-        }
-        assert_eq!(
-            choose_slot(FLEET, &[director_window(60, 4)], 0),
-            new_window(1)
-        );
-        assert_eq!(
-            choose_slot(FLEET, &[director_window(25, 1)], 0),
-            new_window(1)
-        );
-    }
-
-    #[test]
-    fn a_director_window_shorter_than_one_slot_is_skipped() {
-        assert_eq!(
-            choose_slot(FLEET, &[director_window(14, 0)], 0),
-            new_window(1)
-        );
-        assert_eq!(
-            choose_slot(
-                FLEET,
-                &[director_window(10, 0), overflow_window(1, 30, 1, 0)],
-                1
-            ),
-            existing(1, ColumnSide::Left)
-        );
-    }
-
-    #[test]
-    fn an_overflow_window_fills_its_left_column_then_its_right_column() {
-        for (left, right, expected) in [
-            (1, 0, Some(ColumnSide::Left)),
-            (2, 0, Some(ColumnSide::Right)),
-            (2, 1, Some(ColumnSide::Right)),
-            (2, 2, None),
-        ] {
-            let choice = choose_slot(
-                FLEET,
-                &[director_window(30, 2), overflow_window(1, 30, left, right)],
+            )
+        });
+        let overflow_fill = [
+            ("overflow 1 left 0 right", 1, 0, Some(ColumnSide::Left)),
+            ("overflow 2 left 0 right", 2, 0, Some(ColumnSide::Right)),
+            ("overflow 2 left 1 right", 2, 1, Some(ColumnSide::Right)),
+            ("overflow 2 left 2 right", 2, 2, None),
+        ]
+        .map(|(name, left, right, side)| {
+            slot_case(
+                name,
+                vec![director_window(30, 2), overflow_window(1, 30, left, right)],
                 1,
-            );
-            let expected = match expected {
-                Some(side) => existing(1, side),
-                None => new_window(2),
-            };
-            assert_eq!(choice, expected, "left {left} right {right}");
-        }
-    }
-
-    #[test]
-    fn every_overflow_column_accepts_one_member_however_short_the_window() {
-        for (left, right, expected) in [
-            (0, 0, Some(ColumnSide::Left)),
-            (1, 0, Some(ColumnSide::Right)),
-            (1, 1, None),
-        ] {
-            let choice = choose_slot(
-                FLEET,
-                &[director_window(10, 0), overflow_window(1, 10, left, right)],
-                1,
-            );
-            let expected = match expected {
-                Some(side) => existing(1, side),
-                None => new_window(2),
-            };
-            assert_eq!(choice, expected, "left {left} right {right}");
-        }
-    }
-
-    #[test]
-    fn a_new_window_takes_the_ordinal_after_the_last_allocated_one() {
-        assert_eq!(
-            choose_slot(
-                FLEET,
-                &[director_window(30, 2), overflow_window(2, 30, 2, 2)],
-                5
+                side.map_or_else(|| new_window(2), |side| existing(1, side)),
+            )
+        });
+        let short_overflow = [
+            (
+                "short overflow 0 left 0 right",
+                0,
+                0,
+                Some(ColumnSide::Left),
             ),
-            new_window(6)
-        );
-        assert_eq!(
-            choose_slot(42, &[director_window(30, 2)], 0),
-            SlotChoice::NewWindow {
-                ordinal: 1,
-                window_name: "cafleet-42-1".into(),
-            }
-        );
+            (
+                "short overflow 1 left 0 right",
+                1,
+                0,
+                Some(ColumnSide::Right),
+            ),
+            ("short overflow 1 left 1 right", 1, 1, None),
+        ]
+        .map(|(name, left, right, side)| {
+            slot_case(
+                name,
+                vec![director_window(10, 0), overflow_window(1, 10, left, right)],
+                1,
+                side.map_or_else(|| new_window(2), |side| existing(1, side)),
+            )
+        });
+        let cases = director_fill
+            .chain(overflow_fill)
+            .chain(short_overflow)
+            .chain([
+                slot_case(
+                    "full director window",
+                    vec![director_window(60, 4)],
+                    0,
+                    new_window(1),
+                ),
+                slot_case(
+                    "one-slot director window holding one member",
+                    vec![director_window(25, 1)],
+                    0,
+                    new_window(1),
+                ),
+                slot_case(
+                    "director window shorter than one slot",
+                    vec![director_window(14, 0)],
+                    0,
+                    new_window(1),
+                ),
+                slot_case(
+                    "short director window skipped for an overflow window",
+                    vec![director_window(10, 0), overflow_window(1, 30, 1, 0)],
+                    1,
+                    existing(1, ColumnSide::Left),
+                ),
+                slot_case(
+                    "new window after the last allocated ordinal",
+                    vec![director_window(30, 2), overflow_window(2, 30, 2, 2)],
+                    5,
+                    new_window(6),
+                ),
+                SlotCase {
+                    name: "new window named for its fleet".into(),
+                    fleet_id: 42,
+                    windows: vec![director_window(30, 2)],
+                    last_window_ordinal: 0,
+                    expected: SlotChoice::NewWindow {
+                        ordinal: 1,
+                        window_name: "cafleet-42-1".into(),
+                    },
+                },
+                slot_case(
+                    "overflow windows scanned in ascending ordinal order",
+                    vec![
+                        director_window(30, 2),
+                        overflow_window(1, 30, 2, 2),
+                        overflow_window(3, 30, 2, 1),
+                        overflow_window(4, 30, 0, 0),
+                    ],
+                    4,
+                    existing(3, ColumnSide::Right),
+                ),
+                slot_case(
+                    "freed director slot reused before an overflow window",
+                    vec![director_window(60, 3), overflow_window(1, 30, 1, 0)],
+                    1,
+                    existing(0, ColumnSide::Right),
+                ),
+                slot_case(
+                    "emptied left column refilled before the right column",
+                    vec![director_window(30, 2), overflow_window(1, 30, 0, 1)],
+                    1,
+                    existing(1, ColumnSide::Left),
+                ),
+            ]);
+        for case in cases {
+            assert_eq!(
+                choose_slot(case.fleet_id, &case.windows, case.last_window_ordinal),
+                case.expected,
+                "{}",
+                case.name
+            );
+        }
     }
 
     #[test]
-    fn overflow_windows_are_scanned_in_ascending_ordinal_order() {
-        assert_eq!(
-            choose_slot(
-                FLEET,
-                &[
+    fn choose_slot_refuses_windows_that_do_not_start_at_the_director_in_ascending_order() {
+        for (name, windows, last_window_ordinal) in [
+            (
+                "no director window first",
+                vec![overflow_window(1, 30, 0, 0)],
+                1,
+            ),
+            ("no windows", Vec::new(), 0),
+            (
+                "descending ordinals",
+                vec![
+                    director_window(30, 2),
+                    overflow_window(2, 30, 0, 0),
+                    overflow_window(1, 30, 0, 0),
+                ],
+                2,
+            ),
+            (
+                "repeated ordinal",
+                vec![
                     director_window(30, 2),
                     overflow_window(1, 30, 2, 2),
-                    overflow_window(3, 30, 2, 1),
-                    overflow_window(4, 30, 0, 0),
+                    overflow_window(1, 30, 0, 0),
                 ],
-                4
+                1,
             ),
-            existing(3, ColumnSide::Right)
-        );
-    }
-
-    #[test]
-    fn a_freed_director_slot_is_reused_before_any_overflow_window() {
-        assert_eq!(
-            choose_slot(
-                FLEET,
-                &[director_window(60, 3), overflow_window(1, 30, 1, 0)],
-                1
-            ),
-            existing(0, ColumnSide::Right)
-        );
-    }
-
-    #[test]
-    fn an_emptied_left_column_is_refilled_before_the_right_column() {
-        assert_eq!(
-            choose_slot(
-                FLEET,
-                &[director_window(30, 2), overflow_window(1, 30, 0, 1)],
-                1
-            ),
-            existing(1, ColumnSide::Left)
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn choose_slot_requires_the_director_window_first() {
-        choose_slot(FLEET, &[overflow_window(1, 30, 0, 0)], 1);
-    }
-
-    #[test]
-    #[should_panic]
-    fn choose_slot_requires_at_least_the_director_window() {
-        choose_slot(FLEET, &[], 0);
-    }
-
-    #[test]
-    #[should_panic]
-    fn choose_slot_requires_strictly_ascending_ordinals() {
-        choose_slot(
-            FLEET,
-            &[
-                director_window(30, 2),
-                overflow_window(2, 30, 0, 0),
-                overflow_window(1, 30, 0, 0),
-            ],
-            2,
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn choose_slot_refuses_a_repeated_ordinal() {
-        choose_slot(
-            FLEET,
-            &[
-                director_window(30, 2),
-                overflow_window(1, 30, 2, 2),
-                overflow_window(1, 30, 0, 0),
-            ],
-            1,
-        );
+        ] {
+            let refused = std::panic::catch_unwind(|| {
+                choose_slot(FLEET, &windows, last_window_ordinal);
+            });
+            assert!(refused.is_err(), "{name}");
+        }
     }
 }

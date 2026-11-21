@@ -8,7 +8,6 @@ use crate::runtime::control::decode_service_request;
 use crate::runtime::control::encode_input_reply;
 use crate::runtime::input::InputCoordinator;
 use crate::runtime::input::InputServices;
-use crate::runtime::input::RealInputDeadlineClock;
 use crate::runtime::input::RequestTokenSource;
 use crate::runtime::input::receive_input_expiration;
 use crate::runtime::transport::TransportProgress;
@@ -127,16 +126,6 @@ impl RequestTokenSource for SystemRequestTokens {
     }
 }
 
-struct PendingInputClient {
-    id: u64,
-    deadline: Instant,
-}
-
-/// The runner's own immediate preview attempt; it has no control-socket client to answer.
-struct PendingSweep {
-    deadline: Instant,
-}
-
 struct NativeIo<'a> {
     input: &'a mut NonblockingFile,
     pty: &'a mut PtySession,
@@ -144,18 +133,11 @@ struct NativeIo<'a> {
     transport: &'a mut Transport,
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
-    clock: &'a dyn ObservationClock,
-    #[cfg(test)]
-    shutdown_unit: Duration,
+    clock: &'a dyn crate::time::Clock,
 }
 impl NativeIo<'_> {
-    #[cfg(not(test))]
-    fn shutdown_clock(&self) -> ShutdownClock {
-        ShutdownClock::new(Instant::now())
-    }
-    #[cfg(test)]
-    fn shutdown_clock(&self) -> ShutdownClock {
-        ShutdownClock::with_unit(Instant::now(), self.shutdown_unit)
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+        ShutdownDeadlines::starting_now(self.clock)
     }
     fn quiesce(
         &mut self,
@@ -178,7 +160,7 @@ impl NativeIo<'_> {
         &mut self,
         native_exit: &mut Option<ChildExit>,
         before_exit: impl FnOnce(&ObservationController) -> Result<()>,
-    ) -> Result<Option<ShutdownClock>> {
+    ) -> Result<Option<ShutdownDeadlines>> {
         let Some(exit) = self.pty.try_wait()? else {
             return Ok(None);
         };
@@ -186,16 +168,16 @@ impl NativeIo<'_> {
         before_exit(self.controller)?;
         self.controller
             .child_exited(exit, &self.transport.snapshot(), self.writer, self.clock)?;
-        Ok(Some(self.shutdown_clock()))
+        Ok(Some(self.shutdown_deadlines()))
     }
 }
 
-fn input_deadline(request: &InputControlRequest, admitted_at: Instant) -> Result<Instant> {
-    receive_input_expiration(
-        request.expires_at_mono_ns,
-        admitted_at,
-        &mut RealInputDeadlineClock,
-    )
+fn input_deadline(
+    request: &InputControlRequest,
+    admitted_at: Instant,
+    clock: &dyn crate::time::Clock,
+) -> Result<Instant> {
+    receive_input_expiration(request.expires_at_mono_ns, admitted_at, clock)
 }
 impl RunnerLoop<'_> {
     fn inspect(
@@ -221,7 +203,7 @@ impl RunnerLoop<'_> {
         input: PermissionInspectInput,
         admitted_at: Instant,
     ) -> Result<InputControlReply> {
-        let deadline = input_deadline(request, admitted_at)?;
+        let deadline = input_deadline(request, admitted_at, self.native.clock)?;
         request.identity.validate(&self.run)?;
         let coordinator = self
             .coordinator
@@ -237,32 +219,6 @@ impl RunnerLoop<'_> {
             )
             .map_err(CafleetError::from)
     }
-    /// Serves a forced flush action with no input drain, so no queue-turn gate holds it.
-    fn flush(
-        &mut self,
-        request: InputControlRequest,
-        admitted_at: Instant,
-    ) -> Result<InputControlReply> {
-        let deadline = input_deadline(&request, admitted_at)?;
-        request.identity.validate(&self.run)?;
-        let InputControlOperation::Flush(action) = request.operation else {
-            unreachable!("a flush receives a flush operation");
-        };
-        let coordinator = self
-            .coordinator
-            .as_mut()
-            .ok_or_else(|| error("native input has not started"))?;
-        coordinator
-            .flush_received(
-                self.conn,
-                action,
-                self.native.controller,
-                self.native.transport,
-                deadline,
-            )
-            .map(InputControlReply::Flush)
-            .map_err(CafleetError::from)
-    }
     fn submit(
         &mut self,
         request: InputControlRequest,
@@ -274,7 +230,7 @@ impl RunnerLoop<'_> {
                 run_id: Some(self.run.run_id),
                 interaction_id: Some(input.interaction_id),
                 input_id: None,
-                operation_key: Some(input.operation_key.clone()),
+                operation_key: None,
             }),
             _ => None,
         };
@@ -291,15 +247,13 @@ impl RunnerLoop<'_> {
         admitted_at: Instant,
         client_id: u64,
     ) -> Result<Option<InputControlReply>> {
-        let deadline = input_deadline(&request, admitted_at)?;
+        let deadline = input_deadline(&request, admitted_at, self.native.clock)?;
         let coordinator = self
             .coordinator
             .as_mut()
             .ok_or_else(|| error("native input has not started"))?;
         if responds {
-            if let Some(reply) =
-                coordinator.retained_permission_response(self.conn, &request, deadline)?
-            {
+            if let Some(reply) = coordinator.answered_episode_refusal(&request)? {
                 return Ok(Some(reply));
             }
             let admission = self.native.quiesce(coordinator, deadline)?;
@@ -316,21 +270,14 @@ impl RunnerLoop<'_> {
         let reply =
             coordinator.handle_received(self.conn, request, self.native.controller, deadline)?;
         if reply.is_none() {
-            ensure(
-                self.pending_input_client.is_none() && self.pending_sweep.is_none(),
-                "an accepted immediate input requires no other attempt in flight",
-            )?;
-            self.pending_input_client = Some(PendingInputClient {
-                id: client_id,
-                deadline,
-            });
+            self.turns.admit_client(client_id, deadline)?;
         }
         Ok(reply)
     }
 }
 
 impl Client {
-    fn poll(&mut self) -> Result<Vec<AdmittedControlFrame>> {
+    fn poll(&mut self, clock: &dyn crate::time::Clock) -> Result<Vec<AdmittedControlFrame>> {
         let mut requests = Vec::new();
         let mut bytes = [0; 4096];
         match self.stream.read(&mut bytes) {
@@ -339,7 +286,7 @@ impl Client {
                 self.closed = true;
             }
             Ok(count) => {
-                let observed_at = Instant::now();
+                let observed_at = clock.now();
                 requests = self.decoder.feed_admitted(&bytes[..count], observed_at)?;
             }
             Err(cause)
@@ -396,9 +343,9 @@ struct LiveShutdown<'a> {
     output: &'a mut NonblockingFile,
     raw: &'a mut RawTerminalGuard,
     writer: &'a mut EventWriter,
-    clock: ShutdownClock,
+    deadlines: ShutdownDeadlines,
     controller: &'a mut ObservationController,
-    observation_clock: &'a dyn ObservationClock,
+    clock: &'a dyn crate::time::Clock,
     coordinator: Option<&'a mut InputCoordinator>,
 }
 impl LiveShutdown<'_> {
@@ -408,12 +355,11 @@ impl LiveShutdown<'_> {
         return self.controller.poll_for(
             &snapshot,
             self.writer,
-            self.observation_clock,
+            self.clock,
             ObservationPhase::ShutdownDrain,
         );
         #[cfg(not(test))]
-        self.controller
-            .poll(&snapshot, self.writer, self.observation_clock)
+        self.controller.poll(&snapshot, self.writer, self.clock)
     }
     #[cfg(test)]
     fn await_native_exit_before_parsing(&mut self, deadline: Instant) -> Result<()> {
@@ -423,7 +369,7 @@ impl LiveShutdown<'_> {
         {
             return Ok(());
         }
-        while Instant::now() < deadline {
+        while self.clock.now() < deadline {
             self.transport.prefetch_child_bytes(self.pty)?;
             if self.pty.try_wait()?.is_some() {
                 self.send_exit()?;
@@ -431,7 +377,7 @@ impl LiveShutdown<'_> {
                     return Ok(());
                 }
             }
-            nap_until(deadline);
+            nap_until(self.clock, deadline);
         }
         Err(CafleetError::DeadlineExceeded)
     }
@@ -442,21 +388,21 @@ impl LiveShutdown<'_> {
                 exit,
                 &self.transport.snapshot(),
                 self.writer,
-                self.observation_clock,
+                self.clock,
             )?;
         }
         Ok(())
     }
 }
 impl ShutdownHost for LiveShutdown<'_> {
-    fn now(&self) -> Instant {
-        Instant::now()
+    fn clock(&self) -> &dyn crate::time::Clock {
+        self.clock
     }
     fn gate_programmatic_input(&mut self) {
-        self.writer.set_deadline(self.clock.storage_deadline());
+        self.writer.set_deadline(self.deadlines.storage_deadline());
         #[cfg(test)]
         self.controller
-            .begin_capture_shutdown(self.clock.storage_deadline());
+            .begin_capture_shutdown(self.deadlines.storage_deadline());
     }
     fn term_verified_descendants(&mut self) -> Result<()> {
         self.pty.signal_verified(nix::sys::signal::Signal::SIGTERM)
@@ -469,18 +415,16 @@ impl ShutdownHost for LiveShutdown<'_> {
         #[cfg(test)]
         self.await_native_exit_before_parsing(deadline)?;
 
-        while Instant::now() < deadline {
+        while self.clock.now() < deadline {
             let mut tick = |transport: &mut Transport| {
                 #[cfg(test)]
                 let mut observer = self.controller.observer_for(
                     self.writer,
-                    self.observation_clock,
+                    self.clock,
                     ObservationPhase::ShutdownDrain,
                 );
                 #[cfg(not(test))]
-                let mut observer = self
-                    .controller
-                    .observer(self.writer, self.observation_clock);
+                let mut observer = self.controller.observer(self.writer, self.clock);
                 transport.tick(self.input, self.pty, self.output, &mut observer)
             };
             let progress = match self.coordinator.as_mut() {
@@ -492,7 +436,7 @@ impl ShutdownHost for LiveShutdown<'_> {
             if !self.pty.survivors()? && progress.child_eof {
                 break;
             }
-            nap_until(deadline);
+            nap_until(self.clock, deadline);
         }
         self.pty.try_wait()
     }
@@ -501,11 +445,11 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
     fn close_pty(&mut self) -> Result<()> {
         self.pty.close()?;
-        while Instant::now() < self.clock.storage_deadline() {
+        while self.clock.now() < self.deadlines.storage_deadline() {
             if (self.pty.try_wait()?.is_some() || !self.pty.has_child()) && !self.pty.survivors()? {
                 break;
             }
-            nap_until(self.clock.storage_deadline());
+            nap_until(self.clock, self.deadlines.storage_deadline());
         }
         self.send_exit()?;
         ensure(
@@ -518,9 +462,9 @@ impl ShutdownHost for LiveShutdown<'_> {
         )
     }
     fn flush_display_until(&mut self, deadline: Instant) -> Result<u64> {
-        while self.transport.pending_display_bytes() > 0 && Instant::now() < deadline {
+        while self.transport.pending_display_bytes() > 0 && self.clock.now() < deadline {
             self.transport.flush_display(self.output)?;
-            nap_until(deadline);
+            nap_until(self.clock, deadline);
         }
         Ok(self.transport.discard_display_tail() as u64)
     }
@@ -532,12 +476,16 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
     fn finish_events_until(&mut self, deadline: Instant) -> Result<(u64, u64)> {
         self.send_exit()?;
-        if self.clock.remaining_storage_at(Instant::now()).is_zero() {
+        if self
+            .deadlines
+            .remaining_storage_at(self.clock.now())
+            .is_zero()
+        {
             return Err(crate::error::CafleetError::DeadlineExceeded);
         }
-        while self.controller.has_pending() && Instant::now() < deadline {
+        while self.controller.has_pending() && self.clock.now() < deadline {
             self.poll_shutdown()?;
-            nap_until(deadline);
+            nap_until(self.clock, deadline);
         }
         let (pending, gap) = self.writer.finish(deadline);
         Ok((
@@ -564,8 +512,7 @@ impl ShutdownHost for LiveShutdown<'_> {
 pub(crate) struct RunnerDependencies {
     #[cfg(test)]
     pub(crate) catalog: &'static crate::coding_agent::ProfileCatalog,
-    #[cfg(test)]
-    pub(crate) clock: Arc<dyn ObservationClock>,
+    pub(crate) clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
 
@@ -574,9 +521,6 @@ pub(crate) struct RunnerDependencies {
 
     #[cfg(test)]
     pub(crate) observation_hooks: Option<Arc<dyn ObservationHooks>>,
-
-    #[cfg(test)]
-    pub(crate) shutdown_unit: Duration,
 
     #[cfg(test)]
     pub(crate) preview_sweep: bool,
@@ -588,8 +532,7 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         RunnerDependencies {
             #[cfg(test)]
             catalog: crate::coding_agent::ProfileCatalog::bundled(),
-            #[cfg(test)]
-            clock: Arc::new(RealObservationClock),
+            clock: Arc::new(crate::time::SystemClock),
             #[cfg(test)]
             writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
 
@@ -600,9 +543,6 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
             observation_hooks: None,
 
             #[cfg(test)]
-            shutdown_unit: Duration::from_secs(1),
-
-            #[cfg(test)]
             preview_sweep: true,
         },
     )
@@ -610,31 +550,16 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 pub(crate) fn run_service(
     settings: &Settings,
     descriptor_path: &Path,
-    #[cfg_attr(
-        not(test),
-        expect(
-            unused_variables,
-            reason = "production dependencies carry only test seams"
-        )
-    )]
     services: RunnerDependencies,
 ) -> Result<i32> {
     #[cfg(test)]
     let mut services = services;
-    #[cfg(not(test))]
-    let shutdown_clock = || ShutdownClock::new(Instant::now());
-    #[cfg(test)]
-    let shutdown_unit = services.shutdown_unit;
-    #[cfg(test)]
-    let shutdown_clock = || ShutdownClock::with_unit(Instant::now(), shutdown_unit);
+    let clock = services.clock.clone();
+    let shutdown_deadlines = || ShutdownDeadlines::starting_now(clock.as_ref());
     #[cfg(not(test))]
     let catalog = crate::coding_agent::ProfileCatalog::bundled();
     #[cfg(test)]
     let catalog = services.catalog;
-    #[cfg(not(test))]
-    let observation_clock: Arc<dyn ObservationClock> = Arc::new(RealObservationClock);
-    #[cfg(test)]
-    let observation_clock = services.clock.clone();
 
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
@@ -650,14 +575,15 @@ pub(crate) fn run_service(
             .ok_or_else(|| error("run ownership lock is held"))?,
     );
     let process = ProcessIdentity::current()?;
-    let handshake_deadline = Instant::now() + Duration::from_secs(10);
+    let handshake_deadline = clock.now() + Duration::from_secs(10);
     let owner = lock.transfer_to_runner_with_deadline(
         &mut conn,
         &original.owner(),
         process.clone(),
         handshake_deadline,
+        clock.as_ref(),
     )?;
-    let mut run = storage::get_run(&conn, owner.run_id)?;
+    let run = storage::get_run(&conn, owner.run_id)?;
     with_database_deadline(&mut conn, handshake_deadline, |conn| {
         lock.validate(conn, &owner)?;
         ensure(
@@ -666,8 +592,7 @@ pub(crate) fn run_service(
                 && run.child_start_identity.is_none()
                 && run.started_at.is_none()
                 && run.ended_at.is_none()
-                && run.recovery_origin_status.is_none()
-                && run.event_seq_reserved_through == 0,
+                && run.recovery_origin_status.is_none(),
             "live startup requires fresh run",
         )?;
         let history:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM member_interactions WHERE run_id=?1) OR EXISTS(SELECT 1 FROM member_runtime_events WHERE run_id=?1)",[run.run_id],|row|row.get(0))?;
@@ -679,7 +604,7 @@ pub(crate) fn run_service(
         .as_file()
         .map_err(io_error)?;
     let initial_size = terminal_size(&terminal)?;
-    let mut pty = PtySession::prepare(initial_size)?;
+    let mut pty = PtySession::prepare(initial_size, clock.clone())?;
     let mut raw = RawTerminalGuard::enter(&terminal)?;
     let mut input = NonblockingFile::new(&std::io::stdin())?;
     let mut output = NonblockingFile::new(&std::io::stdout())?;
@@ -690,6 +615,7 @@ pub(crate) fn run_service(
             display_bytes: 262144,
             bytes_per_tick: 16384,
         },
+        clock.clone(),
     )?;
     let listener = UnixListener::bind(&artifacts.paths.control_socket).map_err(|cause| {
         error(format!(
@@ -702,23 +628,7 @@ pub(crate) fn run_service(
     )
     .map_err(io_error)?;
     listener.set_nonblocking(true).map_err(io_error)?;
-    with_database_deadline(&mut conn, handshake_deadline, |conn| {
-        storage::reserve_event_sequences(conn, &owner)
-    })?;
-    run = storage::get_run(&conn, owner.run_id)?;
-    let evidence_policy = match descriptor.spawn.evidence_policy["mode"].as_str() {
-        Some("metadata") => storage::evidence::EvidencePolicy::metadata(),
-        Some("redacted") => {
-            let ids = catalog.rule_ids();
-            let refs = ids.iter().map(String::as_str).collect::<Vec<_>>();
-            storage::evidence::EvidencePolicy::redacted(
-                &descriptor.spawn.evidence_policy["config"],
-                &refs,
-            )?
-        }
-        _ => return Err(error("invalid launch evidence policy")),
-    };
-    let mut controller = ObservationController::new(&run, catalog, evidence_policy)?;
+    let mut controller = ObservationController::new(&run, catalog)?;
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -734,6 +644,7 @@ pub(crate) fn run_service(
         settings.database_url.clone(),
         run.clone(),
         lock.clone(),
+        clock.clone(),
         #[cfg(test)]
         services.writer_hooks.clone(),
     )?;
@@ -749,9 +660,7 @@ pub(crate) fn run_service(
             transport: &mut transport,
             controller: &mut controller,
             writer: &writer,
-            clock: observation_clock.as_ref(),
-            #[cfg(test)]
-            shutdown_unit,
+            clock: clock.as_ref(),
         },
         conn: &mut conn,
         original: &original,
@@ -766,6 +675,7 @@ pub(crate) fn run_service(
         terminate: &terminate,
         resize: &resize,
         catalog,
+        clock: clock.clone(),
         #[cfg(test)]
         capture: services.capture.take(),
         handshake_deadline,
@@ -774,18 +684,14 @@ pub(crate) fn run_service(
         creator_connection: None,
         started: false,
         coordinator: None,
-        pending_input_client: None,
-        pending_sweep: None,
         #[cfg(not(test))]
-        preview_sweep: PreviewSweep::default(),
+        turns: InputTurns::new(),
         #[cfg(test)]
-        preview_sweep: if services.preview_sweep {
-            PreviewSweep::default()
+        turns: if services.preview_sweep {
+            InputTurns::new()
         } else {
-            PreviewSweep::disabled()
+            InputTurns::without_sweep()
         },
-        deferred_retry: DeferredRetry::default(),
-        queue_housekeeping_at: None,
         shutdown_client: None,
         native_exit: None,
     };
@@ -803,18 +709,18 @@ pub(crate) fn run_service(
         Ok(result) => (result, None),
         Err(payload) => (Err(error("runner loop unwound")), Some(payload)),
     };
-    let clock = match loop_result {
-        Ok(clock) => clock,
+    let deadlines = match loop_result {
+        Ok(deadlines) => deadlines,
         Err(cause) => {
-            let clock = shutdown_clock();
+            let deadlines = shutdown_deadlines();
             let mut message = cause.message().into_owned();
             if started {
                 let degraded = with_database_deadline(
                     &mut conn,
-                    clock.storage_deadline(),
+                    deadlines.storage_deadline(),
                     |conn| {
                         lock.validate(conn, &owner)?;
-                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
+                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
                         Ok(())
                     },
                 );
@@ -823,13 +729,13 @@ pub(crate) fn run_service(
                 }
             }
             failure = Some(message);
-            clock
+            deadlines
         }
     };
     if let Some(coordinator) = coordinator.as_mut() {
-        let fenced = coordinator.fence(clock.storage_deadline());
+        let fenced = coordinator.fence(deadlines.storage_deadline());
         coordinator.finish_pending_attempt();
-        let unpublished = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
+        let unpublished = with_database_deadline(&mut conn, deadlines.storage_deadline(), |conn| {
             storage::unpublished_delivery_results(conn, run.run_id)
         });
         if let Ok(unpublished) = &unpublished {
@@ -853,7 +759,7 @@ pub(crate) fn run_service(
             }
         }
     }
-    let clock = pty.begin_shutdown(clock);
+    let deadlines = pty.begin_shutdown(deadlines);
     let mut live = LiveShutdown {
         pty: &mut pty,
         transport: &mut transport,
@@ -861,12 +767,12 @@ pub(crate) fn run_service(
         output: &mut output,
         raw: &mut raw,
         writer: &mut writer,
-        clock,
+        deadlines,
         controller: &mut controller,
-        observation_clock: observation_clock.as_ref(),
+        clock: clock.as_ref(),
         coordinator: coordinator.as_mut(),
     };
-    let mut outcome = shutdown(&mut live, clock, native_exit);
+    let mut outcome = shutdown(&mut live, deadlines, native_exit);
     if let Some(cause) = failure {
         outcome.fail(cause);
     }
@@ -876,9 +782,9 @@ pub(crate) fn run_service(
     if let Some(cause) = writer.diagnostic() {
         outcome.fail(cause);
     }
-    let persisted = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
+    let persisted = with_database_deadline(&mut conn, deadlines.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
-        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
+        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
         Ok(())
     });
     if let Err(cause) = persisted {
@@ -888,12 +794,12 @@ pub(crate) fn run_service(
         && let Some(client) = clients.iter_mut().find(|client| client.id == id)
     {
         client.answer(serde_json::to_value(&outcome).map_err(io_error));
-        while !client.output.is_empty() && Instant::now() < clock.storage_deadline() {
+        while !client.output.is_empty() && clock.now() < deadlines.storage_deadline() {
             if client.closed || client.flush().is_err() {
                 client.closed = true;
                 break;
             }
-            std::thread::sleep(Duration::from_millis(1));
+            clock.sleep(Duration::from_millis(1));
         }
     }
     for diagnostic in &outcome.diagnostics {
@@ -934,6 +840,7 @@ struct RunnerLoop<'a> {
     terminate: &'a AtomicBool,
     resize: &'a AtomicBool,
     catalog: &'static crate::coding_agent::ProfileCatalog,
+    clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     capture: Option<crate::runtime::observation::native_capture::NativeCapturePort>,
     handshake_deadline: Instant,
@@ -942,27 +849,23 @@ struct RunnerLoop<'a> {
     creator_connection: Option<u64>,
     started: bool,
     coordinator: Option<InputCoordinator>,
-    pending_input_client: Option<PendingInputClient>,
-    pending_sweep: Option<PendingSweep>,
-    preview_sweep: PreviewSweep,
-    deferred_retry: DeferredRetry,
-    queue_housekeeping_at: Option<Instant>,
+    turns: InputTurns,
     shutdown_client: Option<u64>,
     native_exit: Option<ChildExit>,
 }
 
 impl RunnerLoop<'_> {
-    fn shutdown_clock(&self) -> ShutdownClock {
-        self.native.shutdown_clock()
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+        self.native.shutdown_deadlines()
     }
 
-    fn serve(&mut self) -> Result<ShutdownClock> {
+    fn serve(&mut self) -> Result<ShutdownDeadlines> {
         loop {
             if self.terminate.load(Ordering::Acquire) {
-                return Ok(self.shutdown_clock());
+                return Ok(self.shutdown_deadlines());
             }
             if !self.started {
-                check_deadline(Instant::now(), self.handshake_deadline)?;
+                check_deadline(self.native.clock.now(), self.handshake_deadline)?;
                 ensure(
                     self.creator.matches()?,
                     "creator disconnected before native start",
@@ -970,23 +873,23 @@ impl RunnerLoop<'_> {
             }
             self.accept()?;
             for index in 0..self.clients.len() {
-                if let Some(clock) = self.serve_client(index)? {
-                    return Ok(clock);
+                if let Some(deadlines) = self.serve_client(index)? {
+                    return Ok(deadlines);
                 }
             }
             self.clients.retain(|client| !client.closed);
             let progress = if self.started {
                 match self.tick_running()? {
-                    ControlFlow::Break(clock) => return Ok(clock),
+                    ControlFlow::Break(deadlines) => return Ok(deadlines),
                     ControlFlow::Continue(progress) => progress,
                 }
             } else {
                 TransportProgress::default()
             };
-            std::thread::sleep(tick_sleep(
+            self.native.clock.sleep(tick_sleep(
                 &progress,
                 self.native.controller.status().next_deadline,
-                Instant::now(),
+                self.native.clock.now(),
             ));
         }
     }
@@ -1018,9 +921,9 @@ impl RunnerLoop<'_> {
         self.creator_connection == Some(client_id) && !self.started
     }
 
-    fn serve_client(&mut self, index: usize) -> Result<Option<ShutdownClock>> {
+    fn serve_client(&mut self, index: usize) -> Result<Option<ShutdownDeadlines>> {
         let client_id = self.clients[index].id;
-        let requests = match self.clients[index].poll() {
+        let requests = match self.clients[index].poll(self.native.clock) {
             Ok(requests) => requests,
             Err(_) => {
                 self.clients[index].closed = true;
@@ -1049,7 +952,7 @@ impl RunnerLoop<'_> {
             let mut accepted_startup = false;
             let result = self.serve_lifecycle(client_id, &lifecycle, &mut accepted_startup);
             if self.shutdown_client == Some(client_id) {
-                return Ok(Some(self.shutdown_clock()));
+                return Ok(Some(self.shutdown_deadlines()));
             }
             let startup_failure = result
                 .as_ref()
@@ -1085,10 +988,6 @@ impl RunnerLoop<'_> {
             InputControlOperation::PermissionInspect(_)
         ) {
             let result = self.inspect(request, admitted_at);
-            return self.clients[index].answer_input(result.as_ref());
-        }
-        if matches!(request.operation, InputControlOperation::Flush(_)) {
-            let result = self.flush(request, admitted_at);
             return self.clients[index].answer_input(result.as_ref());
         }
         let result = self.submit(request, admitted_at, client_id);
@@ -1146,7 +1045,7 @@ impl RunnerLoop<'_> {
         )?;
         self.handshake_deadline = self
             .handshake_deadline
-            .min(Instant::now() + Duration::from_millis(remaining));
+            .min(self.native.clock.now() + Duration::from_millis(remaining));
         self.creator_connection = Some(client_id);
         *accepted_startup = true;
         self.artifacts.remove_descriptor()?;
@@ -1202,7 +1101,7 @@ impl RunnerLoop<'_> {
         let child = self.native.pty.spawn(&self.descriptor.spawn)?;
         with_database_deadline(self.conn, self.handshake_deadline, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
-            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,crate::time::now_stamp(),self.run.run_id,self.run.owner_epoch])?;
+            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,self.native.clock.wall_stamp(),self.run.run_id,self.run.owner_epoch])?;
             ensure(changed == 1, "native spawn storage lost ownership")
         })?;
         self.run = storage::get_run(self.conn, self.run.run_id)?;
@@ -1227,6 +1126,7 @@ impl RunnerLoop<'_> {
             InputServices {
                 catalog: self.catalog.clone(),
                 token_source: Box::new(SystemRequestTokens),
+                clock: self.clock.clone(),
                 #[cfg(test)]
                 stage_settle: crate::runtime::input::STAGE_SETTLE,
                 #[cfg(test)]
@@ -1257,7 +1157,7 @@ impl RunnerLoop<'_> {
         .map_err(io_error)
     }
 
-    fn tick_running(&mut self) -> Result<ControlFlow<ShutdownClock, TransportProgress>> {
+    fn tick_running(&mut self) -> Result<ControlFlow<ShutdownDeadlines, TransportProgress>> {
         let selected = self.run.database_identity_json["canonical_path"]
             .as_str()
             .expect("validated database path");
@@ -1295,330 +1195,52 @@ impl RunnerLoop<'_> {
             .controller
             .poll(&native.transport.snapshot(), native.writer, native.clock)?;
         if progress.outer_eof {
-            return Ok(ControlFlow::Break(self.shutdown_clock()));
+            return Ok(ControlFlow::Break(self.shutdown_deadlines()));
         }
-        if let Some(clock) = self.observe_exit()? {
-            return Ok(ControlFlow::Break(clock));
+        if let Some(deadlines) = self.observe_exit()? {
+            return Ok(ControlFlow::Break(deadlines));
         }
-        self.housekeep_queue()?;
-        if self.pending_input_client.is_some() || self.pending_sweep.is_some() {
-            if let Some(clock) = self.complete_pending_input()? {
-                return Ok(ControlFlow::Break(clock));
+        let mut io = LoopIo {
+            native: &mut self.native,
+            terminate: self.terminate,
+            resize: self.resize,
+            native_exit: &mut self.native_exit,
+            run_id: self.run.run_id,
+        };
+        let coordinator = started(&mut self.coordinator);
+        match self
+            .turns
+            .turn(coordinator, self.conn, &self.run, &mut io)?
+        {
+            InputTurnOutcome::Continue => {}
+            InputTurnOutcome::Shutdown(deadlines) => return Ok(ControlFlow::Break(deadlines)),
+            InputTurnOutcome::Reply { client, result } => {
+                if let Some(client) = self
+                    .clients
+                    .iter_mut()
+                    .find(|candidate| candidate.id == client && !candidate.closed)
+                {
+                    client.answer_input(result.as_ref());
+                }
             }
-        } else {
-            self.retry_deferred()?;
-            self.sweep_previews()?;
         }
         Ok(ControlFlow::Continue(progress))
     }
 
-    fn observe_exit(&mut self) -> Result<Option<ShutdownClock>> {
+    fn observe_exit(&mut self) -> Result<Option<ShutdownDeadlines>> {
         let coordinator = started(&mut self.coordinator);
         let (conn, run_id) = (&mut *self.conn, self.run.run_id);
+        let clock = self.native.clock;
         self.native
             .observe_exit(&mut self.native_exit, |controller| {
-                publish_stopped_results(coordinator, conn, run_id, controller)
+                publish_stopped_results(coordinator, conn, run_id, controller, clock)
             })
-    }
-
-    fn advance(&mut self, deadline: Instant) -> Result<Option<InputControlReply>> {
-        let coordinator = started(&mut self.coordinator);
-        coordinator
-            .advance(
-                self.conn,
-                self.native.transport,
-                self.native.pty,
-                self.native.controller,
-                deadline,
-            )
-            .map_err(CafleetError::from)
-    }
-
-    /// Drives the in-flight immediate input to its reply: a client-owned attempt answers its
-    /// client, and the runner's own sweep attempt settles without a reply.
-    fn complete_pending_input(&mut self) -> Result<Option<ShutdownClock>> {
-        let deadline = match (&self.pending_input_client, &self.pending_sweep) {
-            (Some(client), None) => client.deadline,
-            (None, Some(sweep)) => sweep.deadline,
-            _ => unreachable!("exactly one immediate input attempt is in flight"),
-        };
-        let coordinator = started(&mut self.coordinator);
-        let result = match self.native.quiesce(coordinator, deadline) {
-            Err(failure) => Err(CafleetError::from(coordinator.pending_attempt_failed(
-                self.conn,
-                self.native.controller,
-                failure,
-            ))),
-            Ok(InputDrain::Pending) => Ok(None),
-            Ok(InputDrain::Quiescent) => {
-                if self.terminate.load(Ordering::Acquire) {
-                    return Ok(Some(self.shutdown_clock()));
-                }
-                if let Some(clock) = self.observe_exit()? {
-                    return Ok(Some(clock));
-                }
-                if self.resize.load(Ordering::Acquire) {
-                    Ok(None)
-                } else {
-                    self.advance(deadline)
-                }
-            }
-        };
-        if !matches!(result, Ok(None)) {
-            started(&mut self.coordinator).finish_pending_attempt();
-            self.deferred_retry.next_at = None;
-            if self.pending_sweep.take().is_some() {
-                self.finish_sweep(
-                    result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
-                );
-                return Ok(None);
-            }
-            let pending = self
-                .pending_input_client
-                .take()
-                .expect("completed input retains its original client");
-            if let Some(client) = self
-                .clients
-                .iter_mut()
-                .find(|client| client.id == pending.id && !client.closed)
-            {
-                client.answer_input(
-                    result
-                        .as_ref()
-                        .map(|reply| reply.as_ref().expect("completed input has a reply")),
-                );
-            }
-        }
-        Ok(None)
-    }
-
-    fn retry_deferred(&mut self) -> Result<()> {
-        let coordinator = started(&mut self.coordinator);
-        if !coordinator.has_deferred_work()
-            || !self.deferred_retry.due(
-                coordinator.deferred_attempt_writing(),
-                self.native.controller.status(),
-                Instant::now(),
-            )
-        {
-            return Ok(());
-        }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let drained = self.native.quiesce(coordinator, deadline);
-        if let Ok(drain) = &drained {
-            coordinator.record_queue_drain(*drain);
-        }
-        if let Ok(InputDrain::Quiescent) = drained
-            && !self.terminate.load(Ordering::Acquire)
-            && !self.resize.load(Ordering::Acquire)
-            && let Err(failure) = self.advance(deadline)
-        {
-            let coordinator = started(&mut self.coordinator);
-            if coordinator.deferred_failed() {
-                return Err(failure);
-            }
-            coordinator.record_attempt_failure(&failure);
-            eprintln!("member runtime: deferred input: {}", failure.message());
-        }
-        Ok(())
-    }
-
-    fn housekeep_queue(&mut self) -> Result<()> {
-        let now = Instant::now();
-        if self.queue_housekeeping_at.is_some_and(|at| now < at) {
-            return Ok(());
-        }
-        self.queue_housekeeping_at = Some(now + QUEUE_HOUSEKEEPING_INTERVAL);
-        let coordinator = started(&mut self.coordinator);
-        if let Err(failure) = coordinator.queue_housekeeping(self.conn, self.native.controller) {
-            if coordinator.deferred_failed() {
-                return Err(failure);
-            }
-            eprintln!("member runtime: queue housekeeping: {}", failure.message());
-        }
-        Ok(())
-    }
-
-    /// Retries the member's oldest unnotified pending preview that never reached the FIFO,
-    /// strictly oldest-first and through the same entry point a control-socket preview reaches.
-    fn sweep_previews(&mut self) -> Result<()> {
-        let now = Instant::now();
-        self.preview_sweep
-            .observe(self.native.controller.status().eligibility);
-        if started(&mut self.coordinator).owns_preview_delivery() || !self.preview_sweep.due(now) {
-            return Ok(());
-        }
-        let deadline = now + SWEEP_ATTEMPT_BUDGET;
-        match self.sweep_candidate(deadline) {
-            Ok(Some(input)) => self.submit_sweep(input, deadline),
-            Ok(None) => {}
-            Err(cause) => {
-                eprintln!("member runtime: preview sweep: {}", cause.message());
-                self.preview_sweep.back_off(Instant::now());
-            }
-        }
-        Ok(())
-    }
-
-    /// Selects the next attempt under the latest-attempt table, settling accepted history
-    /// without typing; `None` ends this tick.
-    fn sweep_candidate(&mut self, deadline: Instant) -> Result<Option<SubmitInput>> {
-        let run = self.run.clone();
-        let verified = crate::coding_agent::coding_agent(&run.backend).is_some_and(|backend| {
-            self.catalog.verified_composer(
-                backend,
-                run.native_version.as_deref(),
-                crate::coding_agent::ComposerOperation::Prompt,
-            )
-        });
-        let mut skipped = std::collections::BTreeSet::new();
-        loop {
-            let Some(message) = with_database_deadline(self.conn, deadline, |conn| {
-                sweep_snapshot(conn, &run, &skipped)
-            })?
-            else {
-                return Ok(None);
-            };
-            let latest = with_database_deadline(self.conn, deadline, |conn| {
-                storage::find_latest_preview_input(conn, run.run_id, message.message_id)
-            })?;
-            let attempt = match latest {
-                None => 1,
-                Some(input) => match (input.state, input.disposition) {
-                    (InputState::Ready, _) if input.deferred_at.is_some() => return Ok(None),
-                    (InputState::Ready, _) => {
-                        input.preview_attempt.expect("a preview has its attempt")
-                    }
-                    (InputState::InProgress | InputState::Uncertain, _)
-                    | (InputState::Settled, Some(InputDisposition::AbandonedUncertain)) => {
-                        if !verified {
-                            return Ok(None);
-                        }
-                        skipped.insert(message.message_id);
-                        continue;
-                    }
-                    (InputState::Accepted, _)
-                    | (InputState::Settled, Some(InputDisposition::Submitted)) => {
-                        self.settle_swept(input.input_id)?;
-                        skipped.insert(message.message_id);
-                        continue;
-                    }
-                    (InputState::Settled, Some(InputDisposition::NotSubmitted)) => {
-                        if input.is_retried_preview()
-                            && self
-                                .preview_sweep
-                                .backs_off_after(input.input_id, Instant::now())
-                        {
-                            return Ok(None);
-                        }
-                        input
-                            .preview_attempt
-                            .expect("a preview has its attempt")
-                            .checked_add(1)
-                            .ok_or_else(|| error("preview attempt exhausted"))?
-                    }
-                    (InputState::Settled, _) => {
-                        return Err(error(format!(
-                            "preview input {} was left in the composer without a re-delivery attempt",
-                            input.input_id
-                        )));
-                    }
-                },
-            };
-            return Ok(Some(SubmitInput {
-                operation_key: storage::preview_operation_key(
-                    run.run_id,
-                    message.message_id,
-                    attempt,
-                )?,
-                input_kind: InputKind::Preview,
-                message_id: Some(message.message_id),
-                literal: crate::delivery::canonical_preview_line(&message),
-            }));
-        }
-    }
-
-    fn submit_sweep(&mut self, input: SubmitInput, deadline: Instant) {
-        let request =
-            InputExpiration::capture(deadline, &mut RealInputDeadlineClock).map(|expiration| {
-                InputControlRequest {
-                    identity: crate::runtime::ControlIdentity::from_run(&self.run),
-                    expires_at_mono_ns: expiration.monotonic_ns(),
-                    operation: InputControlOperation::SubmitPrompt(input),
-                }
-            });
-        let reply = request.and_then(|request| {
-            started(&mut self.coordinator)
-                .handle_swept(self.conn, request, self.native.controller, deadline)
-                .map_err(CafleetError::from)
-        });
-        match reply {
-            Ok(None) => self.pending_sweep = Some(PendingSweep { deadline }),
-            Ok(Some(reply)) => self.finish_sweep(Ok(reply)),
-            Err(cause) => self.finish_sweep(Err(cause)),
-        }
-    }
-
-    /// Settles a completed sweep attempt in the runner, which has no client to settle it, and
-    /// feeds its outcome to the run-wide backoff.
-    fn finish_sweep(&mut self, reply: Result<InputControlReply>) {
-        let now = Instant::now();
-        let submission = match reply {
-            Ok(InputControlReply::Submission(submission)) => submission,
-            Ok(_) => unreachable!("a preview submission replies with a submission"),
-            Err(cause) => {
-                eprintln!("member runtime: preview sweep: {}", cause.message());
-                self.preview_sweep.back_off(now);
-                return;
-            }
-        };
-        match submission.status {
-            SubmissionStatus::Accepted => {
-                let input_id = submission
-                    .input_id
-                    .expect("an accepted preview has its durable input ID");
-                if let Err(cause) = self.settle_swept(input_id) {
-                    eprintln!(
-                        "member runtime: preview sweep: input {input_id} settlement: {}",
-                        cause.message()
-                    );
-                }
-                self.preview_sweep.reset();
-            }
-            SubmissionStatus::Held => self.preview_sweep.back_off(now),
-            SubmissionStatus::Queued
-            | SubmissionStatus::Rejected
-            | SubmissionStatus::Uncertain
-            | SubmissionStatus::LeftInComposer => {}
-        }
-    }
-
-    fn settle_swept(&mut self, input_id: i64) -> Result<()> {
-        let deadline = Instant::now() + SWEEP_ATTEMPT_BUDGET;
-        let run = self.run.clone();
-        with_database_deadline(self.conn, deadline, |conn| {
-            storage::settle_preview(conn, &run.owner(), input_id)
-        })?;
-        let retirement = InputExpiration::capture(deadline, &mut RealInputDeadlineClock)?;
-        let request = InputControlRequest {
-            identity: crate::runtime::ControlIdentity::from_run(&run),
-            expires_at_mono_ns: retirement.monotonic_ns(),
-            operation: InputControlOperation::Receipt(ReceiptAction::Retire { input_id }),
-        };
-        started(&mut self.coordinator)
-            .handle_received(self.conn, request, self.native.controller, deadline)
-            .map_err(CafleetError::from)?;
-        Ok(())
     }
 }
 
 /// The sweep's read snapshot: the run's member is an active ordinary member whose recorded run
 /// is this run with a concrete placement, and its oldest unnotified pending message.
-fn sweep_snapshot(
-    conn: &mut Connection,
-    run: &RunRecord,
-    skipped: &std::collections::BTreeSet<i64>,
-) -> Result<Option<broker::MessageRecord>> {
+fn sweep_snapshot(conn: &mut Connection, run: &RunRecord) -> Result<Option<broker::MessageRecord>> {
     let tx = conn.transaction()?;
     let Some(fleet_id) = broker::active_member_fleet(&tx, run.member_id)? else {
         return Ok(None);
@@ -1632,11 +1254,369 @@ fn sweep_snapshot(
                 .is_some_and(|runtime| runtime.run.run_id == run.run_id)
     });
     let message = match current {
-        Some(_) => broker::oldest_pending_preview(&tx, run.member_id, skipped)?,
+        Some(_) => broker::oldest_pending_preview(&tx, run.member_id)?,
         None => None,
     };
     tx.commit()?;
     Ok(message)
+}
+
+/// The in-flight immediate input attempt that later turns drive to its reply.
+enum PendingAttempt {
+    /// A control client's attempt, answered on that client.
+    Client { id: u64, deadline: Instant },
+    /// The runner's own sweep preview, which has no client to answer.
+    Sweep { deadline: Instant },
+}
+
+/// What a turn's input work asks the runner loop to do next.
+pub(crate) enum InputTurnOutcome {
+    Continue,
+    Shutdown(ShutdownDeadlines),
+    /// A control client's completed immediate attempt and its reply.
+    Reply {
+        client: u64,
+        result: Result<InputControlReply>,
+    },
+}
+
+/// The runner I/O that input work drives between transport turns.
+pub(crate) trait InputTurnIo {
+    fn clock(&self) -> &dyn crate::time::Clock;
+    fn controller(&self) -> &ObservationController;
+    fn quiesce(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        deadline: Instant,
+    ) -> std::result::Result<InputDrain, InputFailure>;
+    fn advance(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        deadline: Instant,
+    ) -> Result<Option<InputControlReply>>;
+    /// A termination request, which preempts any further write.
+    fn terminate_requested(&self) -> bool;
+    /// A pending resize, which defers a write to a later turn.
+    fn resize_requested(&self) -> bool;
+    /// The deadlines of the shutdown a termination request starts.
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines;
+    /// Records an observed native exit and returns the shutdown it starts.
+    fn observe_exit(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+    ) -> Result<Option<ShutdownDeadlines>>;
+}
+
+/// The runner's input work after each transport turn: queue housekeeping, the in-flight
+/// immediate attempt, deferred retries and the preview sweep.
+pub(crate) struct InputTurns {
+    pending: Option<PendingAttempt>,
+    preview_sweep: PreviewSweep,
+    deferred_retry: DeferredRetry,
+    queue_housekeeping_at: Option<Instant>,
+}
+
+impl InputTurns {
+    pub(crate) fn new() -> Self {
+        Self {
+            pending: None,
+            preview_sweep: PreviewSweep::default(),
+            deferred_retry: DeferredRetry::default(),
+            queue_housekeeping_at: None,
+        }
+    }
+
+    /// Holds a client's accepted immediate attempt until a later turn completes it.
+    pub(crate) fn admit_client(&mut self, id: u64, deadline: Instant) -> Result<()> {
+        ensure(
+            self.pending.is_none(),
+            "an accepted immediate input requires no other attempt in flight",
+        )?;
+        self.pending = Some(PendingAttempt::Client { id, deadline });
+        Ok(())
+    }
+
+    /// Runs one turn's input work in the runner loop's order.
+    pub(crate) fn turn(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        run: &RunRecord,
+        io: &mut impl InputTurnIo,
+    ) -> Result<InputTurnOutcome> {
+        self.housekeep_queue(coordinator, conn, io)?;
+        if self.pending.is_some() {
+            return self.complete_pending_input(coordinator, conn, io);
+        }
+        self.retry_deferred(coordinator, conn, io)?;
+        self.sweep_previews(coordinator, conn, run, io)?;
+        Ok(InputTurnOutcome::Continue)
+    }
+
+    /// Drives the in-flight immediate input to its reply: a client-owned attempt answers its
+    /// client, and the runner's own sweep attempt settles without a reply.
+    fn complete_pending_input(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        io: &mut impl InputTurnIo,
+    ) -> Result<InputTurnOutcome> {
+        let deadline = match self.pending.as_ref().expect("an attempt is in flight") {
+            PendingAttempt::Client { deadline, .. } | PendingAttempt::Sweep { deadline } => {
+                *deadline
+            }
+        };
+        let result = match io.quiesce(coordinator, deadline) {
+            Err(failure) => coordinator
+                .pending_attempt_failed(conn, io.controller(), failure)
+                .map(Some)
+                .map_err(CafleetError::from),
+            Ok(InputDrain::Pending) => Ok(None),
+            Ok(InputDrain::Quiescent) => {
+                if io.terminate_requested() {
+                    return Ok(InputTurnOutcome::Shutdown(io.shutdown_deadlines()));
+                }
+                if let Some(deadlines) = io.observe_exit(coordinator, conn)? {
+                    return Ok(InputTurnOutcome::Shutdown(deadlines));
+                }
+                if io.resize_requested() {
+                    Ok(None)
+                } else {
+                    io.advance(coordinator, conn, deadline)
+                }
+            }
+        };
+        if matches!(result, Ok(None)) {
+            return Ok(InputTurnOutcome::Continue);
+        }
+        coordinator.finish_pending_attempt();
+        self.deferred_retry.next_at = None;
+        match self.pending.take().expect("an attempt is in flight") {
+            PendingAttempt::Sweep { .. } => {
+                self.finish_sweep(
+                    result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
+                    io.clock().now(),
+                );
+                Ok(InputTurnOutcome::Continue)
+            }
+            PendingAttempt::Client { id, .. } => Ok(InputTurnOutcome::Reply {
+                client: id,
+                result: result.map(|reply| reply.expect("completed input has a reply")),
+            }),
+        }
+    }
+
+    fn retry_deferred(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        io: &mut impl InputTurnIo,
+    ) -> Result<()> {
+        if !coordinator.has_deferred_work()
+            || !self.deferred_retry.due(
+                coordinator.deferred_attempt_writing(),
+                io.controller().status(),
+                io.clock().now(),
+            )
+        {
+            return Ok(());
+        }
+        let deadline = io.clock().now() + Duration::from_secs(5);
+        let drained = io.quiesce(coordinator, deadline);
+        if let Ok(InputDrain::Quiescent) = drained
+            && !io.terminate_requested()
+            && !io.resize_requested()
+            && let Err(failure) = io.advance(coordinator, conn, deadline)
+        {
+            if coordinator.deferred_failed() {
+                return Err(failure);
+            }
+            eprintln!("member runtime: deferred input: {}", failure.message());
+        }
+        Ok(())
+    }
+
+    fn housekeep_queue(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        io: &impl InputTurnIo,
+    ) -> Result<()> {
+        let now = io.clock().now();
+        if self.queue_housekeeping_at.is_some_and(|at| now < at) {
+            return Ok(());
+        }
+        self.queue_housekeeping_at = Some(now + QUEUE_HOUSEKEEPING_INTERVAL);
+        if let Err(failure) = coordinator.queue_housekeeping(conn, io.controller()) {
+            if coordinator.deferred_failed() {
+                return Err(failure);
+            }
+            eprintln!("member runtime: queue housekeeping: {}", failure.message());
+        }
+        Ok(())
+    }
+
+    /// Delivers the member's oldest unnotified pending message, strictly oldest-first, when no
+    /// ordinary attempt is active and the FIFO is empty.
+    fn sweep_previews(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        run: &RunRecord,
+        io: &impl InputTurnIo,
+    ) -> Result<()> {
+        let now = io.clock().now();
+        self.preview_sweep
+            .observe(io.controller().status().eligibility);
+        if !coordinator.sweep_may_start() || !self.preview_sweep.due(now) {
+            return Ok(());
+        }
+        let deadline = now + SWEEP_ATTEMPT_BUDGET;
+        match with_database_deadline(conn, deadline, |conn| sweep_snapshot(conn, run)) {
+            Ok(Some(message)) => {
+                let reply = coordinator
+                    .handle_preview(conn, &message, io.controller(), deadline)
+                    .map_err(CafleetError::from);
+                match reply {
+                    Ok(None) => self.pending = Some(PendingAttempt::Sweep { deadline }),
+                    Ok(Some(reply)) => self.finish_sweep(Ok(reply), io.clock().now()),
+                    Err(cause) => self.finish_sweep(Err(cause), io.clock().now()),
+                }
+            }
+            Ok(None) => {}
+            Err(cause) => {
+                eprintln!("member runtime: preview sweep: {}", cause.message());
+                self.preview_sweep.back_off(io.clock().now());
+            }
+        }
+        Ok(())
+    }
+
+    /// Feeds a completed sweep attempt's outcome to the run-wide backoff: a submitted preview
+    /// resets it, and a transient obstacle arms it.
+    fn finish_sweep(&mut self, reply: Result<InputControlReply>, now: Instant) {
+        let submission = match reply {
+            Ok(InputControlReply::Submission(submission)) => submission,
+            Ok(_) => unreachable!("a preview submission replies with a submission"),
+            Err(cause) => {
+                eprintln!("member runtime: preview sweep: {}", cause.message());
+                self.preview_sweep.back_off(now);
+                return;
+            }
+        };
+        match submission.status {
+            SubmissionStatus::Accepted => self.preview_sweep.reset(),
+            SubmissionStatus::Held
+                if matches!(
+                    submission.reason.as_deref(),
+                    Some(
+                        "pane_input_busy"
+                            | "storage_unavailable"
+                            | "observer_unavailable"
+                            | "delivery_budget_exhausted"
+                    )
+                ) =>
+            {
+                self.preview_sweep.back_off(now)
+            }
+            SubmissionStatus::Held
+            | SubmissionStatus::Queued
+            | SubmissionStatus::Rejected
+            | SubmissionStatus::Uncertain => {}
+        }
+    }
+}
+
+#[cfg(test)]
+impl InputTurns {
+    /// Turns whose sweep never comes due, so a runner fixture's own preview delivery races no
+    /// sweep.
+    pub(crate) fn without_sweep() -> Self {
+        Self {
+            preview_sweep: PreviewSweep::disabled(),
+            ..Self::new()
+        }
+    }
+
+    /// Whether no immediate attempt is in flight.
+    pub(crate) fn idle(&self) -> bool {
+        self.pending.is_none()
+    }
+
+    /// The earliest instants at which a turn has timer work: the next sweep pass (after any
+    /// backoff) and the next queue housekeeping.
+    pub(crate) fn wakes(&self, now: Instant) -> [Option<Instant>; 2] {
+        let sweep = self
+            .preview_sweep
+            .next_at
+            .into_iter()
+            .chain(self.preview_sweep.backoff_until)
+            .max()
+            .unwrap_or(now);
+        [Some(sweep), self.queue_housekeeping_at]
+    }
+}
+
+/// The live runner's I/O for its input turns.
+struct LoopIo<'a, 'b> {
+    native: &'a mut NativeIo<'b>,
+    terminate: &'a AtomicBool,
+    resize: &'a AtomicBool,
+    native_exit: &'a mut Option<ChildExit>,
+    run_id: i64,
+}
+
+impl InputTurnIo for LoopIo<'_, '_> {
+    fn clock(&self) -> &dyn crate::time::Clock {
+        self.native.clock
+    }
+    fn controller(&self) -> &ObservationController {
+        self.native.controller
+    }
+    fn quiesce(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        deadline: Instant,
+    ) -> std::result::Result<InputDrain, InputFailure> {
+        self.native.quiesce(coordinator, deadline)
+    }
+    fn advance(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+        deadline: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        coordinator
+            .advance(
+                conn,
+                self.native.transport,
+                self.native.pty,
+                self.native.controller,
+                deadline,
+            )
+            .map_err(CafleetError::from)
+    }
+    fn terminate_requested(&self) -> bool {
+        self.terminate.load(Ordering::Acquire)
+    }
+    fn resize_requested(&self) -> bool {
+        self.resize.load(Ordering::Acquire)
+    }
+    fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+        self.native.shutdown_deadlines()
+    }
+    fn observe_exit(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        conn: &mut Connection,
+    ) -> Result<Option<ShutdownDeadlines>> {
+        let (clock, run_id) = (self.native.clock, self.run_id);
+        self.native.observe_exit(self.native_exit, |controller| {
+            publish_stopped_results(coordinator, conn, run_id, controller, clock)
+        })
+    }
 }
 
 /// Fences ordinary input after the native exit and queues every durable deferred result that
@@ -1646,8 +1626,9 @@ fn publish_stopped_results(
     conn: &mut Connection,
     run_id: i64,
     controller: &ObservationController,
+    clock: &dyn crate::time::Clock,
 ) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = clock.now() + Duration::from_secs(1);
     coordinator.fence(deadline)?;
     let unpublished = with_database_deadline(conn, deadline, |conn| {
         storage::unpublished_delivery_results(conn, run_id)
@@ -1692,13 +1673,12 @@ impl SweepBackoff {
 const SWEEP_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 
 /// Paces the pending-preview sweep: one pass per interval, none before the run-wide backoff
-/// expires. Each transient `not_submitted` receipt arms the backoff once, before its retry.
+/// expires.
 #[derive(Default)]
 struct PreviewSweep {
     next_at: Option<Instant>,
     backoff: SweepBackoff,
     backoff_until: Option<Instant>,
-    backed_off_input: Option<i64>,
     eligibility: Option<InputEligibility>,
     #[cfg(test)]
     disabled: bool,
@@ -1738,17 +1718,6 @@ impl PreviewSweep {
     fn back_off(&mut self, now: Instant) {
         self.backoff.transient();
         self.backoff_until = Some(now + self.backoff.delay());
-    }
-
-    /// Arms the backoff the first time the sweep meets this transient receipt; `true` while the
-    /// retry must wait.
-    fn backs_off_after(&mut self, input_id: i64, now: Instant) -> bool {
-        if self.backed_off_input == Some(input_id) {
-            return false;
-        }
-        self.backed_off_input = Some(input_id);
-        self.back_off(now);
-        true
     }
 
     fn reset(&mut self) {
@@ -2443,6 +2412,14 @@ pub(crate) mod test_support {
         /// journaling it; the next journaled line restores the composer screen.
         pub(crate) const FORM_LINE: &str = "show-permission-form";
         pub(crate) const FORM: &[u8] = b"\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: write held.txt\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ";
+        /// A manual line that makes the native child show a composer holding a draft, which no
+        /// composer rule matches; the next journaled line restores the composer screen.
+        pub(crate) const DRAFT_LINE: &str = "show-composer-draft";
+        pub(crate) const DRAFT: &[u8] =
+            b"\x1b[2J\x1b[23;1HSynthetic draft: half-typed\r\nState end";
+        /// Literal text that makes the native child show the detected permission form while the
+        /// literal is still unsubmitted, once per native process, so the write stops mid-stage.
+        pub(crate) const FORM_MID_WRITE: &str = "open-form-mid-write";
         pub(crate) const PANIC_RECORD_LIMIT: usize = 16 * 1024;
         pub(crate) const PANIC_DIRECTORY: &str = "service-input-panics";
 
@@ -2522,14 +2499,15 @@ pub(crate) mod test_support {
             Ok(records)
         }
 
-        pub(crate) use crate::runtime::RealInputDeadlineClock as Clock;
+        pub(crate) use crate::time::SystemClock as Clock;
         pub(crate) fn expiration(until: Instant) -> u64 {
-            InputExpiration::capture(until, &mut Clock)
+            InputExpiration::capture(until, &Clock)
                 .unwrap()
                 .monotonic_ns()
         }
         pub(crate) fn pause(until: Instant) {
-            crate::runtime::control::pause(until).expect("original owned service deadline");
+            crate::runtime::control::pause(until, &crate::time::SystemClock)
+                .expect("original owned service deadline");
         }
 
         /// `detecting` adds the synthetic permission-form detector, so `FORM_LINE` opens a
@@ -2559,7 +2537,7 @@ pub(crate) mod test_support {
             rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
             rule["extract"] = json!({"operation":null,"choices":[]});
             rule["verified_noninteraction"] = json!(true);
-            catalog["profiles"][0]["capabilities"] = json!({"detection":null,"annotations":null,"answers":[],"composer":{
+            catalog["profiles"][0]["capabilities"] = json!({"detection":null,"answers":[],"composer":{
                 "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
                 "submission":{
                     "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]},
@@ -2659,12 +2637,11 @@ pub(crate) mod test_support {
             key: &str,
             literal: &str,
             kind: InputKind,
-            message: Option<i64>,
             until: Instant,
         ) -> Value {
             json!({"protocol_version":1,"kind":if kind==InputKind::Exec {"submit_exec"} else {"submit_prompt"},
         "identity":fixture.prepared.as_ref().unwrap(),"expires_at_mono_ns":expiration(until),
-        "operation_key":key,"input_kind":kind,"message_id":message,"literal":literal})
+        "operation_key":key,"input_kind":kind,"literal":literal})
         }
         pub(crate) fn submission(reply: Value) -> SubmissionResult {
             assert!(
@@ -2777,6 +2754,26 @@ pub(crate) mod test_support {
                 pause(until);
             }
         }
+        /// Waits until the runner observes a non-degraded screen with no open interaction and
+        /// no pending observation work, which also holds on a run without composer verification.
+        pub(crate) fn input_service_settled(fixture: &mut ServiceFixture, until: Instant) {
+            loop {
+                assert!(Instant::now() < until);
+                let health = fixture.health();
+                if health.observation.as_ref().is_some_and(|observation| {
+                    !observation.degraded
+                        && observation.eligibility
+                            != InputEligibility::Hold(GateReason::Interaction)
+                        && observation.pending_count == 0
+                }) {
+                    return;
+                }
+                pause(until);
+            }
+        }
+        fn composer_ready(fixture: &mut ServiceFixture, until: Instant) {
+            input_service_composer(fixture, until);
+        }
         pub(crate) fn with_input_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
             with_configured_input_service(false, 0, body);
         }
@@ -2803,18 +2800,22 @@ pub(crate) mod test_support {
             with_configured_input_service(true, exit_code, body);
         }
 
-        /// The only input service whose runner sweeps pending previews; `lifetime` replaces
-        /// the default ten-second deadline for behavior that spans several retry intervals.
-        pub(crate) fn with_sweeping_input_service(
+        /// A sweeping input service whose catalog `configure_catalog` adjusts first.
+        pub(crate) fn with_sweeping_input_service_catalog(
             lifetime: Duration,
             detecting: bool,
+            configure_catalog: impl FnOnce(&mut Value),
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
             with_input_service_lifetime(
                 lifetime,
                 detecting,
                 0,
-                |config| config["preview_sweep"] = json!(true),
+                |config| {
+                    config["preview_sweep"] = json!(true);
+                    configure_catalog(&mut config["catalog"]);
+                },
+                input_service_settled,
                 body,
             );
         }
@@ -2838,6 +2839,7 @@ pub(crate) mod test_support {
                 detecting,
                 exit_code,
                 |config| configure_catalog(&mut config["catalog"]),
+                composer_ready,
                 body,
             );
         }
@@ -2847,6 +2849,7 @@ pub(crate) mod test_support {
             detecting: bool,
             exit_code: i32,
             configure: impl FnOnce(&mut Value),
+            ready: impl FnOnce(&mut ServiceFixture, Instant),
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
             let until = Instant::now() + lifetime;
@@ -2861,7 +2864,7 @@ pub(crate) mod test_support {
             fixture.cleanup_deadline = Some(until);
             let primary = catch_unwind(AssertUnwindSafe(|| {
                 fixture.start_running();
-                input_service_composer(&mut fixture, until);
+                ready(&mut fixture, until);
                 body(&mut fixture, until);
             }));
             let cleanup = catch_unwind(AssertUnwindSafe(|| {
@@ -2921,7 +2924,10 @@ pub(crate) mod test_support {
             ) -> rusqlite::Result<Vec<Value>> {
                 loop {
                     assert!(
-                        Clock.sample().unwrap().monotonic_ns < expires,
+                        crate::time::Clock::monotonic_sample(&Clock)
+                            .unwrap()
+                            .monotonic_ns
+                            < expires,
                         "original owned native lifetime"
                     );
                     let result = (|| {
@@ -2941,7 +2947,9 @@ pub(crate) mod test_support {
                                 )
                             ) =>
                         {
-                            let now = Clock.sample().unwrap().monotonic_ns;
+                            let now = crate::time::Clock::monotonic_sample(&Clock)
+                                .unwrap()
+                                .monotonic_ns;
                             assert!(now < expires, "original owned native lifetime");
                             std::thread::sleep(
                                 Duration::from_millis(2).min(Duration::from_nanos(expires - now)),
@@ -2961,7 +2969,9 @@ pub(crate) mod test_support {
                 conn.busy_timeout(Duration::ZERO).unwrap();
                 let stdin = std::io::stdin();
                 let mut terminal = tcgetattr(&stdin).unwrap();
-                terminal.local_flags.remove(LocalFlags::ECHO);
+                terminal
+                    .local_flags
+                    .remove(LocalFlags::ECHO | LocalFlags::ICANON);
                 tcsetattr(&stdin, SetArg::TCSANOW, &terminal).unwrap();
                 let flags = OFlag::from_bits_retain(fcntl(&stdin, FcntlArg::F_GETFL).unwrap());
                 fcntl(&stdin, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK)).unwrap();
@@ -2981,9 +2991,13 @@ pub(crate) mod test_support {
                 output.flush().unwrap();
                 let mut input = stdin.lock();
                 let mut pending = Vec::new();
+                let mut form_mid_write_shown = false;
                 loop {
                     assert!(
-                        Clock.sample().unwrap().monotonic_ns < expires,
+                        crate::time::Clock::monotonic_sample(&Clock)
+                            .unwrap()
+                            .monotonic_ns
+                            < expires,
                         "original owned native lifetime"
                     );
                     let mut bytes = [0; 4096];
@@ -2998,6 +3012,16 @@ pub(crate) mod test_support {
                         Err(cause) => panic!("owned synthetic native input: {cause}"),
                     }
                     assert!(pending.len() <= 65536);
+                    if !form_mid_write_shown
+                        && !pending.contains(&b'\n')
+                        && pending
+                            .windows(FORM_MID_WRITE.len())
+                            .any(|window| window == FORM_MID_WRITE.as_bytes())
+                    {
+                        form_mid_write_shown = true;
+                        output.write_all(FORM).unwrap();
+                        output.flush().unwrap();
+                    }
                     while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
                         let mut line = pending.drain(..=end).collect::<Vec<_>>();
                         assert_eq!(line.pop(), Some(b'\n'));
@@ -3005,11 +3029,16 @@ pub(crate) mod test_support {
                             line.pop();
                         }
                         let line = String::from_utf8(line).unwrap();
-                        if line == "finish" {
+                        if line.ends_with("finish") {
                             return;
                         }
                         if line == FORM_LINE {
                             output.write_all(FORM).unwrap();
+                            output.flush().unwrap();
+                            continue;
+                        }
+                        if line == DRAFT_LINE {
+                            output.write_all(DRAFT).unwrap();
                             output.flush().unwrap();
                             continue;
                         }
@@ -3085,18 +3114,6 @@ pub(crate) mod test_support {
             std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
         }
 
-        pub(crate) struct Clock;
-        impl ObservationClock for Clock {
-            fn sample(&self) -> ObservationMoment {
-                ObservationMoment {
-                    monotonic: Instant::now(),
-                    observed_at: crate::time::now_stamp(),
-                }
-            }
-            fn kind(&self) -> ObservationClockKind {
-                ObservationClockKind::Real
-            }
-        }
         pub(crate) struct Hooks {
             pub(crate) directory: std::path::PathBuf,
             pub(crate) work_slice: Duration,
@@ -3110,10 +3127,10 @@ pub(crate) mod test_support {
                 boundary: WriterBoundary,
                 deadline: Instant,
             ) -> Result<(), CafleetError> {
-                if matches!(boundary, WriterBoundary::Sync)
-                    && self.directory.join("fail-sync").exists()
+                if matches!(boundary, WriterBoundary::Persist)
+                    && self.directory.join("fail-persist").exists()
                 {
-                    return Err(error("owned synthetic sync failure"));
+                    return Err(error("owned synthetic persist failure"));
                 }
                 if matches!(boundary, WriterBoundary::Persist) {
                     match std::fs::OpenOptions::new()
@@ -3147,7 +3164,7 @@ pub(crate) mod test_support {
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
             let services = crate::runtime::service::RunnerDependencies {
                 catalog: Box::leak(Box::new(catalog)),
-                clock: Arc::new(Clock),
+                clock: Arc::new(crate::time::SystemClock),
                 writer_hooks: Arc::new(Hooks {
                     directory: config.parent().unwrap().to_path_buf(),
                     work_slice: match value.get("writer_work_slice_ms") {
@@ -3163,7 +3180,6 @@ pub(crate) mod test_support {
                     &value,
                     config.parent().unwrap(),
                 )?,
-                shutdown_unit: Duration::from_secs(1),
                 preview_sweep: match value.get("preview_sweep") {
                     None => false,
                     Some(enabled) => enabled.as_bool().expect("preview_sweep is a boolean"),
@@ -3527,6 +3543,757 @@ pub(crate) mod test_support {
             serde_json::from_value(reply["result"].clone()).unwrap()
         }
     }
+
+    /// The runtime scenario harness: the runner's transport, observation, event writer and input
+    /// coordinator over a scripted native child, fake terminal and temporary database, driven in
+    /// the runner loop's turn order on one virtual [`TestClock`].
+    pub(crate) mod scenario {
+        use std::io;
+        use std::sync::Arc;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use crate::broker::runtime as storage;
+        use crate::coding_agent::CodingAgent;
+        use crate::coding_agent::ComposerOperation;
+        use crate::coding_agent::ProfileCatalog;
+        use crate::coding_agent::catalog::LiteralFraming;
+        use crate::db::test_support::FaultPlan;
+        use crate::error::CafleetError;
+        use crate::runtime::service::InputTurnIo;
+        use crate::runtime::service::InputTurnOutcome;
+        use crate::runtime::service::InputTurns;
+        use crate::runtime::service::SystemRequestTokens;
+        use crate::runtime::service::input_deadline;
+        use crate::runtime::service::tick_sleep;
+        use crate::runtime::test_support::Fixture;
+        use crate::runtime::transport::test_support::FakeDisplay;
+        use crate::runtime::transport::test_support::FakeInput;
+        use crate::runtime::writer::WriterBoundary;
+        use crate::runtime::writer::WriterHooks;
+        use crate::runtime::writer::test_support::WriterFixture;
+        use crate::runtime::writer::test_support::YieldingClock;
+        use crate::runtime::*;
+        use crate::time::Clock;
+        use crate::time::test_support::TestClock;
+
+        /// Every scenario's shutdown unit, so a storage deadline lies 400 ms of virtual time out.
+        const SHUTDOWN_UNIT: Duration = Duration::from_millis(100);
+        /// The real-time bound on waiting for the event writer's thread.
+        const WRITER_WAIT: Duration = Duration::from_secs(10);
+        const TURN_LIMIT: usize = 100_000;
+
+        /// One scripted step of a scenario.
+        #[derive(Clone, Copy, Debug)]
+        pub(crate) enum Step {
+            /// The native child draws the bundled fixture screen with this id.
+            Screen(&'static str),
+            /// The human types these bytes into the outer terminal.
+            Type(&'static [u8]),
+            /// Runner turns until the virtual clock has advanced by at least this much.
+            Run(Duration),
+            /// A control client submits this prompt under the operation key.
+            Prompt {
+                key: &'static str,
+                literal: &'static str,
+            },
+            /// A control client submits this exec under the operation key.
+            Exec {
+                key: &'static str,
+                literal: &'static str,
+            },
+            /// A control client reconciles the uncertain receipt of the operation key as
+            /// submitted.
+            Reconcile(&'static str),
+            /// The Director sends the member a message with this body.
+            Message(&'static str),
+            /// The Director sends the member a message the member has already consumed.
+            Consumed(&'static str),
+            /// Another writer takes the member's pane input lock.
+            HoldPane,
+            ReleasePane,
+            Arm(FaultPlan),
+            Clear(FaultPlan),
+        }
+
+        /// A scenario as data: the native screen the child starts on, the screen it redraws after
+        /// each submit key, the screen it draws once the bytes written to it contain a marker,
+        /// the steps, and the runtime event kinds the run records, in order.
+        pub(crate) struct Scenario {
+            pub(crate) name: &'static str,
+            pub(crate) screen: &'static str,
+            pub(crate) redraw: Option<&'static str>,
+            pub(crate) interrupt: Option<Interrupt>,
+            pub(crate) steps: &'static [Step],
+            pub(crate) events: &'static [&'static str],
+        }
+
+        /// The native child draws `screen` once, as soon as the bytes written to it contain
+        /// `marker`.
+        #[derive(Clone, Copy)]
+        pub(crate) struct Interrupt {
+            pub(crate) marker: &'static str,
+            pub(crate) screen: &'static str,
+        }
+
+        impl Scenario {
+            /// Runs every step and asserts the recorded event kinds, returning the finished runner
+            /// for further row and byte assertions.
+            pub(crate) fn run(&self) -> Runner {
+                self.run_with(|_| {})
+            }
+
+            /// Like [`Scenario::run`], with `configure` applied to the started runner first.
+            pub(crate) fn run_with(&self, configure: impl FnOnce(&mut Runner)) -> Runner {
+                let mut runner = Runner::new(self.screen, self.redraw);
+                runner.child.interrupt = self.interrupt.map(|interrupt| {
+                    (
+                        interrupt.marker.as_bytes().to_vec(),
+                        screen_bytes(interrupt.screen),
+                    )
+                });
+                configure(&mut runner);
+                runner.settle();
+                for step in self.steps {
+                    runner.step(*step);
+                }
+                runner.settle();
+                assert_eq!(runner.event_kinds(), self.events, "{}", self.name);
+                runner
+            }
+        }
+
+        /// A writer work slice longer than any scenario, so event batches never split on time.
+        struct ScenarioWriterHooks;
+
+        impl WriterHooks for ScenarioWriterHooks {
+            fn before(&self, _: WriterBoundary, _: Instant) -> Result<()> {
+                Ok(())
+            }
+            fn work_slice(&self) -> Duration {
+                Duration::from_secs(3600)
+            }
+        }
+
+        /// The native child behind the PTY: it draws queued screens, records every byte the
+        /// runner writes to it, and draws the `redraw` screen after each write that ends with
+        /// its submit key.
+        pub(crate) struct NativeChild {
+            screens: FakeInput,
+            pub(crate) written: Vec<u8>,
+            redraw: Option<(Vec<u8>, Vec<u8>)>,
+            interrupt: Option<(Vec<u8>, Vec<u8>)>,
+        }
+
+        impl NativeChild {
+            fn draw(&mut self, screen: Vec<u8>) {
+                assert!(!screen.is_empty(), "an empty read is end of file");
+                self.screens.chunks.push_back(screen);
+            }
+        }
+
+        impl ByteInput for NativeChild {
+            fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                self.screens.try_read(bytes)
+            }
+        }
+
+        impl PtyIo for NativeChild {
+            fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.written.extend_from_slice(bytes);
+                if self.interrupt.as_ref().is_some_and(|(marker, _)| {
+                    self.written
+                        .windows(marker.len())
+                        .any(|window| window == marker.as_slice())
+                }) {
+                    let (_, screen) = self.interrupt.take().expect("the armed interrupt");
+                    self.screens.chunks.push_back(screen);
+                } else if let Some((submit, screen)) = &self.redraw
+                    && self.written.ends_with(submit)
+                {
+                    self.screens.chunks.push_back(screen.clone());
+                }
+                Ok(bytes.len())
+            }
+            fn resize(&mut self, _: TerminalSize) -> Result<()> {
+                Ok(())
+            }
+            fn close(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        pub(crate) fn screen_bytes(id: &str) -> Vec<u8> {
+            use crate::coding_agent::detector::test_support::bundled_screen;
+            use crate::coding_agent::detector::test_support::native_fixture_bytes;
+            native_fixture_bytes(&bundled_screen(id))
+        }
+
+        struct NativeScreen {
+            backend: CodingAgent,
+            version: String,
+            size: TerminalSize,
+        }
+
+        fn native_screen(id: &str) -> NativeScreen {
+            let definitions = crate::coding_agent::catalog::test_support::bundled_definitions();
+            let entry = definitions["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["id"] == id)
+                .unwrap_or_else(|| panic!("bundled fixture {id} is registered"))
+                .clone();
+            let dimension = |key: &str| u16::try_from(entry[key].as_u64().unwrap()).unwrap();
+            NativeScreen {
+                backend: serde_json::from_value(entry["backend"].clone()).unwrap(),
+                version: entry["native_version"].as_str().unwrap().into(),
+                size: TerminalSize {
+                    rows: dimension("rows"),
+                    cols: dimension("cols"),
+                },
+            }
+        }
+
+        /// The runner I/O the production input turns drive: the scenario's fake terminal,
+        /// scripted child and observation, with no termination, resize or native exit.
+        struct ScenarioIo<'a> {
+            clock: &'a TestClock,
+            controller: &'a mut ObservationController,
+            writer: &'a EventWriter,
+            transport: &'a mut Transport,
+            human: &'a mut FakeInput,
+            child: &'a mut NativeChild,
+            display: &'a mut FakeDisplay,
+        }
+
+        impl InputTurnIo for ScenarioIo<'_> {
+            fn clock(&self) -> &dyn Clock {
+                self.clock
+            }
+            fn controller(&self) -> &ObservationController {
+                self.controller
+            }
+            fn quiesce(
+                &mut self,
+                coordinator: &mut InputCoordinator,
+                deadline: Instant,
+            ) -> std::result::Result<InputDrain, InputFailure> {
+                coordinator.progress_with_manual(self.transport, |transport| {
+                    transport.quiesce_for_input(
+                        self.human,
+                        self.child,
+                        self.display,
+                        &mut self.controller.observer(self.writer, self.clock),
+                        deadline,
+                    )
+                })
+            }
+            fn advance(
+                &mut self,
+                coordinator: &mut InputCoordinator,
+                conn: &mut rusqlite::Connection,
+                deadline: Instant,
+            ) -> Result<Option<InputControlReply>> {
+                coordinator
+                    .advance(conn, self.transport, self.child, self.controller, deadline)
+                    .map_err(CafleetError::from)
+            }
+            fn terminate_requested(&self) -> bool {
+                false
+            }
+            fn resize_requested(&self) -> bool {
+                false
+            }
+            fn shutdown_deadlines(&self) -> ShutdownDeadlines {
+                ShutdownDeadlines::starting_now(self.clock)
+            }
+            fn observe_exit(
+                &mut self,
+                _: &mut InputCoordinator,
+                _: &mut rusqlite::Connection,
+            ) -> Result<Option<ShutdownDeadlines>> {
+                Ok(None)
+            }
+        }
+
+        pub(crate) struct Runner {
+            pub(crate) clock: Arc<TestClock>,
+            pub(crate) fixture: Fixture,
+            _artifacts: RunArtifacts,
+            pub(crate) writer: EventWriter,
+            pub(crate) controller: ObservationController,
+            pub(crate) transport: Transport,
+            pub(crate) coordinator: InputCoordinator,
+            pub(crate) human: FakeInput,
+            pub(crate) child: NativeChild,
+            pub(crate) display: FakeDisplay,
+            pub(crate) replies: Vec<std::result::Result<InputControlReply, CafleetError>>,
+            pub(crate) held_pane: Option<crate::pane_lock::PaneLock>,
+            turns: InputTurns,
+            finished: bool,
+        }
+
+        impl Runner {
+            /// A started run of the backend and version that recorded `screen`, at its size, with
+            /// the child showing `screen`.
+            pub(crate) fn new(screen: &str, redraw: Option<&str>) -> Self {
+                let catalog = ProfileCatalog::bundled();
+                let native = native_screen(screen);
+                let clock = Arc::new(
+                    TestClock::starting_at(
+                        Instant::now() + crate::runtime::test_support::VIRTUAL_LEAD,
+                    )
+                    .with_shutdown_unit(SHUTDOWN_UNIT),
+                );
+                let WriterFixture {
+                    mut fixture,
+                    artifacts,
+                    lock,
+                } = WriterFixture::new();
+                let coverage = catalog
+                    .capabilities(native.backend, Some(&native.version))
+                    .detection;
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3 WHERE run_id=?4",
+                        rusqlite::params![
+                            native.backend.name(),
+                            native.version,
+                            coverage.as_str(),
+                            fixture.run.run_id
+                        ],
+                    )
+                    .unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                        rusqlite::params![native.backend.name(), fixture.run.member_id],
+                    )
+                    .unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                let mut controller = ObservationController::new(&fixture.run, catalog).unwrap();
+                let writer = EventWriter::start_with_hooks(
+                    format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                    fixture.run.clone(),
+                    lock.clone(),
+                    Arc::new(YieldingClock(clock.clone())),
+                    Arc::new(ScenarioWriterHooks),
+                )
+                .unwrap();
+                let child = ProcessIdentity::current().unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",
+                        rusqlite::params![
+                            child.pid,
+                            child.start_identity,
+                            clock.wall_stamp(),
+                            fixture.run.run_id
+                        ],
+                    )
+                    .unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                let transport = Transport::new(
+                    native.size,
+                    TransportLimits {
+                        input_bytes: 65536,
+                        display_bytes: 262144,
+                        bytes_per_tick: 16384,
+                    },
+                    clock.clone(),
+                )
+                .unwrap();
+                controller
+                    .started(&fixture.run, &transport.snapshot(), &writer, clock.as_ref())
+                    .unwrap();
+                let coordinator = InputCoordinator::new(
+                    &mut fixture.conn,
+                    &fixture.run,
+                    lock,
+                    InputServices {
+                        catalog: catalog.clone(),
+                        token_source: Box::new(SystemRequestTokens),
+                        clock: clock.clone(),
+                        stage_settle: crate::runtime::input::STAGE_SETTLE,
+                        hooks: crate::runtime::input::test_support::default_input_hooks(),
+                    },
+                    clock.now() + Duration::from_secs(10),
+                )
+                .unwrap();
+                let redraw = redraw.map(|id| {
+                    let plan = catalog
+                        .composer_plan(native.backend, &native.version, ComposerOperation::Prompt)
+                        .expect("a redraw after submit needs the profile's prompt plan");
+                    let submit = plan
+                        .stages("x", LiteralFraming::Plain)
+                        .unwrap()
+                        .into_iter()
+                        .last()
+                        .expect("a prompt plan ends with its submit key");
+                    (submit, screen_bytes(id))
+                });
+                let mut child = NativeChild {
+                    screens: FakeInput::default(),
+                    written: Vec::new(),
+                    redraw,
+                    interrupt: None,
+                };
+                child.draw(screen_bytes(screen));
+                Self {
+                    clock,
+                    fixture,
+                    _artifacts: artifacts,
+                    writer,
+                    controller,
+                    transport,
+                    coordinator,
+                    human: FakeInput::default(),
+                    child,
+                    display: FakeDisplay::default(),
+                    replies: Vec::new(),
+                    held_pane: None,
+                    turns: InputTurns::new(),
+                    finished: false,
+                }
+            }
+
+            pub(crate) fn step(&mut self, step: Step) {
+                match step {
+                    Step::Screen(id) => self.child.draw(screen_bytes(id)),
+                    Step::Type(bytes) => {
+                        assert!(!bytes.is_empty(), "an empty read is end of file");
+                        self.human.chunks.push_back(bytes.to_vec());
+                    }
+                    Step::Run(duration) => self.run_for(duration),
+                    Step::Prompt { key, literal } => {
+                        self.submit(InputControlOperation::SubmitPrompt(SubmitInput {
+                            operation_key: key.into(),
+                            input_kind: storage::InputKind::Prompt,
+                            literal: literal.into(),
+                        }))
+                    }
+                    Step::Exec { key, literal } => {
+                        self.submit(InputControlOperation::SubmitExec(SubmitInput {
+                            operation_key: key.into(),
+                            input_kind: storage::InputKind::Exec,
+                            literal: literal.into(),
+                        }))
+                    }
+                    Step::Reconcile(key) => {
+                        let input =
+                            storage::find_input(&self.fixture.conn, self.fixture.run.run_id, key)
+                                .unwrap()
+                                .unwrap_or_else(|| panic!("{key} has a receipt"));
+                        self.submit(InputControlOperation::Receipt(ReceiptAction::Reconcile {
+                            input_id: input.input_id,
+                            expected: storage::InputState::Uncertain,
+                            disposition: storage::InputDisposition::Submitted,
+                            evidence_ref: "audit:pane-shows-the-input".into(),
+                        }))
+                    }
+                    Step::Message(body) => {
+                        self.send(body);
+                    }
+                    Step::Consumed(body) => {
+                        let message = self.send(body);
+                        self.fixture
+                            .conn
+                            .execute(
+                                "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                                [message.message_id],
+                            )
+                            .unwrap();
+                    }
+                    Step::HoldPane => {
+                        assert!(self.held_pane.is_none(), "one held pane lock");
+                        let url = format!("sqlite:///{}", self.fixture.conn.path().unwrap());
+                        let placement = crate::broker::get_member(
+                            &self.fixture.conn,
+                            self.fixture.run.member_id,
+                            self.fixture.run.fleet_id,
+                        )
+                        .unwrap()
+                        .unwrap()
+                        .placement;
+                        self.held_pane = Some(
+                            crate::pane_lock::PaneLock::try_acquire(&url, &placement)
+                                .unwrap()
+                                .expect("the member's pane input lock is free"),
+                        );
+                    }
+                    Step::ReleasePane => {
+                        self.held_pane.take().expect("a held pane lock");
+                    }
+                    Step::Arm(plan) => plan.arm(&mut self.fixture.conn),
+                    Step::Clear(plan) => plan.clear(&mut self.fixture.conn),
+                }
+            }
+
+            /// Turns until every queued screen and typed byte is consumed and nothing more moves.
+            pub(crate) fn settle(&mut self) {
+                for _ in 0..TURN_LIMIT {
+                    let start = self.clock.elapsed();
+                    self.turn();
+                    if self.child.screens.chunks.is_empty()
+                        && self.human.chunks.is_empty()
+                        && self.turns.idle()
+                        && self.clock.elapsed() > start
+                    {
+                        return;
+                    }
+                }
+                panic!("the scenario settles within {TURN_LIMIT} turns");
+            }
+
+            pub(crate) fn run_for(&mut self, duration: Duration) {
+                let until = self.clock.elapsed() + duration;
+                for _ in 0..TURN_LIMIT {
+                    if self.clock.elapsed() >= until {
+                        return;
+                    }
+                    self.skip_idle_turns(self.clock.now() + (until - self.clock.elapsed()));
+                    self.turn();
+                }
+                panic!("{duration:?} of virtual time passes within {TURN_LIMIT} turns");
+            }
+
+            /// One runner loop turn of a started runner: the transport tick and observation poll,
+            /// the production input turns, then the loop's idle sleep.
+            pub(crate) fn turn(&mut self) {
+                self.await_writer();
+                let clock = self.clock.clone();
+                let progress = self
+                    .coordinator
+                    .progress_with_manual(&mut self.transport, |transport| {
+                        transport.tick(
+                            &mut self.human,
+                            &mut self.child,
+                            &mut self.display,
+                            &mut self.controller.observer(&self.writer, clock.as_ref()),
+                        )
+                    })
+                    .unwrap();
+                self.controller
+                    .poll(&self.transport.snapshot(), &self.writer, clock.as_ref())
+                    .unwrap();
+                let mut io = ScenarioIo {
+                    clock: clock.as_ref(),
+                    controller: &mut self.controller,
+                    writer: &self.writer,
+                    transport: &mut self.transport,
+                    human: &mut self.human,
+                    child: &mut self.child,
+                    display: &mut self.display,
+                };
+                match self
+                    .turns
+                    .turn(
+                        &mut self.coordinator,
+                        &mut self.fixture.conn,
+                        &self.fixture.run,
+                        &mut io,
+                    )
+                    .unwrap()
+                {
+                    InputTurnOutcome::Continue => {}
+                    InputTurnOutcome::Reply { result, .. } => self.replies.push(result),
+                    InputTurnOutcome::Shutdown(_) => {
+                        unreachable!("a scenario runner requests no shutdown")
+                    }
+                }
+                self.await_writer();
+                let pause = tick_sleep(
+                    &progress,
+                    self.controller.status().next_deadline,
+                    clock.now(),
+                );
+                if !pause.is_zero() {
+                    clock.sleep(pause);
+                }
+            }
+
+            /// Moves the clock to the next turn that can do work, or to `limit`, while nothing is
+            /// in flight: the turns in between read no bytes and reach no timer.
+            fn skip_idle_turns(&mut self, limit: Instant) {
+                let idle = self.turns.idle()
+                    && !self.coordinator.has_deferred_work()
+                    && self.child.screens.chunks.is_empty()
+                    && self.human.chunks.is_empty()
+                    && self.transport.pending_input_bytes() == 0
+                    && !self.controller.has_pending();
+                if !idle {
+                    return;
+                }
+                let now = self.clock.now();
+                let wake = self
+                    .turns
+                    .wakes(now)
+                    .into_iter()
+                    .chain([self.controller.status().next_deadline])
+                    .flatten()
+                    .chain([limit])
+                    .min()
+                    .expect("the limit bounds every wake");
+                if wake > now {
+                    self.clock.advance(wake - now);
+                }
+            }
+
+            /// Waits in real time until the writer has persisted every accepted event or reported
+            /// a failure, so each turn observes a settled sink.
+            fn await_writer(&self) {
+                let until = Instant::now() + WRITER_WAIT;
+                loop {
+                    let status = self.writer.status();
+                    if status.pending_count == 0 || status.diagnostic.is_some() {
+                        return;
+                    }
+                    assert!(
+                        Instant::now() < until,
+                        "the event writer settles: {status:?}"
+                    );
+                    std::thread::yield_now();
+                }
+            }
+
+            /// Admits a control request the way the runner serves an input client.
+            pub(crate) fn submit(&mut self, operation: InputControlOperation) {
+                let expires = self.clock.now() + Duration::from_secs(30);
+                let request = InputControlRequest {
+                    identity: ControlIdentity::from_run(&self.fixture.run),
+                    expires_at_mono_ns: InputExpiration::capture(expires, self.clock.as_ref())
+                        .unwrap()
+                        .monotonic_ns(),
+                    operation,
+                };
+                let deadline =
+                    input_deadline(&request, self.clock.now(), self.clock.as_ref()).unwrap();
+                match self.coordinator.handle_received(
+                    &mut self.fixture.conn,
+                    request,
+                    &self.controller,
+                    deadline,
+                ) {
+                    Ok(Some(reply)) => self.replies.push(Ok(reply)),
+                    Ok(None) => self.turns.admit_client(0, deadline).unwrap(),
+                    Err(failure) => self.replies.push(Err(CafleetError::from(failure))),
+                }
+            }
+
+            fn send(&mut self, body: &str) -> crate::broker::MessageRecord {
+                let run = &self.fixture.run;
+                let (director, member) = (run.director_member_id, run.member_id);
+                crate::broker::send_message(&mut self.fixture.conn, director, member, body).unwrap()
+            }
+
+            /// The preview line the sweep types for the message with this body.
+            pub(crate) fn preview_line(&self, body: &str) -> String {
+                let message = self.message(body);
+                crate::runtime::preview::canonical_preview_line(&message)
+            }
+
+            pub(crate) fn message(&self, body: &str) -> crate::broker::MessageRecord {
+                let id: i64 = self
+                    .fixture
+                    .conn
+                    .query_row(
+                        "SELECT message_id FROM messages WHERE text=?1",
+                        [body],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or_else(|cause| panic!("message {body:?}: {cause}"));
+                crate::broker::get_message(&self.fixture.conn, id).unwrap()
+            }
+
+            /// How many times the child received `text`.
+            pub(crate) fn typed(&self, text: &str) -> usize {
+                String::from_utf8_lossy(&self.child.written)
+                    .matches(text)
+                    .count()
+            }
+
+            /// The byte offset of the first `text` the child received.
+            pub(crate) fn typed_at(&self, text: &str) -> usize {
+                String::from_utf8_lossy(&self.child.written)
+                    .find(text)
+                    .unwrap_or_else(|| panic!("the child received {text:?}"))
+            }
+
+            pub(crate) fn notified(&self, body: &str) -> bool {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT notified_at IS NOT NULL FROM messages WHERE text=?1",
+                        [body],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            pub(crate) fn payloads(&self, kind: &str) -> Vec<serde_json::Value> {
+                self.fixture
+                    .conn
+                    .prepare(
+                        "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind=?2 ORDER BY event_seq",
+                    )
+                    .unwrap()
+                    .query_map(rusqlite::params![self.fixture.run.run_id, kind], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .unwrap()
+                    .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                    .collect()
+            }
+
+            pub(crate) fn event_kinds(&self) -> Vec<String> {
+                self.fixture
+                    .conn
+                    .prepare(
+                        "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
+                    )
+                    .unwrap()
+                    .query_map([self.fixture.run.run_id], |row| row.get(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            }
+
+            /// When the run-wide sweep backoff next allows a sweep, once a failed attempt armed it.
+            pub(crate) fn sweep_backoff_until(&self) -> Option<Instant> {
+                self.turns.preview_sweep.backoff_until
+            }
+
+            pub(crate) fn eligibility(&self) -> InputEligibility {
+                self.controller.health(&self.writer).eligibility
+            }
+
+            /// Stops the writer at the shutdown storage deadline and returns its unsaved
+            /// `(pending, gap)` counts; a writer that cannot persist is abandoned at that deadline.
+            pub(crate) fn finish(&mut self) -> (u64, u64) {
+                self.finished = true;
+                self.await_writer();
+                let until = ShutdownDeadlines::starting_now(self.clock.as_ref()).storage_deadline();
+                self.writer.begin_shutdown(until);
+                if self.writer.status().pending_count > 0 {
+                    self.clock
+                        .advance(until.saturating_duration_since(self.clock.now()));
+                }
+                self.writer.finish(until)
+            }
+        }
+
+        impl Drop for Runner {
+            fn drop(&mut self) {
+                if !self.finished && !std::thread::panicking() {
+                    self.finish();
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3743,7 +4510,6 @@ mod tests {
                     key,
                     literal,
                     InputKind::Prompt,
-                    None,
                     until.min(Instant::now() + Duration::from_secs(3)),
                 );
                 let result = submission(exchange(fixture, &value, until));
@@ -3787,7 +4553,6 @@ mod tests {
                     "exec:service:expired",
                     "expired command",
                     InputKind::Exec,
-                    None,
                     expires,
                 );
                 let frame = encode_control_frame(&value).unwrap();
@@ -3834,7 +4599,6 @@ mod tests {
                     "exec:service:fresh",
                     "queued command λ",
                     InputKind::Exec,
-                    None,
                     until.min(Instant::now() + Duration::from_secs(3)),
                 );
                 let reply = submission(exchange(fixture, &fresh, until));
@@ -3848,86 +4612,6 @@ mod tests {
                         .collect::<Vec<_>>(),
                     ["manual progress", "! queued command λ", "barrier"]
                 );
-            });
-        }
-
-        #[test]
-        fn service_input_disconnected_preview_consumer_retains_outcome_without_automatic_retyping()
-        {
-            with_input_service(|fixture, until| {
-                let message = crate::broker::send_message(
-                    &mut fixture.fixture.conn,
-                    fixture.fixture.run.director_member_id,
-                    fixture.fixture.run.member_id,
-                    "disconnected preview λ",
-                )
-                .unwrap();
-                let key = crate::broker::runtime::preview_operation_key(
-                    fixture.fixture.run.run_id,
-                    message.message_id,
-                    1,
-                )
-                .unwrap();
-                let accepted_until = until.min(Instant::now() + Duration::from_secs(3));
-                let literal = crate::delivery::canonical_preview_line(&message);
-                let value = request(
-                    fixture,
-                    &key,
-                    &literal,
-                    InputKind::Preview,
-                    Some(message.message_id),
-                    accepted_until,
-                );
-                let mut abandoned = Peer::connect(fixture);
-                abandoned.send(&encode_control_frame(&value).unwrap(), until);
-                abandoned.stream.shutdown(Shutdown::Read).unwrap();
-                let row = loop {
-                    let current = storage::find_input(
-                        &fixture.fixture.conn,
-                        fixture.fixture.run.run_id,
-                        &key,
-                    )
-                    .unwrap();
-                    if let Some(row) = current.as_ref()
-                        && row.state == InputState::Accepted
-                    {
-                        break row.clone();
-                    }
-                    assert!(
-                        Instant::now() < accepted_until,
-                        "disconnected consumer's durable accepted outcome is absent: row={current:?}; native_records={:?}",
-                        input_service_records(fixture),
-                    );
-                    assert!(fixture.child.try_wait().unwrap().is_none());
-                    pause(accepted_until);
-                };
-                drop(abandoned);
-                wait_input_service_record(fixture, &literal, until);
-                let retained = submission(exchange(fixture, &value, until));
-                assert_eq!(retained.input_id, Some(row.input_id));
-                input_service_barrier(fixture, until);
-                assert_eq!(
-                    input_service_records(fixture)
-                        .iter()
-                        .filter(|record| record["line"] == literal)
-                        .count(),
-                    1
-                );
-                assert_eq!(
-                    storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
-                    row
-                );
-                assert_eq!(row.message_id, Some(message.message_id));
-                let notified: Option<String> = fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [message.message_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert!(notified.is_none());
             });
         }
 
@@ -3959,7 +4643,6 @@ mod tests {
                     expired_key,
                     "expired reservation must stay unwritten",
                     InputKind::Prompt,
-                    None,
                     expires,
                 );
                 let started = Instant::now();
@@ -3999,7 +4682,6 @@ mod tests {
                     fresh_key,
                     literal,
                     InputKind::Prompt,
-                    None,
                     until.min(Instant::now() + Duration::from_secs(3)),
                 );
                 let reply = exchange(fixture, &fresh, until);
@@ -4044,7 +4726,6 @@ mod tests {
                     key,
                     literal,
                     InputKind::Prompt,
-                    None,
                     until.min(Instant::now() + Duration::from_secs(3)),
                 );
                 let attempt = catch_unwind(AssertUnwindSafe(|| exchange(fixture, &value, until)));
@@ -4120,7 +4801,6 @@ mod tests {
                 let observation = health.observation.as_ref().unwrap();
                 if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
                     && observation.pending_count == 0
-                    && !observation.pending_evidence
                 {
                     break;
                 }
@@ -4131,7 +4811,6 @@ mod tests {
                 "prompt:service:stopped",
                 "queued at shutdown",
                 InputKind::Prompt,
-                None,
                 until.min(Instant::now() + Duration::from_secs(3)),
             );
             let reply = exchange(fixture, &value, until);
@@ -4266,25 +4945,22 @@ mod tests {
             );
         }
 
+        const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
+        /// Longer than two sweep intervals, so a sweep that could deliver would have done so.
+        const SWEEP_WINDOW: Duration = Duration::from_millis(2500);
+
         fn send(fixture: &mut ServiceFixture, body: &str) -> MessageRecord {
             let run = &fixture.fixture.run;
             let (director, member) = (run.director_member_id, run.member_id);
             crate::broker::send_message(&mut fixture.fixture.conn, director, member, body).unwrap()
         }
 
-        fn previews(fixture: &ServiceFixture, message_id: i64) -> Vec<InputOperation> {
-            let conn = &fixture.fixture.conn;
-            conn.prepare(
-                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND message_id=?2 ORDER BY input_id",
+        /// The canonical preview line of a message whose body needs no folding.
+        fn line(message: &MessageRecord) -> String {
+            format!(
+                "[cafleet msg {} from {} {}] {} {RESUME_CLAUSE}",
+                message.message_id, message.from_member_id, message.created_at, message.text
             )
-            .unwrap()
-            .query_map(
-                rusqlite::params![fixture.fixture.run.run_id, message_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap()
-            .map(|id| storage::get_input(conn, id.unwrap()).unwrap())
-            .collect()
         }
 
         fn notified_at(fixture: &ServiceFixture, message_id: i64) -> Option<String> {
@@ -4299,18 +4975,6 @@ mod tests {
                 .unwrap()
         }
 
-        fn result_events(fixture: &ServiceFixture, input_id: i64) -> i64 {
-            fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
-                    rusqlite::params![fixture.fixture.run.run_id, input_id],
-                    |row| row.get(0),
-                )
-                .unwrap()
-        }
-
         fn lines(fixture: &ServiceFixture) -> Vec<String> {
             input_service_records(fixture)
                 .iter()
@@ -4318,8 +4982,11 @@ mod tests {
                 .collect()
         }
 
-        fn line(message: &MessageRecord) -> String {
-            crate::delivery::canonical_preview_line(message)
+        fn typed_count(fixture: &ServiceFixture, text: &str) -> usize {
+            lines(fixture)
+                .iter()
+                .filter(|typed| typed.contains(text))
+                .count()
         }
 
         fn wait_for(until: Instant, what: &str, mut done: impl FnMut() -> bool) {
@@ -4329,843 +4996,163 @@ mod tests {
             }
         }
 
-        fn wait_delivered(fixture: &mut ServiceFixture, message: &MessageRecord, until: Instant) {
-            wait_input_service_record(fixture, &line(message), until);
-            wait_for(until, "the delivered preview is stamped", || {
-                notified_at(fixture, message.message_id).is_some()
-            });
-        }
-
-        fn assert_runner_settled_submitted(fixture: &ServiceFixture, message: &MessageRecord) {
-            let receipts = previews(fixture, message.message_id);
-            let latest = receipts
-                .last()
-                .expect("the sweep reserved a preview receipt");
-            assert_eq!(latest.kind, InputKind::Preview);
-            assert_eq!(latest.state, InputState::Settled, "{latest:?}");
-            assert_eq!(latest.disposition, Some(InputDisposition::Submitted));
-            assert!(notified_at(fixture, message.message_id).is_some());
-        }
-
-        fn pane_lock(fixture: &ServiceFixture) -> crate::pane_lock::PaneLock {
-            let run = &fixture.fixture.run;
-            let placement =
-                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
-                    .unwrap()
-                    .unwrap()
-                    .placement;
-            let url = format!("sqlite:///{}", fixture.fixture.conn.path().unwrap());
-            crate::pane_lock::PaneLock::try_acquire(&url, &placement)
+        /// The receipt-free delivery results the run published for `message_id`.
+        fn preview_results(fixture: &ServiceFixture, message_id: i64) -> Vec<Value> {
+            fixture
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.message_id')=?2 AND json_type(payload_json,'$.input_id')='null' ORDER BY event_seq",
+                )
                 .unwrap()
-                .expect("the test takes the member's free pane input lock")
-        }
-
-        #[test]
-        fn the_sweep_submits_unnotified_previews_oldest_first_with_no_caller_command() {
-            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
-                let first = send(fixture, "first swept preview");
-                let second = send(fixture, "second swept preview");
-                wait_delivered(fixture, &first, until);
-                wait_delivered(fixture, &second, until);
-                input_service_barrier(fixture, until);
-                assert_eq!(
-                    lines(fixture),
-                    [line(&first), line(&second), "barrier".to_owned()],
-                    "each preview is typed once, oldest first"
-                );
-                for message in [&first, &second] {
-                    let receipts = previews(fixture, message.message_id);
-                    assert_eq!(receipts.len(), 1, "{receipts:?}");
-                    assert_eq!(
-                        receipts[0].operation_key,
-                        storage::preview_operation_key(
-                            fixture.fixture.run.run_id,
-                            message.message_id,
-                            1
-                        )
-                        .unwrap(),
-                        "the runner reserves attempt 1 under its own run key"
-                    );
-                    assert_runner_settled_submitted(fixture, message);
-                }
-            });
-        }
-
-        #[test]
-        fn a_consumed_message_is_never_selected() {
-            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
-                let run = fixture.fixture.run.clone();
-                let tx = fixture
-                    .fixture
-                    .conn
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .unwrap();
-                let consumed = crate::broker::messaging::insert_message_validated(
-                    &tx,
-                    run.director_member_id,
-                    run.member_id,
-                    "consumed before any sweep",
+                .query_map(
+                    rusqlite::params![fixture.fixture.run.run_id, message_id],
+                    |row| row.get::<_, String>(0),
                 )
-                .unwrap();
-                tx.execute(
-                    "UPDATE messages SET status_state='completed' WHERE message_id=?1",
-                    [consumed.message_id],
-                )
-                .unwrap();
-                tx.commit().unwrap();
-                let later = send(fixture, "pending after the consumed message");
-                wait_delivered(fixture, &later, until);
-                input_service_barrier(fixture, until);
-                assert!(previews(fixture, consumed.message_id).is_empty());
-                assert_eq!(notified_at(fixture, consumed.message_id), None);
-                assert_eq!(lines(fixture), [line(&later), "barrier".to_owned()]);
-            });
+                .unwrap()
+                .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                .collect()
         }
 
-        #[test]
-        fn a_disconnected_consumers_accepted_preview_is_settled_by_the_sweep_and_its_receipt_retired()
-         {
-            with_sweeping_input_service(Duration::from_secs(10), false, |fixture, until| {
-                let message = send(fixture, "disconnected swept preview λ");
-                let key = storage::preview_operation_key(
-                    fixture.fixture.run.run_id,
-                    message.message_id,
-                    1,
-                )
-                .unwrap();
-                let literal = line(&message);
-                let value = request(
-                    fixture,
-                    &key,
-                    &literal,
-                    InputKind::Preview,
-                    Some(message.message_id),
-                    until,
-                );
-                let mut abandoned = Peer::connect(fixture);
-                abandoned.send(&encode_control_frame(&value).unwrap(), until);
-                abandoned.stream.shutdown(Shutdown::Read).unwrap();
-                wait_delivered(fixture, &message, until);
-                drop(abandoned);
-                input_service_barrier(fixture, until);
-                assert_eq!(lines(fixture), [literal, "barrier".to_owned()]);
-                let receipts = previews(fixture, message.message_id);
-                assert_eq!(receipts.len(), 1, "{receipts:?}");
-                assert_eq!(receipts[0].operation_key, key);
-                assert_runner_settled_submitted(fixture, &message);
-                let query = json!({"protocol_version":1,"kind":"receipt",
-                    "identity":fixture.prepared.as_ref().unwrap(),"expires_at_mono_ns":expiration(until),
-                    "action":"query","operation_key":key});
-                let reply = exchange(fixture, &query, until);
-                let receipt = &reply["result"]["receipt"];
-                assert_eq!(receipt["status"], "present", "{reply}");
-                assert_eq!(receipt["input_id"], receipts[0].input_id, "{reply}");
-                let projection: SubmissionResult =
-                    serde_json::from_value(receipt["submission"].clone()).unwrap();
-                assert_eq!(
-                    projection.output_seq, None,
-                    "the sweep retires the coordinator's cached receipt after settling it: {reply}"
-                );
-            });
-        }
-
-        #[test]
-        fn the_sweep_never_duplicates_a_preview_the_fifo_already_holds() {
-            with_sweeping_input_service(Duration::from_secs(10), true, |fixture, until| {
-                let run =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
-                loop {
-                    assert!(Instant::now() < until, "the detected interaction opens");
-                    let health = NativeInputHost.health(&run, until).unwrap();
-                    let observation = health.observation.as_ref().unwrap();
-                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
-                        && observation.pending_count == 0
-                        && !observation.pending_evidence
-                    {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                let message = send(fixture, "queued behind the form");
-                let settings =
-                    Settings::for_database(Path::new(fixture.fixture.conn.path().unwrap()));
-                crate::delivery::deliver_pending(
-                    &mut fixture.fixture.conn,
-                    &settings,
-                    run.member_id,
-                    None,
-                    crate::time::Deadline::until(
-                        until.min(Instant::now() + Duration::from_secs(5)),
-                    ),
-                    &std::collections::BTreeSet::new(),
-                )
-                .unwrap();
-                let queued = previews(fixture, message.message_id);
-                assert_eq!(queued.len(), 1, "{queued:?}");
-                assert_eq!(queued[0].state, InputState::Ready);
-                std::thread::sleep(Duration::from_millis(2500));
-                assert_eq!(
-                    previews(fixture, message.message_id),
-                    queued,
-                    "two sweep intervals add no receipt while the FIFO holds the preview"
-                );
-                assert!(input_service_records(fixture).is_empty());
-                input_service_barrier(fixture, until);
-                wait_delivered(fixture, &message, until);
-                assert_eq!(
-                    lines(fixture)
-                        .iter()
-                        .filter(|typed| **typed == line(&message))
-                        .count(),
-                    1
-                );
-                assert_eq!(previews(fixture, message.message_id).len(), 1);
-            });
-        }
-
-        #[test]
-        fn a_sweep_request_queues_with_zero_bytes_behind_a_held_pane_lock_and_delivers_once_free() {
-            with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
-                let held = pane_lock(fixture);
-                let message = send(fixture, "swept behind a held pane lock");
-                wait_for(until, "the sweep reserves a receipt", || {
-                    !previews(fixture, message.message_id).is_empty()
-                });
-                std::thread::sleep(Duration::from_millis(1500));
-                let receipts = previews(fixture, message.message_id);
-                assert_eq!(receipts.len(), 1, "{receipts:?}");
-                assert_eq!(
-                    receipts[0].delivery().unwrap().status,
-                    DeliveryStatus::Queued,
-                    "the request queues with zero bytes while another process holds the lock"
-                );
-                assert!(input_service_records(fixture).is_empty());
-                assert_eq!(notified_at(fixture, message.message_id), None);
-                drop(held);
-                wait_delivered(fixture, &message, until);
-                assert_eq!(previews(fixture, message.message_id).len(), 1);
-                assert_runner_settled_submitted(fixture, &message);
-                pane_lock(fixture);
-            });
-        }
-
-        #[test]
-        fn a_transient_failure_backs_off_and_retries_the_same_head_before_a_newer_message() {
-            with_sweeping_input_service(Duration::from_secs(45), false, |fixture, until| {
-                let held = pane_lock(fixture);
-                let head = send(fixture, "head behind a busy pane");
-                let newer = send(fixture, "newer message");
-                wait_for(
-                    until,
-                    "the head's first attempt settles not submitted",
-                    || {
-                        previews(fixture, head.message_id)
-                            .first()
-                            .is_some_and(|first| first.state == InputState::Settled)
-                    },
-                );
-                let first = previews(fixture, head.message_id).remove(0);
-                assert_eq!(first.disposition, Some(InputDisposition::NotSubmitted));
-                assert_eq!(first.delivery_reason.as_deref(), Some("pane_input_busy"));
-                assert!(previews(fixture, newer.message_id).is_empty());
-                wait_for(until, "the head is retried as attempt 2", || {
-                    previews(fixture, head.message_id).len() == 2
-                });
-                let retry = previews(fixture, head.message_id).remove(1);
-                assert_eq!(
-                    retry.operation_key,
-                    storage::preview_operation_key(fixture.fixture.run.run_id, head.message_id, 2)
-                        .unwrap()
-                );
-                let settled_at = crate::time::parse_lenient(&first.updated_at).unwrap();
-                let retried_at = crate::time::parse_lenient(&retry.created_at).unwrap();
-                assert!(
-                    retried_at - settled_at >= chrono::Duration::milliseconds(900),
-                    "the retry waits out the one-second backoff: {settled_at} -> {retried_at}"
-                );
-                assert!(
-                    previews(fixture, newer.message_id).is_empty(),
-                    "strict oldest-first: the newer message waits behind the head"
-                );
-                assert_eq!(
-                    result_events(fixture, first.input_id),
-                    0,
-                    "a retried preview publishes no delivery result"
-                );
-                drop(held);
-                wait_delivered(fixture, &head, until);
-                wait_delivered(fixture, &newer, until);
-                assert_eq!(lines(fixture), [line(&head), line(&newer)]);
-                assert_runner_settled_submitted(fixture, &head);
-                assert_runner_settled_submitted(fixture, &newer);
-                assert!(
-                    previews(fixture, newer.message_id)[0].input_id > retry.input_id,
-                    "the newer message is attempted only after the head"
-                );
-            });
-        }
-
-        /// Holds the synthetic native child stopped, so an attempt already written stays in
-        /// flight until the guard resumes it.
-        struct StoppedNative(nix::unistd::Pid);
-
-        impl StoppedNative {
-            fn stop(fixture: &ServiceFixture) -> Self {
-                let identity: ProcessIdentity = serde_json::from_slice(
-                    &std::fs::read(
-                        fixture
-                            .fixture
-                            ._dir
-                            .path()
-                            .join("service-input-native-identity.json"),
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-                let pid = nix::unistd::Pid::from_raw(i32::try_from(identity.pid).unwrap());
-                nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGSTOP).unwrap();
-                Self(pid)
-            }
-        }
-
-        impl Drop for StoppedNative {
-            fn drop(&mut self) {
-                nix::sys::signal::kill(self.0, nix::sys::signal::Signal::SIGCONT).unwrap();
-            }
-        }
-
-        #[test]
-        fn an_in_flight_sweep_attempt_blocks_a_second_sweep_and_queues_a_control_request_behind_it()
-        {
-            with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
-                let stopped = StoppedNative::stop(fixture);
-                let head = send(fixture, "in flight while the native is stopped");
-                let newer = send(fixture, "second pending message");
-                wait_for(until, "the sweep starts its immediate attempt", || {
-                    previews(fixture, head.message_id)
-                        .first()
-                        .is_some_and(|attempt| attempt.state == InputState::InProgress)
-                });
-                let value = request(
-                    fixture,
-                    "prompt:behind-the-sweep",
-                    "control request behind the sweep",
-                    InputKind::Prompt,
-                    None,
-                    until.min(Instant::now() + Duration::from_secs(10)),
-                );
-                let reply = exchange(fixture, &value, until);
-                assert!(reply.get("error").is_none(), "{reply}");
-                let queued: SubmissionResult =
-                    serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
-                assert_eq!(queued.status, SubmissionStatus::Queued, "{reply}");
-                assert_eq!(
-                    queued
-                        .delivery
-                        .as_ref()
-                        .and_then(|delivery| delivery.reason.as_deref()),
-                    Some("earlier_input"),
-                    "a control request behind the in-flight sweep attempt waits for it"
-                );
-                std::thread::sleep(Duration::from_millis(1200));
-                assert!(
-                    previews(fixture, newer.message_id).is_empty(),
-                    "no second sweep attempt starts while one is in flight"
-                );
-                assert_eq!(previews(fixture, head.message_id).len(), 1);
-                drop(stopped);
-                wait_delivered(fixture, &head, until);
-                wait_delivered(fixture, &newer, until);
-                wait_input_service_record(fixture, "control request behind the sweep", until);
-                let typed = lines(fixture);
-                assert_eq!(typed[0], line(&head), "{typed:?}");
-                for expected in [
-                    line(&head),
-                    line(&newer),
-                    "control request behind the sweep".to_owned(),
-                ] {
-                    assert_eq!(
-                        typed.iter().filter(|typed| **typed == expected).count(),
-                        1,
-                        "{typed:?}"
-                    );
-                }
-                assert_runner_settled_submitted(fixture, &head);
-                assert_eq!(previews(fixture, head.message_id).len(), 1);
-            });
-        }
-
-        mod queue_housekeeping {
-            use crate::runtime::service::tests::preview_sweep::*;
-
-            pub(super) fn queue_preview(
-                fixture: &ServiceFixture,
-                message: &MessageRecord,
-                until: Instant,
-            ) -> i64 {
-                let key = storage::preview_operation_key(
-                    fixture.fixture.run.run_id,
-                    message.message_id,
-                    1,
-                )
-                .unwrap();
-                let value = request(
-                    fixture,
-                    &key,
-                    &line(message),
-                    InputKind::Preview,
-                    Some(message.message_id),
-                    until,
-                );
-                let reply = exchange(fixture, &value, until);
-                assert!(reply.get("error").is_none(), "{reply}");
-                let queued: SubmissionResult =
-                    serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
-                assert_eq!(queued.status, SubmissionStatus::Queued, "{reply}");
-                queued.input_id.expect("queued work has a durable input ID")
-            }
-
-            /// Queues three previews in FIFO order: a head and a later entry whose messages the
-            /// test consumes, around a kept entry that stays `input_required`.
-            fn queue_three(
-                fixture: &mut ServiceFixture,
-                until: Instant,
-            ) -> [(MessageRecord, i64); 3] {
-                ["consumed head", "kept entry", "consumed later entry"].map(|body| {
-                    let message = send(fixture, body);
-                    let input_id = queue_preview(fixture, &message, until);
-                    (message, input_id)
-                })
-            }
-
-            /// Marks both messages consumed and returns when the last consumption committed.
-            fn consume(fixture: &mut ServiceFixture, messages: [&MessageRecord; 2]) -> Instant {
-                for message in messages {
-                    fixture
-                        .fixture
-                        .conn
-                        .execute(
-                            "UPDATE messages SET status_state='completed' WHERE message_id=?1",
-                            [message.message_id],
-                        )
-                        .unwrap();
-                }
-                Instant::now()
-            }
-
-            pub(super) fn input(fixture: &ServiceFixture, input_id: i64) -> InputOperation {
-                storage::get_input(&fixture.fixture.conn, input_id).unwrap()
-            }
-
-            /// The runner loop's slack beyond one housekeeping interval: a tick in progress when
-            /// the interval elapses plus the cancelling transaction.
-            const HOUSEKEEPING_SLACK: Duration = Duration::from_millis(300);
-
-            /// Waits one housekeeping interval plus tick slack, measured from `since`, for every
-            /// listed entry to leave `ready`, running `during` on each wait.
-            fn await_housekeeping(
-                fixture: &mut ServiceFixture,
-                since: Instant,
-                input_ids: [i64; 2],
-                mut during: impl FnMut(&mut ServiceFixture),
-            ) {
-                let bound = since
-                    + crate::runtime::service::QUEUE_HOUSEKEEPING_INTERVAL
-                    + HOUSEKEEPING_SLACK;
-                while input_ids
+        /// Types `barrier` and waits for its journal line, which also carries any literal the
+        /// native child still holds unsubmitted; the child then restores the empty composer.
+        fn clear_with_barrier(fixture: &mut ServiceFixture, until: Instant) {
+            manual(fixture, b"barrier\r", until);
+            wait_for(until, "the barrier line is journaled", || {
+                lines(fixture)
                     .iter()
-                    .any(|id| input(fixture, *id).state == InputState::Ready)
-                {
-                    assert!(
-                        Instant::now() < bound,
-                        "housekeeping cancels each consumed queued entry within its interval: {:?}",
-                        input_ids.map(|id| input(fixture, id))
-                    );
-                    during(fixture);
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-
-            fn assert_cancelled_consumed(fixture: &ServiceFixture, input_id: i64) {
-                let settled = input(fixture, input_id);
-                assert_eq!(settled.state, InputState::Settled, "{settled:?}");
-                assert_eq!(settled.disposition, Some(InputDisposition::NotSubmitted));
-                assert_eq!(settled.delivery_reason.as_deref(), Some("message_consumed"));
-                assert_eq!(
-                    result_events(fixture, input_id),
-                    0,
-                    "a preview consumed by poll publishes no delivery result"
-                );
-            }
-
-            fn assert_housekept(
-                fixture: &ServiceFixture,
-                [(_, head), (_, kept), (_, later)]: &[(MessageRecord, i64); 3],
-            ) {
-                assert_cancelled_consumed(fixture, *head);
-                assert_cancelled_consumed(fixture, *later);
-                assert_eq!(
-                    input(fixture, *kept).state,
-                    InputState::Ready,
-                    "an entry whose message is still input_required stays queued"
-                );
-            }
-
-            pub(super) fn open_form(fixture: &mut ServiceFixture, until: Instant) {
-                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
-                loop {
-                    assert!(Instant::now() < until, "the detected interaction opens");
-                    let health = fixture.health();
-                    let observation = health.observation.as_ref().unwrap();
-                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
-                        && observation.pending_count == 0
-                        && !observation.pending_evidence
-                    {
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-            }
-
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_an_immediate_attempt_is_in_flight()
-             {
-                with_input_service(|fixture, until| {
-                    let stopped = StoppedNative::stop(fixture);
-                    let key = "prompt:in-flight-while-stopped";
-                    let value = request(
-                        fixture,
-                        key,
-                        "in flight while the native is stopped",
-                        InputKind::Prompt,
-                        None,
-                        until.min(Instant::now() + Duration::from_secs(8)),
-                    );
-                    let mut client = Peer::connect(fixture);
-                    client.send(&encode_control_frame(&value).unwrap(), until);
-                    let in_flight = || {
-                        fixture
-                            .fixture
-                            .conn
-                            .query_row(
-                                "SELECT input_id FROM member_input_operations WHERE operation_key=?1 AND state='in_progress'",
-                                [key],
-                                |row| row.get::<_, i64>(0),
-                            )
-                            .ok()
-                    };
-                    wait_for(until, "the immediate attempt starts writing", || {
-                        in_flight().is_some()
-                    });
-                    let attempt = in_flight().unwrap();
-                    let queue = queue_three(fixture, until);
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
-                    assert_eq!(
-                        input(fixture, attempt).state,
-                        InputState::InProgress,
-                        "housekeeping ran while the immediate attempt was still in flight"
-                    );
-                    assert_housekept(fixture, &queue);
-                    drop(stopped);
-                    drop(client);
-                });
-            }
-
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_the_drain_stays_pending() {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let queue = queue_three(fixture, until);
-                    let hold_reply_prefix =
-                        |fixture: &mut ServiceFixture| manual(fixture, b"\x1b", until);
-                    let warm = Instant::now() + Duration::from_millis(200);
-                    while Instant::now() < warm {
-                        hold_reply_prefix(fixture);
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(
-                        fixture,
-                        consumed,
-                        [queue[0].1, queue[2].1],
-                        hold_reply_prefix,
-                    );
-                    assert_housekept(fixture, &queue);
-                    manual(fixture, b"\r", until);
-                });
-            }
-
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_after_a_storage_outage_leaves_a_finalization_retry()
-             {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let queue = queue_three(fixture, until);
-                    consume(fixture, [&queue[0].0, &queue[2].0]);
-                    let outage = fixture
-                        .fixture
-                        .conn
-                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                        .unwrap();
-                    std::thread::sleep(Duration::from_millis(1500));
-                    drop(outage);
-                    let released = Instant::now();
-                    await_housekeeping(fixture, released, [queue[0].1, queue[2].1], |_| {});
-                    assert_housekept(fixture, &queue);
-                });
-            }
-
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_a_sweep_attempt_is_in_flight() {
-                with_sweeping_input_service(Duration::from_secs(30), false, |fixture, until| {
-                    let stopped = StoppedNative::stop(fixture);
-                    let swept = send(fixture, "swept while the native is stopped");
-                    wait_for(until, "the sweep starts its immediate attempt", || {
-                        previews(fixture, swept.message_id)
-                            .first()
-                            .is_some_and(|attempt| attempt.state == InputState::InProgress)
-                    });
-                    let queue = queue_three(fixture, until);
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
-                    assert_eq!(
-                        previews(fixture, swept.message_id)[0].state,
-                        InputState::InProgress,
-                        "housekeeping ran while the sweep attempt was still in flight"
-                    );
-                    assert_housekept(fixture, &queue);
-                    drop(stopped);
-                });
-            }
-
-            #[test]
-            fn housekeeping_cancels_consumed_queued_previews_while_each_queue_turn_fails() {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let queue = queue_three(fixture, until);
-                    fixture
-                        .fixture
-                        .conn
-                        .execute_batch(
-                            "CREATE TRIGGER owned_deferred_attempt_failure BEFORE UPDATE OF state ON member_input_operations
-                             WHEN OLD.kind='preview' AND NEW.state='in_progress'
-                             BEGIN SELECT RAISE(FAIL,'owned deferred attempt failure'); END",
-                        )
-                        .unwrap();
-                    manual(fixture, b"\r", until);
-                    wait_for(until, "the answered form closes", || {
-                        fixture.health().observation.as_ref().unwrap().eligibility
-                            != InputEligibility::Hold(GateReason::Interaction)
-                    });
-                    std::thread::sleep(Duration::from_millis(300));
-                    assert_eq!(
-                        input(fixture, queue[0].1).state,
-                        InputState::Ready,
-                        "the queue head's attempts fail without starting it"
-                    );
-                    let consumed = consume(fixture, [&queue[0].0, &queue[2].0]);
-                    await_housekeeping(fixture, consumed, [queue[0].1, queue[2].1], |_| {});
-                    assert_housekept(fixture, &queue);
-                    fixture
-                        .fixture
-                        .conn
-                        .execute_batch("DROP TRIGGER owned_deferred_attempt_failure")
-                        .unwrap();
-                    wait_for(until, "the runner survives the swallowed errors", || {
-                        input(fixture, queue[1].1).state == InputState::Settled
-                    });
-                    let kept = input(fixture, queue[1].1);
-                    assert_eq!(
-                        kept.disposition,
-                        Some(InputDisposition::Submitted),
-                        "{kept:?}"
-                    );
-                });
-            }
+                    .any(|typed| typed.ends_with("barrier"))
+            });
+            input_service_settled(fixture, until);
         }
 
-        mod forced_flush_dispatch {
-            use crate::runtime::FlushAction;
-            use crate::runtime::FlushReply;
-            use crate::runtime::FlushWriteOutcome;
-            use crate::runtime::flush::ControlFlushChannel;
-            use crate::runtime::flush::FlushChannel;
-            use crate::runtime::service::tests::preview_sweep::queue_housekeeping::input;
-            use crate::runtime::service::tests::preview_sweep::queue_housekeeping::open_form;
-            use crate::runtime::service::tests::preview_sweep::queue_housekeeping::queue_preview;
-            use crate::runtime::service::tests::preview_sweep::*;
+        fn submit(
+            fixture: &ServiceFixture,
+            key: &str,
+            literal: &str,
+            kind: InputKind,
+            until: Instant,
+        ) -> (SubmissionResult, Value) {
+            let value = request(fixture, key, literal, kind, until);
+            let reply = exchange(fixture, &value, until);
+            assert!(reply.get("error").is_none(), "{reply}");
+            let result = serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
+            (result, reply)
+        }
 
-            fn exchange(
-                fixture: &ServiceFixture,
-                action: FlushAction,
-                until: Instant,
-            ) -> FlushReply {
-                let run =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                ControlFlushChannel
-                    .exchange(
-                        &run,
-                        action,
-                        crate::time::Deadline::until(
-                            until.min(Instant::now() + Duration::from_secs(5)),
-                        ),
-                    )
-                    .unwrap_or_else(|cause| {
-                        panic!("the runner serves the flush: {}", cause.message())
-                    })
-            }
+        fn reconcile(fixture: &ServiceFixture, input_id: i64, until: Instant) {
+            let value = json!({"protocol_version":1,"kind":"receipt",
+                "identity":fixture.prepared.as_ref().unwrap(),"expires_at_mono_ns":expiration(until),
+                "action":"reconcile","input_id":input_id,"expected_state":"uncertain",
+                "disposition":"submitted","evidence_ref":"audit:pane-shows-the-input"});
+            let reply = exchange(fixture, &value, until);
+            assert!(reply.get("error").is_none(), "{reply}");
+        }
 
-            fn reserve(fixture: &ServiceFixture, until: Instant) -> FlushReply {
-                exchange(
-                    fixture,
-                    FlushAction::Reserve {
-                        director_member_id: fixture.fixture.run.director_member_id,
-                        expires_at_mono_ns: expiration(until),
-                    },
-                    until,
-                )
-            }
+        fn without_composer_verification(catalog: &mut Value) {
+            catalog["profiles"][0]["capabilities"]["composer"] = Value::Null;
+        }
 
-            fn refusal(reply: FlushReply) -> String {
-                match reply {
-                    FlushReply::Refused { cause } => cause,
-                    _ => panic!("the flush is refused"),
-                }
-            }
-
-            /// Reserves, checks the selection and settles `NotStarted`, so the run keeps no slot.
-            fn assert_reserves(fixture: &ServiceFixture, previews: &[i64], until: Instant) {
-                let flush_input_id = match reserve(fixture, until) {
-                    FlushReply::Reserved {
-                        flush_input_id,
-                        flushed_input_ids,
-                        ..
-                    } => {
-                        assert_eq!(flushed_input_ids, previews);
-                        flush_input_id
-                    }
-                    FlushReply::Refused { cause } => panic!("the flush is refused: {cause}"),
-                    _ => panic!("the flush reserves the queued previews"),
-                };
-                assert!(matches!(
-                    exchange(
-                        fixture,
-                        FlushAction::Settle {
-                            flush_input_id,
-                            outcome: FlushWriteOutcome::NotStarted,
-                        },
-                        until,
-                    ),
-                    FlushReply::Settled { .. }
-                ));
-                for id in previews {
-                    assert_eq!(input(fixture, *id).state, InputState::Ready);
-                }
-            }
-
-            /// Keeps a lone Escape reply prefix pending for `hold`, so every drain stays `Pending`.
-            fn hold_drain(fixture: &mut ServiceFixture, hold: Duration, until: Instant) {
-                let stop = Instant::now() + hold;
-                while Instant::now() < stop {
-                    manual(fixture, b"\x1b", until);
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-
-            /// Closes the form while the drain stays held, so no queue turn delivers the queue.
-            fn close_form_holding_the_drain(fixture: &mut ServiceFixture, until: Instant) {
-                hold_drain(fixture, Duration::from_millis(200), until);
-                manual(fixture, b"\r", until);
-                hold_drain(fixture, Duration::from_millis(400), until);
-            }
-
-            #[test]
-            fn a_flush_is_served_while_the_drain_holds_the_queue_turn() {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let message = send(fixture, "stalled behind a held drain");
-                    let preview = queue_preview(fixture, &message, until);
-                    close_form_holding_the_drain(fixture, until);
-                    manual(fixture, b"\x1b", until);
-                    assert_reserves(fixture, &[preview], until);
-                    manual(fixture, b"\r", until);
-                });
-            }
-
-            #[test]
-            fn a_flush_is_refused_while_an_immediate_attempt_is_in_flight() {
-                with_input_service(|fixture, until| {
-                    let stopped = StoppedNative::stop(fixture);
-                    let key = "prompt:in-flight-before-the-flush";
-                    let value = request(
-                        fixture,
-                        key,
-                        "in flight while the native is stopped",
-                        InputKind::Prompt,
-                        None,
-                        until.min(Instant::now() + Duration::from_secs(8)),
-                    );
-                    let mut client = Peer::connect(fixture);
-                    client.send(&encode_control_frame(&value).unwrap(), until);
-                    wait_for(until, "the immediate attempt starts writing", || {
-                        storage::find_input(&fixture.fixture.conn, fixture.fixture.run.run_id, key)
-                            .unwrap()
-                            .is_some_and(|input| input.state == InputState::InProgress)
+        #[test]
+        fn an_unverified_run_stamps_an_uncertain_preview_before_publishing_it_and_never_retypes_it()
+        {
+            with_sweeping_input_service_catalog(
+                Duration::from_secs(30),
+                true,
+                without_composer_verification,
+                |fixture, until| {
+                    let message = send(fixture, &format!("unverified preview {FORM_MID_WRITE}"));
+                    wait_for(until, "the stopped preview publishes its result", || {
+                        !preview_results(fixture, message.message_id).is_empty()
                     });
-                    assert_eq!(
-                        refusal(reserve(fixture, until)),
-                        "a runner input attempt is in flight; retry"
-                    );
-                    drop(stopped);
-                    drop(client);
-                });
-            }
-
-            #[test]
-            fn a_flush_is_refused_while_an_interaction_is_open() {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let message = send(fixture, "queued behind the form");
-                    queue_preview(fixture, &message, until);
-                    let cause = refusal(reserve(fixture, until));
                     assert!(
-                        cause.starts_with("an interaction is open (") && cause.ends_with(')'),
-                        "{cause}"
+                        notified_at(fixture, message.message_id).is_some(),
+                        "the stamp precedes the published result"
                     );
-                });
-            }
+                    clear_with_barrier(fixture, until);
+                    std::thread::sleep(SWEEP_WINDOW);
+                    assert_eq!(
+                        typed_count(fixture, &line(&message)),
+                        1,
+                        "{:?}",
+                        lines(fixture)
+                    );
+                    assert_eq!(preview_results(fixture, message.message_id).len(), 1);
+                },
+            );
+        }
 
-            #[test]
-            fn a_flush_is_served_after_a_storage_outage_leaves_a_finalization_retry() {
-                with_detecting_input_service(|fixture, until| {
-                    open_form(fixture, until);
-                    let consumed = send(fixture, "consumed during the outage");
-                    queue_preview(fixture, &consumed, until);
-                    let live = send(fixture, "live behind the outage");
-                    let preview = queue_preview(fixture, &live, until);
-                    close_form_holding_the_drain(fixture, until);
-                    fixture
-                        .fixture
-                        .conn
-                        .execute(
-                            "UPDATE messages SET status_state='completed' WHERE message_id=?1",
-                            [consumed.message_id],
-                        )
-                        .unwrap();
-                    let url = format!("sqlite:///{}", fixture.fixture.conn.path().unwrap());
-                    let mut writer = crate::db::connect(&url).unwrap();
-                    let outage = writer
-                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                        .unwrap();
-                    hold_drain(fixture, Duration::from_millis(1500), until);
-                    drop(outage);
-                    manual(fixture, b"\x1b", until);
-                    assert_reserves(fixture, &[preview], until);
-                    manual(fixture, b"\r", until);
-                });
-            }
+        /// Stops a prompt mid-write with a detected form, clears the form, then checks that
+        /// neither a queued exec nor a sweep preview writes a byte until the prompt is
+        /// reconciled.
+        fn uncertain_prompt_stops_the_fifo_and_the_sweep(
+            fixture: &mut ServiceFixture,
+            until: Instant,
+        ) {
+            let (stopped, stopped_reply) = submit(
+                fixture,
+                "prompt:stopped-mid-write",
+                &format!("stopped prompt {FORM_MID_WRITE}"),
+                InputKind::Prompt,
+                until.min(Instant::now() + Duration::from_secs(10)),
+            );
+            assert_eq!(
+                stopped.status,
+                SubmissionStatus::Uncertain,
+                "{stopped_reply}"
+            );
+            clear_with_barrier(fixture, until);
+            let (queued, queued_reply) = submit(
+                fixture,
+                "exec:behind-the-uncertain-prompt",
+                "printf behind",
+                InputKind::Exec,
+                until.min(Instant::now() + Duration::from_secs(10)),
+            );
+            assert_eq!(queued.status, SubmissionStatus::Queued, "{queued_reply}");
+            let message = send(fixture, "preview behind the uncertain prompt");
+            std::thread::sleep(SWEEP_WINDOW);
+            let before = lines(fixture);
+            assert_eq!(
+                before.len(),
+                1,
+                "only the stopped prompt's line: {before:?}"
+            );
+            assert_eq!(notified_at(fixture, message.message_id), None);
+            reconcile(
+                fixture,
+                stopped.input_id.expect("the stopped prompt has a receipt"),
+                until,
+            );
+            wait_for(until, "the queued exec and the preview drain", || {
+                let typed = lines(fixture);
+                typed.iter().any(|typed| typed.ends_with("printf behind"))
+                    && typed.iter().any(|typed| typed.contains(&line(&message)))
+            });
+            let typed = lines(fixture);
+            let exec = typed
+                .iter()
+                .position(|typed| typed.ends_with("printf behind"))
+                .unwrap();
+            let preview = typed
+                .iter()
+                .position(|typed| typed.contains(&line(&message)))
+                .unwrap();
+            assert!(
+                exec < preview,
+                "the FIFO drains before the sweep: {typed:?}"
+            );
+        }
+
+        #[test]
+        fn an_uncertain_prompt_stops_queued_input_and_the_sweep_until_reconciled_on_an_unverified_run()
+         {
+            with_sweeping_input_service_catalog(
+                Duration::from_secs(40),
+                true,
+                without_composer_verification,
+                uncertain_prompt_stops_the_fifo_and_the_sweep,
+            );
         }
     }
 
@@ -5178,7 +5165,7 @@ mod tests {
         use crate::runtime::service::tests::*;
         #[test]
         fn service_sqlite_and_writer_failures_keep_health_manual_display_and_resize_live() {
-            for boundary in ["fail-sync", "block-persist"] {
+            for boundary in ["fail-persist", "block-persist"] {
                 let mut fixture = ServiceFixture::configured(false, synthetic);
                 fixture.start_running();
                 let hook = fixture.fixture._dir.path().join(boundary);
@@ -5211,47 +5198,14 @@ mod tests {
             }
         }
         #[test]
-        fn service_existing_reservation_is_refused_before_native_spawn_or_new_grant() {
-            let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
-                synthetic(fixture, spec);
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET event_seq_reserved_through=256 WHERE run_id=?1",
-                        [fixture.run.run_id],
-                    )
-                    .unwrap();
-                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            });
-            let after =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert!(after.child_pid.is_none());
-            assert_eq!(after.event_seq_reserved_through, 256);
-            assert_eq!(
-                fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
-                        [after.run_id],
-                        |row| row.get::<_, i64>(0)
-                    )
-                    .unwrap(),
-                0
-            );
-            assert_eq!(count(&fixture, "interaction_opened"), 0);
-            assert!(!fixture.fixture._dir.path().join("native-started").exists());
-        }
-
-        #[test]
-        fn service_each_durable_history_table_is_checked_before_initial_reservation() {
+        fn service_each_durable_history_table_is_checked_before_native_spawn() {
             for interaction in [false, true] {
                 let mut seeded = None;
                 let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
                     synthetic(fixture, spec);
                     let run = &fixture.run;
                     let evidence =
-                        storage::evidence::run_metadata(run, "runner-lifecycle", 1).unwrap();
+                        crate::broker::runtime::run_evidence(run, "runner-lifecycle", 1).unwrap();
                     if interaction {
                         seeded = Some(evidence.to_string());
                         fixture.conn.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,'2026-10-26T17:00:00Z',?3)",rusqlite::params![run.run_id,evidence["evidence_digest"].as_str().unwrap(),evidence.to_string()]).unwrap();
@@ -5264,7 +5218,6 @@ mod tests {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
                 assert!(run.child_pid.is_none());
-                assert_eq!(run.event_seq_reserved_through, 0);
                 assert!(!fixture.fixture._dir.path().join("native-started").exists());
                 assert_eq!(count(&fixture, "coverage_unknown"), i64::from(!interaction));
                 let interactions: i64 = fixture
@@ -5433,7 +5386,6 @@ mod tests {
         }
     }
     mod input_admission_tests {
-        use crate::runtime::InputClockSample;
         use crate::runtime::control::AdmittedControlFrame;
         use crate::runtime::input::receive_input_expiration;
         use crate::runtime::service::*;
@@ -5473,7 +5425,7 @@ mod tests {
             let mut frames = Vec::new();
             while frames.len() < count {
                 assert!(Instant::now() < deadline, "bounded actual client polling");
-                frames.extend(client.poll().unwrap());
+                frames.extend(client.poll(&crate::time::SystemClock).unwrap());
                 std::thread::yield_now();
             }
             assert_eq!(frames.len(), count);
@@ -5488,7 +5440,7 @@ mod tests {
             client.decoder.finish().unwrap();
             send(peer, &[byte], deadline);
             let before = Instant::now();
-            assert!(client.poll().unwrap().is_empty());
+            assert!(client.poll(&crate::time::SystemClock).unwrap().is_empty());
             let after = Instant::now();
             assert!(
                 client.decoder.finish().is_err(),
@@ -5502,7 +5454,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(1);
             client.decoder.finish().unwrap();
             let empty_at = Instant::now();
-            assert!(client.poll().unwrap().is_empty());
+            assert!(client.poll(&crate::time::SystemClock).unwrap().is_empty());
             client.decoder.finish().unwrap();
             after(empty_at, deadline);
             let body = br#"{"protocol_version":1,"kind":"health"}"#;
@@ -5542,15 +5494,15 @@ mod tests {
                 let actual = queue.pop_front().unwrap();
                 assert_eq!(actual.admitted_at(), expected);
                 let now = Instant::now();
-                let mut clock =
-                    crate::runtime::input::test_support::ScriptClock::one(InputClockSample {
+                let clock = crate::runtime::input::test_support::ScriptClock::one(
+                    crate::time::MonotonicSample {
                         before: now,
                         monotonic_ns: 1_000_000_000,
                         after: now,
-                    });
+                    },
+                );
                 let converted =
-                    receive_input_expiration(11_000_000_000, actual.admitted_at(), &mut clock)
-                        .unwrap();
+                    receive_input_expiration(11_000_000_000, actual.admitted_at(), &clock).unwrap();
                 assert_eq!(converted, actual.admitted_at() + Duration::from_secs(5));
                 clock.consumed(1, 0);
             }
@@ -5563,7 +5515,498 @@ mod tests {
             let (mut partial, mut peer) = pair();
             first(&mut partial, &mut peer, 0, deadline);
             peer.shutdown(Shutdown::Write).unwrap();
-            assert!(partial.poll().is_err());
+            assert!(partial.poll(&crate::time::SystemClock).is_err());
+        }
+    }
+
+    mod scenarios {
+        use std::time::Duration;
+
+        use crate::time::Clock;
+
+        use crate::coding_agent::ComposerOperation;
+        use crate::coding_agent::ProfileCatalog;
+        use crate::coding_agent::catalog::LiteralFraming;
+        use crate::db::test_support::FaultPlan;
+        use crate::runtime::service::test_support::scenario::*;
+        use crate::runtime::*;
+
+        const IDLE: &str = "codex-0.167.0-composer-idle-empty-tmux-120-1";
+        const APPROVAL: &str = "codex-0.167.0-allow-pre-stage-tmux-120-1";
+        const STATUS: &str = "codex-0.167.0-auto-status-tmux-120-1";
+        const EVENT_FAULT: FaultPlan = FaultPlan::Abort {
+            trigger: "scenario_event_fault",
+            on: "BEFORE INSERT ON member_runtime_events",
+            message: "scenario event fault",
+        };
+
+        fn prompt_program(literal: &str) -> Vec<u8> {
+            ProfileCatalog::bundled()
+                .composer_plan(
+                    crate::coding_agent::CodingAgent::Codex,
+                    "0.167.0",
+                    ComposerOperation::Prompt,
+                )
+                .unwrap()
+                .stages(literal, LiteralFraming::Plain)
+                .unwrap()
+                .concat()
+        }
+
+        #[test]
+        fn screen_scenarios_record_their_event_sequences() {
+            const SCENARIOS: &[Scenario] = &[
+                Scenario {
+                    name: "an idle composer records nothing",
+                    screen: IDLE,
+                    redraw: None,
+                    interrupt: None,
+                    steps: &[Step::Run(Duration::from_secs(2))],
+                    events: &[],
+                },
+                Scenario {
+                    name: "an approval form opens an interaction that a later screen closes",
+                    screen: STATUS,
+                    redraw: None,
+                    interrupt: None,
+                    steps: &[
+                        Step::Screen(APPROVAL),
+                        Step::Run(Duration::from_secs(1)),
+                        Step::Screen(STATUS),
+                        Step::Run(Duration::from_secs(1)),
+                    ],
+                    events: &["interaction_opened", "interaction_closed"],
+                },
+            ];
+            for scenario in SCENARIOS {
+                let mut runner = scenario.run();
+                assert_eq!(runner.finish(), (0, 0), "{}", scenario.name);
+            }
+        }
+
+        #[test]
+        fn human_typing_reaches_the_child_and_the_child_screen_reaches_the_display() {
+            const TYPING: Scenario = Scenario {
+                name: "typing",
+                screen: IDLE,
+                redraw: None,
+                interrupt: None,
+                steps: &[Step::Type(b"typed by hand")],
+                events: &[],
+            };
+            let mut runner = TYPING.run();
+            assert_eq!(runner.child.written, b"typed by hand");
+            assert_eq!(runner.display.bytes, screen_bytes(IDLE));
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn a_prompt_into_a_verified_empty_composer_writes_its_plan_and_is_accepted() {
+            const LITERAL: &str = "scenario prompt";
+            const PROMPT: Scenario = Scenario {
+                name: "prompt",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Prompt {
+                        key: "scenario:prompt",
+                        literal: LITERAL,
+                    },
+                    Step::Run(Duration::from_secs(5)),
+                ],
+                events: &[],
+            };
+            let mut runner = PROMPT.run();
+            assert_eq!(runner.child.written, prompt_program(LITERAL));
+            let [Ok(InputControlReply::Submission(reply))] = runner.replies.as_slice() else {
+                panic!("one submission reply, got {}", runner.replies.len());
+            };
+            assert_eq!(reply.status, SubmissionStatus::Accepted);
+            assert_eq!(reply.stage, SubmissionStage::Submitted);
+            assert!(
+                runner.clock.sleeps().iter().sum::<Duration>()
+                    >= crate::runtime::input::STAGE_SETTLE,
+                "the staged write settles on the virtual clock"
+            );
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        const DRAFT: &str = "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1";
+        const MID_WRITE: Interrupt = Interrupt {
+            marker: "FORM_MID_WRITE",
+            screen: APPROVAL,
+        };
+        /// Longer than two sweep intervals, so a sweep that could deliver would have done so.
+        const SWEEP_WINDOW: Duration = Duration::from_millis(2500);
+
+        fn submission(reply: &Result<InputControlReply>) -> &SubmissionResult {
+            match reply {
+                Ok(InputControlReply::Submission(submission)) => submission,
+                Ok(_) => panic!("a submission reply"),
+                Err(cause) => panic!("a submission reply, got {cause}"),
+            }
+        }
+
+        #[test]
+        fn the_sweep_types_each_pending_preview_once_oldest_first_and_stamps_it() {
+            const SWEEP: Scenario = Scenario {
+                name: "oldest first",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Consumed("consumed before any sweep"),
+                    Step::Message("first swept preview"),
+                    Step::Message("second swept preview"),
+                    Step::Run(Duration::from_secs(3)),
+                ],
+                events: &[],
+            };
+            let mut runner = SWEEP.run();
+            let first = runner.preview_line("first swept preview");
+            let second = runner.preview_line("second swept preview");
+            assert_eq!(runner.typed(&first), 1);
+            assert_eq!(runner.typed(&second), 1);
+            assert!(runner.typed_at(&first) < runner.typed_at(&second));
+            assert!(runner.notified("first swept preview"));
+            assert!(runner.notified("second swept preview"));
+            assert_eq!(runner.typed("consumed before any sweep"), 0);
+            assert!(!runner.notified("consumed before any sweep"));
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn an_obstacle_defers_the_sweep_with_zero_bytes_until_it_clears() {
+            const CASES: &[Scenario] = &[
+                Scenario {
+                    name: "a non-empty composer blocks delivery until it verifies empty",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::Screen(DRAFT),
+                        Step::Run(Duration::from_millis(100)),
+                        Step::Message("blocked preview"),
+                        Step::Run(SWEEP_WINDOW),
+                    ],
+                    events: &[],
+                },
+                Scenario {
+                    name: "a held pane lock defers the sweep until it is free",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::HoldPane,
+                        Step::Message("blocked preview"),
+                        Step::Run(SWEEP_WINDOW),
+                    ],
+                    events: &[],
+                },
+            ];
+            for scenario in CASES {
+                let name = scenario.name;
+                let mut runner = scenario.run();
+                assert!(runner.child.written.is_empty(), "{name}");
+                assert!(!runner.notified("blocked preview"), "{name}");
+                match runner.held_pane {
+                    Some(_) => runner.step(Step::ReleasePane),
+                    None => runner.step(Step::Screen(IDLE)),
+                }
+                runner.step(Step::Run(Duration::from_secs(10)));
+                let line = runner.preview_line("blocked preview");
+                assert_eq!(runner.typed(&line), 1, "{name}");
+                assert!(runner.notified("blocked preview"), "{name}");
+                assert_eq!(runner.finish(), (0, 0), "{name}");
+            }
+        }
+
+        #[test]
+        fn a_retried_head_waits_out_the_run_wide_backoff_and_precedes_a_newer_message() {
+            const RETRY: Scenario = Scenario {
+                name: "retried head",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::HoldPane,
+                    Step::Message("head behind a busy pane"),
+                    Step::Message("newer message"),
+                    Step::Run(SWEEP_WINDOW),
+                    Step::ReleasePane,
+                ],
+                events: &[],
+            };
+            let mut runner = RETRY.run();
+            let released = runner.clock.now();
+            let backoff = runner
+                .sweep_backoff_until()
+                .expect("a pane_input_busy hold arms the run-wide backoff");
+            assert!(
+                backoff >= released,
+                "the backoff outlasts the release: {:?}",
+                backoff.duration_since(released)
+            );
+            runner.step(Step::Run(
+                backoff
+                    .duration_since(released)
+                    .saturating_sub(Duration::from_millis(10)),
+            ));
+            assert!(
+                runner.child.written.is_empty(),
+                "no preview byte is written while the backoff is armed"
+            );
+            runner.step(Step::Run(Duration::from_secs(10)));
+            let head = runner.preview_line("head behind a busy pane");
+            let newer = runner.preview_line("newer message");
+            assert_eq!(runner.typed(&head), 1);
+            assert_eq!(runner.typed(&newer), 1);
+            assert!(runner.typed_at(&head) < runner.typed_at(&newer));
+            assert!(
+                runner.payloads("input_delivery_result").is_empty(),
+                "a held and retried preview publishes no delivery result"
+            );
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn a_control_prompt_queues_behind_an_in_flight_sweep_or_an_open_interaction() {
+            const CASES: &[Scenario] = &[
+                Scenario {
+                    name: "a prompt arriving during a sweep attempt queues behind it",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::Message("ahead of the prompt"),
+                        Step::Run(Duration::from_millis(1250)),
+                        Step::Prompt {
+                            key: "prompt:queued",
+                            literal: "queued control prompt",
+                        },
+                    ],
+                    events: &[],
+                },
+                Scenario {
+                    name: "a prompt queued behind a form is written before the sweep",
+                    screen: IDLE,
+                    redraw: Some(IDLE),
+                    interrupt: None,
+                    steps: &[
+                        Step::Screen(APPROVAL),
+                        Step::Run(Duration::from_secs(1)),
+                        Step::Prompt {
+                            key: "prompt:queued",
+                            literal: "queued control prompt",
+                        },
+                        Step::Message("behind the prompt"),
+                        Step::Run(SWEEP_WINDOW),
+                    ],
+                    events: &["interaction_opened"],
+                },
+            ];
+            for (index, scenario) in CASES.iter().enumerate() {
+                let name = scenario.name;
+                let mut runner = scenario.run();
+                let reply = runner.replies.last().expect("the prompt replies");
+                assert_eq!(submission(reply).status, SubmissionStatus::Queued, "{name}");
+                assert_eq!(runner.typed("queued control prompt"), 0, "{name}");
+                if index == 1 {
+                    runner.step(Step::Screen(IDLE));
+                }
+                runner.step(Step::Run(Duration::from_secs(5)));
+                assert_eq!(runner.typed("queued control prompt"), 1, "{name}");
+                let (first, second) = if index == 0 {
+                    (
+                        runner.preview_line("ahead of the prompt"),
+                        "queued control prompt".to_owned(),
+                    )
+                } else {
+                    (
+                        "queued control prompt".to_owned(),
+                        runner.preview_line("behind the prompt"),
+                    )
+                };
+                assert_eq!(runner.typed(&first), 1, "{name}");
+                assert_eq!(runner.typed(&second), 1, "{name}");
+                assert!(runner.typed_at(&first) < runner.typed_at(&second), "{name}");
+                runner.finish();
+            }
+        }
+
+        #[test]
+        fn an_uncertain_preview_publishes_one_receipt_free_result_and_is_typed_again_once_verified_empty()
+         {
+            const UNCERTAIN: Scenario = Scenario {
+                name: "uncertain preview",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: Some(MID_WRITE),
+                steps: &[
+                    Step::Message("retried preview FORM_MID_WRITE"),
+                    Step::Run(Duration::from_secs(3)),
+                ],
+                events: &["input_delivery_result"],
+            };
+            let mut runner = UNCERTAIN.run();
+            let body = "retried preview FORM_MID_WRITE";
+            let line = runner.preview_line(body);
+            let message_id = runner.message(body).message_id;
+            let results: Vec<_> = runner
+                .payloads("input_delivery_result")
+                .into_iter()
+                .filter(|result| result["message_id"] == message_id)
+                .collect();
+            assert_eq!(results.len(), 1, "{results:?}");
+            assert_eq!(results[0]["input_id"], serde_json::Value::Null);
+            assert_eq!(results[0]["delivery"]["status"], "uncertain");
+            assert_eq!(results[0]["director_action"], serde_json::Value::Null);
+            assert!(!runner.notified(body));
+            runner.step(Step::Screen(IDLE));
+            runner.step(Step::Run(Duration::from_secs(5)));
+            assert_eq!(runner.typed(&line), 2, "the stopped literal and its retry");
+            assert!(runner.notified(body));
+            assert_eq!(
+                runner
+                    .payloads("input_delivery_result")
+                    .iter()
+                    .filter(|result| result["message_id"] == message_id)
+                    .count(),
+                1,
+                "the retry publishes no further result"
+            );
+            runner.finish();
+        }
+
+        #[test]
+        fn a_preview_behind_a_non_empty_composer_publishes_one_stall_event_at_the_stall_bound() {
+            const BOUND: Duration = Duration::from_secs(2);
+            const STALLED: Scenario = Scenario {
+                name: "stalled preview",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Screen(DRAFT),
+                    Step::Run(Duration::from_millis(100)),
+                    Step::Message("stalled behind a human draft"),
+                    Step::Run(Duration::from_secs(1)),
+                ],
+                events: &[],
+            };
+            let mut runner = STALLED.run_with(|runner| runner.coordinator.set_stall_bound(BOUND));
+            assert!(runner.payloads("input_delivery_stalled").is_empty());
+            runner.step(Step::Run(BOUND + SWEEP_WINDOW));
+            let stalls = runner.payloads("input_delivery_stalled");
+            assert_eq!(
+                stalls.len(),
+                1,
+                "published once per run and message: {stalls:?}"
+            );
+            let stall = &stalls[0];
+            assert_eq!(
+                stall["message_id"],
+                runner.message("stalled behind a human draft").message_id
+            );
+            assert!(stall.get("blocking_input_id").is_none(), "{stall}");
+            assert!(stall["waiting_since"].as_str().is_some(), "{stall}");
+            assert!(
+                stall["director_action"]["instruction"]
+                    .as_str()
+                    .is_some_and(|instruction| !instruction.trim().is_empty()),
+                "one instruction: {stall}"
+            );
+            assert!(runner.child.written.is_empty());
+            runner.step(Step::Screen(IDLE));
+            runner.step(Step::Run(Duration::from_secs(5)));
+            assert!(runner.notified("stalled behind a human draft"));
+            assert_eq!(runner.payloads("input_delivery_stalled").len(), 1);
+            runner.finish();
+        }
+
+        #[test]
+        fn an_uncertain_prompt_stops_queued_input_and_the_sweep_until_reconciled() {
+            const STOPPED: Scenario = Scenario {
+                name: "uncertain prompt",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: Some(MID_WRITE),
+                steps: &[
+                    Step::Prompt {
+                        key: "prompt:stopped-mid-write",
+                        literal: "stopped prompt FORM_MID_WRITE",
+                    },
+                    Step::Run(Duration::from_secs(3)),
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Exec {
+                        key: "exec:behind-the-uncertain-prompt",
+                        literal: "printf behind",
+                    },
+                    Step::Message("preview behind the uncertain prompt"),
+                    Step::Run(SWEEP_WINDOW),
+                ],
+                events: &[
+                    "input_delivery_result",
+                    "interaction_opened",
+                    "interaction_closed",
+                ],
+            };
+            let mut runner = STOPPED.run();
+            assert_eq!(
+                submission(&runner.replies[0]).status,
+                SubmissionStatus::Uncertain
+            );
+            assert_eq!(
+                submission(&runner.replies[1]).status,
+                SubmissionStatus::Queued
+            );
+            assert_eq!(runner.typed("printf behind"), 0);
+            let line = runner.preview_line("preview behind the uncertain prompt");
+            assert_eq!(runner.typed(&line), 0);
+            assert!(!runner.notified("preview behind the uncertain prompt"));
+            runner.step(Step::Reconcile("prompt:stopped-mid-write"));
+            runner.step(Step::Run(Duration::from_secs(10)));
+            assert_eq!(runner.typed("printf behind"), 1);
+            assert_eq!(runner.typed(&line), 1);
+            assert!(
+                runner.typed_at("printf behind") < runner.typed_at(&line),
+                "the FIFO drains before the sweep"
+            );
+            runner.finish();
+        }
+
+        #[test]
+        fn an_event_storage_fault_holds_input_until_the_writer_persists_again() {
+            const FAULTED: Scenario = Scenario {
+                name: "event fault",
+                screen: STATUS,
+                redraw: None,
+                interrupt: None,
+                steps: &[
+                    Step::Arm(EVENT_FAULT),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                ],
+                events: &[],
+            };
+            let mut runner = FAULTED.run();
+            assert!(runner.writer.status().diagnostic.is_some());
+            assert_eq!(
+                runner.eligibility(),
+                InputEligibility::Hold(GateReason::Gap)
+            );
+            runner.step(Step::Clear(EVENT_FAULT));
+            runner.step(Step::Run(Duration::from_secs(5)));
+            assert!(
+                runner
+                    .event_kinds()
+                    .contains(&"interaction_opened".to_owned()),
+                "{:?}",
+                runner.event_kinds()
+            );
+            runner.finish();
         }
     }
 }

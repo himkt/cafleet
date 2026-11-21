@@ -36,16 +36,8 @@ pub(crate) fn format_messages(messages: &[MessageRecord]) -> String {
         .join("\n\n")
 }
 
-pub(crate) fn format_message_sent(
-    message: &MessageRecord,
-    input_id: Option<i64>,
-    delivery: &DeliveryProjection,
-) -> String {
-    with_delivery(
-        format!("Message sent.\n{}", format_message(message)),
-        input_id,
-        delivery,
-    )
+pub(crate) fn format_message_sent(message: &MessageRecord) -> String {
+    format!("Message sent.\n{}", format_message(message))
 }
 
 pub(crate) fn format_fleet_list(fleets: &[FleetSummary]) -> String {
@@ -229,40 +221,14 @@ pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     lines.join("\n")
 }
 
-pub(crate) fn format_runtime_recovery(report: &crate::runtime::RecoveryReport) -> String {
-    let mut text = format!(
-        "Recovery: member={} run={} outcome={} status={} replayed={} inbox={} archived={}",
-        report.member_id,
-        report.run_id,
-        report.outcome.as_str(),
-        report.status.as_str(),
-        report.replayed_count,
-        report.inbox_count,
-        report.archived_count
-    );
-    for diagnostic in &report.cleanup_diagnostics {
-        text.push_str("\nCleanup: ");
-        match diagnostic {
-            serde_json::Value::String(value) => text.push_str(value),
-            value => text.push_str(&value.to_string()),
-        }
-    }
-    text
-}
-
 pub(crate) fn format_runtime_snapshot(snapshot: &RuntimeSnapshot) -> String {
     let run = &snapshot.run;
     format!(
-        "Runtime: run={} mode={} status={} coverage={} review={}",
+        "Runtime: run={} mode={} status={} coverage={}",
         run.run_id,
         run.resolved_mode,
         run.status.as_str(),
         run.coverage.as_str(),
-        run.effective_policy_json.as_ref().map_or("-", |record| {
-            record["automatic_review"]
-                .as_str()
-                .expect("validated effective policy review state")
-        })
     )
 }
 
@@ -296,8 +262,8 @@ pub(crate) fn format_runtime_event(view: &RuntimeEventView) -> String {
 }
 
 pub(crate) fn format_input_operation(input: &InputOperation) -> String {
-    let mut text = format!(
-        "Input: {} run={} kind={} state={} disposition={} message={}",
+    format!(
+        "Input: {} run={} kind={} state={} disposition={}",
         input.input_id,
         input.run_id,
         input.kind.as_str(),
@@ -305,32 +271,19 @@ pub(crate) fn format_input_operation(input: &InputOperation) -> String {
         input
             .disposition
             .map_or("-", |disposition| disposition.as_str()),
-        input
-            .message_id
-            .map_or_else(|| "-".into(), |id| id.to_string())
-    );
-    if let Some(response) = &input.permission_response {
-        let metadata = &response.metadata;
-        text.push_str(&format!("\nPermission decision: interaction={} event={} decision={} choice={} source={} mode={} director={} epoch={}",
-            metadata.interaction_id,metadata.event_id,metadata.key.decision().map_or("-", |decision| decision.as_str()),metadata.key.choice().unwrap_or("-"),metadata.decision_source.as_str(),metadata.director_mode.as_str(),metadata.director_member_id,metadata.expected_owner_epoch));
-    }
-    text
+    )
 }
 
 pub(crate) fn format_permission_response_result(
     row: &crate::runtime::PermissionResponseResult,
 ) -> String {
     let mut text = format!(
-        "Permission response: interaction={} run={} decision={} choice={} source={} status={} input={} stage={} output_seq={}",
+        "Permission response: interaction={} run={} decision={} choice={} status={} stage={} output_seq={}",
         row.interaction_id,
         row.run_id,
         row.key.decision().map_or("-", |decision| decision.as_str()),
         row.key.choice().unwrap_or("-"),
-        row.decision_source.as_str(),
         row.submission.status.as_str(),
-        row.submission
-            .input_id
-            .map_or_else(|| "-".into(), |value| value.to_string()),
         row.submission.stage.as_str(),
         row.submission
             .output_seq
@@ -465,33 +418,78 @@ mod tests {
         }
 
         #[test]
-        fn delivery_text_send_appends_delivery_then_input_only_when_allocated() {
+        fn message_sent_text_is_the_confirmation_line_then_the_envelope() {
             let message = MessageRecord::fixture(9, 2, 3, "hello");
-            let envelope = format_message(&message);
-            let submitted = projection(
-                DeliveryStatus::Submitted,
-                Some(DeliveryMethod::Profile),
-                None,
-            );
             assert_eq!(
-                format_message_sent(&message, Some(4), &submitted),
-                format!(
-                    "Message sent.\n{envelope}\nDelivery: status=submitted method=profile reason=-\nInput: 4"
-                )
+                format_message_sent(&message),
+                format!("Message sent.\n{}", format_message(&message))
             );
-            let director = projection(DeliveryStatus::NotApplicable, None, Some("director_stdout"));
-            assert_eq!(
-                format_message_sent(&message, None, &director),
-                format!(
-                    "Message sent.\n{envelope}\nDelivery: status=not_applicable method=- reason=director_stdout"
-                )
-            );
-            let queued = projection(DeliveryStatus::Queued, None, Some("earlier_input"));
-            let text = format_message_sent(&message, Some(5), &queued);
-            assert!(text.starts_with(&format!(
-                "Message sent.\n{envelope}\nDelivery: status=queued method=- reason=earlier_input\nInput: 5"
-            )));
-            assert!(text.contains("retry"), "{text}");
+        }
+    }
+
+    mod quoted_text {
+        use crate::broker::runtime::DeliveryMethod;
+        use crate::broker::runtime::DeliveryProjection;
+        use crate::broker::runtime::DeliveryStatus;
+        use crate::output::text::tests::*;
+
+        const CASES: &[(&str, &str, &str)] = &[
+            ("double quote", "\"", r#""\"""#),
+            ("backslash", "\\", r#""\\""#),
+            ("tab", "\t", r#""\t""#),
+            ("line feed", "\n", r#""\n""#),
+            ("carriage return", "\r", r#""\r""#),
+            ("nul", "\0", r#""\0""#),
+            ("Cc bell", "\u{7}", r#""\u{7}""#),
+            ("Cc escape", "\u{1b}", r#""\u{1b}""#),
+            ("Cc delete", "\u{7f}", r#""\u{7f}""#),
+            ("Cc next line", "\u{85}", r#""\u{85}""#),
+            ("Cf soft hyphen", "\u{ad}", r#""\u{ad}""#),
+            ("Cf zero width space", "\u{200b}", r#""\u{200b}""#),
+            ("Cf byte order mark", "\u{feff}", r#""\u{feff}""#),
+            ("Co private use", "\u{e000}", r#""\u{e000}""#),
+            ("Cn noncharacter", "\u{ffff}", r#""\u{ffff}""#),
+            ("Cn plane 16 noncharacter", "\u{10ffff}", r#""\u{10ffff}""#),
+            ("Zl line separator", "\u{2028}", r#""\u{2028}""#),
+            ("Zp paragraph separator", "\u{2029}", r#""\u{2029}""#),
+            ("Zs no-break space", "\u{a0}", r#""\u{a0}""#),
+            ("Zs ideographic space", "\u{3000}", r#""\u{3000}""#),
+            ("Grapheme_Extend alone", "\u{301}", r#""\u{301}""#),
+            ("Grapheme_Extend after a base", "e\u{301}", r#""e\u{301}""#),
+            (
+                "Grapheme_Extend enclosing mark",
+                "\u{20dd}",
+                r#""\u{20dd}""#,
+            ),
+            (
+                "Grapheme_Extend zero width non-joiner",
+                "\u{200c}",
+                r#""\u{200c}""#,
+            ),
+            ("space", " ", r#"" ""#),
+            ("single quote", "'", r#""'""#),
+            ("solidus", "/", r#""/""#),
+            ("latin small e with acute", "\u{e9}", "\"\u{e9}\""),
+            ("cjk ideographs", "日本", "\"日本\""),
+            ("euro sign", "€", "\"€\""),
+            ("emoji", "\u{1f4a9}", "\"\u{1f4a9}\""),
+        ];
+
+        #[test]
+        fn member_prompt_text_quotes_each_scalar_class_per_the_quoted_text_definition() {
+            let submitted = DeliveryProjection {
+                status: DeliveryStatus::Submitted,
+                method: Some(DeliveryMethod::Profile),
+                reason: None,
+            };
+            for (name, scalar, quoted) in CASES {
+                let text = format_member_prompt(7, scalar, "worker", "%2", None, &submitted);
+                assert_eq!(
+                    text.split_once('\n').map(|(first, _)| first),
+                    Some(format!("Sent prompt {quoted} to member worker (%2).").as_str()),
+                    "{name}"
+                );
+            }
         }
     }
 
@@ -635,8 +633,15 @@ mod tests {
         }
 
         #[test]
-        fn member_list_shows_each_members_window_between_backend_and_pane() {
-            let rows = [
+        fn member_text_shows_each_window_or_pending_beside_the_pane_and_status() {
+            let concrete = || placement(Some(("@6", "cafleet-3-1")), Some("%12"));
+            let pending = || placement(None, None);
+            let registered = RegisteredMember {
+                member_id: 9,
+                name: "drafter".into(),
+                registered_at: "registered".into(),
+            };
+            let list = format_member_list(&[
                 row(
                     8,
                     "director",
@@ -644,82 +649,51 @@ mod tests {
                     placement(Some(("@1", "main")), Some("%3")),
                     12,
                 ),
-                row(
-                    9,
-                    "drafter",
-                    MemberKind::Member,
-                    placement(Some(("@6", "cafleet-3-1")), Some("%12")),
-                    5,
+                row(9, "drafter", MemberKind::Member, concrete(), 5),
+            ]);
+            let pending_list =
+                format_member_list(&[row(10, "tester", MemberKind::Member, pending(), 0)]);
+            let cases = [
+                (
+                    "member list with concrete windows",
+                    list,
+                    [
+                        "2 members:",
+                        "  member_id  name           kind      backend   window         pane_id  idle",
+                        "  8          director       director  claude    main           %3       12s",
+                        "  9          drafter        member    claude    cafleet-3-1    %12      5s",
+                    ]
+                    .join("\n"),
+                ),
+                (
+                    "member list row with a pending window and pane",
+                    pending_list.lines().nth(2).unwrap().to_owned(),
+                    "  10         tester         member    claude    (pending)      (pending)  0s".into(),
+                ),
+                (
+                    "member create with a concrete placement",
+                    format_member(&registered, &concrete()),
+                    "9 drafter backend=claude pane=%12 window=cafleet-3-1".into(),
+                ),
+                (
+                    "member create with a pending placement",
+                    format_member(&registered, &pending()),
+                    "9 drafter backend=claude pane=(pending) window=(pending)".into(),
+                ),
+                (
+                    "member show with a concrete window",
+                    format_member_detail(&row(9, "drafter", MemberKind::Member, concrete(), 5).member),
+                    "9 drafter active window=cafleet-3-1".into(),
+                ),
+                (
+                    "member show with a pending window",
+                    format_member_detail(&row(10, "tester", MemberKind::Member, pending(), 0).member),
+                    "10 tester active window=(pending)".into(),
                 ),
             ];
-            assert_eq!(
-                format_member_list(&rows),
-                [
-                    "2 members:",
-                    "  member_id  name           kind      backend   window         pane_id  idle",
-                    "  8          director       director  claude    main           %3       12s",
-                    "  9          drafter        member    claude    cafleet-3-1    %12      5s",
-                ]
-                .join(
-                    "
-"
-                )
-            );
-        }
-
-        #[test]
-        fn member_list_shows_a_pending_window_and_pane() {
-            let rows = [row(
-                10,
-                "tester",
-                MemberKind::Member,
-                placement(None, None),
-                0,
-            )];
-            assert_eq!(
-                format_member_list(&rows).lines().nth(2).unwrap(),
-                "  10         tester         member    claude    (pending)      (pending)  0s"
-            );
-        }
-
-        #[test]
-        fn member_create_text_appends_the_window_after_the_pane() {
-            let registered = RegisteredMember {
-                member_id: 9,
-                name: "drafter".into(),
-                registered_at: "registered".into(),
-            };
-            assert_eq!(
-                format_member(
-                    &registered,
-                    &placement(Some(("@6", "cafleet-3-1")), Some("%12"))
-                ),
-                "9 drafter backend=claude pane=%12 window=cafleet-3-1"
-            );
-            assert_eq!(
-                format_member(&registered, &placement(None, None)),
-                "9 drafter backend=claude pane=(pending) window=(pending)"
-            );
-        }
-
-        #[test]
-        fn member_show_text_appends_the_window_after_the_status() {
-            let concrete = row(
-                9,
-                "drafter",
-                MemberKind::Member,
-                placement(Some(("@6", "cafleet-3-1")), Some("%12")),
-                5,
-            );
-            assert_eq!(
-                format_member_detail(&concrete.member),
-                "9 drafter active window=cafleet-3-1"
-            );
-            let pending = row(10, "tester", MemberKind::Member, placement(None, None), 0);
-            assert_eq!(
-                format_member_detail(&pending.member),
-                "10 tester active window=(pending)"
-            );
+            for (name, rendered, expected) in cases {
+                assert_eq!(rendered, expected, "{name}");
+            }
         }
     }
 
@@ -759,71 +733,41 @@ mod tests {
     use crate::runtime::control::test_support::inspection;
 
     #[test]
-    fn permission_inspection_text_names_the_token_sequence_and_answer_rule() {
+    fn permission_inspection_text_names_the_token_sequence_answers_and_rule_or_dashes() {
         let token = "a".repeat(64);
-        assert_eq!(
-            crate::output::text::format_permission_inspection(&inspection()),
-            format!(
-                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=allow,deny\nRequest: token={token} output_seq=5 rule=opencode-shell-allow-enter\nMissing evidence: arguments,cwd"
-            )
-        );
-    }
-
-    #[test]
-    fn permission_inspection_text_marks_an_unsupported_request_with_dashes_and_its_reason() {
         let mut unsupported = inspection();
         unsupported.answer_rule_id = None;
         unsupported.request_token = None;
         unsupported.supported_decisions = Vec::new();
         unsupported.capability_reason = Some("native profile unavailable".into());
         unsupported.missing_evidence = Vec::new();
-        assert_eq!(
-            crate::output::text::format_permission_inspection(&unsupported),
-            "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\nRequest: token=- output_seq=5 rule=-\nCapability: native profile unavailable"
-        );
-    }
-
-    #[test]
-    fn permission_inspection_text_lists_a_questions_supported_choice_ids() {
-        let token = "a".repeat(64);
-        assert_eq!(
-            crate::output::text::format_permission_inspection(
-                &crate::runtime::control::test_support::question_inspection()
+        for (name, inspected, expected) in [
+            (
+                "supported permission request",
+                inspection(),
+                format!(
+                    "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=allow,deny\nRequest: token={token} output_seq=5 rule=opencode-shell-allow-enter\nMissing evidence: arguments,cwd"
+                ),
             ),
-            format!(
-                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=not-now,dont-show-again\nRequest: token={token} output_seq=5 rule=-"
-            )
-        );
-    }
-
-    #[test]
-    fn permission_response_text_names_the_decision_or_the_choice_with_a_dash_for_the_other() {
-        use crate::coding_agent::catalog::AnswerKey;
-        use crate::runtime::PermissionResponseResult;
-        use crate::runtime::SubmissionResult;
-        let result = |key: AnswerKey| PermissionResponseResult {
-            submission: SubmissionResult::held("another programmatic input is pending"),
-            member_id: 3,
-            run_id: 7,
-            owner_epoch: 2,
-            interaction_id: 12,
-            event_id: 11,
-            key,
-            decision_source: crate::broker::runtime::DecisionSource::DirectorAuto,
-        };
-        let decision = format_permission_response_result(&result(AnswerKey::Decision(
-            crate::broker::runtime::PermissionDecision::Deny,
-        )));
-        assert!(
-            decision.starts_with("Permission response: interaction=12 run=7 decision=deny choice=- source=director-auto status=held"),
-            "{decision}"
-        );
-        let choice =
-            format_permission_response_result(&result(AnswerKey::Choice("not-now".into())));
-        assert!(
-            choice.starts_with("Permission response: interaction=12 run=7 decision=- choice=not-now source=director-auto status=held"),
-            "{choice}"
-        );
+            (
+                "unsupported request",
+                unsupported,
+                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\nRequest: token=- output_seq=5 rule=-\nCapability: native profile unavailable".into(),
+            ),
+            (
+                "question with supported choice ids",
+                crate::runtime::control::test_support::question_inspection(),
+                format!(
+                    "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=not-now,dont-show-again\nRequest: token={token} output_seq=5 rule=-"
+                ),
+            ),
+        ] {
+            assert_eq!(
+                crate::output::text::format_permission_inspection(&inspected),
+                expected,
+                "{name}"
+            );
+        }
     }
 
     #[test]

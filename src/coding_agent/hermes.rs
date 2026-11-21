@@ -799,61 +799,58 @@ mod tests {
     }
 
     #[test]
-    fn a_not_set_plugins_key_and_each_absent_member_are_not_set() {
-        assert_eq!(plugin_state(None).unwrap(), state(false, &[], false));
-        assert_eq!(
-            plugin_state(Some(json!({}))).unwrap(),
-            state(false, &[], false)
-        );
-        assert_eq!(
-            plugin_state(Some(json!({"enabled": ["alpha"]}))).unwrap(),
-            state(false, &["alpha"], false)
-        );
-    }
-
-    #[test]
-    fn the_plugins_subtree_yields_disabled_enabled_and_injection_states() {
-        assert_eq!(
-            plugin_state(Some(json!({
-                "disabled": ["other", "cafleet"],
-                "enabled": ["alpha", "cafleet"],
-                "entries": {"cafleet": {"allow_gateway_injection": true}},
-                "unrelated": 1
-            })))
-            .unwrap(),
-            state(true, &["alpha", "cafleet"], true)
-        );
-        for injection in [json!(false), json!("true"), json!(1), json!(null)] {
-            assert!(
-                !plugin_state(Some(
-                    json!({"entries": {"cafleet": {"allow_gateway_injection": injection}}})
-                ))
-                .unwrap()
-                .injection_allowed,
-                "{injection}"
-            );
-        }
-    }
-
-    #[test]
-    fn plugin_lists_must_be_arrays_of_strings_and_plugins_an_object() {
-        for (plugins, prefix) in [
+    fn plugin_state_reads_the_plugins_subtree_and_refuses_a_value_outside_its_shape() {
+        let not_set = || Ok(state(false, &[], false));
+        let not_true = |injection: serde_json::Value| {
+            Some(json!({"entries": {"cafleet": {"allow_gateway_injection": injection}}}))
+        };
+        let cases: [(&str, Option<serde_json::Value>, Result<_, &str>); 11] = [
+            ("not set plugins key", None, not_set()),
+            ("empty plugins object", Some(json!({})), not_set()),
             (
-                json!({"disabled": "cafleet"}),
-                "plugins.disabled is not a JSON array of strings: ",
+                "enabled list only",
+                Some(json!({"enabled": ["alpha"]})),
+                Ok(state(false, &["alpha"], false)),
             ),
             (
-                json!({"enabled": ["cafleet", null]}),
-                "plugins.enabled is not a JSON array of strings: ",
+                "every member with unrelated keys",
+                Some(json!({
+                    "disabled": ["other", "cafleet"],
+                    "enabled": ["alpha", "cafleet"],
+                    "entries": {"cafleet": {"allow_gateway_injection": true}},
+                    "unrelated": 1
+                })),
+                Ok(state(true, &["alpha", "cafleet"], true)),
             ),
-        ] {
-            let failure = plugin_state(Some(plugins.clone())).unwrap_err();
-            assert!(failure.starts_with(prefix), "{plugins}: {failure}");
+            ("injection false", not_true(json!(false)), not_set()),
+            ("injection as a string", not_true(json!("true")), not_set()),
+            ("injection as a number", not_true(json!(1)), not_set()),
+            ("injection null", not_true(json!(null)), not_set()),
+            (
+                "disabled as a string",
+                Some(json!({"disabled": "cafleet"})),
+                Err("plugins.disabled is not a JSON array of strings: "),
+            ),
+            (
+                "enabled with a null member",
+                Some(json!({"enabled": ["cafleet", null]})),
+                Err("plugins.enabled is not a JSON array of strings: "),
+            ),
+            (
+                "plugins as an array",
+                Some(json!(["cafleet"])),
+                Err("plugins is not a JSON object"),
+            ),
+        ];
+        for (name, plugins, expected) in cases {
+            match expected {
+                Ok(expected) => assert_eq!(plugin_state(plugins).unwrap(), expected, "{name}"),
+                Err(prefix) => {
+                    let failure = plugin_state(plugins).unwrap_err();
+                    assert!(failure.starts_with(prefix), "{name}: {failure}");
+                }
+            }
         }
-        assert_eq!(
-            plugin_state(Some(json!(["cafleet"]))).unwrap_err(),
-            "plugins is not a JSON object"
-        );
     }
 
     #[test]
@@ -939,54 +936,66 @@ mod tests {
     }
 
     #[test]
-    fn an_enabled_plugin_is_left_unwritten_and_unread() {
-        let fake = Fake::new(None);
-        assert!(
-            !enable_plugin(&fake, &state(false, &["alpha", "cafleet"], true), budget()).unwrap()
-        );
-        assert!(fake.calls().is_empty(), "{:?}", fake.calls());
-    }
-
-    #[test]
-    fn a_first_install_appends_cafleet_sets_injection_serially_then_re_reads_plugins_once() {
+    fn enable_plugin_writes_only_the_missing_keys_then_re_reads_plugins_once() {
+        let enabled = format!("set {PLUGINS_ENABLED_KEY} [\"alpha\",\"beta\",\"cafleet\"]");
+        let injection = format!("set {GATEWAY_INJECTION_KEY} true");
+        let reread = format!("get {PLUGINS_KEY}");
+        let cases = [
+            (
+                "an enabled plugin is left unwritten and unread",
+                None,
+                state(false, &["alpha", "cafleet"], true),
+                Ok(false),
+                Vec::new(),
+            ),
+            (
+                "a first install appends cafleet and sets injection serially",
+                Some(json!({"enabled": ["alpha", "beta"]})),
+                state(false, &["alpha", "beta"], false),
+                Ok(true),
+                vec![enabled, injection.clone(), reread.clone()],
+            ),
+            (
+                "only the missing injection key is written",
+                Some(json!({"enabled": ["cafleet"]})),
+                state(false, &["cafleet"], false),
+                Ok(true),
+                vec![injection, reread],
+            ),
+            (
+                "a disabled entry for cafleet is refused before any call",
+                None,
+                state(true, &[], false),
+                Err(
+                    "plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'",
+                ),
+                Vec::new(),
+            ),
+        ];
+        for (name, plugins, before, expected, calls) in cases {
+            let fake = Fake::new(plugins);
+            match expected {
+                Ok(changed) => assert_eq!(
+                    enable_plugin(&fake, &before, budget()).unwrap(),
+                    changed,
+                    "{name}"
+                ),
+                Err(message) => assert_eq!(
+                    enable_plugin(&fake, &before, budget()).unwrap_err(),
+                    message,
+                    "{name}"
+                ),
+            }
+            assert_eq!(fake.calls(), calls, "{name}");
+        }
         let fake = Fake::new(Some(json!({"enabled": ["alpha", "beta"]})));
         let before = plugin_state(Some(fake.plugins())).unwrap();
-        assert!(enable_plugin(&fake, &before, budget()).unwrap());
-        assert_eq!(
-            fake.calls(),
-            [
-                format!("set {PLUGINS_ENABLED_KEY} [\"alpha\",\"beta\",\"cafleet\"]"),
-                format!("set {GATEWAY_INJECTION_KEY} true"),
-                format!("get {PLUGINS_KEY}"),
-            ]
-        );
+        enable_plugin(&fake, &before, budget()).unwrap();
         assert_eq!(
             plugin_state(Some(fake.plugins())).unwrap(),
-            state(false, &["alpha", "beta", "cafleet"], true)
+            state(false, &["alpha", "beta", "cafleet"], true),
+            "a first install leaves cafleet enabled with gateway injection"
         );
-    }
-
-    #[test]
-    fn only_the_missing_key_is_written() {
-        let fake = Fake::new(Some(json!({"enabled": ["cafleet"]})));
-        assert!(enable_plugin(&fake, &state(false, &["cafleet"], false), budget()).unwrap());
-        assert_eq!(
-            fake.calls(),
-            [
-                format!("set {GATEWAY_INJECTION_KEY} true"),
-                format!("get {PLUGINS_KEY}")
-            ]
-        );
-    }
-
-    #[test]
-    fn a_disabled_entry_for_cafleet_is_refused_before_any_call() {
-        let fake = Fake::new(None);
-        assert_eq!(
-            enable_plugin(&fake, &state(true, &[], false), budget()).unwrap_err(),
-            "plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'"
-        );
-        assert!(fake.calls().is_empty());
     }
 
     #[test]

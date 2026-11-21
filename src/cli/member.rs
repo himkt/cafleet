@@ -3,7 +3,6 @@ use crate::broker::MemberRecord;
 use crate::broker::NewPlacement;
 use crate::broker::runtime::DeliveryProjection;
 use crate::cli::emit;
-use crate::cli::nonblank;
 use crate::cli::resolve_body;
 use crate::cli::resolve_command_body;
 use crate::coding_agent::CodingAgent;
@@ -36,7 +35,6 @@ use serde_json::Value;
 use serde_json::json;
 use std::io::Write;
 use std::path::Path;
-use std::path::PathBuf;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -83,12 +81,6 @@ pub(crate) struct CreateArgs {
     pub(super) effort: Option<String>,
     #[arg(long, value_name = "MODE", help = CodingAgent::permission_mode_help())]
     pub(super) permission_mode: Option<String>,
-    /// Persist metadata or explicitly redacted screen evidence.
-    #[arg(long, default_value = "metadata", value_parser = ["metadata", "redacted"])]
-    pub(super) event_evidence: String,
-    /// Absolute UTF-8 JSON redaction configuration for redacted evidence.
-    #[arg(long, value_name = "PATH")]
-    pub(super) event_redaction_file: Option<PathBuf>,
     #[command(flatten)]
     pub(super) body: PromptArgs,
     /// Output in JSON format.
@@ -98,30 +90,6 @@ pub(crate) struct CreateArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum MemberCommand {
-    /// Reconcile a recorded member run under exclusive ownership.
-    Recover {
-        /// The member whose recorded run is reconciled.
-        #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        member_id: i64,
-        /// The root Director issuing this Director-only command.
-        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        director_member_id: i64,
-        /// Attest that the inspected owner and startup processes have terminated.
-        #[arg(long, requires_all = ["expected_run_id", "expected_owner_epoch", "evidence_ref"])]
-        owner_terminated: bool,
-        /// Run ID from the inspected registry snapshot the attestation binds to.
-        #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
-        expected_run_id: Option<i64>,
-        /// Owner epoch from the inspected registry snapshot the attestation binds to.
-        #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
-        expected_owner_epoch: Option<i64>,
-        /// Reference to the operator's recorded termination evidence.
-        #[arg(long, requires = "owner_terminated", value_parser = nonblank("nonblank termination evidence reference required"))]
-        evidence_ref: Option<String>,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
     /// Register a member and spawn its coding-agent pane.
     Create(CreateArgs),
     /// Tear down a member's pane (when one exists) and deregister it.
@@ -197,18 +165,6 @@ pub(crate) enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Force-submit a member's queued previews through its outer pane.
-    Flush {
-        /// The target member.
-        #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        member_id: i64,
-        /// The root Director issuing this Director-only command.
-        #[arg(long = "from-member-id", value_name = "DIRECTOR_MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
-        director_member_id: i64,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
     /// Capture the tail of a member's pane.
     Capture {
         /// The target member.
@@ -271,35 +227,6 @@ pub(crate) fn run(
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
-        MemberCommand::Recover {
-            member_id,
-            director_member_id: _,
-            owner_terminated,
-            expected_run_id,
-            expected_owner_epoch,
-            evidence_ref,
-            json,
-        } => {
-            let attestation =
-                owner_terminated.then(|| crate::runtime::OwnerTerminationAttestation {
-                    expected_run_id: expected_run_id.expect("complete attestation options"),
-                    expected_owner_epoch: expected_owner_epoch
-                        .expect("complete attestation options"),
-                    evidence_ref: evidence_ref.expect("complete attestation options"),
-                });
-            let report = crate::runtime::recover_member(
-                conn,
-                settings,
-                member_id,
-                attestation.as_ref(),
-                deadline.instant(),
-            )?;
-            emit(
-                json,
-                &crate::output::json::runtime_recovery(&report),
-                || crate::output::format_runtime_recovery(&report),
-            )
-        }
         MemberCommand::Create(args) => create(conn, &args),
         MemberCommand::Delete { member_id, json } => {
             delete(conn, settings, member_id, json, deadline)
@@ -324,40 +251,12 @@ pub(crate) fn run(
             exec(conn, settings, member_id, &command, json, deadline)
         }
         MemberCommand::Press { .. } => unreachable!("press has a dedicated typed dispatch"),
-        MemberCommand::Flush { .. } => unreachable!("flush has a dedicated dispatch"),
         MemberCommand::Capture {
             member_id,
             lines,
             ansi,
             json,
         } => capture(conn, member_id, lines, ansi, json),
-    }
-}
-
-fn launch_evidence(
-    mode: &str,
-    file: Option<&Path>,
-    catalog: &ProfileCatalog,
-) -> Result<(broker::runtime::EventEvidence, Value), CafleetError> {
-    use broker::runtime::EventEvidence;
-    use broker::runtime::evidence::EvidencePolicy;
-    match (mode, file) {
-        ("metadata", None) => Ok((EventEvidence::Metadata, json!({"mode":"metadata"}))),
-        ("redacted", Some(path)) if path.is_absolute() => {
-            let config = std::fs::read_to_string(path).map_err(|cause| {
-                CafleetError::Usage(format!("cannot read --event-redaction-file: {cause}"))
-            })?;
-            let config: Value = serde_json::from_str(&config).map_err(|cause| {
-                CafleetError::Usage(format!("invalid --event-redaction-file JSON: {cause}"))
-            })?;
-            let rules = catalog.rule_ids();
-            let rule_refs = rules.iter().map(String::as_str).collect::<Vec<_>>();
-            EvidencePolicy::redacted(&config, &rule_refs)?;
-            Ok((EventEvidence::Redacted, json!({"mode":"redacted","config":config})))
-        }
-        _ => Err(CafleetError::Usage(
-            "--event-evidence metadata requires no redaction file; redacted requires an absolute --event-redaction-file".into(),
-        )),
     }
 }
 
@@ -534,11 +433,6 @@ pub(crate) fn create_with_layout_wait(
     backend.validate_effort(effort)?;
     let policy = backend.resolve_policy(args.permission_mode.as_deref())?;
     let catalog = ProfileCatalog::bundled();
-    let (event_evidence, evidence_policy) = launch_evidence(
-        &args.event_evidence,
-        args.event_redaction_file.as_deref(),
-        catalog,
-    )?;
 
     let prompt_body = resolve_body(args.body.prompt.as_deref(), args.body.file.as_deref())?;
     backend.validate_prompt(&prompt_body)?;
@@ -650,7 +544,6 @@ pub(crate) fn create_with_layout_wait(
         mode_source: policy.mode_source(),
         permission_argv_json: serde_json::to_value(policy.permission_argv())
             .expect("string argv serializes"),
-        event_evidence,
         native_version: native.native_version,
         coverage: native.coverage,
     };
@@ -663,7 +556,12 @@ pub(crate) fn create_with_layout_wait(
             ))
         })?
         .to_owned();
-    let mut host = runner::NativeLaunchHost::new(&*mux, &target.pane, &cwd_text);
+    let mut host = runner::NativeLaunchHost::new(
+        &*mux,
+        &target.pane,
+        &cwd_text,
+        std::sync::Arc::new(crate::time::SystemClock),
+    );
     let created = runner::create_registered(
         conn,
         &pending,
@@ -702,7 +600,6 @@ pub(crate) fn create_with_layout_wait(
                 argv,
                 cwd,
                 environment: forwarded_config.clone().into_iter().collect(),
-                evidence_policy,
                 size,
             };
             Ok((artifacts, spawn))
@@ -916,23 +813,19 @@ pub(super) fn press(
     json: bool,
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
-    let acknowledgment = crate::runtime::press_member(conn, settings, member_id, keys, deadline)?;
+    let acknowledgment = crate::runtime::press_member(
+        conn,
+        settings,
+        member_id,
+        keys,
+        deadline,
+        &crate::time::SystemClock,
+    )?;
     emit(
         json,
         &crate::output::json::member_press(&acknowledgment),
         || crate::output::format_member_press(&acknowledgment),
     )
-}
-
-pub(super) fn flush(
-    conn: &mut Connection,
-    settings: &Settings,
-    member_id: i64,
-    json: bool,
-    deadline: crate::time::Deadline,
-) -> Result<(), CafleetError> {
-    let outcome = crate::runtime::flush::flush_member(conn, settings, member_id, deadline)?;
-    emit(json, &outcome.to_json(), || outcome.text())
 }
 
 fn wrapped_delivery_refusal(
@@ -950,31 +843,10 @@ fn wrapped_delivery_refusal(
             .expect("a pre-write rejection has its cause");
         return format!("{label} was not dispatched to member {member_id}: {cause}");
     }
-    if result.status == SubmissionStatus::LeftInComposer {
-        let cause = result
-            .reason
-            .as_deref()
-            .expect("a left input has its stop cause");
-        let method = result
-            .delivery
-            .as_ref()
-            .and_then(|delivery| delivery.method)
-            .expect("a left input has its delivery method");
-        let text = if result.stage == crate::runtime::SubmissionStage::EscapeOnly {
-            "Escape was sent but no text was typed."
-        } else {
-            "the typed text stays in the member's composer."
-        };
-        return format!(
-            "{label} delivery to member {member_id} was not submitted: {cause} (method={}); {text} Inspect the pane before retrying.",
-            method.as_str()
-        );
-    }
     let description = match result.status {
         SubmissionStatus::Held => "held",
         SubmissionStatus::Rejected => "rejected",
         SubmissionStatus::Uncertain => "uncertain",
-        SubmissionStatus::LeftInComposer => unreachable!("left inputs have their scoped refusal"),
         SubmissionStatus::Accepted | SubmissionStatus::Queued => {
             unreachable!("submitted and queued results are not refusals")
         }
@@ -1020,7 +892,6 @@ fn dispatch_input(
     let request = SubmitInput {
         operation_key: format!("{}:{}:{random}", kind.as_str(), run.run_id),
         input_kind: kind,
-        message_id: None,
         literal: text.into(),
     };
     let result =
@@ -1396,13 +1267,10 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_member_deletion_terminal_no_work_finishes_under_the_original_guard() {
-            run_case("terminal");
-        }
-
-        #[test]
-        fn runner_recovery_member_deletion_foreign_epoch_after_close_preserves_registration() {
-            run_case("epoch");
+        fn runner_recovery_member_deletion_finishes_terminal_work_and_preserves_a_foreign_epoch() {
+            for scenario in ["terminal", "epoch"] {
+                run_case(scenario);
+            }
         }
 
         fn run_case(scenario: &str) {
@@ -2017,60 +1885,6 @@ mod tests {
     }
 
     #[test]
-    fn wrapped_left_prompt_and_exec_errors_describe_the_retained_text_and_escape_only_stage() {
-        use crate::runtime::{SubmissionResult, SubmissionStage, SubmissionStatus};
-        for label in ["prompt", "native command"] {
-            for stage in [
-                SubmissionStage::Partial,
-                SubmissionStage::LiteralComplete,
-                SubmissionStage::Submitted,
-            ] {
-                let cause = if stage == SubmissionStage::Submitted {
-                    "submit_unconfirmed"
-                } else {
-                    "manual_input"
-                };
-                let result = SubmissionResult {
-                    status: SubmissionStatus::LeftInComposer,
-                    input_id: Some(9),
-                    stage,
-                    output_seq: Some(4),
-                    reason: Some(cause.into()),
-                    delivery: Some(DeliveryProjection {
-                        status: DeliveryStatus::LeftInComposer,
-                        method: Some(DeliveryMethod::Profile),
-                        reason: None,
-                    }),
-                };
-                assert_eq!(
-                    wrapped_delivery_refusal(label, 110, &result),
-                    format!(
-                        "{label} delivery to member 110 was not submitted: {cause} (method=profile); the typed text stays in the member's composer. Inspect the pane before retrying."
-                    )
-                );
-            }
-            let result = SubmissionResult {
-                status: SubmissionStatus::LeftInComposer,
-                input_id: Some(9),
-                stage: SubmissionStage::EscapeOnly,
-                output_seq: Some(4),
-                reason: Some("manual_input".into()),
-                delivery: Some(DeliveryProjection {
-                    status: DeliveryStatus::LeftInComposer,
-                    method: Some(DeliveryMethod::Fallback),
-                    reason: None,
-                }),
-            };
-            assert_eq!(
-                wrapped_delivery_refusal(label, 110, &result),
-                format!(
-                    "{label} delivery to member 110 was not submitted: manual_input (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying."
-                )
-            );
-        }
-    }
-
-    #[test]
     fn wrapped_uncertain_prompt_and_exec_errors_name_the_recorded_cause_and_method() {
         use crate::runtime::SubmissionResult;
         use crate::runtime::SubmissionStage;
@@ -2187,23 +2001,15 @@ mod tests {
     }
 
     #[test]
-    fn over_limit_dispatch_prompt_plain_names_the_command_before_the_complete_cause() {
-        assert_over_limit_dispatch("prompt", "plain");
-    }
-
-    #[test]
-    fn over_limit_dispatch_exec_plain_counts_its_prefix_and_names_the_command() {
-        assert_over_limit_dispatch("exec", "plain");
-    }
-
-    #[test]
-    fn over_limit_dispatch_prompt_disabled_paste_names_the_command_and_character_limit() {
-        assert_over_limit_dispatch("prompt", "bracketed_paste");
-    }
-
-    #[test]
-    fn over_limit_dispatch_exec_disabled_paste_counts_its_prefix_in_the_character_limit() {
-        assert_over_limit_dispatch("exec", "bracketed_paste");
+    fn over_limit_dispatch_names_the_command_counts_its_prefix_and_states_the_limit_cause() {
+        for (action, framing) in [
+            ("prompt", "plain"),
+            ("exec", "plain"),
+            ("prompt", "bracketed_paste"),
+            ("exec", "bracketed_paste"),
+        ] {
+            assert_over_limit_dispatch(action, framing);
+        }
     }
 
     #[test]
@@ -2280,7 +2086,6 @@ mod tests {
                         storage::get_input(&fixture.fixture.conn, *after.last().unwrap()).unwrap();
                     assert_eq!(row.kind, kind);
                     assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(row.message_id, None);
                     let prefix = format!("{}:{}:", kind.as_str(), run.run_id);
                     let random = row
                         .operation_key
@@ -2292,7 +2097,8 @@ mod tests {
                             .bytes()
                             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                     );
-                    let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
+                    let payload =
+                        json!({"kind":kind.as_str(),"literal":literal,"run_id":run.run_id});
                     let digest = crate::digest::sha256_hex(&serde_json::to_vec(&payload).unwrap());
                     assert_eq!(
                         row.payload_digest, digest,
@@ -2427,7 +2233,6 @@ mod tests {
                 let request = SubmitInput {
                     operation_key: row.operation_key.clone(),
                     input_kind: row.kind,
-                    message_id: row.message_id,
                     literal: literal.into(),
                 };
                 let result = submit_wrapped_input(
@@ -2489,14 +2294,6 @@ mod tests {
 
         fn run_for(&self, argv: &[String], _: Duration) -> Result<String, RunError> {
             self.run(argv)
-        }
-
-        fn run_until(
-            &self,
-            argv: &[String],
-            deadline: Instant,
-        ) -> Result<String, crate::multiplexer::TimedRunError> {
-            crate::multiplexer::test_support::run_until_through_run_for(self, argv, deadline)
         }
 
         /// Counts and checks the pane close; the window restoration that follows it lists a
@@ -2770,16 +2567,12 @@ mod tests {
                 "fixture-model",
                 "--effort",
                 "high",
-                "--event-evidence",
-                "metadata",
                 "literal '$x' `text` assignment",
             ]);
             let Command::Member(member::MemberCommand::Create(member::CreateArgs {
                 coding_agent,
                 model,
                 effort,
-                event_evidence,
-                event_redaction_file,
                 ..
             })) = CliArgs::try_parse_from(arguments).unwrap().command
             else {
@@ -2788,29 +2581,6 @@ mod tests {
             assert_eq!(coding_agent, Some(crate::coding_agent::CodingAgent::Codex));
             assert_eq!(model.as_deref(), Some("fixture-model"));
             assert_eq!(effort.as_deref(), Some("high"));
-            assert_eq!(event_evidence, "metadata");
-            assert_eq!(event_redaction_file, None);
-            let mut arguments = create_arguments();
-            arguments.extend([
-                "--event-evidence",
-                "redacted",
-                "--event-redaction-file",
-                "/tmp/synthetic-redaction.json",
-                "literal assignment",
-            ]);
-            let Command::Member(member::MemberCommand::Create(member::CreateArgs {
-                event_evidence,
-                event_redaction_file,
-                ..
-            })) = CliArgs::try_parse_from(arguments).unwrap().command
-            else {
-                panic!("member create expected")
-            };
-            assert_eq!(event_evidence, "redacted");
-            assert_eq!(
-                event_redaction_file.as_deref(),
-                Some(std::path::Path::new("/tmp/synthetic-redaction.json"))
-            );
         }
 
         #[test]
@@ -2860,44 +2630,6 @@ mod tests {
                 failure.message(),
                 "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got 'openrouter/moonshotai/kimi-k2.6:high')."
             );
-        }
-
-        #[test]
-        fn runtime_policy_invalid_redaction_configuration_fails_before_creation_effects() {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("redaction.json");
-            for bytes in [
-                b"not json".to_vec(),
-                vec![0xff],
-                br#"{"schema_version":1,"patterns":["secret"],"sensitive_rules":["missing-rule"]}"#
-                    .to_vec(),
-            ] {
-                std::fs::write(&path, bytes).unwrap();
-                invalid_creation(
-                    CodingAgent::Codex,
-                    &[
-                        "--event-evidence".into(),
-                        "redacted".into(),
-                        "--event-redaction-file".into(),
-                        path.to_str().unwrap().into(),
-                    ],
-                );
-            }
-        }
-
-        #[test]
-        fn runtime_policy_redaction_options_form_a_validated_launch_only_group() {
-            for extra in [
-                vec!["--event-evidence".into(), "redacted".into()],
-                vec![
-                    "--event-evidence".into(),
-                    "metadata".into(),
-                    "--event-redaction-file".into(),
-                    "/tmp/unused-redaction.json".into(),
-                ],
-            ] {
-                invalid_creation(CodingAgent::Codex, &extra);
-            }
         }
 
         #[test]
@@ -3000,156 +2732,6 @@ mod tests {
             }
         }
     }
-    mod recovery_entry {
-        use clap::Parser;
-
-        use crate::cli::CliArgs;
-        use crate::cli::Command;
-        use crate::cli::member::MemberCommand;
-        use crate::cli::test_support::assert_usage_rejected;
-
-        fn exceptional_args() -> Vec<&'static str> {
-            vec![
-                "member",
-                "recover",
-                "7",
-                "--from-member-id",
-                "1",
-                "--owner-terminated",
-                "--expected-run-id",
-                "11",
-                "--expected-owner-epoch",
-                "3",
-                "--evidence-ref",
-                "audit:owner-termination",
-            ]
-        }
-
-        #[test]
-        fn runner_recovery_entry_member_ids_require_positive_assigned_integers() {
-            assert_usage_rejected(&["member", "recover", "--from-member-id", "1", "--json"]);
-            for member_id in ["0", "unknown"] {
-                assert_usage_rejected(&[
-                    "member",
-                    "recover",
-                    "--from-member-id",
-                    "1",
-                    "--json",
-                    "--",
-                    member_id,
-                ]);
-            }
-        }
-
-        #[test]
-        fn runner_recovery_entry_full_attestation_preserves_snapshot_reference_and_json_values() {
-            for (member_id, run_id, epoch, reference, json) in [
-                (7, 11, 3, "audit:owner-termination", false),
-                (
-                    i64::MAX,
-                    i64::MAX,
-                    i64::MAX,
-                    "  audit:owner 世界 '$x' `literal`  ",
-                    true,
-                ),
-            ] {
-                let (member, run, owner_epoch) =
-                    (member_id.to_string(), run_id.to_string(), epoch.to_string());
-                let mut args = vec![
-                    "cafleet",
-                    "member",
-                    "recover",
-                    &member,
-                    "--from-member-id",
-                    "1",
-                    "--owner-terminated",
-                    "--expected-run-id",
-                    &run,
-                    "--expected-owner-epoch",
-                    &owner_epoch,
-                    "--evidence-ref",
-                    reference,
-                ];
-                if json {
-                    args.push("--json");
-                }
-                let Command::Member(MemberCommand::Recover {
-                    member_id: parsed_member,
-                    director_member_id,
-                    owner_terminated,
-                    expected_run_id,
-                    expected_owner_epoch,
-                    evidence_ref,
-                    json: parsed_json,
-                }) = CliArgs::try_parse_from(&args).unwrap().command
-                else {
-                    panic!("member recover expected")
-                };
-                assert_eq!(
-                    (parsed_member, director_member_id, owner_terminated),
-                    (member_id, 1, true)
-                );
-                assert_eq!(
-                    (expected_run_id, expected_owner_epoch),
-                    (Some(run_id), Some(epoch))
-                );
-                assert_eq!(evidence_ref.as_deref(), Some(reference));
-                assert_eq!(parsed_json, json);
-            }
-        }
-
-        #[test]
-        fn runner_recovery_entry_attestation_options_require_the_complete_group() {
-            let options: [&[&str]; 4] = [
-                &["--owner-terminated"],
-                &["--expected-run-id", "11"],
-                &["--expected-owner-epoch", "3"],
-                &["--evidence-ref", "audit:owner-termination"],
-            ];
-            for selected in 1_u8..15 {
-                let mut args = vec!["member", "recover", "7", "--from-member-id", "1", "--json"];
-                for (index, option) in options.iter().enumerate() {
-                    if selected & (1 << index) != 0 {
-                        args.extend_from_slice(option);
-                    }
-                }
-                assert_usage_rejected(&args);
-            }
-        }
-
-        #[test]
-        fn runner_recovery_entry_attestation_snapshot_ids_require_positive_integers() {
-            for option in ["--expected-run-id", "--expected-owner-epoch"] {
-                for invalid in ["0", "unknown"] {
-                    let mut args = exceptional_args();
-                    let index = args.iter().position(|value| *value == option).unwrap();
-                    args.drain(index..index + 2);
-                    let literal = format!("{option}={invalid}");
-                    args.push(&literal);
-                    assert_usage_rejected(&args);
-                }
-            }
-        }
-
-        #[test]
-        fn runner_recovery_entry_attestation_rejects_blank_references_and_missing_option_values() {
-            let mut args = exceptional_args();
-            *args.last_mut().unwrap() = " ";
-            assert_usage_rejected(&args);
-            for option in [
-                "--expected-run-id",
-                "--expected-owner-epoch",
-                "--evidence-ref",
-            ] {
-                let mut args = exceptional_args();
-                let index = args.iter().position(|value| *value == option).unwrap();
-                args.drain(index..index + 2);
-                args.push(option);
-                assert_usage_rejected(&args);
-            }
-        }
-    }
-
     #[test]
     fn spawn_placeholders_substitute_and_unescape() {
         for (body, expected) in [

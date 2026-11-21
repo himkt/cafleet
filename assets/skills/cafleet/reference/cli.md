@@ -7,7 +7,7 @@ Exact command facts for running CAFleet and interpreting its results.
 | Command | Purpose | Subject | JSON |
 |---|---|---|---|
 | `setup` | Initialize the version's database and install assets | — | no |
-| `doctor` | Diagnose multiplexer, database, agent assets and member runtimes | — | yes |
+| `doctor` | Diagnose multiplexer, database and agent assets | — | yes |
 | `fleet create` | Register the calling Director atomically | — | yes |
 | `fleet list` / `fleet show` | Read fleet registry | `FLEET_ID` for show | yes |
 | `fleet delete` | End a fleet's ordinary members, then deregister the fleet | `FLEET_ID` | yes |
@@ -16,13 +16,11 @@ Exact command facts for running CAFleet and interpreting its results.
 | `member show` / `member list` | Read detail / active roster | `MEMBER_ID` / `FLEET_ID` | yes |
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
 | `member press` | Request explicit ordered keys | `MEMBER_ID` | yes |
-| `member flush` | Force-submit a member's queued previews through its outer pane | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
-| `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request or question | `INTERACTION_ID` | yes |
-| `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
+| `message send` | Persist a point-to-point message for the recipient's runner to preview | Sender/recipient flags | yes |
 | `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
 | `message listen` | Notify pending messages through stdout | `MEMBER_ID` | JSONL only |
 | `message show` | Read one message | `MESSAGE_ID` | yes |
@@ -35,7 +33,7 @@ Place the complete DB-assigned integer subject immediately after its subcommand.
 
 ## Director-only command guard
 
-The Director-only commands are exactly `member prompt`, `member exec`, `member press`, `member flush`, `member recover`, `permission respond` and `input reconcile`. Each requires `--from-member-id <director-member-id>`, a positive integer (missing: parse error, exit 2); `permission respond` takes it as its pinned Director. After parsing and the schema-version guard, and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet (a member's fleet, or the fleet of the run owning an input or interaction) and requires it live with that ID as its root Director. An unknown subject keeps its not-found error, which comes first. Otherwise it exits 1, prints nothing on stdout and writes `Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.` to stderr.
+The Director-only commands are exactly `member prompt`, `member exec`, `member press`, `permission respond` and `input reconcile`. Each requires `--from-member-id <director-member-id>`, a positive integer (missing: parse error, exit 2); `permission respond` takes it as its pinned Director. After parsing and the schema-version guard, and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet (a member's fleet, or the fleet of the run owning an input or interaction) and requires it live with that ID as its root Director. An unknown subject keeps its not-found error, which comes first. Otherwise it exits 1, prints nothing on stdout and writes `Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.` to stderr.
 
 Every other command, including `permission inspect`, `input show`, `event show`, `member list`, `member capture` and the lifecycle commands, carries no guard refusal; `permission inspect` still requires `--from-member-id` as its pinned Director (§ `permission inspect`). The guard is cooperative, not a security boundary: it stops a member that passes its own `YOUR MEMBER ID:`, and a member that copies `DIRECTOR MEMBER ID:` passes it. A Director-only command the Director dispatches into a member pane with `member exec` is checked by the ID it carries.
 
@@ -51,7 +49,7 @@ Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DI
 
 Use JSON for complete untruncated text; text output truncates message bodies at a fixed 200 codepoints. Message records contain `message_id`, `from_member_id`, integer `to_member_id`, `created_at`, `status_state`, `status_timestamp` and `text`.
 
-Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/description/registration/placement; lists return records and show includes nullable `deleted_at`. Deletion returns `fleet_id`, `deregistered_count` and `members`. Send returns `message`, `notification_sent`, `input_id`, `delivery`; poll returns an array of the records it consumed; show returns `message`. Member deletion returns `member_id`, `pane_status`; capture returns `member_id`, `pane_id`, `lines`, `content`, `captured_at`, `content_sha256`. Runtime commands define their fields below.
+Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/description/registration/placement; lists return records and show includes nullable `deleted_at`. Deletion returns `fleet_id`, `deregistered_count` and `members`. Send returns `message`; poll returns an array of the records it consumed; show returns `message`. Member deletion returns `member_id`, `pane_status`; capture returns `member_id`, `pane_id`, `lines`, `content`, `captured_at`, `content_sha256`. Runtime commands define their fields below.
 
 ### Member list output
 
@@ -74,7 +72,7 @@ Place `--json` before any `--` literal-key separator. JSON is compact UTF-8. Com
 
 ## `permissions.allow` coverage
 
-Broker prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Literal IDs preserve matching. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)`, `Bash(cafleet member press *)` and `Bash(cafleet member flush *)` under ask to confirm each of the Director's explicit pane-input dispatches; ask outranks allow. Director permission responses remain subject to effective native/managed rules.
+Broker prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Literal IDs preserve matching. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each of the Director's explicit pane-input dispatches; ask outranks allow. Director permission responses remain subject to effective native/managed rules.
 
 Claude receives `Bash(cafleet message *)` at spawn, and setup installs the Codex and OpenCode allow rules (§ `setup` and `doctor`); the Director-only commands refuse a member's own ID (§ Director-only command guard). Members retain broker reception/evidence-routing authority.
 
@@ -134,27 +132,7 @@ With `--pane`, `fleet create` reads no process ancestry, and an environment nami
 
 `cafleet message send --from-member-id ID --to-member-id ID (TEXT | --file PATH) [--json]`
 
-Persist once, then deliver ordinary-recipient previews oldest-first. Self-sends return `delivery.status=not_applicable`, null method/input and reason `self_send`; other root-Director sends use reason `director_stdout`, without multiplexer or pane diagnostics.
-
-Commit succeeds with exit 0 even when notification is queued, held or unavailable. `notification_sent=true` means this invocation submitted the new message; another invocation's submission leaves it false without a diagnostic. `input_id` identifies the new message's nullable preview receipt; `delivery` describes that message even when older ones are retried. The recipient's runner retries every still-pending preview automatically, oldest first: a queued preview retries itself, and the runner's sweep retries one that never reached its queue. The next send also retries them.
-
-### Delivery outcome
-
-Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` followed by `message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; member MEMBER_ID's runner retries it.` `CAUSE` is `pane input remained busy` for a busy lock, otherwise a runner lock/transport/submission or storage error with known run/input context. Storage failures identify the current candidate. An exhausted attempt retains its sent prefix and reports failure with current receipt context.
-
-Receipt retirement failure reports `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining `notification_sent=true`. Pre-commit storage failure exits 1. Consume each committed ID once.
-
-Each attempted message left in the composer or held by its own in-progress, uncertain or abandoned receipt prints one diagnostic after `Message NEW_ID was persisted. `. Submitted and queued messages print none. `INPUT_ID` is this attempt and `NEXT_ID` its re-delivery successor; JSON `input_id` and `delivery` continue to describe this invocation's attempt of the new message.
-
-| Outcome | Diagnostic |
-|---|---|
-| Left stage `partial` | `message MESSAGE_ID was partly typed into member MEMBER_ID's composer and not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Left stage `literal_complete` | `message MESSAGE_ID was typed into member MEMBER_ID's composer but not submitted: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Left stage `submitted` | `message MESSAGE_ID was typed into member MEMBER_ID's composer and its submit key sent, but the submission was not confirmed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Left stage `escape_only` | `message MESSAGE_ID was not typed: Escape was sent to member MEMBER_ID but the input was not typed: STOP_CAUSE (input_id=INPUT_ID, redelivery input_id=NEXT_ID); the runner re-delivers it once the composer is empty.` |
-| Own uncertain receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is uncertain (STOP_CAUSE); inspect it with cafleet input show INPUT_ID --json and reconcile it with cafleet input reconcile.` |
-| Own in-progress receipt | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID is in progress; inspect it with cafleet input show INPUT_ID --json.` |
-| Abandoned uncertainty | `message MESSAGE_ID was not notified to member MEMBER_ID: input INPUT_ID was abandoned as uncertain; send its content again as a new message if it is still needed.` |
+Persist once and return: the send writes no pane input. An ordinary recipient's runner types each pending message, oldest first, at its next preview sweep, and retries it on its own; a member with no live runner keeps its messages pending. A self-send is stored already notified, and a root Director reads its messages through its own reception. Pre-commit storage failure exits 1. Consume each committed ID once.
 
 ### `message poll`
 
@@ -164,7 +142,7 @@ Each attempted message left in the composer or held by its own in-progress, unce
 
 `cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
 
-Notifies an active member's pending messages, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer `1..=1800` lease is monotonic from startup; absence runs until closure/cancellation/failure.
+Notifies an active member's pending messages, requiring a live root Director with concrete placement and no multiplexer. Unknown/inactive startup: `Member ID not found`, exit 1. Optional integer lease from 1 through 1800 inclusive is monotonic from startup; absence runs until closure/cancellation/failure.
 
 Flush UTF-8 JSONL records: `ready` with `member_id,fleet_id` before replay; `pending` with `next`; `closed` with `member_id,reason`. There is no text mode or `--json`. Closure reasons are `timeout`, `member_inactive`, `fleet_deleted`, and `session_exited` in forwarding mode only; deletion wins simultaneous lifecycle closure. Normal closure exits 0, operational/output failures exit 1, usage errors exit 2; cancellation may omit `closed`.
 
@@ -184,7 +162,7 @@ Listening changes no consumption/notification state and retries no pane delivery
 
 - Stdout carries only `ready` and the final `closed` record, written right before exit with every reason, `session_exited` included.
 - Each `pending` notice, and each `closed` record with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, one at a time with a 10 s deadline each. `ready` and `closed` `session_exited` are never forwarded.
-- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal. A refused `pending` notice is rebuilt from a fresh snapshot after 1 s while the pinned session lives, and dropped when a poll consumed its messages meanwhile or its re-notice no longer has fresh messages. A refused `closed` record is retried every 1 s with no time limit and, once accepted, still written to stdout. The pinned session's exit during either wait ends the listener with `session_exited`.
+- Any non-zero `codex queue` exit ends forwarding, a full thread queue (`queue cannot contain more than 100 submissions`) included; nothing is retried.
 - At startup the listener pins its nearest ancestor whose argv[0] basename is exactly `codex`. When that process exits (a reused pid counts as exited), stdout gets `closed` `session_exited` and the listener exits 0.
 
 | Condition | Result |
@@ -192,13 +170,10 @@ Listening changes no consumption/notification state and retries no pane delivery
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | Process inspection fails at startup | The read error propagates before `ready`, including macOS `cannot run ps: Operation not permitted (os error 1)` |
 | No Codex ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| Full-queue refusal of a `pending` notice or forwarded `closed` record | Not an error: retried every 1 s while the pinned session lives |
-| `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
-| `codex queue` exceeds 10 s while the pinned session is alive | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
-| `codex queue` exits non-zero or exceeds 10 s after the pinned session exited | stdout `closed` `session_exited`, exit 0, no closed notice |
-| Any other failure after `ready` | its usual diagnostic, closed notice, exit 1 |
-
-The closed notice is one best-effort `codex queue` of `[cafleet listen closed] exit 1: <stderr diagnostic>`, bounded by 10 s and not retried on a full queue. When it also fails, stderr adds `failed to forward the closed notice to codex thread <THREAD>: <cause>` and the exit stays 1.
+| `codex queue` exits non-zero while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, exit 1 |
+| `codex queue` exceeds 10 s while the pinned session is alive | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, exit 1 |
+| `codex queue` exits non-zero or exceeds 10 s after the pinned session exited | stdout `closed` `session_exited`, exit 0 |
+| Any other failure after `ready` | its usual diagnostic, exit 1 |
 
 For sandbox startup failures, confirm exit and follow the [Codex native reception recipe](coding-agents.md#codex-native-director-reception) for approved escalation and readiness checks.
 
@@ -208,33 +183,33 @@ For sandbox startup failures, confirm exit and follow the [Codex native receptio
 
 ## Push notifications
 
-Ordinary concrete panes receive previews; Directors and self-sends use broker reception. Profile previews are `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.` Delivery fallback leads with Escape and appends ` [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.`
+Ordinary concrete panes receive previews from their own runner's sweep; Directors and self-sends use broker reception. Profile previews are `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.` Delivery fallback leads with Escape and appends ` [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.`
 
 Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.` independently of the 200-codepoint text-output limit. `RECIPIENT_ID` is the recipient; the pointer never carries `--database-url`. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
 
 ### Wrapped delivery methods
 
-Validate identity, ownership, reachability, storage and the operation's own receipt first. Its own uncertain attempt requires inspection; another message's uncertainty follows the per-message hold below. Unknown detection alone permits fallback. A verified-composer run has empty-composer observation and the operation's measured plan from its recorded backend/native version.
+Validate identity, ownership, reachability, storage and the operation's own receipt first. Its own uncertain attempt requires inspection; while another prompt or exec of the run is uncertain, the runner's FIFO is stopped. Unknown detection alone permits fallback. A verified-composer run has empty-composer observation and the operation's measured plan from its recorded backend/native version.
 
-An open/candidate interaction (`permission_request`, `question`, `unknown_interaction`, including obscured) or earlier queued input defers with zero bytes, including Escape. A verified empty composer with a measured plan receives text, a short settle and the measured submit key without Escape. Terminal replies and complete mouse reports during the settle preserve submission; keyboard/paste input stops it as `left_in_composer/manual_input` on a verified-composer run, otherwise uncertain. Pointer input between literal chunks stops continuation as `pointer_input`; permission tokens and gated answers still revoke on pointer input.
+An open/candidate interaction (`permission_request`, `question`, `unknown_interaction`, including obscured) or earlier queued input defers a prompt or exec with zero bytes, including Escape, and leaves a preview pending. A verified empty composer with a measured plan receives text, a short settle and the measured submit key without Escape. Only an interaction that opens or becomes a candidate during the write stops it; keyboard, paste and pointer input and terminal replies leave the write running, and post-submit verification detects a literal that was not submitted. Permission tokens and gated answers still revoke on keyboard and pointer input.
 
-A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`, except while CAFleet's held composer is set. Every head waits for verified empty while that hold remains; clearing/submitting the retained text and verifying empty clears it. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
+A measured plan with an unverified/nonempty composer queues a prompt or exec under `composer_busy` and leaves a preview pending, then delivers when empty; a human draft blocks previews until it is cleared or submitted. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
 
 Absent plan/profile/version probe uses fallback `submission_plan_unavailable`: Escape, settle, literal (`! ` prefix for exec), settle, Enter. Recheck interactions before each stage; permission answers require their tested plan.
 
-Long input uses a plan's declared bracketed-paste framing when the child has enabled it; otherwise a preview over its measured plain limit uses the short `poll` pointer. Oversized prompt/exec input without safe framing is refused before typing; a queued refusal settles `not_submitted/plain_limit_exceeded`. On verified-composer runs, `submitted` requires confirmation by a verified empty composer or a newly opened interaction; an ineffective submit key produces `left_in_composer/submit_unconfirmed`. Insufficient immediate budget returns zero-byte `queued` with `delivery_budget_exhausted`.
+Long input uses a plan's declared bracketed-paste framing when the child has enabled it; otherwise a preview over its measured plain limit uses the short `poll` pointer. Oversized prompt/exec input without safe framing is refused before typing; a queued refusal settles `not_submitted/plain_limit_exceeded`. On verified-composer runs, `submitted` requires confirmation by a verified empty composer or a newly opened interaction; an ineffective submit key records `uncertain/submit_unconfirmed`, stage `submitted`. Insufficient immediate budget returns zero-byte `queued` with `delivery_budget_exhausted`.
 
 ### Runner queue
 
-Accepted deferred input returns durable `ready`, `deferred_at`, `defer_reason` and its input ID; it outlives the invocation and drains automatically. Inspect `cafleet input show INPUT_ID --json`. The Director receives one `input_delivery_result` for its first submitted/not-submitted/uncertain/left-in-composer outcome and for every immediate stopped staged write, except a retried preview result: a preview settled `not_submitted` with `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `runner_stopped`, `runner_lost` or `message_consumed` publishes nothing, live or on shutdown and recovery, because the runner sweep retries its still-pending message or the member already consumed it. `target_inactive` and `target_changed` previews, prompt/exec results, `left_in_composer`, `uncertain` and deferred submissions publish; `input show` reports every receipt.
+The runner's FIFO holds prompt and exec input only. Accepted deferred input returns durable `ready`, `deferred_at`, `defer_reason` and its input ID; it outlives the invocation and drains automatically. Inspect `cafleet input show INPUT_ID --json`. The Director receives one `input_delivery_result` for its first submitted/not-submitted/uncertain outcome and for every immediate stopped staged write; `input show` reports every receipt.
 
-Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `plain_limit_exceeded`, `message_consumed`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
+Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `plain_limit_exceeded`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
 
-A left-in-composer preview settles its attempt and atomically queues a `redelivery` successor at the head. It waits for verified empty, with later input behind it; prompt/exec is retried deliberately. A composer showing only a native suggestion counts as empty. Runner housekeeping checks every queued preview each second, independently of the queue turn: a consumed message cancels its zero-byte receipt as `not_submitted/message_consumed`, and a removed head target as `not_submitted/target_inactive`. A written immediate attempt that fails records `uncertain/write_failed`. An uncertain head on a verified-composer run advances the FIFO but sets the held composer; other runs retain their FIFO/member-wide stop. A head that starts no attempt within 3 minutes of becoming the head, excluding time an open interaction blocks it, generates one `input_delivery_stalled` with a `cause`; [Runtime events](#runtime-events) owns the recovery action, and [`member flush`](#member-flush) force-submits the queued previews.
+A preview is typed only from the runner's sweep, when the FIFO is empty and not stopped and no attempt is active, so queued prompt and exec input always goes first. On a verified-composer run it is typed only into a verified empty composer; a preview whose submission is uncertain stays unnotified and is typed again once the composer is verified empty, so a recipient can see it twice and deduplicates by message ID. On a run without composer verification an uncertain preview is stamped notified and not typed again. An uncertain preview publishes one `input_delivery_result` with `input_id` null and its `message_id`. A composer showing only a native suggestion counts as empty. Runner housekeeping checks the queue head each second, independently of the queue turn, and cancels a removed head target as `not_submitted/target_inactive`. A written immediate attempt that fails records `uncertain/write_failed`. After a prompt or exec records `uncertain`, on every run, the FIFO stays stopped and no queued input and no preview is written until `input reconcile` settles it. A head that starts no attempt within 3 minutes of becoming the head, excluding time an open interaction blocks it, generates one `input_delivery_stalled` with a `cause`; [Runtime events](#runtime-events) owns the recovery action.
 
 ### Held delivery
 
-Degraded/recovering/lost observation, unavailable ownership/storage, uncertain reachability and pending/changed placement hold input without queue acceptance or writing. On a verified-composer run, a latest uncertain/in-progress/abandoned preview holds only that message and later messages remain eligible; every other hold ends the drain. Other runs retain member-wide holds. Held/queued previews leave notification unset and grant no permission.
+Degraded/recovering/lost observation, unavailable ownership/storage, uncertain reachability and pending/changed placement hold prompt/exec input without queue acceptance or writing, and leave previews pending. Pending previews leave notification unset and grant no permission.
 
 ### Accepted trade-offs
 
@@ -248,11 +223,10 @@ Pane operations require active placement; opaque pane IDs may be pending. Indivi
 
 ### `member create`
 
-`cafleet member create --fleet-id ID --name NAME --description DESCRIPTION [--coding-agent AGENT] [--model MODEL] [--permission-mode MODE] [--event-evidence POLICY] [--event-redaction-file PATH] [--effort LEVEL] (PROMPT | --file PATH) [--json]`
+`cafleet member create --fleet-id ID --name NAME --description DESCRIPTION [--coding-agent AGENT] [--model MODEL] [--permission-mode MODE] [--effort LEVEL] (PROMPT | --file PATH) [--json]`
 
 Registers and spawns, resolving the acting Director from the fleet. Omitted backend inherits its placement backend. Description is one sentence. CAFleet names every member pane `<member_id> - <name>`, such as `12 - drafter` (herdr pane label, tmux pane title; Claude and pi also set their own title), and `member list` `window` and `pane_id` locate it. Model forwards to the native CLI; OpenCode requires `<provider-id>/<model-id>`, Hermes passes any value through, and pi passes any value without a `:<thinking>` suffix through. Hermes argv: `hermes chat --cli --source tool --in <cwd>`, then optional `--model MODEL` and `--reasoning LEVEL`, then `-q PROMPT`; it never carries `--provider`, `--resume`, `--continue` or `--create-if-missing`. pi argv: `pi --cafleet-gate MODE --no-approve --tui-mode fullscreen --name "<member_id> - <name>"`, then optional `--model MODEL` and `--thinking LEVEL`, then `-- PROMPT`, as a fresh session.
 
-Evidence defaults to `metadata`; `redacted` requires an absolute readable UTF-8 redaction file. Invalid policy/configuration combinations exit 2 before registration.
 
 Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet-ask); hermes: smart (default smart); pi: cafleet, cafleet-ask (default cafleet-ask)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2. Mode classes (documentation only; argv and run records are unchanged): `auto` (native automatic review or a fixed allow/deny policy) is claude `auto`, `dontAsk`, `bypassPermissions`; codex `approve-for-me`, `never`; opencode `cafleet`; hermes `smart`; pi `cafleet`. `manual` (native interactive approval) is claude `default`, `manual`, `acceptEdits`, `plan`; codex `on-request`; opencode `cafleet-ask`; pi `cafleet-ask`. pi choices emit `--cafleet-gate MODE` and select the CAFleet member gate's mode. The Hermes choice emits no permission argv (`permission_argv_json` `[]`) and is recorded only; the operator configuration's `approvals.mode` governs the session.
 
@@ -331,10 +305,8 @@ Director target, before I/O: `cannot prompt the Director's own pane`, exit 1. Ru
 |---|---|
 | Pre-write error, including a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
 | Partial uncertainty | `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
-| Text left in composer | `prompt delivery to member ID was not submitted: STOP_CAUSE (method=METHOD); the typed text stays in the member's composer. Inspect the pane before retrying.` |
-| Only fallback Escape written | `prompt delivery to member ID was not submitted: STOP_CAUSE (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying.` |
 
-Left-in-composer errors include `input_id=INPUT_ID`; inspect that result and pane before a deliberate retry. Above-limit input with no safe framing uses the pre-write error and the CAUSE strings below, with zero bytes and no reservation at an immediate attempt. UNIT is `bytes` or `characters` for the plan's byte/scalar unit; N includes prefix plus literal.
+Uncertain errors include `input_id=INPUT_ID`; inspect that result and pane before a deliberate retry. Above-limit input with no safe framing uses the pre-write error and the CAUSE strings below, with zero bytes and no reservation at an immediate attempt. UNIT is `bytes` or `characters` for the plan's byte/scalar unit; N includes prefix plus literal.
 
 | Missing delivery mechanism | CAUSE |
 |---|---|
@@ -352,16 +324,14 @@ The runner submits `! ` plus command through profile/fallback/queue. The host ow
 | Root Director, before I/O | `cannot exec in the Director's own pane` |
 | Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
-| Text left in composer | `native command delivery to member ID was not submitted: STOP_CAUSE (method=METHOD); the typed text stays in the member's composer. Inspect the pane before retrying.` |
-| Only fallback Escape written | `native command delivery to member ID was not submitted: STOP_CAUSE (method=fallback); Escape was sent but no text was typed. Inspect the pane before retrying.` |
 
-Left-in-composer errors include `input_id=INPUT_ID`. The pre-write over-limit CAUSE strings are shared with [member prompt](#member-prompt); queued over-limit refusals settle `not_submitted/plain_limit_exceeded` and publish a result. Explicit prompt/exec left in the composer requires a deliberate retry.
+Uncertain errors include `input_id=INPUT_ID`. The pre-write over-limit CAUSE strings are shared with [member prompt](#member-prompt); queued over-limit refusals settle `not_submitted/plain_limit_exceeded` and publish a result. An uncertain prompt/exec requires a deliberate retry.
 
 A failing first write may partially type; failure after Enter may have executed. Inspect native output and reconcile receipts before a newly authorized retry. Receipts retain operation key/digest/state, without command text. After completion, explicitly prompt continuation if the host has not resumed.
 
 ### `member press`
 
-`cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID KEY... [--json]` requests 1–64 ordered keys, each at most 32 UTF-8 bytes, with no implicit Escape/Enter or shell submission. For punctuation use `cafleet member press 42 --from-member-id 1 -- '-' '+' ';'`. Wrapped members receive manual keys through the outer pane. Exit 0 establishes backend acknowledgment, independently of native approval/effects; fields are `member_id,pane_id,keys,status`, with `status=acknowledged`.
+`cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID KEY... [--json]` requests 1–64 ordered keys, each at most 32 UTF-8 bytes, with no implicit Escape/Enter or shell submission. For punctuation use `cafleet member press 42 --from-member-id 1 -- '-' '+' ';'`. Wrapped members receive manual keys through the outer pane. Every probe and the write share one five-second invocation deadline. Exit 0 establishes backend acknowledgment, independently of native approval/effects; fields are `member_id,pane_id,keys,status`, with `status=acknowledged`.
 
 | Condition | Error body (exit 2) |
 |---|---|
@@ -385,48 +355,6 @@ Operational failures exit 1 with empty stdout, including under `--json`. The pri
 
 Request-bound decisions use permission respond.
 
-### `member flush`
-
-`cafleet member flush MEMBER_ID --from-member-id DIRECTOR_ID [--json]` rebuilds every queued preview of an ordinary member from its stored message and submits them through the outer pane in one forced submission, also while the runner's queue turn is stalled. It holds the member's pane input lock, has the runner reserve the previews over its control socket, revalidates the placement, types ` [cafleet: ignore any text before this marker, if present] ` followed by the preview lines in queue order, waits 500 ms, sends the profile submit key, then reports the write outcome to the runner. It sends no Escape or clear key and types after whatever the composer holds. One 10-second deadline covers the command; there is no `--timeout`. Previews that do not fit the plain limit stay queued and are listed in `remaining_input_ids`.
-
-JSON fields are ordered `member_id,pane_id,flush_input_id,flushed_input_ids,message_ids,remaining_input_ids,delivery`, with `delivery` `{"status":"submitted","method":"forced","reason":null}`; `flush_input_id` and `delivery` are null when nothing was queued. Text is `Flushed N queued previews to member ID (input FLUSH_INPUT_ID): messages M1,M2`, plus `Still queued: IDS` when some remain, or `No queued previews for member ID`. Each flushed preview settles `submitted` with method `forced` and publishes one `input_delivery_result` carrying `flush_input_id`.
-
-Every refusal exits 1 with `Error: queued input was not flushed to member ID: CAUSE`, writes zero bytes and leaves receipts unchanged:
-
-| Condition | CAUSE |
-|---|---|
-| Root Director target | `cannot flush the Director's own pane` |
-| Member inactive | `member ID is not active` |
-| Pending placement | `member ID has no pane yet (pending placement)` |
-| Run not `running` | `the member's run is STATUS` |
-| Lock busy until the deadline | `member ID's pane input remained busy` |
-| Target check fails | `press target context does not match the recorded placement` |
-| Placement changed | `member ID placement changed before flush` |
-| Runner control socket unreachable | `the member's runner is unreachable: CAUSE` |
-| Ordinary input fenced or manual accounting failed | `the member's input is fenced` |
-| Earlier flush outstanding or runner attempt in flight | `a runner input attempt is in flight; retry` |
-| Unresolved receipt | `input INPUT_IDS is unresolved; reconcile it with cafleet input reconcile before flushing` |
-| Queued prompt or exec | `queued KIND input INPUT_ID cannot be rebuilt from its receipt; settle it with 'cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition not-submitted --evidence-ref REFERENCE', then resend it` |
-| Interaction or candidate shown | `an interaction is open (CLASSIFICATION)` |
-| Observation not visible or degraded | `the member's screen observation is unavailable: REASON` |
-| Draft unreadable | `the composer draft cannot be read from the screen` |
-| Draft starts with a mode prefix | `the composer draft starts with mode prefix 'PREFIX'` |
-| No composer plan | `the BACKEND profile has no submission plan for native version VERSION` |
-| First pointer line above the bound | `the first queued preview is N UNIT as a pointer line, above the flush limit of MAX UNIT` |
-| A selected receipt changed during reservation | `queued input changed while the flush was prepared; retry` |
-
-An unknown member keeps its not-found error. Receipt refusals list every matching input ID ascending, comma-separated; with several queued prompt/exec inputs the error names the lowest and appends `; also queued: IDS`.
-
-| Write outcome | Error (exit 1) |
-|---|---|
-| Failure before any writing process started, and the runner confirmed the settlement | `Error: queued input was not flushed to member ID: CAUSE` |
-| Failure before any writing process started, and the runner did not confirm the settlement | `Error: queued input flush to member ID is uncertain: CAUSE; the runner did not confirm that the flush wrote nothing: SETTLE_CAUSE (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
-| A writing process started and failed, or an unreadable acknowledgment | `Error: queued input flush to member ID is uncertain: CAUSE (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
-| The reservation expired before settlement | `Error: queued input flush to member ID is uncertain: the flush reservation expired before settlement (input_id=FLUSH_INPUT_ID). Inspect the pane, then reconcile input FLUSH_INPUT_ID.` |
-| A reconciliation settled the flush first | `Error: queued input flush to member ID was already settled DISPOSITION before the flush reported its write outcome (input_id=FLUSH_INPUT_ID).` |
-
-Reconcile an uncertain flush with `cafleet input reconcile FLUSH_INPUT_ID` after pane evidence; it settles the flush and every preview it owns.
-
 ### `member capture`
 
 `cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` reads trailing lines (default 20); `--ansi` preserves escapes, otherwise clean redraws/escapes. Capture requires no input lock; pending placement fails. `captured_at` stamps reading; `content_sha256` hashes exact emitted `content`.
@@ -441,59 +369,29 @@ Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, 
 
 ### Runtime presentation
 
-Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
+Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`) and `unresolved_input_ids`.
 
-Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Settled left-in-composer inputs are absent; their queued successors remain listed. An in-progress or uncertain `flush` receipt is listed too. Registry reads establish no live health. Effective policy contains `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
+Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health.
 
-Uncertain and left-in-composer prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write_failed (method=profile)` and `input_id=INPUT_ID`.
+Uncertain prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write_failed (method=profile)` and `input_id=INPUT_ID`.
 
 ### Delivery reporting
 
-`delivery` contains `status,method,reason`. Method is `profile`, `fallback`, `forced` (a preview submitted by `member flush`, and the flush receipt) or null before selection. Held prompt/exec exits 1; held send retains commit. `left_in_composer` is settled and needs no reconciliation; prompt/exec exits 1, while sends retain exit 0. `uncertain` requires reconciliation; `not_submitted` records cancellation or an evidence-based reconciliation; `not_applicable` is broker-only.
+`delivery` contains `status,method,reason`. Method is `profile`, `fallback` or null before selection. Held prompt/exec exits 1. `uncertain` requires reconciliation and exits 1; `not_submitted` records cancellation or an evidence-based reconciliation.
 
-Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,redelivery,delivery_budget_exhausted`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run hold or an earlier receipt on a run without composer verification), `notification_failed` (lock/transport/storage/submission failure). Queued previews stay unnotified until submission or settlement of accepted delivery; later results appear in receipts/events without changing original command output.
+Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,delivery_budget_exhausted`; the fallback reason is `submission_plan_unavailable`. Pending previews stay unnotified until the sweep submits them; later results appear in receipts/events without changing original command output.
 
 ### Runtime events
 
-Notifications contain the full event JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,automatic_refusal_observed,automatic_review_unavailable,input_delivery_result,input_delivery_stalled,runner_degraded,runner_lost,runner_exited`.
+Notifications contain the full event JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_closed,input_delivery_result,input_delivery_stalled,runner_degraded,runner_lost,runner_exited`.
 
-Identity fields: `event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Permission/question/automatic-review `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question,review_automatic_refusal,review_automatic_review_unavailable`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv. Delivery actions have their receipt-derived forms below; other events carry null action.
+Identity fields: `event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Permission/question `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv. Delivery actions have their receipt-derived forms below; other events carry null action.
 
-Evidence contains `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,excerpt,evidence_digest`. Positive `operation_rows` is null exactly with null operation; above one requires confirmation against excerpt. Metadata nulls screen-derived operation/choices/excerpt. Excerpts/payloads are bounded at 8/16 KiB.
+Evidence contains `backend,native_version,rule_id,screen_seq,evidence_digest` and no screen text; read the operation and choices from `member capture`. Payloads are bounded at 16 KiB.
 
-Both automatic-review kinds carry `null` `interaction_id` and `classification`, `source` `runner_screen`, `decision_outcome` `"unknown"` and `director_action.inspect_argv` `["cafleet","event","show","<EVENT_ID>","--json"]`:
+Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification, source `runner_lifecycle`, outcome `unknown`, null `director_action` and `cause={"kind":STOP_CAUSE}` whenever a stop cause is recorded. A prompt or exec result has its input ID and null `message_id`, with delivery and cause derived from its receipt; an uncertain preview has null `input_id`, its `message_id` and delivery `{"status":"uncertain","method":METHOD,"reason":null}`, deduplicated by run and message. Stages are `zero_bytes,partial,submitted,unknown`; an uncertain or in-progress prefix short of the submit key is `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload.
 
-| Field | `automatic_refusal_observed` | `automatic_review_unavailable` |
-|---|---|---|
-| `evidence` | `rule_id` names the refusal rule; `operation`, `operation_rows` and `excerpt` follow the run's evidence policy | `rule_id` names the notice rule; `operation` and `operation_rows` are null |
-| `director_action.kind` | `review_automatic_refusal` | `review_automatic_review_unavailable` |
-
-Automatic-review events create no interaction/input eligibility; permission commands reject their association before writing.
-
-Delivery results contain `input_id,message_id,delivery,stage,flush_input_id`, null interaction/classification, source `runner_lifecycle`, outcome `unknown` and receipt-derived `cause={"kind":STOP_CAUSE}` whenever recorded. Stages are `zero_bytes,escape_only,partial,literal_complete,submitted,unknown`; an uncertain/in-progress written prefix remains `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload. `flush_input_id` is null except for a forced preview: an acknowledged flush publishes one result per preview with delivery `submitted`/`forced` and stage `submitted`, an uncertain flush one with delivery `uncertain`/`forced`, stage `unknown` and its recorded cause, both with null action; the flush receipt itself publishes nothing.
-
-`director_action` is `{"kind":"review_left_input","instruction":INSTRUCTION,"press_argv":["cafleet","member","press","MEMBER_ID","--from-member-id","DIRECTOR_ID","Enter"]}` only for `left_in_composer` at `literal_complete`/`submitted` with cause `observer_unavailable`, `deadline_expired` or `submit_unconfirmed`. INSTRUCTION requires capture, `member show` confirmation of no current interaction, and whole-literal confirmation before pressing Enter; otherwise ask the user to clear/submit natively. All other causes/stages, including interaction stops, have null action; the runner supplies no second submit key.
-
-`input_delivery_stalled` reports a queue head that started no attempt within 3 minutes of becoming the head, once per head through recovery; time an open interaction blocks the head does not count. It carries ordered `input_id,message_id,blocking_input_id,waiting_since,delivery,cause`, where `waiting_since` is UTC RFC 3339, delivery is queued and `cause` is `{"kind":KIND,"detail":DETAIL}`; its null interaction/classification, lifecycle source and evidence shape match delivery results. The runner selects the first cause that holds:
-
-| `cause.kind` | Holds when | `blocking_input_id` | `detail` |
-|---|---|---|---|
-| `forced_flush` | A `member flush` reservation is outstanding | The flush receipt | `null` |
-| `immediate_attempt` | An immediate client or sweep attempt is in flight | Its receipt, or `null` | `null` |
-| `pending_finalization` | A zero-byte finalization or notification stamp awaits storage | That receipt | `null` |
-| `held_composer` | CAFleet's held composer is set | The held blocker | `null` |
-| `unresolved_input` | Another ordinary receipt of the run is `in_progress` | That receipt, lowest ID | `null` |
-| `drain_pending` | The queue turn's input drain stays pending | `null` | The drain blocker, e.g. `terminal reply pending` |
-| `pane_input_busy` | The pane input lock stayed busy, e.g. a hung `member press` | `null` | `null` |
-| `delivery_budget_exhausted` | The attempt budget ran out | `null` | `null` |
-| `storage_unavailable` | Storage was unavailable | `null` | `null` |
-| `attempt_failed` | The last attempt failed | `null` | The error, at most 256 bytes |
-| `composer_busy` | The last queue turn waited on a busy composer | `null` | `null` |
-| `queue_turn_not_reached` | No row above holds | `null` | `null` |
-
-For `held_composer` the action is `{"kind":"review_stalled_input","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","BLOCKING_INPUT_ID","--json"],"press_argv":PRESS_ARGV}`. INSTRUCTION is exactly `Capture the member's pane and inspect the blocking input. When its whole literal remains and member show reports no current interaction, submit it with press_argv; when the capture shows other keys are needed, send them with member press; otherwise ask the user to clear or submit the composer on the member's native surface. Reconcile an uncertain blocker after that evidence. A composer that never verifies empty after clearing is a profile defect to report for correction.` A verified empty composer resumes the FIFO and the waiting head delivers next; if the member's poll already consumed the head's message, the runner cancels it as `not_submitted/message_consumed` instead. PRESS_ARGV is the left-input action's argv only when the blocker qualifies, otherwise null.
-
-For every other cause the action is `{"kind":"review_stalled_queue","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","INPUT_ID","--json"],"flush_argv":["cafleet","member","flush","MEMBER_ID","--from-member-id","DIRECTOR_ID"]}`, inspecting the waiting head. INSTRUCTION is exactly `Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. When the queue stays stalled, ask the user to confirm a forced flush, then run flush_argv. A queue_turn_not_reached cause is a runner defect to report.`
+`input_delivery_stalled` reports input that waited 3 minutes without a delivery attempt: a queued prompt or exec head, once per run and input, or the sweep's selected preview held because the composer is not verified empty, once per run and message. Time an open interaction blocks the input does not count. It carries ordered `input_id,message_id,waiting_since`, with exactly one of the two IDs set and `waiting_since` in UTC RFC 3339; its null interaction/classification, lifecycle source and evidence shape match delivery results. Its action is `{"kind":"review_stalled_delivery","instruction":INSTRUCTION,"inspect_argv":["cafleet","member","capture","MEMBER_ID","--json"]}`. INSTRUCTION is exactly `Capture the member's pane. When the composer holds text, submit or clear it with member press keys the capture establishes, or ask the user to clear or submit it on the member's native surface.`
 
 Every argv array appends `--database-url URL` for a non-default database. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
 
@@ -503,115 +401,82 @@ Every argv array appends `--database-url URL` for a non-default database. [Direc
 
 ### `input show` and `input reconcile`
 
-`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,stop_cause,left_stage,flush_input_id,flushed_input_ids`. `flush_input_id` names the flush that owns a forced preview; `flushed_input_ids` lists a `flush` receipt's previews ascending; each is otherwise null.
+`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,disposition,evidence_ref,delivery,deferred_at,defer_reason,stop_cause`.
 
-Kinds: `preview,prompt,exec,permission_response,flush`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Stored dispositions: `submitted,not_submitted,abandoned_uncertain,left_in_composer`; CLI: `submitted,not-submitted,abandoned-uncertain`. Preview keys: `preview:<run_id>:<message_id>:<attempt>`. Receipts hold digests, excluding literals. Attempt starts at 1; each message's attempts share one digest under distinct keys. Stable receipt IDs.
+Kinds: `prompt,exec`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Stored dispositions: `submitted,not_submitted,abandoned_uncertain`; CLI: `submitted,not-submitted,abandoned-uncertain`. Receipts hold digests, excluding literals. Stable receipt IDs.
 
-Read the latest preview attempt in the current run before choosing delivery:
+Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. A not-submitted receipt without a recorded method reports a null method with `method_unrecorded`.
 
-| Latest attempt | Next action |
-|---|---|
-| None | Start attempt 1 |
-| Deferred `ready` | Leave queued; skip this message for this invocation |
-| Other `ready` | Reuse its key and reevaluate zero-byte eligibility |
-| `accepted` or submitted | Settle/stamp or verify consumption without typing |
-| Not submitted | The runner sweep or the next send starts N+1, including after reconciliation |
-| In-progress, uncertain or abandoned uncertain | Per-message hold on a verified-composer run; otherwise end the member's drain |
-| Left in composer | Its successor must already exist; absence fails with `preview input INPUT_ID was left in the composer without a re-delivery attempt` |
-
-Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; left-in-composer → `left_in_composer` with its durable `left_stage`; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. A not-submitted receipt without a recorded method reports a null method with `method_unrecorded`. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
-
-`stop_cause` records a staged stop and survives settlement/reconciliation; it is required for `left_in_composer` and on transition to uncertain, and otherwise nullable. `left_stage` follows it in output, null except for `left_in_composer`: `escape_only` means only fallback Escape, `partial` a complete literal prefix, `literal_complete` the whole literal without a submit key, and `submitted` the whole literal and key with unconfirmed effect.
+`stop_cause` records why an attempt that wrote bytes ended without confirmed submission; it is required on transition to uncertain, survives settlement/reconciliation and is otherwise null.
 
 | Cause | Recorded when |
 |---|---|
-| `manual_accounting_failed` | Manual-input accounting failed when a staged stage stopped |
-| `manual_input` | Keyboard/paste input since literal start or fallback Escape; pointer input also stops permission responses with this cause |
-| `pointer_input` | Pointer input between ordinary literal chunks |
-| `interaction_candidate` | A staged stage stopped on a candidate interaction |
-| `interaction_open` | A staged stage stopped on any other blocking interaction |
-| `observer_unavailable` | A staged stage stopped because the observer was unavailable or reported a gap |
-| `deadline_expired` | Complete-prefix chunk bound reached or insufficient budget remains before the submit key |
-| `submit_unconfirmed` | Submit effect remained unconfirmed; left-in-composer stage `submitted` |
+| `interaction_open` | An interaction appeared during the write |
+| `interaction_candidate` | A candidate interaction appeared during the write |
+| `submit_unconfirmed` | Submit effect remained unconfirmed; uncertain, stage `submitted` |
+| `deadline_expired` | The chunk bound was reached or too little budget remained before the submit key |
 | `short_write` | A stopped prefix ends inside a scalar/paste marker, or an answer stage writes short |
-| `write_failed` | PTY/checkpoint error, unrecorded possible I/O, failed/short close, short submit key, failed deferred, written immediate or permission attempt, or a failed or expired forced flush |
-| `runner_stopped` | Shutdown ended an active attempt that may have written a child byte, or an outstanding forced flush |
-| `runner_lost` | Recovery after runner loss found an outstanding forced flush |
+| `write_failed` | PTY/checkpoint error, unrecorded possible I/O, failed/short close, short submit key, failed deferred, written immediate or permission attempt |
+| `runner_stopped` | Shutdown ended an active attempt that may have written a child byte |
 
-At checks the first matching cause among the first six wins, then an incomplete-prefix stop takes the `short_write` override. Recorded complete prefixes on verified-composer runs settle left in the composer; short/write/shutdown failures, permission answers and other runs retain uncertainty. `left_in_composer` needs no reconciliation and preview re-delivery is automatic. Director reconciliation of uncertainty requires nonempty evidence, owner synchronization and no active writer; an unreachable owner preserves uncertainty. Missing live placement fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`; repeating a settled ordinary disposition returns original evidence and a conflicting disposition fails. Settlement writes no input and establishes no native result.
+Every stop records `uncertain`, and the runner sends no second submit key. Director reconciliation of uncertainty requires nonempty evidence, owner synchronization and no active writer; an unreachable owner preserves uncertainty. Missing live placement fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`; repeating a settled ordinary disposition returns original evidence and a conflicting disposition fails. Settlement writes no input and establishes no native result.
 
-Reconciling a `flush` receipt settles it and every forced preview it owns together: `submitted` → submitted, `not-submitted` → not_submitted (the runner sweep retries each still-pending message), `abandoned-uncertain` → abandoned_uncertain. Reconciling one forced preview fails with `Error: input INPUT_ID belongs to forced flush FLUSH_INPUT_ID; reconcile the flush`, and a flush whose reservation is still outstanding with `Error: flush FLUSH_INPUT_ID is still outstanding`. Reconciling a queued `ready` prompt or exec as `not-submitted` cancels it with zero bytes and removes it from the queue.
+Reconciling a queued `ready` prompt or exec as `not-submitted` cancels it with zero bytes and removes it from the queue.
 
-Nullable `permission_response` audit contains `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,choice_id,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at`; exactly one of `decision` and `choice_id` is null, and the text line `Permission decision: … decision=DECISION choice=CHOICE …` renders it as `-`. Settlement grants no answer and releases no possibly transmitted claim. IDs are positive; malformed input exits 2, absent/corrupt rows fail explicitly.
+Settlement grants no answer. IDs are positive; malformed input exits 2, absent/corrupt rows fail explicitly.
 
 ### `permission inspect`
 
-`cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads pinned-runner state without child bytes, receipt, audit or claim. Missing interaction fails before event/run/database checks; stale/unavailable owner fails operationally.
+`cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads pinned-runner state without child bytes. Missing interaction fails before event/run/database checks; stale/unavailable owner fails operationally.
 
 Result `request` contains identity `event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq`; context `classification,visibility,backend,native_version`; capability `answer_rule_id,answer_capability,capability_reason,supported_decisions,supported_choices,request_token,output_seq`; `evidence,missing_evidence`.
 
-Visibility: `visible,obscured,not_visible,unknown`; capability: `tested,unknown`. Answerable requests have null `capability_reason`; others return a bounded explanation. For a permission request, supported decisions are the tested subset of `allow,deny` and `supported_choices` is `[]`. For a question, `supported_decisions` is `[]` and `supported_choices` lists one `{choice_id,label,scope}` per tested choice; a question without one returns capability `unknown` with reason `question has no tested answer`. Blocked/unsupported returns empty arrays/null token. Otherwise token is lowercase 64-hex, request-bound. For a permission request, missing facts are `operation,arguments,cwd,environment,targets,effects,choice_scope`; operation requires nonblank/unredacted/untruncated evidence; obtain necessary missing facts before deciding. A question returns `missing_evidence` `[]`. Text `answers=` lists the supported decisions or choice ids.
+Visibility: `visible,obscured,not_visible,unknown`; capability: `tested,unknown`. Answerable requests have null `capability_reason`; others return a bounded explanation. For a permission request, supported decisions are the tested subset of `allow,deny` and `supported_choices` is `[]`. For a question, `supported_decisions` is `[]` and `supported_choices` lists one `{choice_id,label,scope}` per tested choice; a question without one returns capability `unknown` with reason `question has no tested answer`. Blocked/unsupported returns empty arrays/null token. Otherwise token is lowercase 64-hex, request-bound. For a permission request, missing facts are `operation,arguments,cwd,environment,targets,effects,choice_scope`, because evidence carries none of them; obtain necessary missing facts before deciding. A question returns `missing_evidence` `[]`. Text `answers=` lists the supported decisions or choice ids.
 
 ### `permission respond`
 
-`cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID --expected-run-id RUN_ID --expected-owner-epoch EPOCH --request-token TOKEN (--decision allow|deny | --choice CHOICE_ID) --decision-source director-auto|user --director-mode auto|manual|unknown --mode-evidence-ref REFERENCE --decision-evidence-ref REFERENCE --operation-key KEY [--json]`
+`cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID --expected-run-id RUN_ID --expected-owner-epoch EPOCH --request-token TOKEN (--decision allow|deny | --choice CHOICE_ID) [--json]`
 
-Pass exactly one of `--decision` (permission request) and `--choice` (question, one of the inspected `supported_choices` ids); both, neither or a choice id outside 1–64 bytes of lowercase hyphen-separated words exit 2. Require positive IDs/epoch, exact token, nonblank key and evidence references of 1–2048 UTF-8 bytes with non-whitespace and no C0/DEL. References identify host evidence without embedded commands/screens/secrets. `director-auto` requires current host mode `auto`; `user` records a user decision in any mode. Resolve mode independently of member policy; other/unknown modes require user permission. Native/managed rules remain authoritative. Shape/source-mode errors exit 2 before effects. Record operation key before dispatch.
+Pass exactly one of `--decision` (permission request) and `--choice` (question, one of the inspected `supported_choices` ids); both, neither or a choice id outside 1–64 bytes of lowercase hyphen-separated words exit 2. Require positive IDs/epoch and the exact token; shape errors exit 2 before effects. Resolve mode independently of member policy; other/unknown modes require user permission. Native/managed rules remain authoritative.
 
-Validate retained keys first: matching metadata returns stored result with zero new bytes; conflicting reuse fails. New keys cannot bypass active/submitted/uncertain/abandoned claims.
+The runner accepts one answer per episode and stores nothing about it. Once an answer's first byte is written, a later respond for that episode returns `rejected/zero_bytes` with reason `an answer was already sent for this episode`; a zero-byte refusal leaves the episode answerable.
 
-Result `response` contains `status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,decision_source,stage,output_seq,reason`, exactly one of `decision` and `choice` non-null; text adds `choice=CHOICE` after `decision=DECISION`. Status `accepted` means submitted, `held/rejected` zero bytes, `uncertain` partial/submitted/unknown. Input/sequence/reason may be null. Acceptance establishes key submission independently of native approval/execution.
+Result `response` contains `status,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,stage,output_seq,reason`, exactly one of `decision` and `choice` non-null; text adds `choice=CHOICE` after `decision=DECISION`. Status `accepted` means submitted, `held/rejected` zero bytes, `uncertain` partial/submitted/unknown. Sequence/reason may be null; an uncertain reply reports its stop cause, or `manual_input` when keyboard or pointer input revoked the answer after a written stage. Acceptance establishes key submission independently of native approval/execution.
 
-Retained accepted/submitted returns accepted/submitted; in-progress/uncertain returns uncertain/unknown; settled not-submitted/abandoned returns rejected/zero_bytes for this retry, preserving original claim; ready takes exact-metadata live validation. Uncertainty reports recorded cause or `prior transmission remains uncertain`.
+Accepted exits 0; structured held/rejected/uncertain prints selected response and exits 1: `Error: permission response STATUS for interaction INTERACTION_ID: REASON`. Pre-reply failures retain ordinary categories/context; usage exits 2.
 
-Accepted/prior submitted exits 0; structured held/rejected/uncertain prints selected response and exits 1: `Error: permission response STATUS for interaction INTERACTION_ID: REASON`, appending ` (input_id=INPUT_ID)` when known. Pre-reply failures retain ordinary categories/context; usage exits 2.
-
-Blocked current requests create no receipt/audit/claim/byte: `Error: runner control: permission request is blocked: REASON`, followed by known run/interaction/key context; capability reasons are `permission input is fenced`, `manual input accounting failed`, `observation degraded: CODE`, `observation transitions pending`, `observation evidence pending`, `observation update pending`, `observation incomplete`, `terminal input interrupted`, `outer terminal closed`, `native output closed`, `terminal output still arriving`, `terminal reply pending`, `permission request is not visible`, or `permission request is not the current interaction`, matching inspection.
+Blocked current requests write no byte: `Error: runner control: permission request is blocked: REASON`, followed by known run/interaction context; capability reasons are `permission input is fenced`, `manual input accounting failed`, `observation degraded: CODE`, `observation transitions pending`, `observation update pending`, `observation incomplete`, `terminal input interrupted`, `outer terminal closed`, `native output closed`, `terminal output still arriving`, `terminal reply pending`, `permission request is not visible`, or `permission request is not the current interaction`, matching inspection.
 
 A wrong-kind answer is a structured zero-byte `rejected` response (exit 1): `choice answers apply only to question interactions` (`--choice` on a non-question), `decision answers apply only to permission requests` (`--decision` on a question), or `choice CHOICE_ID has no tested answer for this question`.
 
-### `member recover`
-
-`cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID [--json]` reconciles active/deregistered recorded runs without starting agents; absent run fails before mutation.
-
-Exceptional form: `cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID --owner-terminated --expected-run-id RUN_ID --expected-owner-epoch EPOCH --evidence-ref REFERENCE [--json]`. All four options are required, with positive inspected snapshot IDs/epoch and nonempty operator attestation that owner/startup processes ended. Invalid combinations exit 2; changed ownership rejects and positive live evidence protects the owner.
-
-Result fields: `member_id,run_id,outcome,replayed_count,inbox_count,archived_count,status,cleanup_diagnostics`. Outcomes: `recovered,recovering,live_or_unreachable,operator_reconciliation_required`. Counts cover newly committed work; incomplete/unreachable outcomes remain distinct from recovery.
-
 ## `setup` and `doctor`
 
-`cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>`, `failed to enable hermes plugin cafleet in <config path>: <cause>` or config-path error. One installation record per backend covers its skills, presets and extensions.
+`cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>`, `failed to enable hermes plugin cafleet in <config path>: <cause>` or config-path error.
 
-Codex receives `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; OpenCode the `cafleet` and `cafleet-ask` presets (shell rules for the four member broker commands, `"cafleet": "deny"` tool permission) and the plugin `<preset base>/plugins/cafleet.ts`; Hermes the plugin under `<hermes home>/plugins/cafleet/`, enabled with gateway injection in the file `hermes config path` reports, refusing when `plugins.disabled` lists `cafleet`; pi the extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record, without running `pi`. Each plugin and extension runs only the `cafleet` recorded in its executable record by the setup that installed it. Setup writes no Director-only deny, ask or prompt entry. `--coding-agent hermes` requires `hermes` on `PATH`; plain setup without it installs the skills, records the installation and prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`. `cafleet setup --coding-agent pi` prints:
+Codex receives `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; OpenCode the `cafleet` and `cafleet-ask` presets (shell rules for the four member broker commands, `"cafleet": "deny"` tool permission) and the plugin `<preset base>/plugins/cafleet.ts`; Hermes the plugin under `<hermes home>/plugins/cafleet/`, enabled with gateway injection in the file `hermes config path` reports, refusing when `plugins.disabled` lists `cafleet`; pi the extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record, without running `pi`. Each plugin and extension runs only the `cafleet` recorded in its executable record by the setup that installed it. Setup writes no Director-only deny, ask or prompt entry. `--coding-agent hermes` requires `hermes` on `PATH`; plain setup without it installs the skills and prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`. `cafleet setup --coding-agent pi` prints:
 
 ```
 pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
 pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 ```
 
-`cafleet doctor [--verbose] [--json]` runs every check without aborting. Statuses are `ok`, `info`, `warn` and `error`; doctor exits 1 with `Error: doctor found errors` after printing when any check is `error`, otherwise 0, `warn` included.
+`cafleet doctor [--json]` runs every check without aborting. Text prints one `<status> <name>: <detail>` row per check in check order; `--json` prints one JSON array of `name,status,detail` objects in the same order, each detail equal to its text form without the `<status> <name>: ` prefix. Statuses are `ok`, `info`, `warn` and `error`; doctor exits 1 with `Error: doctor found errors` after printing when any check is `error`, otherwise 0, `warn` included.
 
-| Invocation | stdout |
-|---|---|
-| `cafleet doctor` | One `<status> <component>: <detail>` summary line per component: `multiplexer`, `database`, each backend, then `members` lines |
-| `cafleet doctor --verbose` | One `<status> <name>: <detail>` row per check, no summary |
-| `cafleet doctor --json` | `{"summary":[…],"checks":[…]}`; summary entries `component,status,detail` (`members` adds `state,member_ids`), check entries `name,status,detail` (`member_runtime` entries add `member_id,state`) |
+The `multiplexer` check reports the backend and server (`ok` `<backend> server=<server>`), and the `multiplexer.caller_pane` check that follows it reports the `fleet create` pane verification without `--pane` (§ Fleet commands):
 
-The `multiplexer` check reports the backend and server (`ok` `<backend> server=<server>`), and the `multiplexer.caller_pane` check that follows it reports the `fleet create` pane verification without `--pane` (§ Fleet commands). Their `multiplexer` summary line folds both:
-
-| Situation | Checks (`multiplexer`, `multiplexer.caller_pane`) | Summary line |
+| Situation | `multiplexer` | `multiplexer.caller_pane` |
 |---|---|---|
-| Pane verified | `ok`, `ok` `<VAR>=<pane_id> session=<session> window=<window_id>` | `ok multiplexer: <backend> (session <session>, pane <pane_id>)` |
-| Shared-server ancestor | `info` `not checked: a shared <label> server (pid <pid>) supplies the caller environment`, `warn` with the refusal body | `warn multiplexer: <refusal body>` |
-| Env pane unset or unverified | `ok`, `warn` with the refusal body | `warn multiplexer: <backend> (server <server>); <refusal body>` |
-| Verification or verified-pane context read errored | `ok`, `error` with the error | `error multiplexer: <error>` |
-| Detection, server or availability failed | `error` with the cause, `info` `unavailable: the multiplexer is unavailable` | `error multiplexer: <cause>` |
+| Pane verified | `ok` | `ok` `<VAR>=<pane_id> session=<session> window=<window_id>` |
+| Shared-server ancestor | `info` `not checked: a shared <label> server (pid <pid>) supplies the caller environment` | `warn` with the refusal body |
+| Env pane unset or unverified | `ok` | `warn` with the refusal body |
+| Verification or verified-pane context read errored | `ok` | `error` with the error |
+| Detection, server or availability failed | `error` with the cause | `info` `unavailable: the multiplexer is unavailable` |
 
 The refusal body is the `fleet create` refusal without its `cafleet fleet create ` prefix, and a `warn` keeps the exit code at 0.
 
-A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, an identical phrase listed once (`info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets not installed at /home/user/.codex — run 'cafleet setup --coding-agent codex'`. No installation recorded is `warn`.
+Each backend reports `<agent>.configuration`, `<agent>.executable`, its preset and extension checks, then `<agent>.skills`. An absent executable is `info` `<binary> is optional and absent from PATH`, and that backend's preset, extension and skills checks are `info` `unavailable: executable is absent`. `<agent>.skills` byte-compares every embedded skill file with its installed copy, as the extension checks do: missing skills are `warn` `skills not installed at <skills dir>; run 'cafleet setup --coding-agent <agent>'`, and a differing or unreadable file is `error` `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'`.
 
-Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
+Extension checks precede `<agent>.skills`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, `hermes.plugin_enabled` follows `hermes.extension`, and `pi.extension` follows `pi.executable`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. When the resolved Hermes base does not exist, doctor runs no `hermes` process and both Hermes rows are `info` `unavailable: no Hermes home at <base>`.
 
 | Check | `ok` detail | `error` details |
 |---|---|---|
@@ -620,22 +485,7 @@ Extension checks precede `<agent>.installation`: `opencode.extension` follows th
 | `hermes.plugin_enabled` | `cafleet enabled with gateway injection` | `cannot read hermes configuration through 'hermes config get': <cause>`; `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'`; `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
 | `pi.extension` | The extension path | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent pi'`; `<record path>: <cause>; run 'cafleet setup --coding-agent pi'` |
 
-An extension check is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable file. Their summary phrases are `extension <path> is missing or differs from the embedded copy` and `extension executable record <path> is unusable: <cause>` (setup fix), the two `cannot read hermes configuration through …` details above and `hermes plugins.disabled lists cafleet` (no setup fix), `hermes plugin cafleet is not enabled: <key>, …` (setup fix) and `info` `no Hermes home at <base>` (setup fix).
-
-`members` lines group member IDs by state, one line per occupied state: `<status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]`. Three or more consecutive IDs collapse to `a-b`; `ID` in the command stays literal, and a `member recover` command fills in `--from-member-id` with the fleet Director ID when every listed member shares one Director (else `<director-id>` stays literal). With no live member the line is `ok members: none running`; a database that is not current gives `info members: not checked (database unavailable)`; a failed run query gives `error members: could not be checked: <cause>`.
-
-| Label | Status | Next command |
-|---|---|---|
-| `running` | `ok` | — |
-| `not responding` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| `lost runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` or `cafleet member delete ID` |
-| `interrupted launch` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| `agent exited` | `warn` | `cafleet member delete ID` |
-| `deleted with leftover runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
-| `could not be checked` | `error` | `cafleet doctor --verbose` |
-| `not checked (time limit)` | `info` | `cafleet member show ID` |
-
-Ended runs of deregistered members are hidden from the summary and appear in `--verbose` as `info member_runtime.<run_id>: member <id> ended: run <status>, cleanup complete`. Other verbose runtime rows read `<status> member_runtime.<run_id>: member <id> <label>: <phrase>; …`, ending ` — run '<command>'` with the literal member ID, for example `warn member_runtime.9: member 9 lost runtime: owner lock is free; runtime did not answer the health probe: <cause> — run 'cafleet member recover 9 --from-member-id 2' or 'cafleet member delete 9'`.
+An extension check is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable file.
 
 ## Error messages
 
@@ -672,10 +522,6 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` |
 | `permission inspect` | An unknown `INTERACTION_ID` | `Error: Interaction <interaction-id> not found` |
-| `member flush` | A refusal before any byte | `Error: queued input was not flushed to member ID: CAUSE`, with CAUSE under § `member flush` |
-| `member flush` | A started write failed, the reservation expired, or a reconciliation settled the flush first | The write-outcome errors under § `member flush` |
-| `input reconcile` | The input is a forced preview owned by a flush | `Error: input INPUT_ID belongs to forced flush FLUSH_INPUT_ID; reconcile the flush` |
-| `input reconcile` | The flush's reservation is still outstanding | `Error: flush FLUSH_INPUT_ID is still outstanding` |
 
 Text-body errors of `message send` and `member create`:
 

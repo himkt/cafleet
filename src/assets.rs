@@ -3,7 +3,6 @@ use crate::coding_agent::hermes::HermesConfig;
 use crate::config::EnvLookup;
 use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
-use rusqlite::Connection;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -48,10 +47,7 @@ pub(crate) fn agent_paths(
     agent: CodingAgent,
 ) -> Result<AgentPaths, CafleetError> {
     let base = agent.config_dir(env, home)?;
-    let skills_dir = match agent {
-        CodingAgent::Opencode => opencode_skills_base(home).join("skills"),
-        _ => base.join("skills"),
-    };
+    let skills_dir = skills_dir(agent, &base, home);
     let presets = match agent {
         CodingAgent::Claude => vec![],
         CodingAgent::Codex => vec![(
@@ -91,6 +87,14 @@ pub(crate) fn agent_paths(
     })
 }
 
+/// Where setup installs `agent`'s skills, given its resolved configuration `base`.
+pub(crate) fn skills_dir(agent: CodingAgent, base: &Path, home: &Path) -> PathBuf {
+    match agent {
+        CodingAgent::Opencode => opencode_skills_base(home).join("skills"),
+        _ => base.join("skills"),
+    }
+}
+
 pub(crate) fn opencode_plugins_dir(preset_base: &Path) -> PathBuf {
     preset_base.join("plugins")
 }
@@ -116,7 +120,6 @@ pub(crate) fn embedded_extension(prefix: &str) -> Vec<(&'static str, &'static [u
 }
 
 pub(crate) fn install_agent(
-    conn: &mut Connection,
     agent: CodingAgent,
     paths: &AgentPaths,
     hermes: HermesSetup<'_>,
@@ -203,7 +206,6 @@ pub(crate) fn install_agent(
             HermesSetup::Absent => report("hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
         }
     }
-    crate::broker::record_asset_install(conn, agent.name(), &paths.base.display().to_string())?;
     Ok(())
 }
 
@@ -276,8 +278,17 @@ pub(crate) fn executable_record_problem(record: &Path) -> Option<String> {
     }
 }
 
-/// Why an installed extension file is unusable, or `None` when it equals the embedded bytes.
-pub(crate) fn extension_file_problem(target: &Path, embedded: &[u8]) -> Option<String> {
+/// Every embedded skill file at its install path under `skills_dir`.
+pub(crate) fn skill_files(skills_dir: &Path) -> Vec<(PathBuf, &'static [u8])> {
+    SKILLS
+        .iter()
+        .map(|(relative, bytes)| (skills_dir.join(relative), *bytes))
+        .collect()
+}
+
+/// Why an installed copy of an embedded file is unusable, or `None` when it equals the embedded
+/// bytes.
+pub(crate) fn installed_file_problem(target: &Path, embedded: &[u8]) -> Option<String> {
     match std::fs::read(target) {
         Ok(bytes) if bytes == embedded => None,
         Ok(_) => Some("differs from the embedded copy".into()),
@@ -672,15 +683,9 @@ mod tests {
             .collect()
     }
 
-    fn asset_install_count(conn: &Connection) -> i64 {
-        conn.query_row("SELECT COUNT(*) FROM asset_installs", [], |row| row.get(0))
-            .unwrap()
-    }
-
     #[test]
     fn installation_replaces_owned_symlinks_and_embeds_bytes_at_selected_paths() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
         let external = home.path().join("operator");
         std::fs::create_dir(&external).unwrap();
         std::fs::write(external.join("keep"), "operator bytes").unwrap();
@@ -718,7 +723,6 @@ mod tests {
             }
             for _ in 0..2 {
                 install_agent(
-                    &mut conn,
                     *agent,
                     &paths,
                     hermes_for(*agent, &fake),
@@ -753,21 +757,12 @@ mod tests {
             if *agent == CodingAgent::Opencode {
                 assert!(!custom.join("skills").exists());
             }
-            let installed_at: String = conn
-                .query_row(
-                    "SELECT installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
-                    rusqlite::params![agent.name(), paths.base.display().to_string()],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(crate::time::parse_lenient(&installed_at).is_some());
         }
     }
 
     #[test]
     fn installation_prints_skills_then_presets_then_extensions_then_hermes_enablement() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
         for agent in CodingAgent::all() {
             let custom = home.path().join(format!("custom-{}", agent.name()));
             let paths = agent_paths(
@@ -779,14 +774,7 @@ mod tests {
             let mut output = Vec::new();
             let fake = FakeHermes::new();
             let extensions = extension_targets(*agent, &custom, &fake);
-            install_agent(
-                &mut conn,
-                *agent,
-                &paths,
-                hermes_for(*agent, &fake),
-                &mut output,
-            )
-            .unwrap();
+            install_agent(*agent, &paths, hermes_for(*agent, &fake), &mut output).unwrap();
             let lines = output_lines(output);
             let mut expected = expected_presets(*agent, &custom)
                 .iter()
@@ -829,9 +817,8 @@ mod tests {
     }
 
     #[test]
-    fn opencode_preset_failure_fails_installation_and_records_nothing() {
+    fn opencode_preset_failure_fails_installation() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
         let base = home.path().join("preset-base");
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(base.join("agents"), "blocked parent").unwrap();
@@ -843,7 +830,6 @@ mod tests {
         .unwrap();
         let mut output = Vec::new();
         let failure = install_agent(
-            &mut conn,
             CodingAgent::Opencode,
             &paths,
             HermesSetup::Absent,
@@ -858,7 +844,6 @@ mod tests {
             "{}",
             failure.message()
         );
-        assert_eq!(asset_install_count(&conn), 0);
         let lines = output_lines(output);
         assert_eq!(lines.len(), 1, "only the completed skills line: {lines:?}");
         assert!(
@@ -877,9 +862,8 @@ mod tests {
     }
 
     #[test]
-    fn opencode_extension_failure_fails_installation_and_records_nothing() {
+    fn opencode_extension_failure_fails_installation() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
         let base = home.path().join("preset-base");
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(base.join("plugins"), "blocked parent").unwrap();
@@ -891,7 +875,6 @@ mod tests {
         .unwrap();
         let mut output = Vec::new();
         let failure = install_agent(
-            &mut conn,
             CodingAgent::Opencode,
             &paths,
             HermesSetup::Absent,
@@ -909,7 +892,6 @@ mod tests {
             "{}",
             failure.message()
         );
-        assert_eq!(asset_install_count(&conn), 0);
         let lines = output_lines(output);
         assert_eq!(
             lines[1..],
@@ -934,12 +916,10 @@ mod tests {
     #[test]
     fn opencode_default_installation_uses_the_native_config_directory_for_every_asset() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
         let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Opencode).unwrap();
         let base = home.path().join(".config/opencode");
         assert_eq!(paths.base, base);
         install_agent(
-            &mut conn,
             CodingAgent::Opencode,
             &paths,
             HermesSetup::Absent,
@@ -957,14 +937,6 @@ mod tests {
         let fake = FakeHermes::new();
         assert_embedded_extensions(&extension_targets(CodingAgent::Opencode, &base, &fake));
         assert_executable_record(&base.join("plugins/cafleet.executable"));
-        let recorded: Vec<String> = conn
-            .prepare("SELECT path FROM asset_installs WHERE coding_agent='opencode'")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(recorded, [base.display().to_string()]);
     }
 
     mod pi {
@@ -975,7 +947,7 @@ mod tests {
             lines: Vec<String>,
         }
 
-        fn install(conn: &mut Connection, home: &Path, base: Option<&Path>) -> Installed {
+        fn install(home: &Path, base: Option<&Path>) -> Installed {
             let paths = agent_paths(
                 &|name| {
                     Ok(base
@@ -987,13 +959,7 @@ mod tests {
             )
             .unwrap();
             let mut output = Vec::new();
-            let result = install_agent(
-                conn,
-                CodingAgent::Pi,
-                &paths,
-                HermesSetup::Absent,
-                &mut output,
-            );
+            let result = install_agent(CodingAgent::Pi, &paths, HermesSetup::Absent, &mut output);
             Installed {
                 result,
                 lines: output_lines(output),
@@ -1016,8 +982,7 @@ mod tests {
         fn pi_default_installation_writes_skills_extension_and_record_under_the_pi_agent_directory()
         {
             let home = tempfile::tempdir().unwrap();
-            let mut conn = crate::db::test_support::migrated_conn(&home);
-            install(&mut conn, home.path(), None).result.unwrap();
+            install(home.path(), None).result.unwrap();
             let base = home.path().join(".pi/agent");
             for (relative, bytes) in SKILLS {
                 assert_eq!(
@@ -1039,22 +1004,13 @@ mod tests {
                     .1
             );
             assert_executable_record(&base.join("extensions/cafleet.executable"));
-            let recorded: Vec<String> = conn
-                .prepare("SELECT path FROM asset_installs WHERE coding_agent='pi'")
-                .unwrap()
-                .query_map([], |row| row.get(0))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            assert_eq!(recorded, [base.display().to_string()]);
         }
 
         #[test]
         fn pi_installation_prints_the_skills_line_then_the_extension_line() {
             let home = tempfile::tempdir().unwrap();
             let base = home.path().join("pi agent");
-            let mut conn = crate::db::test_support::migrated_conn(&home);
-            let installed = install(&mut conn, home.path(), Some(&base));
+            let installed = install(home.path(), Some(&base));
             installed.result.unwrap();
             assert_eq!(installed.lines.len(), 2, "{:?}", installed.lines);
             assert!(
@@ -1075,12 +1031,11 @@ mod tests {
         fn pi_rerun_prints_the_same_lines_and_leaves_identical_bytes_and_one_record() {
             let home = tempfile::tempdir().unwrap();
             let base = home.path().join("pi agent");
-            let mut conn = crate::db::test_support::migrated_conn(&home);
-            let first = install(&mut conn, home.path(), Some(&base));
+            let first = install(home.path(), Some(&base));
             first.result.unwrap();
             let extension = std::fs::read(extension_target(&base)).unwrap();
             let record = std::fs::read(base.join("extensions/cafleet.executable")).unwrap();
-            let second = install(&mut conn, home.path(), Some(&base));
+            let second = install(home.path(), Some(&base));
             second.result.unwrap();
             assert_eq!(second.lines, first.lines);
             assert_eq!(std::fs::read(extension_target(&base)).unwrap(), extension);
@@ -1088,7 +1043,6 @@ mod tests {
                 std::fs::read(base.join("extensions/cafleet.executable")).unwrap(),
                 record
             );
-            assert_eq!(asset_install_count(&conn), 1);
         }
 
         #[test]
@@ -1099,8 +1053,7 @@ mod tests {
             std::fs::create_dir_all(extensions.join("tools")).unwrap();
             std::fs::write(extensions.join("operator.ts"), "operator extension").unwrap();
             std::fs::write(extensions.join("tools/index.ts"), "operator package").unwrap();
-            let mut conn = crate::db::test_support::migrated_conn(&home);
-            install(&mut conn, home.path(), Some(&base)).result.unwrap();
+            install(home.path(), Some(&base)).result.unwrap();
             assert_eq!(
                 std::fs::read(extensions.join("operator.ts")).unwrap(),
                 b"operator extension"
@@ -1112,13 +1065,12 @@ mod tests {
         }
 
         #[test]
-        fn pi_extension_failure_fails_installation_and_records_nothing() {
+        fn pi_extension_failure_fails_installation() {
             let home = tempfile::tempdir().unwrap();
             let base = home.path().join("pi agent");
             std::fs::create_dir_all(&base).unwrap();
             std::fs::write(base.join("extensions"), "blocked parent").unwrap();
-            let mut conn = crate::db::test_support::migrated_conn(&home);
-            let installed = install(&mut conn, home.path(), Some(&base));
+            let installed = install(home.path(), Some(&base));
             let failure = installed
                 .result
                 .expect_err("a blocked extension target fails installation");
@@ -1132,7 +1084,6 @@ mod tests {
                 "{}",
                 failure.message()
             );
-            assert_eq!(asset_install_count(&conn), 0);
             assert_eq!(installed.lines.len(), 1, "{:?}", installed.lines);
             assert!(skills_line_matches(&installed.lines[0], &base));
             assert_eq!(
@@ -1151,7 +1102,6 @@ mod tests {
         struct Installed {
             result: Result<(), CafleetError>,
             lines: Vec<String>,
-            rows: i64,
             base: PathBuf,
             skills: PathBuf,
             _home: tempfile::TempDir,
@@ -1164,16 +1114,14 @@ mod tests {
 
         fn install_with(hermes: HermesSetup<'_>) -> Installed {
             let home = tempfile::tempdir().unwrap();
-            let mut conn = crate::db::test_support::migrated_conn(&home);
             let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Hermes).unwrap();
             let mut output = Vec::new();
-            let result = install_agent(&mut conn, CodingAgent::Hermes, &paths, hermes, &mut output);
+            let result = install_agent(CodingAgent::Hermes, &paths, hermes, &mut output);
             let base = home.path().join(".hermes");
             let skills = base.join("skills");
             Installed {
                 result,
                 lines: output_lines(output),
-                rows: asset_install_count(&conn),
                 base,
                 skills,
                 _home: home,
@@ -1252,10 +1200,6 @@ mod tests {
                 Cause::Exact(cause) => assert_eq!(actual, cause),
                 Cause::Contains(cause) => assert!(actual.contains(cause), "{actual}"),
             }
-            assert_eq!(
-                installed.rows, 0,
-                "no asset_installs row for a failed setup"
-            );
         }
 
         fn extension_prefix(target: &Path) -> String {
@@ -1312,7 +1256,6 @@ mod tests {
                 "the plugin follows the active profile, not HERMES_HOME"
             );
             assert_eq!(installed.lines[1], plugin_line(&fake));
-            assert_eq!(installed.rows, 1);
         }
 
         #[test]
@@ -1360,7 +1303,6 @@ mod tests {
                 "{}",
                 failure.message()
             );
-            assert_eq!(installed.rows, 0);
             assert_eq!(installed.lines, [skills_line(&installed)]);
             assert!(
                 after_batch(&fake.calls()).is_empty(),
@@ -1425,7 +1367,6 @@ mod tests {
                 None,
                 "plugins.disabled is read only"
             );
-            assert_eq!(installed.rows, 1);
         }
 
         #[test]
@@ -1479,7 +1420,6 @@ mod tests {
             );
             assert_eq!(fake.value(ENABLED_KEY), Some(json!(["alpha", "cafleet"])));
             assert_eq!(installed.lines[2], already_enabled_line(&fake));
-            assert_eq!(installed.rows, 1);
         }
 
         #[test]
@@ -1621,46 +1561,51 @@ mod tests {
         }
 
         #[test]
-        fn hermes_setup_fails_into_the_resolved_base_when_the_config_path_is_unavailable() {
-            for plugins_failure in [false, true] {
+        fn hermes_setup_fails_into_the_resolved_base_without_a_usable_config_path() {
+            const DEADLINE: &str = "did not finish within its deadline";
+            type ConfigPathCase = (&'static str, fn(&mut FakeHermes), &'static str);
+            let cases: [ConfigPathCase; 3] = [
+                (
+                    "unavailable config path",
+                    |fake| {
+                        fake.reply(FakeHermes::path_call(), Reply::Fail(DEADLINE.into()));
+                    },
+                    DEADLINE,
+                ),
+                (
+                    "unavailable config path and plugins read",
+                    |fake| {
+                        fake.reply(FakeHermes::path_call(), Reply::Fail(DEADLINE.into()));
+                        fake.reply(get(PLUGINS_KEY), Reply::Fail("permission denied".into()));
+                    },
+                    DEADLINE,
+                ),
+                (
+                    "relative config path",
+                    |fake| {
+                        fake.reply(FakeHermes::path_call(), Reply::Path("config.yaml".into()));
+                    },
+                    "printed no absolute file path: config.yaml",
+                ),
+            ];
+            for (name, arrange, cause) in cases {
                 let mut fake = FakeHermes::new();
-                fake.reply(
-                    FakeHermes::path_call(),
-                    Reply::Fail("did not finish within its deadline".into()),
-                );
-                if plugins_failure {
-                    fake.reply(get(PLUGINS_KEY), Reply::Fail("permission denied".into()));
-                }
+                arrange(&mut fake);
                 let installed = install(&fake);
                 assert_failure(
                     &installed,
                     &extension_prefix(&installed.base),
-                    Cause::Exact("did not finish within its deadline"),
+                    Cause::Exact(cause),
                 );
-                assert_eq!(installed.lines, [skills_line(&installed)]);
-                assert!(after_batch(&fake.calls()).is_empty());
-                assert!(!fake.plugin_dir().exists());
-                assert!(!installed.base.join("plugins").exists());
+                assert_eq!(installed.lines, [skills_line(&installed)], "{name}");
+                assert!(after_batch(&fake.calls()).is_empty(), "{name}");
+                assert!(!fake.plugin_dir().exists(), "{name}");
+                assert!(!installed.base.join("plugins").exists(), "{name}");
             }
         }
 
         #[test]
-        fn hermes_setup_fails_into_the_resolved_base_when_the_config_path_is_not_absolute() {
-            let mut fake = FakeHermes::new();
-            fake.reply(FakeHermes::path_call(), Reply::Path("config.yaml".into()));
-            let installed = install(&fake);
-            assert_failure(
-                &installed,
-                &extension_prefix(&installed.base),
-                Cause::Exact("printed no absolute file path: config.yaml"),
-            );
-            assert_eq!(installed.lines, [skills_line(&installed)]);
-            assert!(after_batch(&fake.calls()).is_empty());
-            assert!(!installed.base.join("plugins").exists());
-        }
-
-        #[test]
-        fn plain_setup_without_hermes_installs_skills_records_the_row_and_reports_the_skip() {
+        fn plain_setup_without_hermes_installs_skills_and_reports_the_skip() {
             let installed = install_with(HermesSetup::Absent);
             installed.result.as_ref().unwrap();
             assert_eq!(
@@ -1670,7 +1615,6 @@ mod tests {
                     "hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".to_owned(),
                 ]
             );
-            assert_eq!(installed.rows, 1);
             assert!(!installed.base.join("plugins").exists());
         }
     }

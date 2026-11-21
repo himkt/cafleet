@@ -1,24 +1,10 @@
 use crate::broker::runtime as storage;
-use crate::broker::runtime::EffectivePolicyObservation;
-use crate::broker::runtime::InteractionEvidenceUpdate;
 use crate::broker::runtime::ObservedTransition;
 use crate::broker::runtime::PersistenceMode;
-use crate::broker::runtime::RunOwner;
 use crate::broker::runtime::RunRecord;
-use crate::broker::runtime::RuntimeEventKind;
 use crate::runtime::*;
 use rusqlite::Connection;
-use rusqlite::OptionalExtension;
-use sha2::Digest;
-use sha2::Sha256;
-use std::collections::BTreeMap;
 use std::collections::VecDeque;
-use std::fs::File;
-use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Write;
-use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc;
@@ -26,16 +12,10 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(test)]
-use std::sync::atomic::AtomicU64;
-
-#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum WriterBoundary {
     Receive,
-    Append,
-    Sync,
     Persist,
-    Compact,
 }
 
 pub(in crate::runtime) const WORK_SLICE: Duration = Duration::from_millis(100);
@@ -51,42 +31,20 @@ pub(crate) trait WriterHooks: Send + Sync {
 #[derive(Debug, Clone)]
 pub(crate) struct WriterStatus {
     pub(crate) pending_count: u64,
-    pub(crate) pending_evidence: bool,
     pub(crate) gap_count: u64,
     pub(crate) diagnostic: Option<String>,
-    #[cfg(test)]
-    pub(crate) policy_diagnostic: Option<String>,
 }
 #[derive(Debug)]
 pub(crate) struct RetainedTransition {
     pub(crate) transition: ObservedTransition,
     pub(crate) cause: CafleetError,
 }
-#[derive(Debug)]
-pub(crate) struct RetainedEvidenceUpdate {
-    pub(crate) update: InteractionEvidenceUpdate,
-    pub(crate) cause: CafleetError,
-}
-#[derive(Clone)]
-struct Refresh {
-    update: InteractionEvidenceUpdate,
-    barrier: i64,
-    revision: u64,
-}
 #[derive(Default)]
 struct Mailbox {
     pending: u64,
-    policies: u64,
-    #[cfg(test)]
-    policy_diagnostic: Option<String>,
     gaps: u64,
     diagnostic: Option<String>,
     last_sequence: i64,
-    active: Option<i64>,
-    refresh: Option<Refresh>,
-    revision: u64,
-    refill: bool,
-    grant: Option<std::ops::RangeInclusive<i64>>,
     stop: bool,
     deadline: Option<Instant>,
 }
@@ -95,58 +53,32 @@ impl Mailbox {
         self.gaps = self.gaps.checked_add(1).expect("writer gap count overflow");
         self.diagnostic = Some(cause.message().into_owned());
     }
-    fn work_deadline(&self, slice: Duration) -> Instant {
-        let local = Instant::now() + slice;
-        self.deadline.map_or(local, |until| until.min(local))
-    }
-    // Compaction validates every retained frame in one attempt and each retry repeats that
-    // whole pass, so it gets a budget wider than one work slice; otherwise an outbox whose
-    // validation outgrows the slice could never compact.
-    fn compaction_deadline(&self) -> Instant {
-        let local = Instant::now() + Duration::from_secs(1);
+    fn work_deadline(&self, now: Instant, slice: Duration) -> Instant {
+        let local = now + slice;
         self.deadline.map_or(local, |until| until.min(local))
     }
     fn success(&mut self) {
         self.diagnostic = None;
     }
-    fn policy_dropped(&mut self, cause: &CafleetError) {
-        eprintln!("member runtime: effective policy update dropped: {cause}");
-        #[cfg(test)]
-        {
-            self.policy_diagnostic = Some(cause.message().into_owned());
-        }
-    }
 }
 pub(crate) struct EventWriter {
-    sender: mpsc::SyncSender<Work>,
+    sender: mpsc::SyncSender<Box<ObservedTransition>>,
     mailbox: Arc<Mutex<Mailbox>>,
     thread: Option<std::thread::JoinHandle<()>>,
-}
-enum Work {
-    Event {
-        transition: Box<ObservedTransition>,
-        effective_policy: Option<EffectivePolicyObservation>,
-    },
-    Policy(EffectivePolicyObservation),
-}
-struct Pending {
-    work: Work,
-    synced: bool,
-}
-impl Pending {
-    fn event_seq(&self) -> Option<i64> {
-        match &self.work {
-            Work::Event { transition, .. } => Some(transition.event_seq),
-            Work::Policy(_) => None,
-        }
-    }
+    clock: Arc<dyn crate::time::Clock>,
 }
 impl EventWriter {
-    pub(crate) fn start(database_url: String, run: RunRecord, lock: Arc<RunLock>) -> Result<Self> {
+    pub(crate) fn start(
+        database_url: String,
+        run: RunRecord,
+        lock: Arc<RunLock>,
+        clock: Arc<dyn crate::time::Clock>,
+    ) -> Result<Self> {
         Self::start_worker(
             database_url,
             run,
             lock,
+            clock,
             #[cfg(test)]
             crate::runtime::writer::test_support::default_writer_hooks(),
         )
@@ -157,33 +89,23 @@ impl EventWriter {
         database_url: String,
         run: RunRecord,
         lock: Arc<RunLock>,
+        clock: Arc<dyn crate::time::Clock>,
         hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
-        Self::start_worker(database_url, run, lock, hooks)
+        Self::start_worker(database_url, run, lock, clock, hooks)
     }
 
     fn start_worker(
         database_url: String,
         run: RunRecord,
         lock: Arc<RunLock>,
+        clock: Arc<dyn crate::time::Clock>,
         #[cfg(test)] hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
         let mut conn = crate::db::connect(&database_url)?;
-        let spool = Outbox::open_owned(
-            &mut conn,
-            &run,
-            lock.clone(),
-            Instant::now() + Duration::from_secs(1),
-        )?;
-        ensure(
-            spool.io.byte_len().map_err(io_error)? == 0,
-            "new runner outbox must start empty",
-        )?;
-        #[cfg(test)]
-        let mut spool = spool;
-        #[cfg(test)]
-        spool.set_hooks(hooks.clone());
-
+        with_database_deadline(&mut conn, clock.now() + Duration::from_secs(1), |conn| {
+            lock.validate(conn, &run.owner())
+        })?;
         let (sender, receiver) = mpsc::sync_channel(64);
         let mailbox = Arc::new(Mutex::new(Mailbox::default()));
         #[cfg(not(test))]
@@ -192,15 +114,13 @@ impl EventWriter {
         let work_slice = hooks.work_slice();
         let worker = Worker {
             conn,
-            spool,
             run,
             lock,
             mailbox: mailbox.clone(),
             receiver,
             queue: VecDeque::new(),
-            committed: 0,
-            compact: false,
             work_slice,
+            clock: clock.clone(),
             #[cfg(test)]
             hooks,
         };
@@ -212,24 +132,17 @@ impl EventWriter {
             sender,
             mailbox,
             thread: Some(thread),
+            clock,
         })
     }
-    fn send(&self, work: Work) -> Result<()> {
+    fn send(&self, transition: Box<ObservedTransition>) -> Result<()> {
         self.sender
-            .try_send(work)
+            .try_send(transition)
             .map_err(|_| error("runtime observation channel is full or unavailable"))
     }
-    #[cfg(test)]
     pub(crate) fn try_submit(
         &self,
         transition: ObservedTransition,
-    ) -> std::result::Result<(), Box<RetainedTransition>> {
-        self.try_submit_with_policy(transition, None)
-    }
-    pub(crate) fn try_submit_with_policy(
-        &self,
-        transition: ObservedTransition,
-        effective_policy: Option<EffectivePolicyObservation>,
     ) -> std::result::Result<(), Box<RetainedTransition>> {
         let mut state = self.mailbox.lock().expect("writer mailbox");
         let result = (|| -> Result<()> {
@@ -238,16 +151,8 @@ impl EventWriter {
                 transition.event_seq > state.last_sequence,
                 "accepted event sequence regressed",
             )?;
-            ensure(
-                effective_policy.is_none()
-                    || transition.kind == RuntimeEventKind::AutomaticReviewUnavailable,
-                "only an unavailable review event carries an effective policy",
-            )?;
-            crate::broker::runtime::evidence::validate(&transition.evidence_json)?;
-            self.send(Work::Event {
-                transition: Box::new(transition.clone()),
-                effective_policy,
-            })
+            storage::validate_evidence(&transition.evidence_json)?;
+            self.send(Box::new(transition.clone()))
         })();
         match result {
             Ok(()) => {
@@ -257,36 +162,12 @@ impl EventWriter {
                     .expect("writer pending overflow");
                 assert!(state.pending <= 128, "bounded accepted writer capacity");
                 state.last_sequence = transition.event_seq;
-                match transition.kind {
-                    RuntimeEventKind::InteractionOpened => state.active = transition.episode_seq,
-                    RuntimeEventKind::InteractionClosed | RuntimeEventKind::RunnerExited => {
-                        state.active = None
-                    }
-                    _ => {}
-                }
                 Ok(())
             }
             Err(cause) => {
                 state.failure(&cause);
                 Err(Box::new(RetainedTransition { transition, cause }))
             }
-        }
-    }
-    pub(crate) fn try_record_policy(&self, observation: EffectivePolicyObservation) {
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        let sent = if state.stop {
-            Err(error("event writer is stopped"))
-        } else {
-            self.send(Work::Policy(observation))
-        };
-        match sent {
-            Ok(()) => {
-                state.policies = state
-                    .policies
-                    .checked_add(1)
-                    .expect("policy update count overflow");
-            }
-            Err(cause) => state.policy_dropped(&cause),
         }
     }
     #[cfg(test)]
@@ -298,78 +179,12 @@ impl EventWriter {
     pub(crate) fn joined(&self) -> bool {
         self.thread.is_none()
     }
-    pub(crate) fn try_refresh(
-        &self,
-        update: InteractionEvidenceUpdate,
-        until: Instant,
-    ) -> std::result::Result<(), Box<RetainedEvidenceUpdate>> {
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        let result = (|| -> Result<()> {
-            check_deadline(Instant::now(), until)?;
-            ensure(
-                !state.stop && state.active == Some(update.episode_seq) && state.last_sequence > 0,
-                "refresh requires current accepted open episode",
-            )?;
-            crate::broker::runtime::evidence::validate(&update.evidence_json)?;
-            ensure(
-                update.output_seq
-                    == update.evidence_json["screen_seq"]
-                        .as_u64()
-                        .ok_or_else(|| error("refresh sequence required"))?,
-                "refresh sequence mismatch",
-            )?;
-            if let Some(old) = &state.refresh {
-                ensure(
-                    old.update.run_id == update.run_id
-                        && old.update.episode_seq == update.episode_seq,
-                    "refresh episode collision",
-                )?;
-                ensure(
-                    update.output_seq > old.update.output_seq || (update == old.update),
-                    "refresh revision regressed or conflicts",
-                )?;
-            }
-            Ok(())
-        })();
-        match result {
-            Ok(()) => {
-                state.revision = state
-                    .revision
-                    .checked_add(1)
-                    .expect("refresh revision overflow");
-                state.refresh = Some(Refresh {
-                    update,
-                    barrier: state.last_sequence,
-                    revision: state.revision,
-                });
-                Ok(())
-            }
-            Err(cause) => {
-                state.failure(&cause);
-                Err(Box::new(RetainedEvidenceUpdate { update, cause }))
-            }
-        }
-    }
-    pub(crate) fn request_sequence_range(&self) -> Result<()> {
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        ensure(!state.stop, "writer stopped before sequence refill")?;
-        if state.grant.is_none() {
-            state.refill = true;
-        }
-        Ok(())
-    }
-    pub(crate) fn take_sequence_range(&self) -> Option<std::ops::RangeInclusive<i64>> {
-        self.mailbox.lock().expect("writer mailbox").grant.take()
-    }
     pub(crate) fn status(&self) -> WriterStatus {
         let state = self.mailbox.lock().expect("writer mailbox");
         WriterStatus {
             pending_count: state.pending,
-            pending_evidence: state.refresh.is_some(),
             gap_count: state.gaps,
             diagnostic: state.diagnostic.clone(),
-            #[cfg(test)]
-            policy_diagnostic: state.policy_diagnostic.clone(),
         }
     }
     pub(crate) fn diagnostic(&self) -> Option<String> {
@@ -392,8 +207,8 @@ impl EventWriter {
             .deadline
             .expect("shutdown deadline");
         if let Some(thread) = self.thread.as_ref() {
-            while !thread.is_finished() && Instant::now() < until {
-                nap_until(until);
+            while !thread.is_finished() && self.clock.now() < until {
+                nap_until(self.clock.as_ref(), until);
             }
         }
         if self
@@ -416,12 +231,7 @@ impl EventWriter {
         } else {
             0
         };
-        (
-            state.pending,
-            unsaved
-                .checked_add(u64::from(state.refresh.is_some()))
-                .expect("unsaved writer observation count overflow"),
-        )
+        (state.pending, unsaved)
     }
 }
 impl Drop for EventWriter {
@@ -431,61 +241,54 @@ impl Drop for EventWriter {
             .lock()
             .expect("writer mailbox")
             .deadline
-            .unwrap_or_else(|| Instant::now() + Duration::from_secs(4));
+            .unwrap_or_else(|| self.clock.now() + Duration::from_secs(4));
         self.finish(until);
     }
 }
 
 struct Worker {
     conn: Connection,
-    spool: Outbox<File>,
     run: RunRecord,
     lock: Arc<RunLock>,
     mailbox: Arc<Mutex<Mailbox>>,
-    receiver: mpsc::Receiver<Work>,
-    queue: VecDeque<Pending>,
-    committed: i64,
-    compact: bool,
+    receiver: mpsc::Receiver<Box<ObservedTransition>>,
+    queue: VecDeque<Box<ObservedTransition>>,
     work_slice: Duration,
+    clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
 }
 impl Worker {
     fn serve(mut self) {
         let mut retry = Duration::from_millis(100);
-        let mut next = Instant::now();
+        let mut next = self.clock.now();
         loop {
             {
                 let state = self.mailbox.lock().expect("writer mailbox");
-                if state.deadline.is_some_and(|end| Instant::now() >= end) {
+                if state.deadline.is_some_and(|end| self.clock.now() >= end) {
                     break;
                 }
-                if state.stop
-                    && state.pending == 0
-                    && state.policies == 0
-                    && state.refresh.is_none()
-                    && !self.compact
-                {
+                if state.stop && state.pending == 0 {
                     break;
                 }
             }
-            if Instant::now() < next {
-                nap_until(next);
+            if self.clock.now() < next {
+                nap_until(self.clock.as_ref(), next);
                 continue;
             }
             match self.step() {
                 Ok(()) => {
                     retry = Duration::from_millis(100);
-                    next = Instant::now();
+                    next = self.clock.now();
                 }
                 Err(cause) => {
                     self.mailbox.lock().expect("writer mailbox").failure(&cause);
-                    next = Instant::now() + retry;
+                    next = self.clock.now() + retry;
                     retry = (retry * 2).min(Duration::from_secs(2));
                 }
             }
             if self.mailbox.lock().expect("writer mailbox").pending == 0 {
-                std::thread::sleep(Duration::from_millis(2));
+                self.clock.sleep(Duration::from_millis(2));
             }
         }
     }
@@ -493,18 +296,13 @@ impl Worker {
         if !self.receive()? {
             return Ok(());
         }
-        self.sync_pending()?;
-        if !self.persist_refresh()? {
-            self.persist_front()?;
-        }
-        self.compact_if_idle()?;
-        self.refill_sequences()
+        self.persist_front()
     }
     fn work_deadline(&self) -> Instant {
         self.mailbox
             .lock()
             .expect("writer mailbox")
-            .work_deadline(self.work_slice)
+            .work_deadline(self.clock.now(), self.work_slice)
     }
     /// Returns `false` when a test hook ends this pass before any persistence.
     fn receive(&mut self) -> Result<bool> {
@@ -517,1696 +315,69 @@ impl Worker {
                 Err(cause) => return Err(cause),
             }
 
-            check_deadline(Instant::now(), until)?;
+            check_deadline(self.clock.now(), until)?;
             match self.receiver.try_recv() {
-                Ok(work) => self.queue.push_back(Pending {
-                    synced: matches!(work, Work::Policy(_)),
-                    work,
-                }),
+                Ok(transition) => self.queue.push_back(transition),
                 Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
             }
         }
         Ok(true)
     }
-    fn sync_pending(&mut self) -> Result<()> {
-        for pending in &mut self.queue {
-            if !pending.synced {
-                let Work::Event {
-                    transition,
-                    effective_policy,
-                } = &pending.work
-                else {
-                    unreachable!("effective policy updates are never spooled")
-                };
-                let until = self
-                    .mailbox
-                    .lock()
-                    .expect("writer mailbox")
-                    .work_deadline(self.work_slice);
-                self.spool.append_synced(
-                    &mut self.conn,
-                    transition,
-                    effective_policy.as_ref(),
-                    until,
-                )?;
-                pending.synced = true;
-            }
-        }
-        Ok(())
-    }
-    /// Persists the due evidence refresh; `false` when none is due.
-    fn persist_refresh(&mut self) -> Result<bool> {
-        let refresh = {
-            let state = self.mailbox.lock().expect("writer mailbox");
-            state
-                .refresh
-                .as_ref()
-                .filter(|value| {
-                    value.barrier <= self.committed
-                        && self.queue.front().is_none_or(|pending| {
-                            pending
-                                .event_seq()
-                                .is_none_or(|sequence| sequence > value.barrier)
-                        })
-                })
-                .cloned()
-        };
-        let Some(refresh) = refresh else {
-            return Ok(false);
+    fn persist_front(&mut self) -> Result<()> {
+        let Some(transition) = self.queue.front() else {
+            return Ok(());
         };
         let until = self.work_deadline();
-        #[cfg(test)]
-        self.hooks.before(WriterBoundary::Receive, until)?;
-
         #[cfg(test)]
         self.hooks.before(WriterBoundary::Persist, until)?;
 
-        storage::update_interaction_evidence(
-            &mut self.conn,
-            &self.run.owner(),
-            &refresh.update,
-            refresh.barrier,
-            until,
-        )?;
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        if state
-            .refresh
-            .as_ref()
-            .is_some_and(|current| current.revision == refresh.revision)
-        {
-            state.refresh = None;
-        }
-        state.success();
-        Ok(true)
-    }
-    fn persist_front(&mut self) -> Result<()> {
-        let Some(pending) = self.queue.front() else {
-            return Ok(());
-        };
-        let until = self
-            .mailbox
-            .lock()
-            .expect("writer mailbox")
-            .work_deadline(self.work_slice);
-        match &pending.work {
-            Work::Event {
-                transition,
-                effective_policy,
-            } => {
-                #[cfg(test)]
-                self.hooks.before(WriterBoundary::Persist, until)?;
-
-                with_database_deadline(&mut self.conn, until, |conn| {
-                    self.lock.validate(conn, &self.run.owner())?;
-                    match effective_policy {
-                        Some(observation) => storage::persist_transition_with_effective_policy(
-                            conn,
-                            &self.run.owner(),
-                            transition,
-                            observation,
-                            PersistenceMode::Live,
-                        ),
-                        None => storage::persist_transition(
-                            conn,
-                            &self.run.owner(),
-                            transition,
-                            PersistenceMode::Live,
-                        ),
-                    }
-                    .map(|_| ())
-                })?;
-                self.committed = transition.event_seq;
-                self.compact = true;
-                self.queue.pop_front();
-                let mut state = self.mailbox.lock().expect("writer mailbox");
-                state.pending = state.pending.checked_sub(1).expect("accepted writer count");
-                state.success();
-            }
-            Work::Policy(observation) => {
-                let outcome = (|| -> Result<bool> {
-                    #[cfg(test)]
-                    self.hooks.before(WriterBoundary::Persist, until)?;
-
-                    self.lock.validate(&self.conn, &self.run.owner())?;
-                    storage::record_effective_policy(
-                        &mut self.conn,
-                        &self.run.owner(),
-                        observation,
-                        until,
-                    )
-                })();
-                self.queue.pop_front();
-                let mut state = self.mailbox.lock().expect("writer mailbox");
-                state.policies = state
-                    .policies
-                    .checked_sub(1)
-                    .expect("accepted policy update count");
-                if let Err(cause) = outcome {
-                    state.policy_dropped(&cause);
-                }
-            }
-        }
-        Ok(())
-    }
-    fn compact_if_idle(&mut self) -> Result<()> {
-        if !self.compact || !self.queue.is_empty() {
-            return Ok(());
-        }
-        let until = self
-            .mailbox
-            .lock()
-            .expect("writer mailbox")
-            .compaction_deadline();
-        self.spool
-            .compact_committed(&mut self.conn, &self.run.owner(), until)?;
-        self.compact = false;
-        self.mailbox.lock().expect("writer mailbox").success();
-        Ok(())
-    }
-    fn refill_sequences(&mut self) -> Result<()> {
-        let refill = {
-            let state = self.mailbox.lock().expect("writer mailbox");
-            state.refill && state.grant.is_none()
-        };
-        if !refill {
-            return Ok(());
-        }
-        let until = self.work_deadline();
-        let grant = with_database_deadline(&mut self.conn, until, |conn| {
+        with_database_deadline(&mut self.conn, until, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
-            storage::reserve_event_sequences(conn, &self.run.owner())
+            storage::persist_transition(conn, &self.run.owner(), transition, PersistenceMode::Live)
+                .map(|_| ())
         })?;
+        self.queue.pop_front();
         let mut state = self.mailbox.lock().expect("writer mailbox");
-        state.grant = Some(grant);
-        state.refill = false;
+        state.pending = state.pending.checked_sub(1).expect("accepted writer count");
         state.success();
-        Ok(())
-    }
-}
-
-const OUTBOX_LIMIT: u64 = 16 * 1024 * 1024;
-/// The big-endian body length and the body's SHA-256 digest.
-const FRAME_HEADER: u64 = 4 + 32;
-pub(crate) trait OutboxIo: Read + Write + Seek + Send {
-    fn sync_all(&mut self) -> std::io::Result<()>;
-    fn byte_len(&self) -> std::io::Result<u64>;
-    fn set_len(&mut self, length: u64) -> std::io::Result<()>;
-}
-impl OutboxIo for File {
-    fn sync_all(&mut self) -> std::io::Result<()> {
-        File::sync_all(self)
-    }
-    fn byte_len(&self) -> std::io::Result<u64> {
-        Ok(self.metadata()?.len())
-    }
-    fn set_len(&mut self, length: u64) -> std::io::Result<()> {
-        File::set_len(self, length)
-    }
-}
-pub(crate) struct OutboxFrame {
-    pub(crate) transition: ObservedTransition,
-    pub(crate) effective_policy: Option<EffectivePolicyObservation>,
-    pub(crate) start: u64,
-    pub(crate) end: u64,
-}
-const EFFECTIVE_POLICY_KEY: &str = "effective_policy";
-fn frame_body(
-    transition: &ObservedTransition,
-    effective_policy: Option<&EffectivePolicyObservation>,
-) -> Result<Vec<u8>> {
-    let Some(observation) = effective_policy else {
-        return serde_json::to_vec(transition).map_err(io_error);
-    };
-    let mut body = serde_json::to_value(transition).map_err(io_error)?;
-    body.as_object_mut()
-        .expect("a transition serializes as an object")
-        .insert(
-            EFFECTIVE_POLICY_KEY.into(),
-            serde_json::to_value(observation).map_err(io_error)?,
-        );
-    serde_json::to_vec(&body).map_err(io_error)
-}
-fn parse_frame_body(
-    body: &[u8],
-) -> Result<(ObservedTransition, Option<EffectivePolicyObservation>)> {
-    let mut value = serde_json::from_slice::<Value>(body).map_err(io_error)?;
-    let effective_policy = value
-        .as_object_mut()
-        .ok_or_else(|| error("outbox frame body must be an object"))?
-        .remove(EFFECTIVE_POLICY_KEY)
-        .map(serde_json::from_value::<EffectivePolicyObservation>)
-        .transpose()
-        .map_err(io_error)?;
-    let transition: ObservedTransition = serde_json::from_value(value.clone()).map_err(io_error)?;
-    ensure(
-        value == serde_json::to_value(&transition).map_err(io_error)?,
-        "unknown outbox transition fields",
-    )?;
-    ensure(
-        effective_policy.is_none()
-            || transition.kind == storage::RuntimeEventKind::AutomaticReviewUnavailable,
-        "only an unavailable review frame carries an effective policy",
-    )?;
-    Ok((transition, effective_policy))
-}
-pub(crate) struct OutboxScan {
-    pub(crate) frames: Vec<OutboxFrame>,
-    pub(crate) incomplete_tail: Option<String>,
-}
-pub(crate) struct Outbox<S: OutboxIo> {
-    io: S,
-    run: RunRecord,
-    lock: Arc<RunLock>,
-    known: BTreeMap<i64, [u8; 32]>,
-    end: u64,
-    dirty: bool,
-    path_identity: Option<OutboxIdentity>,
-    #[cfg(test)]
-    hooks: Arc<dyn WriterHooks>,
-}
-/// The validated outbox path and the inode it named when opened.
-struct OutboxIdentity {
-    path: PathBuf,
-    dev: u64,
-    ino: u64,
-}
-fn open_outbox(
-    conn: &Connection,
-    run: &RunRecord,
-    lock: &RunLock,
-    until: Instant,
-) -> Result<(File, OutboxIdentity)> {
-    check_deadline(Instant::now(), until)?;
-    lock.validate(conn, &run.owner())?;
-    let paths = validate_run_paths(conn, run)?;
-    let file = crate::runtime::artifacts::open_private(&paths.outbox, false)?;
-    let meta = file.metadata().map_err(io_error)?;
-    Ok((
-        file,
-        OutboxIdentity {
-            path: paths.outbox,
-            dev: meta.dev(),
-            ino: meta.ino(),
-        },
-    ))
-}
-fn validate_with(
-    conn: &mut Connection,
-    lock: &RunLock,
-    current: &RunRecord,
-    path_identity: Option<&OutboxIdentity>,
-    until: Instant,
-) -> Result<RunRecord> {
-    let run = with_database_deadline(conn, until, |conn| {
-        lock.validate(conn, &current.owner())?;
-        storage::get_run(conn, current.run_id)
-    })?;
-    if let Some(identity) = path_identity {
-        let meta = std::fs::symlink_metadata(&identity.path).map_err(io_error)?;
-        ensure(
-            meta.is_file()
-                && !meta.file_type().is_symlink()
-                && meta.uid() == nix::unistd::geteuid().as_raw()
-                && meta.mode() & 0o777 == 0o600
-                && meta.dev() == identity.dev
-                && meta.ino() == identity.ino,
-            "owned outbox inode changed",
-        )?;
-    }
-    Ok(run)
-}
-impl Outbox<File> {
-    pub(crate) fn open_recovery(
-        conn: &mut Connection,
-        run: &RunRecord,
-        lock: Arc<RunLock>,
-        until: Instant,
-    ) -> Result<(Self, OutboxScan)> {
-        let (file, identity) = open_outbox(conn, run, &lock, until)?;
-        let mut value = Self::state(run, lock, file);
-        value.path_identity = Some(identity);
-        let scan = value.scan(conn, until)?;
-        Ok((value, scan))
-    }
-    pub(crate) fn open_owned(
-        conn: &mut Connection,
-        run: &RunRecord,
-        lock: Arc<RunLock>,
-        until: Instant,
-    ) -> Result<Self> {
-        let (file, identity) = open_outbox(conn, run, &lock, until)?;
-        let mut value = Self::initialize(conn, run, lock, file, until)?;
-        value.path_identity = Some(identity);
-        Ok(value)
-    }
-}
-impl<S: OutboxIo> Outbox<S> {
-    fn state(run: &RunRecord, lock: Arc<RunLock>, io: S) -> Self {
-        Self {
-            io,
-            run: run.clone(),
-            lock,
-            known: BTreeMap::new(),
-            end: 0,
-            dirty: true,
-            path_identity: None,
-            #[cfg(test)]
-            hooks: crate::runtime::writer::test_support::default_writer_hooks(),
-        }
-    }
-    fn initialize(
-        conn: &mut Connection,
-        run: &RunRecord,
-        lock: Arc<RunLock>,
-        io: S,
-        until: Instant,
-    ) -> Result<Self> {
-        let mut value = Self::state(run, lock, io);
-        value.scan(conn, until)?;
-        Ok(value)
-    }
-    #[cfg(test)]
-    pub(super) fn set_hooks(&mut self, hooks: Arc<dyn WriterHooks>) {
-        self.hooks = hooks;
-    }
-
-    fn validate(&self, conn: &mut Connection, until: Instant) -> Result<RunRecord> {
-        check_deadline(Instant::now(), until)?;
-        validate_with(
-            conn,
-            &self.lock,
-            &self.run,
-            self.path_identity.as_ref(),
-            until,
-        )
-    }
-    pub(crate) fn scan(&mut self, conn: &mut Connection, until: Instant) -> Result<OutboxScan> {
-        let run = self.validate(conn, until)?;
-        self.scan_validated(run, until)
-    }
-    fn scan_validated(&mut self, run: RunRecord, until: Instant) -> Result<OutboxScan> {
-        let length = self.io.byte_len().map_err(io_error)?;
-        ensure(length <= OUTBOX_LIMIT, "runtime outbox exceeds capacity")?;
-        self.io.seek(SeekFrom::Start(0)).map_err(io_error)?;
-        let mut frames = Vec::new();
-        let mut known = BTreeMap::new();
-        let mut position = 0;
-        let mut tail = None;
-        let mut previous = 0;
-        while position < length {
-            check_deadline(Instant::now(), until)?;
-            if length - position < 4 {
-                tail = Some("incomplete outbox length".into());
-                break;
-            }
-            let mut header = [0u8; 4];
-            self.io.read_exact(&mut header).map_err(io_error)?;
-            let bytes = u64::from(u32::from_be_bytes(header));
-            ensure(
-                bytes > 0 && bytes <= OUTBOX_LIMIT - FRAME_HEADER,
-                "invalid outbox frame length",
-            )?;
-            if length - position < FRAME_HEADER + bytes {
-                tail = Some("incomplete outbox frame".into());
-                break;
-            }
-            let mut checksum = [0u8; 32];
-            self.io.read_exact(&mut checksum).map_err(io_error)?;
-            let mut body = vec![0; usize::try_from(bytes).map_err(io_error)?];
-            self.io.read_exact(&mut body).map_err(io_error)?;
-            let digest: [u8; 32] = Sha256::digest(&body).into();
-            ensure(digest == checksum, "outbox frame checksum mismatch")?;
-            let (transition, effective_policy) = parse_frame_body(&body)?;
-            storage::validate_transition(&run, &transition)?;
-            ensure(
-                transition.event_seq >= previous,
-                "outbox sequences regressed",
-            )?;
-            if let Some(old) = known.insert(transition.event_seq, digest) {
-                ensure(old == digest, "conflicting outbox original sequence")?;
-            }
-            previous = transition.event_seq;
-            let end = position + FRAME_HEADER + bytes;
-            frames.push(OutboxFrame {
-                transition,
-                effective_policy,
-                start: position,
-                end,
-            });
-            position = end;
-        }
-        self.end = position;
-        self.dirty = tail.is_some();
-        self.known = known;
-        Ok(OutboxScan {
-            frames,
-            incomplete_tail: tail,
-        })
-    }
-    pub(crate) fn append_synced(
-        &mut self,
-        conn: &mut Connection,
-        value: &ObservedTransition,
-        effective_policy: Option<&EffectivePolicyObservation>,
-        until: Instant,
-    ) -> Result<()> {
-        let run = self.validate(conn, until)?;
-        storage::validate_transition(&run, value)?;
-        if self.dirty || self.io.byte_len().map_err(io_error)? != self.end {
-            let scan = self.scan_validated(run.clone(), until)?;
-            if scan.incomplete_tail.is_some() {
-                self.io.set_len(self.end).map_err(io_error)?;
-                self.io.sync_all().map_err(io_error)?;
-                self.dirty = false;
-            }
-        }
-        ensure(
-            effective_policy.is_none()
-                || value.kind == storage::RuntimeEventKind::AutomaticReviewUnavailable,
-            "only an unavailable review frame carries an effective policy",
-        )?;
-        let body = frame_body(value, effective_policy)?;
-        let digest: [u8; 32] = Sha256::digest(&body).into();
-        if let Some(old) = self.known.get(&value.event_seq) {
-            ensure(*old == digest, "conflicting outbox sequence retry")?;
-        } else {
-            ensure(
-                self.known
-                    .last_key_value()
-                    .is_none_or(|(seq, _)| value.event_seq > *seq),
-                "outbox append sequence regressed",
-            )?;
-            let end = self
-                .end
-                .checked_add(body.len() as u64 + FRAME_HEADER)
-                .ok_or_else(|| error("outbox size overflow"))?;
-            ensure(
-                end <= OUTBOX_LIMIT,
-                "runtime outbox reached 16 MiB pressure limit",
-            )?;
-            #[cfg(test)]
-            self.hooks.before(WriterBoundary::Append, until)?;
-
-            self.io.seek(SeekFrom::Start(self.end)).map_err(io_error)?;
-            self.dirty = true;
-            self.io
-                .write_all(&u32::try_from(body.len()).map_err(io_error)?.to_be_bytes())
-                .map_err(io_error)?;
-            self.io.write_all(&digest).map_err(io_error)?;
-            self.io.write_all(&body).map_err(io_error)?;
-            self.known.insert(value.event_seq, digest);
-            self.end = end;
-            self.dirty = false;
-        }
-        self.dirty = true;
-        #[cfg(test)]
-        self.hooks.before(WriterBoundary::Sync, until)?;
-
-        check_deadline(Instant::now(), until)?;
-        self.io.sync_all().map_err(io_error)?;
-        self.dirty = false;
-        Ok(())
-    }
-    pub(crate) fn compact_committed(
-        &mut self,
-        conn: &mut Connection,
-        owner: &RunOwner,
-        until: Instant,
-    ) -> Result<()> {
-        let run = self.validate(conn, until)?;
-        ensure(*owner == self.run.owner(), "compaction owner mismatch")?;
-        let length = self.io.byte_len().map_err(io_error)?;
-        let scan = self.scan_validated(run, until)?;
-        let all = if !scan.frames.is_empty() {
-            with_database_deadline(conn, until, |conn| {
-                self.lock.validate(conn, owner)?;
-                let mut all = true;
-                for frame in &scan.frames {
-                    check_deadline(Instant::now(), until)?;
-                    let id: Option<i64> = conn
-                .query_row(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
-                    rusqlite::params![owner.run_id, frame.transition.event_seq],
-                    |row| row.get(0),
-                )
-                .optional()?;
-                    if let Some(id) = id {
-                        let view = storage::get_event(conn, id)?;
-                        ensure(
-                            storage::original(&view)? == frame.transition,
-                            &format!(
-                                "committed outbox frame {}..{} original mismatch",
-                                frame.start, frame.end
-                            ),
-                        )?;
-                    } else {
-                        all = false;
-                    }
-                }
-                Ok(all)
-            })?
-        } else {
-            true
-        };
-        if all {
-            #[cfg(test)]
-            self.hooks.before(WriterBoundary::Compact, until)?;
-
-            self.validate(conn, until)?;
-            ensure(
-                length == self.io.byte_len().map_err(io_error)?,
-                "outbox size changed before compaction",
-            )?;
-            check_deadline(Instant::now(), until)?;
-            self.dirty = true;
-            self.io.set_len(0).map_err(io_error)?;
-            check_deadline(Instant::now(), until)?;
-            self.io.sync_all().map_err(io_error)?;
-            self.end = 0;
-            self.known.clear();
-            self.dirty = false;
-        }
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::broker::runtime::*;
-    use crate::runtime::writer::test_support::WriterFixture;
-    use crate::runtime::writer::test_support::deadline;
-    use crate::runtime::writer::test_support::frame;
-    use crate::runtime::writer::test_support::independent_frames;
-    use crate::runtime::writer::test_support::transition;
+    use crate::runtime::writer::test_support::*;
     use crate::runtime::writer::*;
-    use std::io;
-    use std::io::Cursor;
-    use std::io::Read;
-    use std::io::Seek;
-    use std::io::SeekFrom;
-    use std::io::Write;
-    use std::sync::Mutex;
-    use std::sync::atomic::Ordering;
+    use crate::time::Clock;
+    use crate::time::test_support::TestClock;
     use std::time::Duration;
 
-    mod supplied_connection_compaction {
-        use crate::runtime::writer::tests::*;
-
-        fn ordinary_connection_work(conn: &rusqlite::Connection, timeout: i64) {
-            assert_eq!(
-                conn.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))
-                    .unwrap(),
-                timeout
-            );
-            assert_eq!(
-                crate::runtime::lifecycle::test_support::sum(
-                    conn,
-                    crate::runtime::lifecycle::test_support::FAST_SUM,
-                )
-                .unwrap(),
-                50005000
-            );
-        }
-
-        #[test]
-        fn compaction_cancels_supplied_connection_sql_preserves_bytes_and_retries() {
-            let mut fixture = WriterFixture::new();
-            let original = transition(&fixture, 1);
-            persist(&mut fixture, &original);
-            let io = FaultIo::from_bytes(frame(&original));
-            let mut outbox = open(&fixture, io.clone());
-            let before = io.snapshot_bytes();
-            fixture
-                .fixture
-                .conn
-                .busy_timeout(Duration::from_millis(137))
-                .unwrap();
-            fixture
-                .fixture
-                .conn
-                .execute_batch(&format!(
-                    "CREATE TEMP VIEW member_runtime_events AS SELECT original.* FROM main.member_runtime_events original WHERE ({})>0",
-                    crate::runtime::lifecycle::test_support::SLOW_SUM
-                ))
-                .unwrap();
-            let interrupt = fixture.fixture.conn.get_interrupt_handle();
-            let emergency = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let fired = emergency.clone();
-            let (stop, receive) = std::sync::mpsc::channel();
-            let begin = Instant::now();
-            let until = begin + Duration::from_millis(60);
-            let (result, elapsed) = std::thread::scope(|scope| {
-                let watchdog = scope.spawn(move || {
-                    if matches!(
-                        receive.recv_timeout(Duration::from_millis(650)),
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                    ) {
-                        fired.store(true, Ordering::Release);
-                        interrupt.interrupt();
-                    }
-                });
-                let result = outbox.compact_committed(
-                    &mut fixture.fixture.conn,
-                    &fixture.fixture.run.owner(),
-                    until,
-                );
-                let elapsed = begin.elapsed();
-                let _ = stop.send(());
-                watchdog.join().unwrap();
-                (result, elapsed)
-            });
-            assert!(
-                result.is_err(),
-                "expensive supplied-connection SQL must be cancelled"
-            );
-            assert_eq!(io.snapshot_bytes(), before);
-            fixture
-                .fixture
-                .conn
-                .execute_batch("DROP VIEW temp.member_runtime_events")
-                .unwrap();
-            std::thread::sleep(
-                until.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
-            );
-            ordinary_connection_work(&fixture.fixture.conn, 137);
-            compact(&mut outbox, &mut fixture).unwrap();
-            assert!(io.snapshot_bytes().is_empty());
-            ordinary_connection_work(&fixture.fixture.conn, 137);
-            assert!(
-                elapsed < Duration::from_millis(400) && !emergency.load(Ordering::Acquire),
-                "compaction exceeded its 60 ms SQL budget: {elapsed:?}; emergency interrupt fired={} ",
-                emergency.load(Ordering::Acquire)
-            );
-        }
-
-        struct PanicAtCompaction;
-        impl WriterHooks for PanicAtCompaction {
-            fn before(&self, boundary: WriterBoundary, _: Instant) -> Result<()> {
-                if matches!(boundary, WriterBoundary::Compact) {
-                    panic!("owned compaction unwind");
-                }
-                Ok(())
-            }
-        }
-
-        #[test]
-        fn compaction_restores_supplied_connection_after_success_error_and_unwind() {
-            for outcome in ["success", "error", "unwind"] {
-                let mut fixture = WriterFixture::new();
-                let original = transition(&fixture, 1);
-                persist(&mut fixture, &original);
-                let io = FaultIo::from_bytes(frame(&original));
-                let mut outbox = open(&fixture, io.clone());
-                let before = io.snapshot_bytes();
-                fixture
-                    .fixture
-                    .conn
-                    .busy_timeout(Duration::from_millis(173))
-                    .unwrap();
-                if outcome == "error" {
-                    fixture
-                        .fixture
-                        .conn
-                        .execute("UPDATE messages SET text='owned invalid association'", [])
-                        .unwrap();
-                }
-                if outcome == "unwind" {
-                    outbox.set_hooks(Arc::new(PanicAtCompaction));
-                }
-                let until = Instant::now() + Duration::from_millis(80);
-                let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    outbox.compact_committed(
-                        &mut fixture.fixture.conn,
-                        &fixture.fixture.run.owner(),
-                        until,
-                    )
-                }));
-                match outcome {
-                    "success" => assert!(attempt.unwrap().is_ok()),
-                    "error" => assert!(attempt.unwrap().is_err()),
-                    "unwind" => {
-                        let payload =
-                            attempt.expect_err("compaction preserves the original unwind");
-                        assert_eq!(
-                            payload.downcast_ref::<&str>(),
-                            Some(&"owned compaction unwind")
-                        );
-                    }
-                    _ => unreachable!(),
-                }
-                if outcome == "success" {
-                    assert!(io.snapshot_bytes().is_empty());
-                } else {
-                    assert_eq!(io.snapshot_bytes(), before);
-                }
-                std::thread::sleep(
-                    until.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
-                );
-                ordinary_connection_work(&fixture.fixture.conn, 173);
-            }
-        }
+    fn clock() -> Arc<TestClock> {
+        crate::runtime::test_support::virtual_clock()
     }
 
-    mod terminal_tail {
-        use crate::runtime::writer::tests::*;
-
-        fn terminal_spool(committed: bool) -> (WriterFixture, FaultIo, Vec<u8>) {
-            let mut fixture = WriterFixture::new();
-            let mut bytes = Vec::new();
-            if committed {
-                let original = ObservedTransition {
-                    kind: RuntimeEventKind::RunnerExited,
-                    cause_json: Some(
-                        serde_json::json!({"kind":"native_exit","exit_code":7,"exit_signal":null}),
-                    ),
-                    ..transition(&fixture, 1)
-                };
-                persist(&mut fixture, &original);
-                bytes.extend(frame(&original));
-            } else {
-                fixture
-                    .fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET status='exited',exit_code=7 WHERE run_id=?1",
-                        [fixture.fixture.run.run_id],
-                    )
-                    .unwrap();
-            }
-            fixture
-                .fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET cleanup_state='incomplete' WHERE run_id=?1",
-                    [fixture.fixture.run.run_id],
-                )
-                .unwrap();
-            fixture.fixture.run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            bytes.extend([0, 0, 0, 40, 1, 2, 3]);
-            let io = FaultIo::from_bytes(bytes.clone());
-            (fixture, io, bytes)
-        }
-
-        #[test]
-        fn runner_recovery_terminal_tail_compaction_truncates_and_syncs_empty_or_committed_originals()
-         {
-            for committed in [false, true] {
-                let (mut fixture, io, _) = terminal_spool(committed);
-                let mut outbox = open(&fixture, io.clone());
-                let scan = outbox.scan(deadline()).unwrap();
-                assert!(scan.incomplete_tail.is_some());
-                assert_eq!(scan.frames.len(), usize::from(committed));
-                let before =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                let syncs = io.0.lock().unwrap().syncs;
-                compact(&mut outbox, &mut fixture).unwrap();
-                assert!(io.snapshot_bytes().is_empty());
-                let state = io.0.lock().unwrap();
-                assert_eq!(state.truncations.last(), Some(&0));
-                assert!(
-                    state.syncs > syncs,
-                    "successful tail retirement includes fsync"
-                );
-                drop(state);
-                assert_eq!(
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap(),
-                    before
-                );
-            }
-        }
-
-        #[test]
-        fn runner_recovery_terminal_tail_truncate_failure_retains_bytes_and_retries_the_same_owner()
-        {
-            for committed in [false, true] {
-                let (mut fixture, io, bytes) = terminal_spool(committed);
-                let mut outbox = open(&fixture, io.clone());
-                let before =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                io.0.lock().unwrap().fail_truncate = true;
-                let error = compact(&mut outbox, &mut fixture)
-                    .expect_err("incomplete tail truncate failure remains explicit");
-                assert!(error.message().contains("fixture frame truncate failure"));
-                assert_eq!(io.snapshot_bytes(), bytes);
-                assert_eq!(
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap(),
-                    before
-                );
-                let syncs = io.0.lock().unwrap().syncs;
-                io.0.lock().unwrap().fail_truncate = false;
-                compact(&mut outbox, &mut fixture).unwrap();
-                assert!(io.snapshot_bytes().is_empty());
-                assert!(io.0.lock().unwrap().syncs > syncs);
-            }
-        }
-
-        #[test]
-        fn runner_recovery_terminal_tail_sync_failure_requires_successful_sync_on_retry_even_after_truncation()
-         {
-            for committed in [false, true] {
-                let (mut fixture, io, bytes) = terminal_spool(committed);
-                let mut outbox = open(&fixture, io.clone());
-                let before =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                io.0.lock().unwrap().fail_sync = true;
-                let error = compact(&mut outbox, &mut fixture)
-                    .expect_err("incomplete tail sync failure remains explicit");
-                assert!(error.message().contains("fixture frame sync failure"));
-                let retained = io.snapshot_bytes();
-                assert!(
-                    retained == bytes
-                        || retained.is_empty()
-                        || retained == bytes[..bytes.len() - 7],
-                    "failed synchronization preserves a valid original prefix"
-                );
-                assert_eq!(
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap(),
-                    before
-                );
-                let failed_syncs = io.0.lock().unwrap().syncs;
-                assert!(failed_syncs > 0);
-                io.0.lock().unwrap().fail_sync = false;
-                compact(&mut outbox, &mut fixture).unwrap();
-                assert!(io.snapshot_bytes().is_empty());
-                assert!(
-                    io.0.lock().unwrap().syncs > failed_syncs,
-                    "a retry completes fsync even when the failed attempt already truncated the file"
-                );
-            }
-        }
-    }
-
-    #[derive(Default)]
-    struct FaultState {
-        data: Cursor<Vec<u8>>,
-        short_write: Option<usize>,
-        fail_after: Option<u64>,
-        fail_sync: bool,
-        fail_truncate: bool,
-        syncs: usize,
-        largest_read: usize,
-        truncations: Vec<u64>,
-    }
-    #[derive(Clone, Default)]
-    struct FaultIo(Arc<Mutex<FaultState>>);
-    impl FaultIo {
-        fn snapshot_bytes(&self) -> Vec<u8> {
-            self.0.lock().unwrap().data.get_ref().clone()
-        }
-        fn from_bytes(bytes: Vec<u8>) -> Self {
-            let value = Self::default();
-            value.0.lock().unwrap().data = Cursor::new(bytes);
-            value
-        }
-    }
-    impl Read for FaultIo {
-        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-            let mut state = self.0.lock().unwrap();
-            state.largest_read = state.largest_read.max(bytes.len());
-            state.data.read(bytes)
-        }
-    }
-    impl Write for FaultIo {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            let mut state = self.0.lock().unwrap();
-            let position = state.data.position();
-            if state.fail_after.is_some_and(|limit| position >= limit) {
-                return Err(io::Error::other("fixture frame write failure"));
-            }
-            let mut limit = bytes.len();
-            if let Some(short) = state.short_write {
-                limit = limit.min(short);
-            }
-            if let Some(end) = state.fail_after {
-                limit = limit.min(usize::try_from(end - position).unwrap());
-            }
-            state.data.write(&bytes[..limit])
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-    impl Seek for FaultIo {
-        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
-            self.0.lock().unwrap().data.seek(position)
-        }
-    }
-    impl OutboxIo for FaultIo {
-        fn sync_all(&mut self) -> io::Result<()> {
-            let mut state = self.0.lock().unwrap();
-            state.syncs += 1;
-            if state.fail_sync {
-                Err(io::Error::other("fixture frame sync failure"))
-            } else {
-                Ok(())
-            }
-        }
-        fn byte_len(&self) -> io::Result<u64> {
-            Ok(self
-                .0
-                .lock()
-                .unwrap()
-                .data
-                .get_ref()
-                .len()
-                .try_into()
-                .unwrap())
-        }
-        fn set_len(&mut self, length: u64) -> io::Result<()> {
-            let mut state = self.0.lock().unwrap();
-            if state.fail_truncate {
-                return Err(io::Error::other("fixture frame truncate failure"));
-            }
-            state.truncations.push(length);
-            state.data.get_mut().resize(length.try_into().unwrap(), 0);
-            Ok(())
-        }
-    }
-
-    /// An outbox with its own connection to the fixture database.
-    struct TestOutbox {
-        outbox: Outbox<FaultIo>,
-        conn: Connection,
-    }
-
-    impl TestOutbox {
-        fn append_synced(&mut self, value: &ObservedTransition, until: Instant) -> Result<()> {
-            self.outbox
-                .append_synced(&mut self.conn, value, None, until)
-        }
-        fn append_synced_with_policy(
-            &mut self,
-            value: &ObservedTransition,
-            effective_policy: Option<&EffectivePolicyObservation>,
-            until: Instant,
-        ) -> Result<()> {
-            self.outbox
-                .append_synced(&mut self.conn, value, effective_policy, until)
-        }
-        fn scan(&mut self, until: Instant) -> Result<OutboxScan> {
-            self.outbox.scan(&mut self.conn, until)
-        }
-        fn compact_committed(
-            &mut self,
-            conn: &mut Connection,
-            owner: &RunOwner,
-            until: Instant,
-        ) -> Result<()> {
-            self.outbox.compact_committed(conn, owner, until)
-        }
-        fn set_hooks(&mut self, hooks: Arc<dyn WriterHooks>) {
-            self.outbox.set_hooks(hooks);
-        }
-    }
-
-    fn initialize(fixture: &WriterFixture, io: FaultIo) -> Result<TestOutbox> {
-        let mut conn = crate::db::connect(&format!(
-            "sqlite:///{}",
-            fixture.fixture.conn.path().unwrap()
-        ))
-        .unwrap();
-        let outbox = Outbox::initialize(
-            &mut conn,
-            &fixture.fixture.run,
-            fixture.lock.clone(),
-            io,
-            deadline(),
-        )?;
-        Ok(TestOutbox { outbox, conn })
-    }
-
-    fn open(fixture: &WriterFixture, io: FaultIo) -> TestOutbox {
-        initialize(fixture, io).unwrap()
-    }
-
-    fn try_open(fixture: &WriterFixture, io: FaultIo) -> Result<OutboxScan> {
-        initialize(fixture, io).and_then(|mut outbox| outbox.scan(deadline()))
-    }
-
-    fn persist(fixture: &mut WriterFixture, value: &ObservedTransition) {
-        storage::persist_transition(
-            &mut fixture.fixture.conn,
-            &fixture.fixture.run.owner(),
-            value,
-            PersistenceMode::Live,
-        )
-        .unwrap();
-    }
-
-    fn compact(outbox: &mut TestOutbox, fixture: &mut WriterFixture) -> Result<()> {
-        outbox.compact_committed(
-            &mut fixture.fixture.conn,
-            &fixture.fixture.run.owner(),
-            deadline(),
-        )
-    }
-
-    mod effective_policy_frames {
-        use crate::runtime::writer::test_support::frame_bodies;
-        use crate::runtime::writer::test_support::observation;
-        use crate::runtime::writer::test_support::outbox_frame;
-        use crate::runtime::writer::test_support::unavailable;
-        use crate::runtime::writer::tests::*;
-
-        fn framed(body: &Value) -> Vec<u8> {
-            outbox_frame(&serde_json::to_vec(body).unwrap())
-        }
-
-        #[test]
-        fn runner_outbox_unavailable_frame_body_adds_only_the_effective_policy_key() {
-            let fixture = WriterFixture::new();
-            let io = FaultIo::default();
-            let mut outbox = open(&fixture, io.clone());
-            let plain = transition(&fixture, 1);
-            outbox
-                .append_synced_with_policy(&plain, None, deadline())
-                .unwrap();
-            assert_eq!(io.snapshot_bytes(), frame(&plain), "unchanged frame bytes");
-            let value = unavailable(&fixture, 2);
-            let lost = observation(AutomaticReview::Unavailable);
-            outbox
-                .append_synced_with_policy(&value, Some(&lost), deadline())
-                .unwrap();
-            let mut expected = serde_json::to_value(&value).unwrap();
-            expected["effective_policy"] = serde_json::to_value(&lost).unwrap();
-            assert_eq!(
-                frame_bodies(&io.snapshot_bytes()),
-                vec![serde_json::to_value(&plain).unwrap(), expected]
-            );
-            let scan = outbox.scan(deadline()).unwrap();
-            assert_eq!(scan.frames.len(), 2);
-            assert!(scan.frames[0].effective_policy.is_none());
-            assert_eq!(scan.frames[1].transition, value);
-            assert_eq!(
-                serde_json::to_value(scan.frames[1].effective_policy.as_ref().unwrap()).unwrap(),
-                serde_json::to_value(&lost).unwrap()
-            );
-            outbox
-                .append_synced_with_policy(&value, Some(&lost), deadline())
-                .unwrap();
-            assert_eq!(
-                frame_bodies(&io.snapshot_bytes()).len(),
-                2,
-                "identical retry"
-            );
-            assert!(
-                outbox
-                    .append_synced_with_policy(&value, None, deadline())
-                    .is_err(),
-                "a retry without its observation conflicts with the original frame"
-            );
-        }
-
-        #[test]
-        fn runner_outbox_rejects_an_effective_policy_on_any_other_frame() {
-            let fixture = WriterFixture::new();
-            let io = FaultIo::default();
-            let mut outbox = open(&fixture, io.clone());
-            let plain = transition(&fixture, 1);
-            let lost = observation(AutomaticReview::Unavailable);
-            assert!(
-                outbox
-                    .append_synced_with_policy(&plain, Some(&lost), deadline())
-                    .is_err()
-            );
-            assert!(io.snapshot_bytes().is_empty());
-            let mut forged = serde_json::to_value(&plain).unwrap();
-            forged["effective_policy"] = serde_json::to_value(&lost).unwrap();
-            let on_disk = FaultIo::from_bytes(framed(&forged));
-            assert!(initialize(&fixture, on_disk).is_err());
-            let mut malformed = serde_json::to_value(unavailable(&fixture, 1)).unwrap();
-            malformed["effective_policy"] = serde_json::json!({"automatic_review":"available"});
-            assert!(initialize(&fixture, FaultIo::from_bytes(framed(&malformed))).is_err());
-        }
-    }
-
-    #[test]
-    fn outbox_frames_pin_big_endian_length_checksum_and_original_identity() {
-        let fixture = WriterFixture::new();
-        let io = FaultIo::default();
-        let mut outbox = open(&fixture, io.clone());
-        let value = transition(&fixture, 1);
-        let syncs = io.0.lock().unwrap().syncs;
-        outbox.append_synced(&value, deadline()).unwrap();
-        assert_eq!(io.snapshot_bytes(), frame(&value));
-        assert!(io.0.lock().unwrap().syncs > syncs);
-        let scan = outbox.scan(deadline()).unwrap();
-        assert_eq!(scan.frames.len(), 1);
-        assert_eq!(scan.frames[0].transition, value);
-        assert_eq!(scan.frames[0].start, 0);
-        assert_eq!(scan.frames[0].end, io.snapshot_bytes().len() as u64);
-        assert!(scan.incomplete_tail.is_none());
-        assert_eq!(
-            scan.frames.last().map(|frame| frame.transition.event_seq),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn outbox_matching_duplicates_reconcile_but_conflicting_sequence_bytes_fail() {
-        let fixture = WriterFixture::new();
-        let original = transition(&fixture, 1);
-        let mut duplicate = frame(&original);
-        duplicate.extend(frame(&original));
-        let io = FaultIo::from_bytes(duplicate);
-        let mut outbox = open(&fixture, io);
-        assert!(outbox.scan(deadline()).is_ok());
-        let mut changed = original.clone();
-        changed.observed_at = "2026-10-26T16:41:00.000000+00:00".into();
-        let mut bytes = frame(&original);
-        bytes.extend(frame(&changed));
-        let io = FaultIo::from_bytes(bytes.clone());
-        let result = try_open(&fixture, io.clone());
-        assert!(result.is_err());
-        assert_eq!(io.snapshot_bytes(), bytes);
-    }
-
-    #[test]
-    fn outbox_total_capacity_includes_frame_overhead_and_rejects_before_append() {
-        let mut fixture = WriterFixture::new();
-        fixture
-            .fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                [fixture.fixture.run.run_id],
-            )
-            .unwrap();
-        for _ in 1..16 {
-            storage::reserve_event_sequences(
-                &mut fixture.fixture.conn,
-                &fixture.fixture.run.owner(),
-            )
-            .unwrap();
-        }
-        fixture.fixture.run =
-            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        let policy=storage::evidence::EvidencePolicy::redacted(&serde_json::json!({"schema_version":1,"patterns":["absent-fixture-canary"],"sensitive_rules":[]}),&["runner-lifecycle"]).unwrap();
-        let until = Instant::now() + Duration::from_secs(30);
-        let run = fixture.fixture.run.clone();
-        let large = |sequence| {
-            let mut value = run_transition(&run, sequence);
-            let mut raw = value.evidence_json.clone();
-            raw["excerpt"] = serde_json::json!("x".repeat(6000));
-            value.evidence_json = policy.apply(&raw).unwrap();
-            value.kind = RuntimeEventKind::AutomaticRefusalObserved;
-            value.cause_json = None;
-            let bytes = frame(&value);
-            (value, bytes)
-        };
-        let capacity = 16 * 1024 * 1024;
-        let count = i64::try_from(capacity / large(1).1.len() + 2).unwrap();
-        let chunk = (count + 7) / 8;
-        let frames: Vec<_> = std::thread::scope(|scope| {
-            let workers: Vec<_> = (0..8)
-                .map(|worker| {
-                    let large = &large;
-                    scope.spawn(move || {
-                        (worker * chunk + 1..=(worker * chunk + chunk).min(count))
-                            .map(large)
-                            .collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-            workers
-                .into_iter()
-                .flat_map(|worker| worker.join().unwrap())
-                .collect()
-        });
-        let mut fitting = Vec::new();
-        let mut used = 0;
-        let (overflow, _) = frames
-            .into_iter()
-            .find(|(value, bytes)| {
-                if used + bytes.len() > capacity {
-                    return true;
-                }
-                used += bytes.len();
-                fitting.push((value.clone(), bytes.clone()));
-                false
-            })
-            .expect("fixture must reach the fixed outbox capacity");
-        let (last, _) = fitting.pop().unwrap();
-        let io = FaultIo::from_bytes(
-            fitting
-                .iter()
-                .flat_map(|(_, bytes)| bytes.clone())
-                .collect(),
-        );
-        let mut outbox = open(&fixture, io.clone());
-        assert!(outbox.scan(until).unwrap().incomplete_tail.is_none());
-        outbox.append_synced(&last, until).unwrap();
-        assert_eq!(io.byte_len().unwrap(), used as u64);
-        let before = io.snapshot_bytes();
-        assert!(outbox.append_synced(&overflow, until).is_err());
-        assert_eq!(io.snapshot_bytes(), before);
-        assert!(used <= capacity);
-    }
-
-    #[test]
-    fn outbox_short_writes_preserve_the_complete_frame() {
-        let fixture = WriterFixture::new();
-        let io = FaultIo::default();
-        io.0.lock().unwrap().short_write = Some(1);
-        let mut outbox = open(&fixture, io.clone());
-        let value = transition(&fixture, 1);
-        outbox.append_synced(&value, deadline()).unwrap();
-        assert_eq!(independent_frames(&io.snapshot_bytes()), vec![value]);
-    }
-
-    #[test]
-    fn outbox_reopen_recovers_complete_original_frames_in_order() {
-        let fixture = WriterFixture::new();
-        let values = [
-            transition(&fixture, 1),
-            transition(&fixture, 2),
-            transition(&fixture, 3),
-        ];
-        let bytes = values.iter().flat_map(frame).collect();
-        let io = FaultIo::from_bytes(bytes);
-        let mut outbox = open(&fixture, io.clone());
-        let scan = outbox.scan(deadline()).unwrap();
-        assert_eq!(
-            scan.frames
-                .iter()
-                .map(|entry| entry.transition.clone())
-                .collect::<Vec<_>>(),
-            values
-        );
-        assert_eq!(
-            scan.frames.last().map(|frame| frame.transition.event_seq),
-            Some(3)
-        );
-        assert!(scan.incomplete_tail.is_none());
-        assert_eq!(independent_frames(&io.snapshot_bytes()), values);
-    }
-
-    #[test]
-    fn outbox_each_incomplete_final_component_retains_the_valid_prefix() {
-        let fixture = WriterFixture::new();
-        let first = frame(&transition(&fixture, 1));
-        let second = frame(&transition(&fixture, 2));
-        for cut in [1, 3, 4, 20, 35, 36, second.len() - 1] {
-            let mut bytes = first.clone();
-            bytes.extend_from_slice(&second[..cut]);
-            let io = FaultIo::from_bytes(bytes.clone());
-            let mut outbox = open(&fixture, io.clone());
-            let scan = outbox.scan(deadline()).unwrap();
-            assert_eq!(scan.frames.len(), 1, "cut={cut}");
-            assert_eq!(scan.frames[0].transition, transition(&fixture, 1));
-            assert!(scan.incomplete_tail.is_some(), "cut={cut}");
-            assert_eq!(io.snapshot_bytes(), bytes);
-        }
-    }
-
-    #[test]
-    fn outbox_append_diagnoses_and_truncates_only_an_incomplete_tail() {
-        let fixture = WriterFixture::new();
-        let first = frame(&transition(&fixture, 1));
-        let mut initial = first.clone();
-        initial.extend_from_slice(&[0, 0]);
-        let io = FaultIo::from_bytes(initial);
-        let mut outbox = open(&fixture, io.clone());
-        assert!(outbox.scan(deadline()).unwrap().incomplete_tail.is_some());
-        outbox
-            .append_synced(&transition(&fixture, 2), deadline())
-            .unwrap();
-        assert_eq!(
-            independent_frames(&io.snapshot_bytes()),
-            vec![transition(&fixture, 1), transition(&fixture, 2)]
-        );
-        assert!(
-            io.0.lock()
-                .unwrap()
-                .truncations
-                .contains(&(first.len() as u64))
-        );
-    }
-
-    #[test]
-    fn outbox_completed_corruption_preserves_all_original_bytes() {
-        let fixture = WriterFixture::new();
-        let valid = frame(&transition(&fixture, 1));
-        for corrupt in ["checksum", "json", "run", "sequence"] {
-            let mut value = transition(&fixture, 1);
-            if corrupt == "run" {
-                value.run_id += 1;
-            }
-            if corrupt == "sequence" {
-                value.event_seq = 0;
-            }
-            let mut bytes = if matches!(corrupt, "run" | "sequence") {
-                frame(&value)
-            } else {
-                valid.clone()
-            };
-            if corrupt == "checksum" {
-                bytes[4] ^= 1;
-            }
-            if corrupt == "json" {
-                bytes[36] = b'!';
-                let digest = Sha256::digest(&bytes[36..]);
-                bytes[4..36].copy_from_slice(&digest);
-            }
-            let io = FaultIo::from_bytes(bytes.clone());
-            let result = try_open(&fixture, io.clone());
-            assert!(result.is_err(), "{corrupt}");
-            assert_eq!(io.snapshot_bytes(), bytes);
-        }
-    }
-
-    #[test]
-    fn outbox_oversized_declared_length_fails_before_large_reads() {
-        let fixture = WriterFixture::new();
-        let io = FaultIo::from_bytes(u32::MAX.to_be_bytes().to_vec());
-        let result = try_open(&fixture, io.clone());
-        assert!(result.is_err());
-        assert!(io.0.lock().unwrap().largest_read <= 36);
-        assert_eq!(io.snapshot_bytes(), u32::MAX.to_be_bytes());
-    }
-
-    #[test]
-    fn outbox_sync_failure_leaves_a_complete_recoverable_pending_frame() {
-        let fixture = WriterFixture::new();
-        let io = FaultIo::default();
-        let mut outbox = open(&fixture, io.clone());
-        io.0.lock().unwrap().fail_sync = true;
-        assert!(
-            outbox
-                .append_synced(&transition(&fixture, 1), deadline())
-                .is_err()
-        );
-        assert_eq!(
-            independent_frames(&io.snapshot_bytes()),
-            vec![transition(&fixture, 1)]
-        );
-        io.0.lock().unwrap().fail_sync = false;
-        assert_eq!(outbox.scan(deadline()).unwrap().frames.len(), 1);
-        assert_eq!(committed(&fixture), 0);
-    }
-
-    #[test]
-    fn outbox_partial_write_failure_is_an_explicit_tail_without_a_commit() {
-        let fixture = WriterFixture::new();
-        let io = FaultIo::default();
-        let mut outbox = open(&fixture, io.clone());
-        io.0.lock().unwrap().fail_after = Some(40);
-        assert!(
-            outbox
-                .append_synced(&transition(&fixture, 1), deadline())
-                .is_err()
-        );
-        let scan = outbox.scan(deadline()).unwrap();
-        assert!(scan.frames.is_empty());
-        assert!(scan.incomplete_tail.is_some());
-        assert_eq!(io.snapshot_bytes().len(), 40);
-    }
-
-    #[test]
-    fn outbox_compaction_retains_committed_prefix_until_every_frame_is_durable() {
-        let mut fixture = WriterFixture::new();
-        let values = [transition(&fixture, 1), transition(&fixture, 2)];
-        let io = FaultIo::from_bytes(values.iter().flat_map(frame).collect());
-        let mut outbox = open(&fixture, io.clone());
-        let original = io.snapshot_bytes();
-        persist(&mut fixture, &values[0]);
-        compact(&mut outbox, &mut fixture).unwrap();
-        assert_eq!(io.snapshot_bytes(), original);
-        persist(&mut fixture, &values[1]);
-        compact(&mut outbox, &mut fixture).unwrap();
-        assert!(io.snapshot_bytes().is_empty());
-        assert!(io.0.lock().unwrap().syncs > 0);
-    }
-
-    #[test]
-    fn outbox_expired_deadline_and_stale_epoch_have_zero_content_effect() {
-        let fixture = WriterFixture::new();
-        let io = FaultIo::default();
-        let mut outbox = open(&fixture, io.clone());
-        assert!(
-            outbox
-                .append_synced(
-                    &transition(&fixture, 1),
-                    Instant::now() - Duration::from_millis(1)
-                )
-                .is_err()
-        );
-        assert!(io.snapshot_bytes().is_empty());
-        fixture
-            .fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
-                [fixture.fixture.run.run_id],
-            )
-            .unwrap();
-        assert!(
-            outbox
-                .append_synced(&transition(&fixture, 1), deadline())
-                .is_err()
-        );
-        assert!(io.snapshot_bytes().is_empty());
-    }
-
-    #[test]
-    fn outbox_holds_the_original_lock_for_its_entire_content_lifetime() {
-        let WriterFixture {
-            fixture,
-            artifacts: _artifacts,
-            lock,
-        } = WriterFixture::new();
-        let mut conn =
-            crate::db::connect(&format!("sqlite:///{}", fixture.conn.path().unwrap())).unwrap();
-        let outbox = Outbox::open_owned(&mut conn, &fixture.run, lock.clone(), deadline()).unwrap();
-        drop(lock);
-        assert!(
-            RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                .unwrap()
-                .is_none()
-        );
-        drop(outbox);
-        assert!(
-            RunLock::acquire_released(&fixture.conn, &fixture.run.owner())
-                .unwrap()
-                .is_some()
-        );
-    }
-
-    use crate::runtime::writer::test_support::*;
-
-    mod refresh {
-        use crate::runtime::writer::tests::*;
-        fn opening(fixture: &WriterFixture) -> ObservedTransition {
-            ObservedTransition {
-                episode_seq: Some(1),
-                kind: RuntimeEventKind::InteractionOpened,
-                classification: Some(InteractionClass::PermissionRequest),
-                cause_json: None,
-                ..transition(fixture, 1)
-            }
-        }
-        fn update(fixture: &WriterFixture, sequence: u64) -> InteractionEvidenceUpdate {
-            InteractionEvidenceUpdate {
-                run_id: fixture.fixture.run.run_id,
-                episode_seq: 1,
-                output_seq: sequence,
-                evidence_json: transition(fixture, sequence.try_into().unwrap()).evidence_json,
-            }
-        }
-        fn latest(fixture: &WriterFixture) -> Value {
-            let text: String = fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT evidence_json FROM member_interactions WHERE run_id=?1 AND episode_seq=1",
-                    [fixture.fixture.run.run_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            serde_json::from_str(&text).unwrap()
-        }
-        fn committed_open(fixture: &WriterFixture, hooks: Arc<Hooks>) -> EventWriter {
-            let writer = start(fixture, hooks);
-            assert!(writer.try_submit(opening(fixture)).is_ok());
-            wait_until(|| committed(fixture) == 1 && writer.status().pending_count == 0);
-            writer
-        }
-
-        #[test]
-        fn writer_refresh_waits_for_its_opening_barrier_without_an_outbox_frame() {
-            let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            assert!(writer.try_submit(opening(&fixture)).is_ok());
-            assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 1);
-            assert_eq!(committed(&fixture), 0);
-            assert!(writer.status().pending_evidence);
-            assert_eq!(
-                independent_frames(&std::fs::read(&fixture.artifacts.paths.outbox).unwrap()),
-                vec![opening(&fixture)]
-            );
-            drop(release);
-            wait_until(|| committed(&fixture) == 1 && !writer.status().pending_evidence);
-            assert_eq!(latest(&fixture)["screen_seq"], 2);
-            assert_eq!(writer.finish(deadline()).0, 0);
-            assert_eq!(committed(&fixture), 1);
-        }
-
-        #[test]
-        fn writer_refresh_newer_revision_survives_an_inflight_successful_attempt() {
-            for fail in [false, true] {
-                let fixture = WriterFixture::new();
-                let hooks = Arc::new(Hooks::default());
-                let mut writer = committed_open(&fixture, hooks.clone());
-                hooks.pause(WriterBoundary::Persist);
-                let release = Release(hooks.clone());
-                assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-                hooks.wait(WriterBoundary::Persist, 2);
-                assert!(writer.try_refresh(update(&fixture, 3), deadline()).is_ok());
-                assert!(writer.status().pending_evidence);
-                if fail {
-                    hooks.fail_once(WriterBoundary::Persist);
-                }
-                drop(release);
-                wait_until(|| !writer.status().pending_evidence);
-                assert_eq!(latest(&fixture)["screen_seq"], 3, "fail={fail}");
-                assert_eq!(committed(&fixture), 1);
-                writer.finish(deadline());
-            }
-        }
-
-        #[test]
-        fn writer_refresh_rejects_regression_conflict_and_foreign_episode_without_replacing_newer_work()
-         {
-            for field in ["regression", "conflict", "episode"] {
-                let fixture = WriterFixture::new();
-                let hooks = Arc::new(Hooks::default());
-                let mut writer = committed_open(&fixture, hooks.clone());
-                hooks.pause(WriterBoundary::Persist);
-                let release = Release(hooks.clone());
-                assert!(writer.try_refresh(update(&fixture, 3), deadline()).is_ok());
-                hooks.wait(WriterBoundary::Persist, 2);
-                let mut invalid = update(&fixture, if field == "regression" { 2 } else { 3 });
-                if field == "episode" {
-                    invalid.episode_seq = 2;
-                }
-                if field == "conflict" {
-                    let mut raw = invalid.evidence_json.clone();
-                    raw["truncated"] = serde_json::json!(true);
-                    invalid.evidence_json = storage::evidence::EvidencePolicy::metadata()
-                        .apply(&raw)
-                        .unwrap();
-                }
-                let returned = writer
-                    .try_refresh(invalid, deadline())
-                    .expect_err("invalid refresh retains caller ownership");
-                assert_eq!(
-                    returned.update.output_seq,
-                    if field == "regression" { 2 } else { 3 }
-                );
-                assert!(writer.status().diagnostic.is_some());
-                drop(release);
-                wait_until(|| !writer.status().pending_evidence);
-                assert_eq!(latest(&fixture)["screen_seq"], 3);
-                writer.finish(deadline());
-            }
-        }
-
-        #[test]
-        fn writer_refresh_closure_follows_earlier_evidence_and_rejects_late_old_episode_updates() {
-            let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            let mut writer = committed_open(&fixture, hooks.clone());
-            hooks.pause(WriterBoundary::Persist);
-            let release = Release(hooks.clone());
-            assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 2);
-            let close = ObservedTransition {
-                event_seq: 2,
-                kind: RuntimeEventKind::InteractionClosed,
-                close_reason: Some(InteractionCloseReason::NotVisible),
-                evidence_json: transition(&fixture, 3).evidence_json,
-                ..opening(&fixture)
-            };
-            assert!(writer.try_submit(close.clone()).is_ok());
-            assert!(writer.try_refresh(update(&fixture, 4), deadline()).is_err());
-            drop(release);
-            wait_until(|| committed(&fixture) == 2 && !writer.status().pending_evidence);
-            assert_eq!(latest(&fixture), update(&fixture, 2).evidence_json);
-            writer.finish(deadline());
-        }
-
-        #[test]
-        fn writer_refresh_newer_same_episode_revision_advances_its_semantic_barrier() {
-            let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Receive);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            hooks.wait(WriterBoundary::Receive, 1);
-            assert!(writer.try_submit(opening(&fixture)).is_ok());
-            assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-            let obscured = ObservedTransition {
-                event_seq: 2,
-                kind: RuntimeEventKind::InteractionObscured,
-                evidence_json: transition(&fixture, 3).evidence_json,
-                ..opening(&fixture)
-            };
-            assert!(writer.try_submit(obscured).is_ok());
-            assert!(writer.try_refresh(update(&fixture, 4), deadline()).is_ok());
-            drop(release);
-            wait_until(|| committed(&fixture) == 2 && !writer.status().pending_evidence);
-            assert_eq!(latest(&fixture)["screen_seq"], 4);
-            writer.finish(deadline());
-        }
-
-        #[test]
-        fn writer_refresh_equal_identical_requests_coalesce_and_expiry_has_no_enqueue_effect() {
-            let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            let mut writer = committed_open(&fixture, hooks.clone());
-            hooks.pause(WriterBoundary::Persist);
-            let release = Release(hooks.clone());
-            assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 2);
-            assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-            let begin = Instant::now();
-            assert!(
-                writer
-                    .try_refresh(update(&fixture, 3), begin - Duration::from_millis(1))
-                    .is_err()
-            );
-            assert!(begin.elapsed() < Duration::from_millis(250));
-            drop(release);
-            wait_until(|| !writer.status().pending_evidence);
-            assert_eq!(latest(&fixture)["screen_seq"], 2);
-            writer.finish(deadline());
-        }
+    fn until(clock: &TestClock) -> Instant {
+        clock.now() + Duration::from_secs(2)
     }
 
     mod worker {
         use crate::runtime::writer::tests::*;
         #[test]
         fn writer_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
+            let hooks = Arc::new(Hooks::on_virtual_time());
             hooks.pause(WriterBoundary::Receive);
-            let mut writer = start(&fixture, hooks.clone());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
             hooks.wait(WriterBoundary::Receive, 1);
             for sequence in 1..=64 {
                 assert!(writer.try_submit(transition(&fixture, sequence)).is_ok());
             }
             let original = transition(&fixture, 65);
-            let begin = Instant::now();
             let rejected = writer
                 .try_submit(original.clone())
                 .expect_err("channel pressure returns the original");
-            assert!(begin.elapsed() < Duration::from_millis(250));
             assert_eq!(rejected.transition, original);
             let status = writer.status();
             assert_eq!(status.pending_count, 64);
@@ -2214,86 +385,94 @@ mod tests {
             assert!(status.gap_count > 0);
             assert_eq!(committed(&fixture), 0);
             drop(release);
-            wait_until(|| writer.status().pending_count == 0);
+            yield_until(|| writer.status().pending_count == 0);
             assert_eq!(committed(&fixture), 64);
-            assert_eq!(writer.finish(deadline()).0, 0);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
         }
 
         #[test]
-        fn writer_worker_sync_precedes_sqlite_and_pending_delivery_is_not_an_inbox_commit() {
+        fn writer_worker_database_failure_retains_the_same_transition_for_retry() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            let value = transition(&fixture, 1);
-            assert!(writer.try_submit(value.clone()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 1);
-            assert_eq!(committed(&fixture), 0);
+            let hooks = Arc::new(Hooks::on_virtual_time());
+            hooks.fail_once(WriterBoundary::Persist);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let _release = Release(hooks.clone());
+            let original = transition(&fixture, 1);
+            assert!(writer.try_submit(original.clone()).is_ok());
+            yield_until(|| writer.status().diagnostic.is_some());
+            assert_eq!(committed(&fixture), 0, "the retry waits for its backoff");
+            clock.advance(Duration::from_millis(100));
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
             assert_eq!(
-                independent_frames(&std::fs::read(&fixture.artifacts.paths.outbox).unwrap()),
-                vec![value]
+                storage::get_event(&fixture.fixture.conn, 1)
+                    .unwrap()
+                    .event
+                    .payload_json["evidence"],
+                original.evidence_json
             );
-            let first = hooks.state.lock().unwrap().first;
-            assert!(first[1].unwrap() < first[2].unwrap());
-            assert!(first[2].unwrap() < first[3].unwrap());
-            assert_eq!(writer.status().pending_count, 1);
-            drop(release);
-            wait_until(|| committed(&fixture) == 1);
-            assert_eq!(writer.finish(deadline()), (0, 0));
+            assert_eq!(committed(&fixture), 1);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
         }
 
         #[test]
-        fn writer_worker_ambiguous_sync_failure_rescans_and_reuses_the_complete_original() {
+        fn writer_commits_each_submitted_transition_directly_with_its_event_sequence() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            hooks.fail_once(WriterBoundary::Sync);
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            let value = transition(&fixture, 1);
-            assert!(writer.try_submit(value.clone()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 1);
-            assert_eq!(
-                independent_frames(&std::fs::read(&fixture.artifacts.paths.outbox).unwrap()),
-                vec![value]
-            );
-            assert_eq!(hooks.calls(WriterBoundary::Append), 1);
-            assert!(hooks.calls(WriterBoundary::Sync) >= 2);
-            drop(release);
-            wait_until(|| committed(&fixture) == 1);
-            assert_eq!(writer.finish(deadline()).0, 0);
-        }
-
-        #[test]
-        fn writer_worker_append_and_database_failures_retain_the_same_transition_for_retry() {
-            for boundary in [WriterBoundary::Append, WriterBoundary::Persist] {
-                let fixture = WriterFixture::new();
-                let hooks = Arc::new(Hooks::default());
-                hooks.fail_once(boundary);
-                let mut writer = start(&fixture, hooks.clone());
-                let _release = Release(hooks);
-                let original = transition(&fixture, 1);
-                assert!(writer.try_submit(original.clone()).is_ok());
-                wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
-                assert_eq!(
-                    storage::get_event(&fixture.fixture.conn, 1)
-                        .unwrap()
-                        .event
-                        .payload_json["evidence"],
-                    original.evidence_json
-                );
-                assert_eq!(committed(&fixture), 1);
-                assert_eq!(writer.finish(deadline()).0, 0);
+            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
+            for sequence in 1..=3 {
+                assert!(writer.try_submit(transition(&fixture, sequence)).is_ok());
             }
+            yield_until(|| committed(&fixture) == 3 && writer.status().pending_count == 0);
+            let sequences: Vec<i64> = fixture
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT event_seq FROM member_runtime_events WHERE run_id=?1 ORDER BY event_id",
+                )
+                .unwrap()
+                .query_map([fixture.fixture.run.run_id], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert_eq!(sequences, [1, 2, 3]);
+            assert!(writer.status().diagnostic.is_none());
+            assert_eq!(writer.finish(until(&clock)).0, 0);
+        }
+
+        #[test]
+        fn writer_retry_exhaustion_reports_a_degraded_status_and_keeps_the_transition() {
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            crate::db::test_support::FaultPlan::Abort {
+                trigger: "injected_event_failure",
+                on: "BEFORE INSERT ON member_runtime_events",
+                message: "injected event failure",
+            }
+            .arm(&mut fixture.fixture.conn);
+            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            yield_until(|| writer.status().diagnostic.is_some());
+            let status = writer.status();
+            assert_eq!(status.pending_count, 1, "{status:?}");
+            assert_eq!(committed(&fixture), 0);
+            let until = until(&clock);
+            writer.begin_shutdown(until);
+            clock.advance(Duration::from_secs(2));
+            assert_eq!(
+                writer.finish(until).0,
+                1,
+                "the unsaved transition stays counted"
+            );
         }
 
         #[test]
         fn writer_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
+            let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
+            let hooks = Arc::new(Hooks::on_virtual_time());
             hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
             assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
             hooks.wait(WriterBoundary::Persist, 1);
@@ -2311,321 +490,9 @@ mod tests {
             assert_eq!(writer.status().pending_count, accepted);
             assert!(writer.status().diagnostic.is_some());
             drop(release);
-            wait_until(|| writer.status().pending_count == 0);
+            yield_until(|| writer.status().pending_count == 0);
             assert_eq!(committed(&fixture), i64::try_from(accepted).unwrap());
-            assert_eq!(writer.finish(deadline()).0, 0);
-        }
-
-        #[test]
-        fn writer_worker_refill_is_nonblocking_coalesced_and_published_only_after_commit() {
-            let fixture = WriterFixture::new();
-            let blocking = crate::db::connect(&format!(
-                "sqlite:///{}",
-                fixture.fixture.conn.path().unwrap()
-            ))
-            .unwrap();
-            blocking.execute_batch("BEGIN IMMEDIATE").unwrap();
-            let hooks = Arc::new(Hooks::default());
-            let mut writer = start(&fixture, hooks);
-            let begin = Instant::now();
-            for _ in 0..10 {
-                writer.request_sequence_range().unwrap();
-            }
-            assert!(begin.elapsed() < Duration::from_millis(250));
-            assert!(writer.take_sequence_range().is_none());
-            assert_eq!(
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
-                    .unwrap()
-                    .event_seq_reserved_through,
-                256
-            );
-            blocking.execute_batch("ROLLBACK").unwrap();
-            let mut range = None;
-            wait_until(|| {
-                range = writer.take_sequence_range();
-                range.is_some()
-            });
-            assert_eq!(range.unwrap(), 257..=512);
-            assert!(writer.take_sequence_range().is_none());
-            assert_eq!(
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
-                    .unwrap()
-                    .event_seq_reserved_through,
-                512
-            );
-            writer.finish(deadline());
-        }
-
-        #[test]
-        fn writer_worker_shutdown_retains_synced_uncommitted_frames_and_the_original_budget() {
-            let fixture = WriterFixture::new();
-            let blocking = crate::db::connect(&format!(
-                "sqlite:///{}",
-                fixture.fixture.conn.path().unwrap()
-            ))
-            .unwrap();
-            blocking.execute_batch("BEGIN IMMEDIATE").unwrap();
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let _release = Release(hooks.clone());
-            let value = transition(&fixture, 1);
-            assert!(writer.try_submit(value.clone()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 1);
-            let begin = Instant::now();
-            writer.set_deadline(begin + Duration::from_millis(80));
-            writer.begin_shutdown(begin + Duration::from_secs(3));
-            let pending = writer.finish(begin + Duration::from_secs(3));
-            assert!(begin.elapsed() < Duration::from_millis(750));
-            assert_eq!(pending.0, 1);
-            assert_eq!(committed(&fixture), 0);
-            assert_eq!(
-                independent_frames(&std::fs::read(&fixture.artifacts.paths.outbox).unwrap()),
-                vec![value]
-            );
-            blocking.execute_batch("ROLLBACK").unwrap();
-        }
-
-        struct SlowCompaction {
-            calls: AtomicU64,
-        }
-        impl WriterHooks for SlowCompaction {
-            fn before(&self, boundary: WriterBoundary, _: Instant) -> Result<()> {
-                if matches!(boundary, WriterBoundary::Compact) {
-                    self.calls.fetch_add(1, Ordering::AcqRel);
-                    std::thread::sleep(Duration::from_millis(250));
-                }
-                Ok(())
-            }
-        }
-
-        #[test]
-        fn writer_worker_final_compaction_slower_than_one_work_slice_commits_before_the_shutdown_deadline()
-         {
-            let fixture = WriterFixture::new();
-            let hooks = Arc::new(SlowCompaction {
-                calls: AtomicU64::new(0),
-            });
-            let mut writer = EventWriter::start_with_hooks(
-                format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-                fixture.fixture.run.clone(),
-                fixture.lock.clone(),
-                hooks.clone(),
-            )
-            .unwrap();
-            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
-            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
-            let begin = Instant::now();
-            assert_eq!(writer.finish(begin + Duration::from_secs(3)), (0, 0));
-            assert!(
-                writer.joined(),
-                "the worker stops once its final compaction commits"
-            );
-            assert!(begin.elapsed() < Duration::from_secs(3));
-            assert!(
-                std::fs::read(&fixture.artifacts.paths.outbox)
-                    .unwrap()
-                    .is_empty(),
-                "the committed outbox is compacted"
-            );
-            assert!(hooks.calls.load(Ordering::Acquire) >= 1);
-        }
-    }
-
-    mod effective_policy {
-        use crate::runtime::writer::tests::*;
-        fn set_status(fixture: &mut WriterFixture, status: &str) {
-            fixture
-                .fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET status=?1 WHERE run_id=?2",
-                    rusqlite::params![status, fixture.fixture.run.run_id],
-                )
-                .unwrap();
-            fixture.fixture.run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        }
-
-        fn stored(fixture: &WriterFixture) -> Option<Value> {
-            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
-                .unwrap()
-                .effective_policy_json
-        }
-
-        fn spool(fixture: &WriterFixture) -> Vec<u8> {
-            std::fs::read(&fixture.artifacts.paths.outbox).unwrap()
-        }
-
-        #[test]
-        fn runner_policy_unavailable_frame_spools_its_observation_and_commits_it_with_the_event() {
-            let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "running");
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            let value = unavailable(&fixture, 1);
-            let lost = observation(AutomaticReview::Unavailable);
-            assert!(
-                writer
-                    .try_submit_with_policy(value.clone(), Some(lost.clone()))
-                    .is_ok()
-            );
-            hooks.wait(WriterBoundary::Persist, 1);
-            let mut expected = serde_json::to_value(&value).unwrap();
-            expected["effective_policy"] = serde_json::to_value(&lost).unwrap();
-            assert_eq!(frame_bodies(&spool(&fixture)), vec![expected]);
-            assert_eq!(stored(&fixture), None);
-            drop(release);
-            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
-            let event = storage::get_event(&fixture.fixture.conn, 1).unwrap().event;
-            assert_eq!(event.kind, RuntimeEventKind::AutomaticReviewUnavailable);
-            assert_eq!(stored(&fixture), Some(record(&lost, Some(event.event_id))));
-            assert_eq!(writer.finish(deadline()).0, 0);
-        }
-
-        #[test]
-        fn runner_policy_other_frames_keep_their_bytes_and_reject_an_attached_observation() {
-            let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "running");
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            let plain = transition(&fixture, 1);
-            assert!(
-                writer
-                    .try_submit_with_policy(
-                        plain.clone(),
-                        Some(observation(AutomaticReview::Unavailable))
-                    )
-                    .is_err()
-            );
-            assert!(writer.try_submit_with_policy(plain.clone(), None).is_ok());
-            hooks.wait(WriterBoundary::Persist, 1);
-            assert_eq!(spool(&fixture), frame(&plain));
-            drop(release);
-            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
-            assert_eq!(stored(&fixture), None);
-            assert_eq!(writer.finish(deadline()).0, 0);
-        }
-
-        #[test]
-        fn runner_policy_available_update_commits_behind_accepted_transitions_without_spooling() {
-            let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "running");
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            let earlier = transition(&fixture, 1);
-            assert!(writer.try_submit(earlier.clone()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 1);
-            let shown = observation(AutomaticReview::Available);
-            writer.try_record_policy(shown.clone());
-            std::thread::sleep(Duration::from_millis(50));
-            assert_eq!(stored(&fixture), None, "queued behind the paused event");
-            assert_eq!(
-                spool(&fixture),
-                frame(&earlier),
-                "the update is not spooled"
-            );
-            drop(release);
-            wait_until(|| stored(&fixture).is_some());
-            assert_eq!(committed(&fixture), 1);
-            assert_eq!(stored(&fixture), Some(record(&shown, None)));
-            let status = writer.status();
-            assert_eq!(status.policy_diagnostic, None);
-            assert!(status.diagnostic.is_none());
-            assert_eq!(writer.finish(deadline()).0, 0);
-        }
-
-        #[test]
-        fn runner_policy_available_update_on_a_non_live_run_is_dropped_once_and_the_worker_continues()
-         {
-            let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "prepared");
-            let hooks = Arc::new(Hooks::default());
-            let mut writer = start(&fixture, hooks.clone());
-            let _release = Release(hooks.clone());
-            writer.try_record_policy(observation(AutomaticReview::Available));
-            wait_until(|| writer.status().policy_diagnostic.is_some());
-            let persists = hooks.calls(WriterBoundary::Persist);
-            std::thread::sleep(Duration::from_millis(300));
-            assert_eq!(
-                hooks.calls(WriterBoundary::Persist),
-                persists,
-                "a dropped update is not retried"
-            );
-            assert_eq!(stored(&fixture), None);
-            let status = writer.status();
-            assert!(status.diagnostic.is_none(), "{status:?}");
-            assert_eq!(status.gap_count, 0);
-            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
-            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
-            assert_eq!(writer.finish(deadline()).0, 0);
-        }
-
-        #[test]
-        fn runner_policy_available_update_from_a_superseded_owner_is_dropped_with_a_diagnostic() {
-            let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "running");
-            let hooks = Arc::new(Hooks::default());
-            let mut writer = start(&fixture, hooks.clone());
-            let _release = Release(hooks.clone());
-            let lost = observation(AutomaticReview::Unavailable);
-            assert!(
-                writer
-                    .try_submit_with_policy(unavailable(&fixture, 1), Some(lost.clone()))
-                    .is_ok()
-            );
-            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
-            let current = stored(&fixture).expect("event-carried record");
-            assert_eq!(current, record(&lost, Some(1)));
-            fixture
-                .fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
-                    [fixture.fixture.run.run_id],
-                )
-                .unwrap();
-            writer.try_record_policy(observation(AutomaticReview::Available));
-            wait_until(|| writer.status().policy_diagnostic.is_some());
-            assert_eq!(
-                stored(&fixture),
-                Some(current),
-                "a superseded runner never overwrites the record"
-            );
-            writer.finish(deadline());
-        }
-    }
-    fn assert_start_rejected(fixture: &WriterFixture) {
-        let result = fixture.start();
-        let rejected = result.is_err();
-        if let Ok(mut writer) = result {
-            writer.finish(Instant::now() + Duration::from_millis(100));
-        }
-        assert!(
-            rejected,
-            "writer startup validates the recorded owned outbox before accepting work"
-        );
-    }
-
-    #[test]
-    fn writer_missing_or_symlinked_outbox_fails_before_worker_start() {
-        for symlink in [false, true] {
-            let fixture = WriterFixture::new();
-            let path = &fixture.artifacts.paths.outbox;
-            std::fs::remove_file(path).unwrap();
-            let target = fixture.fixture._dir.path().join("untouched-target");
-            std::fs::write(&target, b"original target").unwrap();
-            if symlink {
-                std::os::unix::fs::symlink(&target, path).unwrap();
-            }
-            assert_start_rejected(&fixture);
-            assert_eq!(std::fs::read(target).unwrap(), b"original target");
+            assert_eq!(writer.finish(until(&clock)).0, 0);
         }
     }
 
@@ -2633,50 +500,14 @@ mod tests {
     fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
         fixture.fixture.run.owner_epoch += 1;
-        assert_start_rejected(&fixture);
-    }
-
-    #[test]
-    fn writer_spool_sync_is_pending_until_the_actual_sqlite_commit() {
-        let fixture = WriterFixture::new();
-        let blocking = crate::db::connect(&format!(
-            "sqlite:///{}",
-            fixture.fixture.conn.path().unwrap()
-        ))
-        .unwrap();
-        blocking.execute_batch("BEGIN IMMEDIATE").unwrap();
-        let value = transition(&fixture, 1);
-        let mut writer = fixture.start().unwrap();
-        writer.submit(value.clone()).unwrap();
-        wait_until(|| {
-            std::fs::read(&fixture.artifacts.paths.outbox)
-                .unwrap()
-                .len()
-                == frame(&value).len()
-        });
-        let bytes = std::fs::read(&fixture.artifacts.paths.outbox).unwrap();
-        assert_eq!(independent_frames(&bytes), vec![value]);
-        assert_eq!(committed(&fixture), 0);
-        assert_eq!(
-            fixture
-                .fixture
-                .conn
-                .query_row("SELECT COUNT(*) FROM messages", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-        blocking.execute_batch("ROLLBACK").unwrap();
-        wait_until(|| committed(&fixture) == 1);
-        assert_eq!(writer.finish(deadline()), (0, 0));
-        assert_eq!(
-            fixture
-                .fixture
-                .conn
-                .query_row("SELECT COUNT(*) FROM messages", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
+        let result = fixture.start();
+        let rejected = result.is_err();
+        if let Ok(mut writer) = result {
+            writer.finish(Instant::now() + Duration::from_millis(100));
+        }
+        assert!(
+            rejected,
+            "writer startup validates the run owner before accepting work"
         );
     }
 }
@@ -2700,30 +531,40 @@ pub(crate) mod test_support {
     use crate::broker::runtime::*;
     use crate::runtime::test_support::Fixture;
     use crate::runtime::writer::*;
+    use crate::time::Clock;
+    use crate::time::ClockKind;
+    use crate::time::MonotonicSample;
+    use crate::time::test_support::TestClock;
     use std::sync::Condvar;
     pub(crate) fn index(boundary: WriterBoundary) -> usize {
         match boundary {
             WriterBoundary::Receive => 0,
-            WriterBoundary::Append => 1,
-            WriterBoundary::Sync => 2,
-            WriterBoundary::Persist => 3,
-            WriterBoundary::Compact => 4,
+            WriterBoundary::Persist => 1,
         }
     }
     #[derive(Debug, Default)]
     pub(crate) struct HookState {
-        pub(crate) paused: [bool; 5],
-        pub(crate) failures: [u64; 5],
-        pub(crate) calls: [u64; 5],
-        pub(crate) first: [Option<u64>; 5],
+        pub(crate) paused: [bool; 2],
+        pub(crate) failures: [u64; 2],
+        pub(crate) calls: [u64; 2],
+        pub(crate) first: [Option<u64>; 2],
         pub(crate) ordinal: u64,
     }
     #[derive(Default)]
     pub(crate) struct Hooks {
         pub(crate) state: Mutex<HookState>,
         pub(crate) changed: Condvar,
+        work_slice: Option<Duration>,
     }
     impl Hooks {
+        /// Hooks for a worker on a virtual clock: a work slice longer than any test, so a pause
+        /// measured in real time never outlives the worker's virtual work deadline.
+        pub(crate) fn on_virtual_time() -> Self {
+            Self {
+                work_slice: Some(Duration::from_secs(3600)),
+                ..Self::default()
+            }
+        }
         pub(crate) fn pause(&self, boundary: WriterBoundary) {
             self.state.lock().unwrap().paused[index(boundary)] = true;
         }
@@ -2732,7 +573,7 @@ pub(crate) mod test_support {
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.paused = [false; 5];
+            state.paused = [false; 2];
             drop(state);
             self.changed.notify_all();
         }
@@ -2753,11 +594,11 @@ pub(crate) mod test_support {
                 state = self.changed.wait_timeout(state, remaining).unwrap().0;
             }
         }
-        pub(crate) fn calls(&self, boundary: WriterBoundary) -> u64 {
-            self.state.lock().unwrap().calls[index(boundary)]
-        }
     }
     impl WriterHooks for Hooks {
+        fn work_slice(&self) -> Duration {
+            self.work_slice.unwrap_or(WORK_SLICE)
+        }
         fn before(&self, boundary: WriterBoundary, until: Instant) -> Result<()> {
             let slot = index(boundary);
             let mut state = self.state.lock().unwrap();
@@ -2787,11 +628,75 @@ pub(crate) mod test_support {
         }
     }
 
+    /// A [`TestClock`] as a background worker sees it: the same virtual time, but its sleeps
+    /// yield instead of advancing, so only the test moves time. A sleep on a panicking thread
+    /// advances the clock, so an unwinding writer still reaches its shutdown deadline.
+    pub(crate) struct YieldingClock(pub(crate) Arc<TestClock>);
+
+    impl Clock for YieldingClock {
+        fn now(&self) -> Instant {
+            self.0.now()
+        }
+        fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+            self.0.wall_now()
+        }
+        fn monotonic_sample(&self) -> Result<MonotonicSample> {
+            self.0.monotonic_sample()
+        }
+        fn sleep(&self, duration: Duration) {
+            if std::thread::panicking() {
+                self.0.advance(duration);
+            } else {
+                std::thread::yield_now();
+            }
+        }
+        fn shutdown_unit(&self) -> Duration {
+            self.0.shutdown_unit()
+        }
+        fn kind(&self) -> ClockKind {
+            ClockKind::Deterministic
+        }
+    }
+
+    /// Starts a writer whose worker reads `clock`'s virtual time.
+    pub(crate) fn start_on(
+        fixture: &WriterFixture,
+        hooks: Arc<Hooks>,
+        clock: &Arc<TestClock>,
+    ) -> EventWriter {
+        EventWriter::start_with_hooks(
+            format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+            fixture.fixture.run.clone(),
+            fixture.lock.clone(),
+            Arc::new(YieldingClock(clock.clone())),
+            hooks,
+        )
+        .unwrap()
+    }
+
+    /// Yields until the worker thread makes `condition` hold, within a real-time bound.
+    pub(crate) fn yield_until(condition: impl FnMut() -> bool) {
+        yield_until_within(Duration::from_secs(10), condition);
+    }
+
+    /// Yields until the worker thread makes `condition` hold, within `budget` of real time.
+    pub(crate) fn yield_until_within(budget: Duration, mut condition: impl FnMut() -> bool) {
+        let until = Instant::now() + budget;
+        while !condition() {
+            assert!(
+                Instant::now() < until,
+                "bounded worker condition did not complete"
+            );
+            std::thread::yield_now();
+        }
+    }
+
     pub(crate) fn start(fixture: &WriterFixture, hooks: Arc<Hooks>) -> EventWriter {
         EventWriter::start_with_hooks(
             format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
             fixture.fixture.run.clone(),
             fixture.lock.clone(),
+            std::sync::Arc::new(crate::time::SystemClock),
             hooks,
         )
         .unwrap()
@@ -2820,60 +725,7 @@ pub(crate) mod test_support {
             )
             .unwrap()
     }
-    pub(crate) const UNAVAILABLE_RULE: &str = "codex-auto-review-unavailable";
-    pub(crate) const AVAILABLE_RULE: &str = "codex-auto-review-indicator";
 
-    pub(crate) fn unavailable(fixture: &WriterFixture, sequence: i64) -> ObservedTransition {
-        let evidence = storage::evidence::run_metadata(
-            &fixture.fixture.run,
-            UNAVAILABLE_RULE,
-            u64::try_from(sequence).unwrap(),
-        )
-        .unwrap();
-        ObservedTransition {
-            kind: RuntimeEventKind::AutomaticReviewUnavailable,
-            evidence_json: evidence,
-            cause_json: None,
-            ..transition(fixture, sequence)
-        }
-    }
-
-    pub(crate) fn observation(automatic_review: AutomaticReview) -> EffectivePolicyObservation {
-        EffectivePolicyObservation {
-            automatic_review,
-            observed_mode: None,
-            rule_id: if automatic_review == AutomaticReview::Unavailable {
-                UNAVAILABLE_RULE
-            } else {
-                AVAILABLE_RULE
-            }
-            .into(),
-            observed_at: "2026-10-26T16:40:00.000000+00:00".into(),
-        }
-    }
-
-    pub(crate) fn record(observation: &EffectivePolicyObservation, event_id: Option<i64>) -> Value {
-        serde_json::json!({
-            "automatic_review":observation.automatic_review.as_str(),
-            "observed_mode":observation.observed_mode,
-            "rule_id":observation.rule_id,
-            "event_id":event_id,
-            "observed_at":observation.observed_at,
-        })
-    }
-
-    pub(crate) fn frame_bodies(mut bytes: &[u8]) -> Vec<Value> {
-        let mut bodies = Vec::new();
-        while !bytes.is_empty() {
-            let length =
-                usize::try_from(u32::from_be_bytes(bytes[..4].try_into().unwrap())).unwrap();
-            let body = &bytes[36..36 + length];
-            assert_eq!(&bytes[4..36], &Sha256::digest(body)[..]);
-            bodies.push(serde_json::from_slice(body).unwrap());
-            bytes = &bytes[36 + length..];
-        }
-        bodies
-    }
     pub(crate) struct WriterFixture {
         pub(crate) fixture: Fixture,
         pub(crate) artifacts: RunArtifacts,
@@ -2895,8 +747,6 @@ pub(crate) mod test_support {
             )
             .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             Self {
                 fixture,
                 artifacts,
@@ -2908,6 +758,7 @@ pub(crate) mod test_support {
                 format!("sqlite:///{}", self.fixture.conn.path().unwrap()),
                 self.fixture.run.clone(),
                 self.lock.clone(),
+                std::sync::Arc::new(crate::time::SystemClock),
             )
         }
     }
@@ -2922,7 +773,7 @@ pub(crate) mod test_support {
 
     /// The coverage-unknown transition `sequence` of `run`, usable off the fixture's thread.
     pub(crate) fn run_transition(run: &storage::RunRecord, sequence: i64) -> ObservedTransition {
-        let evidence = storage::evidence::run_metadata(
+        let evidence = crate::broker::runtime::run_evidence(
             run,
             "runner-lifecycle",
             u64::try_from(sequence).unwrap(),
@@ -2939,24 +790,5 @@ pub(crate) mod test_support {
             close_reason: None,
             cause_json: Some(serde_json::json!({"kind":"coverage_unknown"})),
         }
-    }
-
-    /// An outbox frame (length, SHA-256 of the body, body) built without the production encoder.
-    pub(crate) fn outbox_frame(body: &[u8]) -> Vec<u8> {
-        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(body));
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    pub(crate) fn frame(transition: &ObservedTransition) -> Vec<u8> {
-        outbox_frame(&serde_json::to_vec(transition).unwrap())
-    }
-
-    pub(crate) fn independent_frames(bytes: &[u8]) -> Vec<ObservedTransition> {
-        frame_bodies(bytes)
-            .into_iter()
-            .map(|body| serde_json::from_value(body).unwrap())
-            .collect()
     }
 }

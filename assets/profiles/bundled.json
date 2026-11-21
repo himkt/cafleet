@@ -769,10 +769,7 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "c48a4a45d85f7eff591d494588753bc57609c6a46f9734f243308775961abc88",
-      "composer_draft": {
-        "text": ""
-      }
+      "sha256": "c48a4a45d85f7eff591d494588753bc57609c6a46f9734f243308775961abc88"
     },
     {
       "id": "claude-2.1.308-prompt-empty-composer-1",
@@ -792,10 +789,7 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "409494565f1eade8f6f83346f686973c4f50ec6734ae302477f476ed58eeacf6",
-      "composer_draft": {
-        "text": "What is 41 plus 1? Reply with only the number."
-      }
+      "sha256": "409494565f1eade8f6f83346f686973c4f50ec6734ae302477f476ed58eeacf6"
     },
     {
       "id": "claude-2.1.308-prompt-post-submit-1",
@@ -825,8 +819,7 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/claude.json",
-      "sha256": "a2de8c903cd78a78d7802e131187bfdcf5cada9f1b0dc0a8e1b13f1be455907b",
-      "composer_draft": "unreadable"
+      "sha256": "a2de8c903cd78a78d7802e131187bfdcf5cada9f1b0dc0a8e1b13f1be455907b"
     },
     {
       "id": "claude-2.1.308-exec-post-submit-1",
@@ -946,8 +939,7 @@
       "rows": 36,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "3202e1b8610b65bbc2308faf29df70d8f3d7a6e804d58617b2950c228e6c3a50",
-      "composer_draft": "unreadable"
+      "sha256": "3202e1b8610b65bbc2308faf29df70d8f3d7a6e804d58617b2950c228e6c3a50"
     },
     {
       "id": "opencode-2.1.4-exec-post-submit-1",
@@ -6149,10 +6141,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39",
@@ -6254,10 +6243,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
@@ -6409,34 +6395,7 @@
       "rows": 38,
       "cols": 94,
       "source_ref": "native/claude.json",
-      "sha256": "3eba8be1f03d51559e8f2b72c83dc9b927dd5a4b02968dbb99fa29b95bd0d5a5",
-      "composer_draft": {
-        "text": ""
-      }
-    },
-    {
-      "id": "claude-2.1.322-draft-herdr-094-1",
-      "kind": "native",
-      "backend": "claude",
-      "native_version": "2.1.322",
-      "rows": 38,
-      "cols": 94,
-      "source_ref": "native/claude.json",
-      "sha256": "e7afd151b783b4e0b4dc421da671a0413a750bc207d70c8d22566b2afd11a8d0",
-      "composer_draft": {
-        "text": "draft text"
-      }
-    },
-    {
-      "id": "claude-2.1.322-shell-mode-herdr-094-1",
-      "kind": "native",
-      "backend": "claude",
-      "native_version": "2.1.322",
-      "rows": 38,
-      "cols": 94,
-      "source_ref": "native/claude.json",
-      "sha256": "5a6ac3eff6453055895abc5b14d2385a5fe330ddab96a350557a6b8ced35776a",
-      "composer_draft": "unreadable"
+      "sha256": "3eba8be1f03d51559e8f2b72c83dc9b927dd5a4b02968dbb99fa29b95bd0d5a5"
     },
     {
       "id": "codex-0.167.0-suggestion-tmux-120-1",
@@ -6446,34 +6405,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "16b61e5577822e609ddb4d08cd03025425ddde4b22c2e56003e2d27538a49364",
-      "composer_draft": {
-        "text": ""
-      }
-    },
-    {
-      "id": "codex-0.167.0-draft-tmux-120-1",
-      "kind": "native",
-      "backend": "codex",
-      "native_version": "0.167.0",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/codex.json",
-      "sha256": "06d235b8e2e261efc401239b7761bdca170b33cc4d49e74fbffd90dab14a73d6",
-      "composer_draft": {
-        "text": "draft text"
-      }
-    },
-    {
-      "id": "codex-0.167.0-shell-mode-tmux-120-1",
-      "kind": "native",
-      "backend": "codex",
-      "native_version": "0.167.0",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/codex.json",
-      "sha256": "2db21e318c4a43ee997a1d1dedab4d741ae70e108231cd32a482382151d6005a",
-      "composer_draft": "unreadable"
+      "sha256": "16b61e5577822e609ddb4d08cd03025425ddde4b22c2e56003e2d27538a49364"
     },
     {
       "id": "opencode-2.2.7-suggestion-tmux-120-1",
@@ -6483,34 +6415,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "17c32a95d3ee8b2defa8c0633507ee940ed73b2889f90d76dee7308a8e688cbe",
-      "composer_draft": {
-        "text": ""
-      }
-    },
-    {
-      "id": "opencode-2.2.7-draft-tmux-120-1",
-      "kind": "native",
-      "backend": "opencode",
-      "native_version": "2.2.7",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/opencode.json",
-      "sha256": "82a333a245dfc54ace30a97eebef525cb0e04e93b27fd03991aa9c70cf16e4ae",
-      "composer_draft": {
-        "text": "draft text"
-      }
-    },
-    {
-      "id": "opencode-2.2.7-wrapped-draft-tmux-120-1",
-      "kind": "native",
-      "backend": "opencode",
-      "native_version": "2.2.7",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/opencode.json",
-      "sha256": "017f8d666843a5502d4fcd67fe9c18ba8a5fa0bdbb75e6f4548a5af36116ec64",
-      "composer_draft": "unreadable"
+      "sha256": "17c32a95d3ee8b2defa8c0633507ee940ed73b2889f90d76dee7308a8e688cbe"
     },
     {
       "id": "opencode-2.2.7-shell-mode-tmux-120-1",
@@ -6520,8 +6425,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/opencode.json",
-      "sha256": "637d5a7d745c2fbbf7f0d0c254252a9fb15430919339985bff606cfca7ad971e",
-      "composer_draft": "unreadable"
+      "sha256": "637d5a7d745c2fbbf7f0d0c254252a9fb15430919339985bff606cfca7ad971e"
     },
     {
       "id": "hermes-2026.9.24-suggestion-tmux-120-1",
@@ -6531,140 +6435,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/hermes.json",
-      "sha256": "172448c73f48e5ac3d9e6d1e06b42bc149d51c5c6edfd544d5c5370647e150c1",
-      "composer_draft": {
-        "text": ""
-      }
-    },
-    {
-      "id": "hermes-2026.9.24-draft-tmux-120-1",
-      "kind": "native",
-      "backend": "hermes",
-      "native_version": "2026.9.24",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/hermes.json",
-      "sha256": "2798505854684c13bb203ec6882d70bbe6be051d940cf5b9aa358a92af31d748",
-      "composer_draft": {
-        "text": "draft text"
-      }
-    },
-    {
-      "id": "hermes-2026.9.24-multi-row-draft-tmux-120-1",
-      "kind": "native",
-      "backend": "hermes",
-      "native_version": "2026.9.24",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/hermes.json",
-      "sha256": "f200ffabb915e9b494b719ac5f0521466a81b5383c0469e5ce25d371ea8b116d",
-      "composer_draft": {
-        "text": "draft text that wraps onto a continuation row because it is longer than the composer is wide, so the draft spans sever\nal rows"
-      }
-    },
-    {
-      "id": "hermes-2026.9.24-shell-prefix-tmux-120-1",
-      "kind": "native",
-      "backend": "hermes",
-      "native_version": "2026.9.24",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/hermes.json",
-      "sha256": "33cd0bc7bcf41bb6d69cf70488ba25f842b1b3f774f860c9855f6a120cfd9d09",
-      "composer_draft": {
-        "text": "!ls"
-      }
-    },
-    {
-      "id": "pi-1.5.2-empty-composer-tmux-120-1",
-      "kind": "native",
-      "backend": "pi",
-      "native_version": "1.5.2",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/pi.json",
-      "sha256": "9d4d75f994a578df9c048e0fe12a38ac689e7ccf91da10948490e5917b7ef4da",
-      "composer_draft": {
-        "text": ""
-      }
-    },
-    {
-      "id": "pi-1.5.2-draft-tmux-120-1",
-      "kind": "native",
-      "backend": "pi",
-      "native_version": "1.5.2",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/pi.json",
-      "sha256": "d7ddeac5a6b004f6c7252c179567e30c3aa1dc0bb97cf37a62b6479f6a6f4f67",
-      "composer_draft": {
-        "text": "draft text"
-      }
-    },
-    {
-      "id": "pi-1.5.2-multi-row-draft-tmux-120-1",
-      "kind": "native",
-      "backend": "pi",
-      "native_version": "1.5.2",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/pi.json",
-      "sha256": "46a0ecdb3386d1366c80e978830502f6ecf970cc8132fa130abeba16066417a8",
-      "composer_draft": {
-        "text": "draft text that wraps onto a second editor row because it is longer than the editor is wide, so the draft spans\nseveral rows of the editor"
-      }
-    },
-    {
-      "id": "pi-1.5.2-shell-prefix-tmux-120-1",
-      "kind": "native",
-      "backend": "pi",
-      "native_version": "1.5.2",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/pi.json",
-      "sha256": "8b9c6e74195642e54eb61c0bb452ae72d10060859dc52403497853605020b834",
-      "composer_draft": {
-        "text": "!ls"
-      }
-    },
-    {
-      "id": "claude-2.1.322-wrapped-preview-herdr-094-1",
-      "kind": "native",
-      "backend": "claude",
-      "native_version": "2.1.322",
-      "rows": 38,
-      "cols": 94,
-      "source_ref": "native/claude.json",
-      "sha256": "814ca6d9301bbdbe09584227874a2c7431b309e853ba2fae8101224dc669d6e7",
-      "composer_draft": {
-        "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery\n  state, report the stalled queue head with its named cause, and confirm with member show\n  that no interaction is open before the Director forces a flush of the remaining previews"
-      }
-    },
-    {
-      "id": "claude-2.1.322-ctrl-u-one-row-herdr-094-1",
-      "kind": "native",
-      "backend": "claude",
-      "native_version": "2.1.322",
-      "rows": 38,
-      "cols": 94,
-      "source_ref": "native/claude.json",
-      "sha256": "dd4ca35fbe18acbee8464c3a63039c6ce8d8b313012bef4a4ec84b16ca8e0314",
-      "composer_draft": {
-        "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery"
-      }
-    },
-    {
-      "id": "codex-0.167.0-wrapped-preview-tmux-120-1",
-      "kind": "native",
-      "backend": "codex",
-      "native_version": "0.167.0",
-      "rows": 39,
-      "cols": 120,
-      "source_ref": "native/codex.json",
-      "sha256": "7911e5d9289ca5844ab90afc8da6b135376e5770a982acf6b2599157e074405d",
-      "composer_draft": {
-        "text": "[cafleet msg 123 from 44 2026-11-19T23:00:00+00:00] Please review the queued delivery state, report the stalled queue\n  head with its named cause, and confirm with member show that no interaction is open before the Director forces a\n  flush"
-      }
+      "sha256": "172448c73f48e5ac3d9e6d1e06b42bc149d51c5c6edfd544d5c5370647e150c1"
     },
     {
       "id": "opencode-2.2.7-deny-pre-stage-1-tmux-120-1",
@@ -6878,10 +6649,7 @@
           "multiplexer": "tmux",
           "kind": "post_submit"
         }
-      ],
-      "composer_draft": {
-        "text": ""
-      }
+      ]
     },
     {
       "id": "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1",
@@ -6944,10 +6712,7 @@
           "multiplexer": "tmux",
           "kind": "post_submit"
         }
-      ],
-      "composer_draft": {
-        "text": ""
-      }
+      ]
     },
     {
       "id": "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1",
@@ -7010,10 +6775,7 @@
           "multiplexer": "herdr",
           "kind": "post_submit"
         }
-      ],
-      "composer_draft": {
-        "text": ""
-      }
+      ]
     },
     {
       "id": "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1",
@@ -7076,10 +6838,7 @@
           "multiplexer": "herdr",
           "kind": "post_submit"
         }
-      ],
-      "composer_draft": {
-        "text": ""
-      }
+      ]
     },
     {
       "id": "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1",
@@ -7495,10 +7254,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "claude-2.1.322-composer-prompt-plain-41-post-submit-tmux-120-1",
@@ -7561,8 +7317,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": "unreadable"
+      ]
     },
     {
       "id": "claude-2.1.322-composer-exec-plain-41-post-submit-tmux-120-1",
@@ -7625,10 +7380,7 @@
           "multiplexer": "herdr",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1",
@@ -7691,8 +7443,7 @@
           "multiplexer": "herdr",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": "unreadable"
+      ]
     },
     {
       "id": "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1",
@@ -7855,10 +7606,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "codex-0.166.0-composer-prompt-plain-41-post-submit-tmux-120-1",
@@ -7936,8 +7684,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": "unreadable"
+      ]
     },
     {
       "id": "codex-0.166.0-composer-exec-plain-998-post-submit-tmux-120-1",
@@ -7998,10 +7745,7 @@
           "multiplexer": "herdr",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "codex-0.166.0-composer-prompt-plain-41-post-submit-herdr-092-1",
@@ -8079,8 +7823,7 @@
           "multiplexer": "herdr",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": "unreadable"
+      ]
     },
     {
       "id": "codex-0.166.0-composer-exec-plain-998-post-submit-herdr-092-1",
@@ -8144,10 +7887,7 @@
       "rows": 39,
       "cols": 120,
       "source_ref": "native/codex.json",
-      "sha256": "9ecb3c997b968c2163a0b069a9e1251e25e937c32ae34329d3ab9cdd3c406b53",
-      "composer_draft": {
-        "text": ""
-      }
+      "sha256": "9ecb3c997b968c2163a0b069a9e1251e25e937c32ae34329d3ab9cdd3c406b53"
     },
     {
       "id": "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
@@ -8164,10 +7904,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-prompt-plain-41-post-submit-tmux-120-1",
@@ -8245,8 +7982,7 @@
           "multiplexer": "tmux",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": "unreadable"
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-998-post-submit-tmux-120-1",
@@ -8300,10 +8036,7 @@
       "rows": 36,
       "cols": 92,
       "source_ref": "native/codex.json",
-      "sha256": "7bf2035224e634e9466d02c982bc292ff36f1781a8683fbd981c0c071a2d6d5f",
-      "composer_draft": {
-        "text": ""
-      }
+      "sha256": "7bf2035224e634e9466d02c982bc292ff36f1781a8683fbd981c0c071a2d6d5f"
     },
     {
       "id": "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
@@ -8320,10 +8053,7 @@
           "multiplexer": "herdr",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": {
-        "text": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
+      ]
     },
     {
       "id": "codex-0.167.0-composer-prompt-plain-41-post-submit-herdr-092-1",
@@ -8401,8 +8131,7 @@
           "multiplexer": "herdr",
           "kind": "unsubmitted_literal"
         }
-      ],
-      "composer_draft": "unreadable"
+      ]
     },
     {
       "id": "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1",
@@ -8460,8 +8189,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -8470,7 +8199,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -8480,12 +8209,12 @@
             {
               "id": "approval",
               "scope": "line",
-              "pattern": "^ This command requires approval\\s*$"
+              "pattern": "^ This command requires approval[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -8495,12 +8224,12 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -8536,8 +8265,8 @@
           "observation": "composer_empty",
           "region": {
             "screen": "either",
-            "start_pattern": "^❯\\u{a0}",
-            "end_pattern": "^❯\\u{a0}",
+            "start_pattern": "^❯\\x{a0}",
+            "end_pattern": "^❯\\x{a0}",
             "max_rows": 1,
             "cursor": "at_end"
           },
@@ -8545,7 +8274,7 @@
             {
               "id": "prompt",
               "scope": "line",
-              "pattern": "^❯\\u{a0}"
+              "pattern": "^❯\\x{a0}"
             }
           ],
           "extract": {
@@ -8560,8 +8289,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -8570,7 +8299,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -8580,17 +8309,17 @@
             {
               "id": "ask_rule",
               "scope": "line",
-              "pattern": "^ │ Ask rule \\S"
+              "pattern": "^ │ Ask rule [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "auto_hint",
               "scope": "line",
-              "pattern": "^ /permissions to let auto mode decide\\s*$"
+              "pattern": "^ /permissions to let auto mode decide[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -8600,12 +8329,12 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 2\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -8641,8 +8370,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -8651,7 +8380,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -8661,7 +8390,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -8671,22 +8400,22 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "access",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project\\s*$"
+              "pattern": "^ [❯ ] 2\\. Yes, and always allow access to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* from this project[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "switch",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you\\s*$"
+              "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -8722,8 +8451,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Read outside the working directories\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Read outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -8732,7 +8461,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Read outside the working directories\\s*$"
+              "pattern": "^ Read outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -8742,7 +8471,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Allow this read outside the working directories\\?\\s*$"
+              "pattern": "^ Allow this read outside the working directories\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -8752,22 +8481,22 @@
             {
               "id": "keep_allowing",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories\\s*$"
+              "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "block_from_now",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on\\s*$"
+              "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)\\s*$"
+              "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -8803,8 +8532,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -8813,7 +8542,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -8823,7 +8552,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -8833,17 +8562,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and (?:always allow access to \\S.* from this project|don’t ask again for: \\S.*)\\s*$"
+              "pattern": "^ [❯ ] 2\\. Yes, and (?:always allow access to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* from this project|don’t ask again for: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -8879,8 +8608,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Read file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -8889,7 +8618,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Read file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -8899,7 +8628,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -8909,17 +8638,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, allow reading from \\S"
+              "pattern": "^ [❯ ] 2\\. Yes, allow reading from [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -8955,8 +8684,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -8965,17 +8694,17 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^ Edit file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+              "pattern": "(?m)^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n╌{3,}$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to make this edit to \\S.*\\?\\s*$"
+              "pattern": "^ Do you want to make this edit to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -8985,17 +8714,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -9030,8 +8759,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -9040,17 +8769,17 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^ Create file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+              "pattern": "(?m)^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n╌{3,}$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to create \\S.*\\?\\s*$"
+              "pattern": "^ Do you want to create [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -9060,17 +8789,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -9105,8 +8834,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^  Teach auto mode about your environment\\?\\s*$",
-            "end_pattern": "^  Enter to confirm · Esc to cancel\\s*$",
+            "start_pattern": "^  Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^  Enter to confirm · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 14,
             "cursor": "inside",
             "panel_separator": "│"
@@ -9115,7 +8844,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  Teach auto mode about your environment\\?\\s*$"
+              "pattern": "^  Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -9125,22 +8854,22 @@
             {
               "id": "yes",
               "scope": "line",
-              "pattern": "^  [❯ ] 1\\. Yes\\s*$"
+              "pattern": "^  [❯ ] 1\\. Yes[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "not_now",
               "scope": "line",
-              "pattern": "^  [❯ ] 2\\. (?P<label>Not now)\\s*$"
+              "pattern": "^  [❯ ] 2\\. (?P<label>Not now)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "dont_show",
               "scope": "line",
-              "pattern": "^  [❯ ] 3\\. (?P<label>Don't show again)\\s*$"
+              "pattern": "^  [❯ ] 3\\. (?P<label>Don't show again)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "footer",
               "scope": "line",
-              "pattern": "^  Enter to confirm · Esc to cancel\\s*$"
+              "pattern": "^  Enter to confirm · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -9172,8 +8901,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^   Teach auto mode about your environment\\?\\s*$",
-            "end_pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$",
+            "start_pattern": "^   Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^   ←/→ to change · Enter to continue · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 14,
             "cursor": "inside",
             "panel_separator": "│"
@@ -9182,17 +8911,17 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^   Teach auto mode about your environment\\?\\s*$"
+              "pattern": "^   Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^   ❯ \\S"
+              "pattern": "^   ❯ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "footer",
               "scope": "line",
-              "pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$"
+              "pattern": "^   ←/→ to change · Enter to continue · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -9207,8 +8936,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Make auto mode your default permission mode\\?\\s*$",
-            "end_pattern": "^   (?:❯ |  )No, keep \\S.*$",
+            "start_pattern": "^ Make auto mode your default permission mode\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^   (?:❯ |  )No, keep [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*$",
             "max_rows": 10,
             "cursor": "inside",
             "panel_separator": "│"
@@ -9217,23 +8946,23 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Make auto mode your default permission mode\\?\\s*$"
+              "pattern": "^ Make auto mode your default permission mode\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^   ❯ \\S",
+              "pattern": "^   ❯ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]",
               "focus_style": "marker"
             },
             {
               "id": "accept",
               "scope": "line",
-              "pattern": "^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)\\s*$"
+              "pattern": "^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "decline",
               "scope": "line",
-              "pattern": "^   (?:❯ |  )(?P<label>No, keep \\S.*?)\\s*$"
+              "pattern": "^   (?:❯ |  )(?P<label>No, keep [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*?)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -9261,7 +8990,7 @@
           "frame": {
             "require_patterns": [],
             "reject_patterns": [
-              "^❯\\u{a0}"
+              "^❯\\x{a0}"
             ]
           }
         },
@@ -9271,8 +9000,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
-            "end_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
+            "start_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 1,
             "cursor": "any",
             "panel_separator": "│"
@@ -9281,7 +9010,7 @@
             {
               "id": "notice",
               "scope": "line",
-              "pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$"
+              "pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -9291,175 +9020,15 @@
           "verified_noninteraction": false,
           "frame": {
             "require_patterns": [
-              "^❯\\u{a0}"
+              "^❯\\x{a0}"
             ],
             "reject_patterns": [
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           }
-        },
-        {
-          "id": "claude-auto-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^● [A-Z][A-Za-z]*\\(",
-            "end_pattern": "^  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[",
-            "max_rows": 8,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)\\s*\\n  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?\\s*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-refusal-notice",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
-            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "line",
-              "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-unavailable",
-          "priority": 40,
-          "observation": "automatic_review_unavailable",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +auto mode disabled by settings\\b",
-            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "notice",
-              "scope": "line",
-              "pattern": "^ +(?P<notice>auto mode disabled by settings)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-mode-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "claude-auto-refusal",
-            "claude-auto-refusal-notice",
-            "claude-auto-unavailable",
-            "claude-auto-mode-indicator"
-          ],
-          "fixture_ids": [
-            "claude-2.1.302-auto-verbose-two-refusals-1",
-            "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
-            "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
-            "claude-2.1.302-auto-refusal-notice-working-1",
-            "claude-2.1.302-auto-refusal-notice-idle-1",
-            "claude-2.1.302-auto-two-refusals-notice-1",
-            "claude-2.1.302-auto-unavailable-notice-1",
-            "claude-2.1.302-auto-idle-composer-1",
-            "claude-2.1.302-auto-quote-false-positive-1",
-            "claude-2.1.302-auto-verbose-quote-false-positive-1",
-            "claude-2.1.302-auto-transcript-viewer-1",
-            "claude-2.1.302-auto-verbose-transcript-viewer-1",
-            "claude-2.1.302-auto-unavailable-manual-footer-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "claude-bash-permission",
@@ -9970,29 +9539,6 @@
             ]
           }
         ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "either",
-          "start_pattern": "^❯\\u{a0}",
-          "end_pattern": "^─+ *$",
-          "max_rows": 48,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "start",
-          "last": "before_end"
-        },
-        "prompt_pattern": "^❯\\u{a0}",
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "claude-2.1.308-prompt-typed-literal-1",
-          "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
-          "claude-2.1.308-exec-typed-literal-1"
-        ]
       }
     },
     {
@@ -10005,8 +9551,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10015,7 +9561,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -10025,12 +9571,12 @@
             {
               "id": "approval",
               "scope": "line",
-              "pattern": "^ This command requires approval\\s*$"
+              "pattern": "^ This command requires approval[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10040,12 +9586,12 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10081,8 +9627,8 @@
           "observation": "composer_empty",
           "region": {
             "screen": "either",
-            "start_pattern": "^❯\\u{a0}",
-            "end_pattern": "^❯\\u{a0}",
+            "start_pattern": "^❯\\x{a0}",
+            "end_pattern": "^❯\\x{a0}",
             "max_rows": 1,
             "cursor": "at_end"
           },
@@ -10090,7 +9636,7 @@
             {
               "id": "prompt",
               "scope": "line",
-              "pattern": "^❯\\u{a0} *$"
+              "pattern": "^❯\\x{a0} *$"
             }
           ],
           "extract": {
@@ -10105,8 +9651,8 @@
           "observation": "composer_empty",
           "region": {
             "screen": "either",
-            "start_pattern": "^❯\\u{a0}",
-            "end_pattern": "^❯\\u{a0}",
+            "start_pattern": "^❯\\x{a0}",
+            "end_pattern": "^❯\\x{a0}",
             "max_rows": 1,
             "cursor": "after_prompt"
           },
@@ -10114,7 +9660,7 @@
             {
               "id": "prompt",
               "scope": "line",
-              "pattern": "^❯\\u{a0}"
+              "pattern": "^❯\\x{a0}"
             }
           ],
           "extract": {
@@ -10134,8 +9680,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10144,7 +9690,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -10154,17 +9700,17 @@
             {
               "id": "ask_rule",
               "scope": "line",
-              "pattern": "^ │ Ask rule \\S"
+              "pattern": "^ │ Ask rule [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "auto_hint",
               "scope": "line",
-              "pattern": "^ /permissions to let auto mode decide\\s*$"
+              "pattern": "^ /permissions to let auto mode decide[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10174,12 +9720,12 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 2\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10215,8 +9761,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10225,7 +9771,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -10235,7 +9781,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10245,22 +9791,22 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "access",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project\\s*$"
+              "pattern": "^ [❯ ] 2\\. Yes, and always allow access to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* from this project[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "switch",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you\\s*$"
+              "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10296,8 +9842,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Read outside the working directories\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Read outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10306,7 +9852,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Read outside the working directories\\s*$"
+              "pattern": "^ Read outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -10316,7 +9862,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Allow this read outside the working directories\\?\\s*$"
+              "pattern": "^ Allow this read outside the working directories\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10326,22 +9872,22 @@
             {
               "id": "keep_allowing",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories\\s*$"
+              "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "block_from_now",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on\\s*$"
+              "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)\\s*$"
+              "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10377,8 +9923,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10387,7 +9933,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -10397,7 +9943,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10407,17 +9953,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and (?:always allow access to \\S.* from this project|don’t ask again for: \\S.*)\\s*$"
+              "pattern": "^ [❯ ] 2\\. Yes, and (?:always allow access to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* from this project|don’t ask again for: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10453,8 +9999,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Read file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10463,7 +10009,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Read file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
@@ -10473,7 +10019,7 @@
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to proceed\\?\\s*$"
+              "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10483,17 +10029,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, allow reading from \\S"
+              "pattern": "^ [❯ ] 2\\. Yes, allow reading from [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10529,8 +10075,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10539,17 +10085,17 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^ Edit file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+              "pattern": "(?m)^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n╌{3,}$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to make this edit to \\S.*\\?\\s*$"
+              "pattern": "^ Do you want to make this edit to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10559,17 +10105,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10604,8 +10150,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$",
-            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "start_pattern": "^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10614,17 +10160,17 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$"
+              "pattern": "^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^ Create file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+              "pattern": "(?m)^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n╌{3,}$"
             },
             {
               "id": "question",
               "scope": "line",
-              "pattern": "^ Do you want to create \\S.*\\?\\s*$"
+              "pattern": "^ Do you want to create [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10634,17 +10180,17 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "remember",
               "scope": "line",
-              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10679,8 +10225,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^  Teach auto mode about your environment\\?\\s*$",
-            "end_pattern": "^  Enter to confirm · Esc to cancel\\s*$",
+            "start_pattern": "^  Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^  Enter to confirm · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 14,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10689,7 +10235,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  Teach auto mode about your environment\\?\\s*$"
+              "pattern": "^  Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -10699,22 +10245,22 @@
             {
               "id": "yes",
               "scope": "line",
-              "pattern": "^  [❯ ] 1\\. Yes\\s*$"
+              "pattern": "^  [❯ ] 1\\. Yes[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "not_now",
               "scope": "line",
-              "pattern": "^  [❯ ] 2\\. (?P<label>Not now)\\s*$"
+              "pattern": "^  [❯ ] 2\\. (?P<label>Not now)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "dont_show",
               "scope": "line",
-              "pattern": "^  [❯ ] 3\\. (?P<label>Don't show again)\\s*$"
+              "pattern": "^  [❯ ] 3\\. (?P<label>Don't show again)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "footer",
               "scope": "line",
-              "pattern": "^  Enter to confirm · Esc to cancel\\s*$"
+              "pattern": "^  Enter to confirm · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10746,8 +10292,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^   Teach auto mode about your environment\\?\\s*$",
-            "end_pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$",
+            "start_pattern": "^   Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^   ←/→ to change · Enter to continue · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 14,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10756,17 +10302,17 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^   Teach auto mode about your environment\\?\\s*$"
+              "pattern": "^   Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^   ❯ \\S"
+              "pattern": "^   ❯ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "footer",
               "scope": "line",
-              "pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$"
+              "pattern": "^   ←/→ to change · Enter to continue · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10781,8 +10327,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Make auto mode your default permission mode\\?\\s*$",
-            "end_pattern": "^   (?:❯ |  )No, keep \\S.*$",
+            "start_pattern": "^ Make auto mode your default permission mode\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^   (?:❯ |  )No, keep [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*$",
             "max_rows": 10,
             "cursor": "inside",
             "panel_separator": "│"
@@ -10791,23 +10337,23 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Make auto mode your default permission mode\\?\\s*$"
+              "pattern": "^ Make auto mode your default permission mode\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^   ❯ \\S",
+              "pattern": "^   ❯ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]",
               "focus_style": "marker"
             },
             {
               "id": "accept",
               "scope": "line",
-              "pattern": "^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)\\s*$"
+              "pattern": "^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "decline",
               "scope": "line",
-              "pattern": "^   (?:❯ |  )(?P<label>No, keep \\S.*?)\\s*$"
+              "pattern": "^   (?:❯ |  )(?P<label>No, keep [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*?)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10835,7 +10381,7 @@
           "frame": {
             "require_patterns": [],
             "reject_patterns": [
-              "^❯\\u{a0}"
+              "^❯\\x{a0}"
             ]
           }
         },
@@ -10845,8 +10391,8 @@
           "observation": "question",
           "region": {
             "screen": "either",
-            "start_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
-            "end_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
+            "start_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 1,
             "cursor": "any",
             "panel_separator": "│"
@@ -10855,7 +10401,7 @@
             {
               "id": "notice",
               "scope": "line",
-              "pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$"
+              "pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -10865,166 +10411,15 @@
           "verified_noninteraction": false,
           "frame": {
             "require_patterns": [
-              "^❯\\u{a0}"
+              "^❯\\x{a0}"
             ],
             "reject_patterns": [
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           }
-        },
-        {
-          "id": "claude-auto-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^● [A-Z][A-Za-z]*\\(",
-            "end_pattern": "^  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[",
-            "max_rows": 8,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)\\s*\\n  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?\\s*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-refusal-notice",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
-            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "line",
-              "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-unavailable",
-          "priority": 40,
-          "observation": "automatic_review_unavailable",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +auto mode disabled by settings\\b",
-            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "notice",
-              "scope": "line",
-              "pattern": "^ +(?P<notice>auto mode disabled by settings)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-mode-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\u{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "claude-auto-refusal",
-            "claude-auto-refusal-notice",
-            "claude-auto-unavailable",
-            "claude-auto-mode-indicator"
-          ],
-          "fixture_ids": [
-            "claude-2.1.322-ask-allow-post-stage-tmux-120-1",
-            "claude-2.1.322-ask-deny-post-stage-tmux-120-1",
-            "claude-2.1.322-readout-allow-post-stage-tmux-120-1",
-            "claude-2.1.322-readout-deny-post-stage-tmux-120-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "claude-bash-permission",
@@ -11460,35 +10855,6 @@
             ]
           }
         ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "either",
-          "start_pattern": "^❯\\u{a0}",
-          "end_pattern": "^─+ *$",
-          "max_rows": 48,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "start",
-          "last": "before_end"
-        },
-        "prompt_pattern": "^❯\\u{a0}",
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "claude-2.1.322-suggestion-herdr-094-1",
-          "claude-2.1.322-draft-herdr-094-1",
-          "claude-2.1.322-shell-mode-herdr-094-1",
-          "claude-2.1.322-wrapped-preview-herdr-094-1",
-          "claude-2.1.322-ctrl-u-one-row-herdr-094-1",
-          "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1",
-          "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1",
-          "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1",
-          "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1"
-        ]
       }
     },
     {
@@ -11501,8 +10867,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "alternate",
-            "start_pattern": "^  Would you like to run the following command\\?\\s*$",
-            "end_pattern": "^  Press enter to confirm or esc to cancel\\s*$",
+            "start_pattern": "^  Would you like to run the following command\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^  Press enter to confirm or esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside"
           },
@@ -11510,22 +10876,22 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  Would you like to run the following command\\?\\s*$"
+              "pattern": "^  Would you like to run the following command\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "environment",
               "scope": "line",
-              "pattern": "^  Environment: \\S+\\s*$"
+              "pattern": "^  Environment: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "reason",
               "scope": "line",
-              "pattern": "^  Reason: \\S"
+              "pattern": "^  Reason: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "operation",
               "scope": "line",
-              "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"
+              "pattern": "^  \\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*?)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -11535,12 +10901,12 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"
+              "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"
+              "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -11592,98 +10958,9 @@
             "choices": []
           },
           "verified_noninteraction": true
-        },
-        {
-          "id": "codex-auto-review-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^✗ Request denied for codex to run \\S",
-            "end_pattern": "^\\s*$",
-            "max_rows": 6,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*\\S(?:\\n  [^\\n]*\\S)*)\\s*\\n\\s*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation",
-              "row_margin": "  "
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "codex-auto-review-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
-            "end_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))\\s*$"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "codex-auto-review-refusal",
-            "codex-auto-review-indicator"
-          ],
-          "fixture_ids": [
-            "codex-0.163.0-auto-refusal-working-1",
-            "codex-0.163.0-auto-refusal-idle-1",
-            "codex-0.163.0-auto-refusal-after-overlay-1",
-            "codex-0.163.0-auto-two-refusals-1",
-            "codex-0.163.0-auto-two-refusals-resized-1",
-            "codex-0.163.0-auto-two-refusals-restored-1",
-            "codex-0.163.0-auto-denial-limit-interrupted-1",
-            "codex-0.163.0-auto-status-indicator-1",
-            "codex-0.163.0-auto-quote-false-positive-1",
-            "codex-0.163.0-auto-refusal-warning-overlay-1",
-            "codex-0.163.0-auto-warning-overlay-1",
-            "codex-0.163.0-auto-expanded-detail-1",
-            "codex-0.166.0-auto-status-tmux-120-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "codex-exec-approval"
@@ -11803,30 +11080,6 @@
             ]
           }
         ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "alternate",
-          "start_pattern": "^› ",
-          "end_pattern": "^ *$",
-          "max_rows": 48,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "start",
-          "last": "before_end"
-        },
-        "prompt_pattern": "^› ",
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "codex-0.166.0-composer-prompt-plain-41-literal-tmux-120-1",
-          "codex-0.166.0-composer-exec-plain-42-literal-tmux-120-1",
-          "codex-0.166.0-composer-prompt-plain-41-literal-herdr-092-1",
-          "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1"
-        ]
       }
     },
     {
@@ -11839,8 +11092,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "alternate",
-            "start_pattern": "^  Would you like to run the following command\\?\\s*$",
-            "end_pattern": "^  Press enter to confirm or esc to cancel\\s*$",
+            "start_pattern": "^  Would you like to run the following command\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^  Press enter to confirm or esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "inside"
           },
@@ -11848,22 +11101,22 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  Would you like to run the following command\\?\\s*$"
+              "pattern": "^  Would you like to run the following command\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "environment",
               "scope": "line",
-              "pattern": "^  Environment: \\S+\\s*$"
+              "pattern": "^  Environment: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "reason",
               "scope": "line",
-              "pattern": "^  Reason: \\S"
+              "pattern": "^  Reason: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
             },
             {
               "id": "operation",
               "scope": "line",
-              "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"
+              "pattern": "^  \\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*?)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "focus",
@@ -11873,12 +11126,12 @@
             {
               "id": "allow",
               "scope": "line",
-              "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"
+              "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "deny",
               "scope": "line",
-              "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"
+              "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             }
           ],
           "extract": {
@@ -11959,86 +11212,9 @@
               "faint": true
             }
           }
-        },
-        {
-          "id": "codex-auto-review-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^✗ Request denied for codex to run \\S",
-            "end_pattern": "^\\s*$",
-            "max_rows": 6,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*\\S(?:\\n  [^\\n]*\\S)*)\\s*\\n\\s*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation",
-              "row_margin": "  "
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "codex-auto-review-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
-            "end_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))\\s*$"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "codex-auto-review-refusal",
-            "codex-auto-review-indicator"
-          ],
-          "fixture_ids": [
-            "codex-0.167.0-auto-status-tmux-120-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "codex-exec-approval"
@@ -12189,36 +11365,6 @@
             ]
           }
         ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "alternate",
-          "start_pattern": "^› ",
-          "end_pattern": "^ *$",
-          "max_rows": 48,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "start",
-          "last": "before_end"
-        },
-        "prompt_pattern": "^› ",
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "codex-0.167.0-suggestion-tmux-120-1",
-          "codex-0.167.0-draft-tmux-120-1",
-          "codex-0.167.0-shell-mode-tmux-120-1",
-          "codex-0.167.0-wrapped-preview-tmux-120-1",
-          "codex-0.167.0-composer-idle-empty-tmux-120-1",
-          "codex-0.167.0-composer-idle-empty-herdr-092-1",
-          "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
-          "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1",
-          "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
-          "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1"
-        ]
       }
     },
     {
@@ -12231,8 +11377,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "primary",
-            "start_pattern": "^  △ Permission required\\s*$",
-            "end_pattern": "  ⇆ select  enter confirm  esc reject\\s*$",
+            "start_pattern": "^  △ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "  ⇆ select  enter confirm  esc reject[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12240,22 +11386,22 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  △ Permission required\\s*$"
+              "pattern": "^  △ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "shell",
               "scope": "line",
-              "pattern": "^   # Shell command(?:\\s|$)"
+              "pattern": "^   # Shell command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]|$)"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^  \\$ (?P<operation>\\S[^\\n]*(?:\\n  \\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
+              "pattern": "(?m)^  \\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n  [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
             },
             {
               "id": "unclipped",
               "scope": "region",
-              "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  \\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
+              "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
             },
             {
               "id": "controls",
@@ -12265,7 +11411,7 @@
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$",
+              "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
               "focus_style": "background"
             },
             {
@@ -12314,8 +11460,8 @@
           "observation": "permission_continuation",
           "region": {
             "screen": "primary",
-            "start_pattern": "^  △ Reject permission\\s*$",
-            "end_pattern": "  enter confirm  esc cancel\\s*$",
+            "start_pattern": "^  △ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "  enter confirm  esc cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12323,7 +11469,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  △ Reject permission\\s*$"
+              "pattern": "^  △ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "empty_reason",
@@ -12349,8 +11495,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "primary",
-            "start_pattern": "^△ Permission required\\s*$",
-            "end_pattern": "pgup/pgdn scroll\\s*$",
+            "start_pattern": "^△ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "pgup/pgdn scroll[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12358,22 +11504,22 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^△ Permission required\\s*$"
+              "pattern": "^△ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "shell",
               "scope": "line",
-              "pattern": "^# Shell command(?:\\s|$)"
+              "pattern": "^# Shell command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]|$)"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^\\$ (?P<operation>\\S[^\\n]*(?:\\n\\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
+              "pattern": "(?m)^\\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
             },
             {
               "id": "unclipped",
               "scope": "region",
-              "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n\\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
+              "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
             },
             {
               "id": "controls",
@@ -12383,7 +11529,7 @@
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\\s*$",
+              "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
               "focus_style": "background"
             },
             {
@@ -12430,8 +11576,8 @@
           "observation": "permission_continuation",
           "region": {
             "screen": "primary",
-            "start_pattern": "^△ Reject permission\\s*$",
-            "end_pattern": "^enter reject esc back\\s*$",
+            "start_pattern": "^△ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^enter reject esc back[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12439,7 +11585,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^△ Reject permission\\s*$"
+              "pattern": "^△ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "empty_reason",
@@ -12466,7 +11612,7 @@
           "region": {
             "screen": "primary",
             "start_pattern": "^┃ ",
-            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+            "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?cafleet(?:-ask)? · ",
             "max_rows": 3,
             "cursor": "after_prompt"
           },
@@ -12485,7 +11631,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "opencode-shell-permission",
@@ -12737,29 +11882,6 @@
             ]
           }
         ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "primary",
-          "start_pattern": "^┃ ",
-          "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
-          "max_rows": 8,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "start",
-          "last": "before_end"
-        },
-        "prompt_pattern": "^┃ ",
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "opencode-2.1.4-idle-composer-1",
-          "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
-          "opencode-2.1.4-exec-typed-literal-1"
-        ]
       }
     },
     {
@@ -12772,8 +11894,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "primary",
-            "start_pattern": "^  △ Permission required\\s*$",
-            "end_pattern": "  ⇆ select  enter confirm  esc reject\\s*$",
+            "start_pattern": "^  △ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "  ⇆ select  enter confirm  esc reject[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12781,22 +11903,22 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  △ Permission required\\s*$"
+              "pattern": "^  △ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "shell",
               "scope": "line",
-              "pattern": "^   # Shell command(?:\\s|$)"
+              "pattern": "^   # Shell command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]|$)"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^  \\$ (?P<operation>\\S[^\\n]*(?:\\n  \\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
+              "pattern": "(?m)^  \\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n  [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
             },
             {
               "id": "unclipped",
               "scope": "region",
-              "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  \\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
+              "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
             },
             {
               "id": "controls",
@@ -12806,7 +11928,7 @@
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$",
+              "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
               "focus_style": "background"
             },
             {
@@ -12855,8 +11977,8 @@
           "observation": "permission_continuation",
           "region": {
             "screen": "primary",
-            "start_pattern": "^  △ Reject permission\\s*$",
-            "end_pattern": "  enter confirm  esc cancel\\s*$",
+            "start_pattern": "^  △ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "  enter confirm  esc cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12864,7 +11986,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^  △ Reject permission\\s*$"
+              "pattern": "^  △ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "empty_reason",
@@ -12890,8 +12012,8 @@
           "observation": "permission_request",
           "region": {
             "screen": "primary",
-            "start_pattern": "^△ Permission required\\s*$",
-            "end_pattern": "pgup/pgdn scroll\\s*$",
+            "start_pattern": "^△ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "pgup/pgdn scroll[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12899,22 +12021,22 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^△ Permission required\\s*$"
+              "pattern": "^△ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "shell",
               "scope": "line",
-              "pattern": "^# Shell command(?:\\s|$)"
+              "pattern": "^# Shell command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]|$)"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^\\$ (?P<operation>\\S[^\\n]*(?:\\n\\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
+              "pattern": "(?m)^\\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
             },
             {
               "id": "unclipped",
               "scope": "region",
-              "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n\\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
+              "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
             },
             {
               "id": "controls",
@@ -12924,7 +12046,7 @@
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\\s*$",
+              "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
               "focus_style": "background"
             },
             {
@@ -12971,8 +12093,8 @@
           "observation": "permission_continuation",
           "region": {
             "screen": "primary",
-            "start_pattern": "^△ Reject permission\\s*$",
-            "end_pattern": "^enter reject esc back\\s*$",
+            "start_pattern": "^△ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "end_pattern": "^enter reject esc back[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
             "max_rows": 24,
             "cursor": "any"
           },
@@ -12980,7 +12102,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^△ Reject permission\\s*$"
+              "pattern": "^△ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
             },
             {
               "id": "empty_reason",
@@ -13007,7 +12129,7 @@
           "region": {
             "screen": "primary",
             "start_pattern": "^┃ ",
-            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+            "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?cafleet(?:-ask)? · ",
             "max_rows": 3,
             "cursor": "after_prompt"
           },
@@ -13031,7 +12153,7 @@
           "region": {
             "screen": "primary",
             "start_pattern": "^┃ ",
-            "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
+            "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?cafleet(?:-ask)? · ",
             "max_rows": 3,
             "cursor": "after_prompt"
           },
@@ -13060,7 +12182,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "opencode-shell-permission",
@@ -13240,34 +12361,6 @@
             ]
           }
         ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "primary",
-          "start_pattern": "^┃ ",
-          "end_pattern": "^(?:\\S esc interrupt · )?(?:ctrl\\+x q \\d+ pending · )?cafleet(?:-ask)? · ",
-          "max_rows": 8,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "start",
-          "last": "before_end"
-        },
-        "prompt_pattern": "^┃ ",
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "opencode-2.2.7-suggestion-tmux-120-1",
-          "opencode-2.2.7-draft-tmux-120-1",
-          "opencode-2.2.7-wrapped-draft-tmux-120-1",
-          "opencode-2.2.7-shell-mode-tmux-120-1",
-          "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1",
-          "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1",
-          "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
-          "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1"
-        ]
       }
     },
     {
@@ -13289,12 +12382,12 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^│ \\S+ +Dangerous Command\\b"
+              "pattern": "^│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+ +Dangerous Command(?:$|[^0-9A-Za-z_])"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^│ \\S+ +Dangerous Command *│? *\\n│ +│ *\\n(?P<operation>│ \\S[^\\n]*(?:\\n│ \\S[^\\n]*)*)\\n│ +│ *\\n│ [❯ ] 1\\. "
+              "pattern": "(?m)^│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+ +Dangerous Command *│? *\\n│ +│ *\\n(?P<operation>│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)\\n│ +│ *\\n│ [❯ ] 1\\. "
             },
             {
               "id": "focus",
@@ -13324,7 +12417,7 @@
             {
               "id": "complete",
               "scope": "region",
-              "pattern": "(?m)^│ [❯ ] 4\\. Deny +│ *\\n│ +│ *\\n│ \\S[^\\n]*│ *(?:\\n│ [^\\n]*│ *)*\\n╰─+╯"
+              "pattern": "(?m)^│ [❯ ] 4\\. Deny +│ *\\n│ +│ *\\n│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*│ *(?:\\n│ [^\\n]*│ *)*\\n╰─+╯"
             },
             {
               "id": "footer",
@@ -13375,12 +12468,12 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^│ \\S+ +Dangerous Command\\b"
+              "pattern": "^│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+ +Dangerous Command(?:$|[^0-9A-Za-z_])"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^│ \\S+ +Dangerous Command *│? *\\n│ +│ *\\n(?P<operation>│ \\S[^\\n]*(?:\\n│ \\S[^\\n]*)*)\\n│ +│ *\\n│ [❯ ] 1\\. "
+              "pattern": "(?m)^│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+ +Dangerous Command *│? *\\n│ +│ *\\n(?P<operation>│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)\\n│ +│ *\\n│ [❯ ] 1\\. "
             },
             {
               "id": "focus",
@@ -13400,7 +12493,7 @@
             {
               "id": "complete",
               "scope": "region",
-              "pattern": "(?m)^│ [❯ ] 2\\. Deny +│ *\\n│ +│ *\\n│ \\S[^\\n]*│ *(?:\\n│ [^\\n]*│ *)*\\n╰─+╯"
+              "pattern": "(?m)^│ [❯ ] 2\\. Deny +│ *\\n│ +│ *\\n│ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*│ *(?:\\n│ [^\\n]*│ *)*\\n╰─+╯"
             },
             {
               "id": "footer",
@@ -13518,7 +12611,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "hermes-approval-escalate",
@@ -13817,30 +12909,6 @@
             ]
           }
         ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "primary",
-          "start_pattern": "^❯ ",
-          "end_pattern": "^─+ *$",
-          "max_rows": 4,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "start",
-          "last": "before_end"
-        },
-        "prompt_pattern": "^❯ ",
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "hermes-2026.9.24-suggestion-tmux-120-1",
-          "hermes-2026.9.24-draft-tmux-120-1",
-          "hermes-2026.9.24-multi-row-draft-tmux-120-1",
-          "hermes-2026.9.24-shell-prefix-tmux-120-1"
-        ]
       }
     },
     {
@@ -13967,7 +13035,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "pi-gate-approval"
@@ -14198,30 +13265,6 @@
               "pi-1.5.0-deny-pre-stage-2-herdr-049-1"
             ]
           }
-        ]
-      },
-      "composer_draft": {
-        "region": {
-          "screen": "alternate",
-          "start_pattern": "^─+ *$",
-          "end_pattern": "^─+ *$",
-          "max_rows": 10,
-          "cursor": "inside"
-        },
-        "draft_rows": {
-          "first": "after_start",
-          "last": "before_end"
-        },
-        "prompt_pattern": null,
-        "mode_switch_prefixes": [
-          "!",
-          "/"
-        ],
-        "fixture_ids": [
-          "pi-1.5.2-empty-composer-tmux-120-1",
-          "pi-1.5.2-draft-tmux-120-1",
-          "pi-1.5.2-multi-row-draft-tmux-120-1",
-          "pi-1.5.2-shell-prefix-tmux-120-1"
         ]
       }
     }

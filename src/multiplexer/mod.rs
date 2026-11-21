@@ -4,7 +4,6 @@ pub(crate) use crate::multiplexer::tmux::TmuxMultiplexer;
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
-use std::time::Instant;
 
 pub(crate) mod caller;
 pub(crate) mod herdr;
@@ -164,26 +163,10 @@ impl RunError {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct TimedRunError {
-    pub(crate) source: RunError,
-    pub(crate) cleanup_diagnostics: Vec<String>,
-}
-
-impl TimedRunError {
-    pub(crate) fn before_launch() -> Self {
-        Self {
-            source: RunError::deadline_expired(),
-            cleanup_diagnostics: Vec::new(),
-        }
-    }
-}
-
 pub(crate) trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String]) -> Result<String, RunError>;
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError>;
-    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError>;
 }
 
 const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
@@ -298,23 +281,18 @@ impl BackendCore {
         deadline: crate::time::Deadline,
         writing: bool,
     ) -> Result<String, MultiplexerError> {
-        check_deadline(deadline)?;
-        self.runner
-            .run_until(argv, deadline.instant())
-            .map_err(|error| {
-                let started =
-                    writing && matches!(&error.source, RunError::Failed { .. } | RunError::Timeout);
-                let mut mapped = self.map_error(argv, error.source);
-                for diagnostic in error.cleanup_diagnostics {
-                    mapped.message.push('\n');
-                    mapped.message.push_str(&diagnostic);
-                }
-                if started {
-                    mapped.after_write()
-                } else {
-                    mapped
-                }
-            })
+        let remaining = deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        self.runner.run_for(argv, remaining).map_err(|error| {
+            let started = writing && matches!(&error, RunError::Failed { .. } | RunError::Timeout);
+            let mapped = self.map_error(argv, error);
+            if started {
+                mapped.after_write()
+            } else {
+                mapped
+            }
+        })
     }
 
     fn send_keys(
@@ -323,14 +301,6 @@ impl BackendCore {
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
         self.acknowledged_write(argv, deadline, "key")
-    }
-
-    fn send_text(
-        &self,
-        argv: &[String],
-        deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError> {
-        self.acknowledged_write(argv, deadline, "text")
     }
 
     fn acknowledged_write(
@@ -385,14 +355,6 @@ impl CommandRunner for DeadlineRunner {
         let remaining = self.remaining()?;
         self.runner.run_for(argv, timeout.min(remaining))
     }
-
-    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-        let deadline = deadline.min(self.deadline.instant());
-        if Instant::now() >= deadline {
-            return Err(TimedRunError::before_launch());
-        }
-        self.runner.run_until(argv, deadline)
-    }
 }
 
 /// The capture over-fetch margin: both backends fetch `lines + 1000` so a blank
@@ -435,14 +397,6 @@ pub(crate) trait Multiplexer {
         &self,
         pane_id: &str,
         keys: &PressKeys,
-        deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError>;
-
-    /// Writes `text` literally into `pane_id` as one argv element.
-    fn send_text(
-        &self,
-        pane_id: &str,
-        text: &str,
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError>;
 
@@ -862,32 +816,6 @@ pub(crate) mod test_support {
         fn run_for(&self, argv: &[String], _: std::time::Duration) -> Result<String, RunError> {
             self.run(argv)
         }
-
-        fn run_until(
-            &self,
-            argv: &[String],
-            deadline: std::time::Instant,
-        ) -> Result<String, crate::multiplexer::TimedRunError> {
-            run_until_through_run_for(self, argv, deadline)
-        }
-    }
-
-    /// The relative-budget form of `run_until` shared by the fakes that time out through `run_for`.
-    pub(crate) fn run_until_through_run_for(
-        runner: &dyn CommandRunner,
-        argv: &[String],
-        deadline: std::time::Instant,
-    ) -> Result<String, crate::multiplexer::TimedRunError> {
-        let remaining = deadline
-            .checked_duration_since(std::time::Instant::now())
-            .filter(|left| !left.is_zero())
-            .ok_or_else(crate::multiplexer::TimedRunError::before_launch)?;
-        runner
-            .run_for(argv, remaining)
-            .map_err(|source| crate::multiplexer::TimedRunError {
-                source,
-                cleanup_diagnostics: Vec::new(),
-            })
     }
 
     pub(crate) use crate::multiplexer::argv;
@@ -935,6 +863,7 @@ mod tests {
     use crate::multiplexer::*;
     use crate::time::Deadline;
     use std::cell::RefCell;
+    use std::time::Instant;
 
     const TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
     const HERDR_SESSION: &str = "default";
@@ -1207,43 +1136,49 @@ mod tests {
         );
     }
 
-    struct AbsoluteRecorder(RefCell<Vec<Instant>>);
+    struct TimeoutRecorder(RefCell<Vec<Duration>>);
 
-    impl CommandRunner for AbsoluteRecorder {
+    impl CommandRunner for TimeoutRecorder {
         fn binary_exists(&self, _: &str) -> bool {
             true
         }
         fn run(&self, _: &[String]) -> Result<String, RunError> {
-            panic!("absolute execution retains its Instant")
+            panic!("press bounds every process by the invocation deadline")
         }
-        fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
-            panic!("absolute execution retains its Instant")
-        }
-        fn run_until(&self, _: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-            self.0.borrow_mut().push(deadline);
+        fn run_for(&self, _: &[String], timeout: Duration) -> Result<String, RunError> {
+            self.0.borrow_mut().push(timeout);
             Ok(String::new())
         }
     }
 
     #[test]
-    fn press_deadline_runner_clips_the_actual_absolute_call_and_refuses_expiry() {
-        let recorder = Rc::new(AbsoluteRecorder(RefCell::default()));
+    fn press_deadline_runner_clips_each_call_to_the_remaining_deadline_and_refuses_expiry() {
+        let recorder = Rc::new(TimeoutRecorder(RefCell::default()));
         let original = Instant::now() + Duration::from_secs(2);
         let bounded = DeadlineRunner::wrap(recorder.clone(), Deadline::until(original));
         assert!(
             bounded
-                .run_until(&argv(&["fixture"]), original + Duration::from_secs(5))
+                .run_for(&argv(&["fixture"]), Duration::from_secs(7))
                 .is_ok()
         );
-        let earlier = original - Duration::from_secs(1);
-        assert!(bounded.run_until(&argv(&["fixture"]), earlier).is_ok());
-        assert_eq!(*recorder.0.borrow(), vec![original, earlier]);
+        assert!(
+            bounded
+                .run_for(&argv(&["fixture"]), Duration::from_millis(500))
+                .is_ok()
+        );
+        let recorded = recorder.0.borrow().clone();
+        assert!(
+            recorded[0] > Duration::from_secs(1) && recorded[0] <= Duration::from_secs(2),
+            "{recorded:?}"
+        );
+        assert_eq!(recorded[1], Duration::from_millis(500));
         let expired = DeadlineRunner::wrap(recorder.clone(), Deadline::until(Instant::now()));
-        let failure = match expired.run_until(&argv(&["fixture"]), original) {
-            Ok(_) => panic!("expired work starts no underlying command"),
-            Err(failure) => failure,
-        };
-        assert!(matches!(failure.source, RunError::NotStarted(_)));
+        assert!(
+            expired
+                .run_for(&argv(&["fixture"]), Duration::from_secs(1))
+                .is_err(),
+            "expired work starts no underlying command"
+        );
         assert_eq!(recorder.0.borrow().len(), 2);
     }
     fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {

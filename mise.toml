@@ -8,8 +8,9 @@ config_roots = [
 [tools]
 "aqua:pnpm/pnpm" = "12.20.0"
 "core:node" = "26.13.1"
-"core:rust" = { version = "1.100.0", components = ["clippy", "rustfmt"] }
+"core:rust" = { version = "1.100.0", components = ["clippy", "rustfmt", "llvm-tools-preview"] }
 "core:zig" = "0.15.2"
+"cargo:cargo-llvm-cov" = "0.9.1"
 
 [tasks.skill-install]
 run = [
@@ -26,6 +27,10 @@ description = "Install the CLI and the working-tree skills"
 [tasks.test]
 run = "RUST_TEST_THREADS=${RUST_TEST_THREADS:-$(( $(nproc) < 32 ? $(nproc) : 32 ))} cargo test --bin cafleet"
 description = "Run inline unit tests (positional args forward to the cargo test harness)"
+
+[tasks.coverage]
+run = "cargo llvm-cov --bin cafleet --summary-only"
+description = "Report line coverage of the inline unit tests"
 
 [tasks.lint]
 run = ["cargo clippy --all-targets -- -D warnings", "cargo fmt --check"]

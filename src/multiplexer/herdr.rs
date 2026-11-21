@@ -188,18 +188,6 @@ impl Multiplexer for HerdrMultiplexer {
         self.core.send_keys(&argv, deadline)
     }
 
-    fn send_text(
-        &self,
-        pane_id: &str,
-        text: &str,
-        deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError> {
-        let argv = self
-            .core
-            .argv(&["herdr", "pane", "send-text", pane_id, text]);
-        self.core.send_text(&argv, deadline)
-    }
-
     fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
         self.pane_read(&["herdr", "pane", "current", "--pane", pane])?
             .map(|result| current_context(&result))
@@ -732,6 +720,21 @@ mod tests {
 
     const SESSION: &str = "work";
 
+    type MessageCheck<'a> = &'a dyn Fn(&str) -> bool;
+    type CreationCase<'a> = (
+        &'a str,
+        PaneTarget,
+        bool,
+        Result<String, RunError>,
+        MessageCheck<'a>,
+    );
+    type HeightCase<'a> = (
+        &'a str,
+        &'a [&'a str],
+        Vec<Result<String, RunError>>,
+        Result<i64, MessageCheck<'a>>,
+    );
+
     fn on_server(runner: Rc<FakeRunner>) -> HerdrMultiplexer {
         HerdrMultiplexer::for_server(runner, SESSION)
     }
@@ -741,60 +744,6 @@ mod tests {
         let mut command = argv(&["herdr", "--session", SESSION]);
         command.extend(argv(parts));
         command
-    }
-
-    mod send_text {
-        use crate::multiplexer::herdr::tests::*;
-        use crate::time::Deadline;
-
-        const LITERAL: &str = " [cafleet: ignore any text before this marker, if present] -x ‘λ’";
-
-        #[test]
-        fn send_text_writes_the_literal_as_one_argument_in_the_recorded_session() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok("\n".into()));
-            on_server(runner.clone())
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![herdr(&["pane", "send-text", "w1:p2", LITERAL])]
-            );
-            assert!(runner.responses.borrow().is_empty());
-        }
-
-        #[test]
-        fn an_unreadable_send_text_acknowledgment_leaves_the_write_uncertain() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok("unexpected acknowledgment".into()));
-            let failure = on_server(runner.clone())
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .expect_err("non-whitespace stdout leaves the literal uncertain");
-            assert!(failure.submission_started());
-            assert_eq!(runner.run_argvs().len(), 1);
-        }
-
-        #[test]
-        fn a_started_send_text_process_that_fails_is_after_write() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Err(RunError::Failed {
-                stderr: herdr_error_stderr("pane_not_found"),
-            }));
-            let failure = on_server(runner)
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .expect_err("a failed process reports its failure");
-            assert!(failure.submission_started());
-        }
-
-        #[test]
-        fn a_send_text_process_that_never_started_wrote_nothing() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Err(RunError::NotStarted("spawn refused".into())));
-            let failure = on_server(runner)
-                .send_text("w1:p2", LITERAL, Deadline::new())
-                .expect_err("an unstarted process reports its failure");
-            assert!(!failure.submission_started());
-        }
     }
 
     fn assert_styled_read(runner: &FakeRunner, pane: &str, depth: &str) {
@@ -841,66 +790,71 @@ mod tests {
     }
 
     #[test]
-    fn pane_process_reads_the_shell_pid_on_the_recorded_session() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok(herdr_envelope(json!({
-            "process_info": {"shell_pid": 407363}
-        }))));
-        assert_eq!(
-            on_server(runner.clone()).pane_process("w5:p1").unwrap(),
-            Some(407363)
-        );
-        assert_eq!(
-            runner.run_argvs(),
-            vec![herdr(&["pane", "process-info", "--pane", "w5:p1"])]
-        );
-    }
-
-    #[test]
-    fn pane_process_of_a_pane_not_found_is_none() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Err(RunError::Failed {
-            stderr: herdr_error_stderr("pane_not_found"),
-        }));
-        assert_eq!(
-            on_server(runner.clone()).pane_process("w5:p9").unwrap(),
-            None
-        );
-        assert_eq!(runner.run_argvs().len(), 1);
-    }
-
-    #[test]
-    fn pane_process_without_an_integer_shell_pid_fails() {
-        for result in [
-            json!({"process_info": {}}),
-            json!({"process_info": {"shell_pid": "407363"}}),
-            json!({"process_info": {"shell_pid": null}}),
-            json!({}),
+    fn pane_process_reads_the_shell_pid_and_treats_only_a_missing_pane_as_none() {
+        let missing = "herdr pane process-info missing 'shell_pid' field";
+        for (name, reply, expected) in [
+            (
+                "integer shell pid",
+                Ok(herdr_envelope(
+                    json!({"process_info": {"shell_pid": 407363}}),
+                )),
+                Ok(Some(407363)),
+            ),
+            (
+                "pane not found",
+                Err(RunError::Failed {
+                    stderr: herdr_error_stderr("pane_not_found"),
+                }),
+                Ok(None),
+            ),
+            (
+                "no shell pid",
+                Ok(herdr_envelope(json!({"process_info": {}}))),
+                Err(Some(missing)),
+            ),
+            (
+                "string shell pid",
+                Ok(herdr_envelope(
+                    json!({"process_info": {"shell_pid": "407363"}}),
+                )),
+                Err(Some(missing)),
+            ),
+            (
+                "null shell pid",
+                Ok(herdr_envelope(json!({"process_info": {"shell_pid": null}}))),
+                Err(Some(missing)),
+            ),
+            (
+                "no process info",
+                Ok(herdr_envelope(json!({}))),
+                Err(Some(missing)),
+            ),
+            (
+                "unavailable server",
+                Err(RunError::Failed {
+                    stderr: herdr_error_stderr("server_unavailable"),
+                }),
+                Err(None),
+            ),
+            ("timeout", Err(RunError::Timeout), Err(None)),
         ] {
             let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(herdr_envelope(result.clone())));
+            runner.respond(reply);
+            let result = on_server(runner.clone()).pane_process("w5:p1");
+            match expected {
+                Ok(pid) => assert_eq!(result.unwrap(), pid, "{name}"),
+                Err(message) => {
+                    let error = result.unwrap_err().to_string();
+                    if let Some(message) = message {
+                        assert_eq!(error, message, "{name}");
+                    }
+                }
+            }
             assert_eq!(
-                on_server(runner)
-                    .pane_process("w5:p1")
-                    .unwrap_err()
-                    .to_string(),
-                "herdr pane process-info missing 'shell_pid' field",
-                "{result}"
+                runner.run_argvs(),
+                vec![herdr(&["pane", "process-info", "--pane", "w5:p1"])],
+                "{name}"
             );
-        }
-    }
-
-    #[test]
-    fn pane_process_propagates_other_command_failures() {
-        for failure in [
-            RunError::Failed {
-                stderr: herdr_error_stderr("server_unavailable"),
-            },
-            RunError::Timeout,
-        ] {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Err(failure));
-            assert!(on_server(runner).pane_process("w5:p1").is_err());
         }
     }
 
@@ -1340,77 +1294,85 @@ mod tests {
         }
 
         #[test]
-        fn a_tab_create_reply_without_its_ids_leaves_pane_cleanup_unknown() {
-            for reply in [
-                Ok(herdr_envelope(json!({"tab": {"tab_id": "w1:t5"}}))),
-                Ok(herdr_envelope(json!({"root_pane": {"pane_id": "w1:p20"}}))),
-                Ok(herdr_envelope(json!({"tab": {}, "root_pane": {}}))),
-            ] {
+        fn a_failed_or_incomplete_creation_reply_leaves_pane_cleanup_unknown() {
+            let tab = || PaneTarget::NewWindow {
+                session: "w1".into(),
+                window_name: "cafleet-3-1".into(),
+            };
+            let split = || column(ColumnSide::Right, &[], &["w1:p1"]);
+            let missing_field = |message: &str| {
+                message.starts_with("herdr tab create missing '") && message.contains("' field")
+            };
+            let any = |_: &str| true;
+            let cases: [CreationCase<'_>; 8] = [
+                (
+                    "tab create without a root pane",
+                    tab(),
+                    false,
+                    Ok(herdr_envelope(json!({"tab": {"tab_id": "w1:t5"}}))),
+                    &missing_field,
+                ),
+                (
+                    "tab create without a tab",
+                    tab(),
+                    false,
+                    Ok(herdr_envelope(json!({"root_pane": {"pane_id": "w1:p20"}}))),
+                    &missing_field,
+                ),
+                (
+                    "tab create with empty ids",
+                    tab(),
+                    false,
+                    Ok(herdr_envelope(json!({"tab": {}, "root_pane": {}}))),
+                    &missing_field,
+                ),
+                (
+                    "tab create timeout",
+                    tab(),
+                    false,
+                    Err(RunError::Timeout),
+                    &any,
+                ),
+                (
+                    "tab create failure",
+                    tab(),
+                    false,
+                    failed("workspace_not_found"),
+                    &any,
+                ),
+                (
+                    "split without a pane id",
+                    split(),
+                    true,
+                    Ok(herdr_envelope(json!({"pane": {}}))),
+                    &any,
+                ),
+                (
+                    "split with a blank pane id",
+                    split(),
+                    true,
+                    Ok(herdr_envelope(json!({"pane": {"pane_id": " "}}))),
+                    &any,
+                ),
+                ("split timeout", split(), true, Err(RunError::Timeout), &any),
+            ];
+            for (name, target, reads_layout, reply, message) in cases {
                 let runner = FakeRunner::with_binary("herdr");
+                if reads_layout {
+                    runner.respond(layout(vec![pane("w1:p1", 0, 0, 120, 60)], vec![]));
+                }
                 runner.respond(reply);
                 let error = on_server(runner.clone())
-                    .spawn_member_pane(
-                        &PaneTarget::NewWindow {
-                            session: "w1".into(),
-                            window_name: "cafleet-3-1".into(),
-                        },
-                        "tester",
-                        CWD,
-                        &command(),
-                    )
+                    .spawn_member_pane(&target, "worker", CWD, &command())
                     .unwrap_err();
-                assert_eq!(error.pane_cleanup(), Some(&PaneCleanup::Unknown));
-                let message = error.to_string();
-                assert!(
-                    message.starts_with("herdr tab create missing '")
-                        && message.contains("' field"),
-                    "{message}"
+                assert_eq!(error.pane_cleanup(), Some(&PaneCleanup::Unknown), "{name}");
+                let text = error.to_string();
+                assert!(message(&text), "{name}: {text}");
+                assert_eq!(
+                    runner.run_argvs().len(),
+                    1 + usize::from(reads_layout),
+                    "{name}"
                 );
-                assert_eq!(runner.run_argvs().len(), 1);
-            }
-        }
-
-        #[test]
-        fn a_failed_tab_create_leaves_pane_cleanup_unknown() {
-            for reply in [Err(RunError::Timeout), failed("workspace_not_found")] {
-                let runner = FakeRunner::with_binary("herdr");
-                runner.respond(reply);
-                let error = on_server(runner.clone())
-                    .spawn_member_pane(
-                        &PaneTarget::NewWindow {
-                            session: "w1".into(),
-                            window_name: "cafleet-3-1".into(),
-                        },
-                        "tester",
-                        CWD,
-                        &command(),
-                    )
-                    .unwrap_err();
-                assert_eq!(error.pane_cleanup(), Some(&PaneCleanup::Unknown));
-                assert_eq!(runner.run_argvs().len(), 1);
-            }
-        }
-
-        #[test]
-        fn an_unknown_split_id_keeps_unowned_panes_untouched() {
-            for reply in [
-                Ok(herdr_envelope(json!({"pane": {}}))),
-                Ok(herdr_envelope(json!({"pane": {"pane_id": " "}}))),
-                Err(RunError::Timeout),
-            ] {
-                let runner = FakeRunner::with_binary("herdr");
-                runner.respond(layout(vec![pane("w1:p1", 0, 0, 120, 60)], vec![]));
-                runner.respond(reply);
-                let error = on_server(runner.clone())
-                    .spawn_member_pane(
-                        &column(ColumnSide::Right, &[], &["w1:p1"]),
-                        "worker",
-                        CWD,
-                        &command(),
-                    )
-                    .unwrap_err();
-                assert_eq!(error.pane_cleanup(), Some(&PaneCleanup::Unknown));
-                assert_eq!(runner.run_argvs().len(), 2);
             }
         }
 
@@ -1598,67 +1560,77 @@ mod tests {
         use crate::multiplexer::herdr::tests::*;
 
         #[test]
-        fn closing_the_last_pane_of_a_tab_leaves_nothing_to_restore() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(String::new()));
-            runner.respond(Ok(herdr_envelope(json!({"panes": [
-                {"pane_id": "w1:p1", "tab_id": "w1:t0"},
-            ]}))));
-            on_server(runner.clone())
-                .kill_pane("w1:p20", "w1:t5")
-                .unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    herdr(&["pane", "close", "w1:p20"]),
-                    herdr(&["pane", "list"])
-                ]
-            );
-        }
-
-        #[test]
-        fn a_lone_pane_with_one_residual_right_split_is_restored_to_full_width() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(String::new()));
-            runner.respond(Ok(herdr_envelope(
-                json!({"panes": [{"pane_id": "w1:p1", "tab_id": TAB}]}),
-            )));
-            runner.respond(layout(
-                vec![pane("w1:p1", 0, 0, 72, 60)],
-                vec![split("right", (0, 0, 120, 60), 0.6)],
-            ));
-            runner.succeed(1);
-            on_server(runner.clone()).kill_pane("w1:p2", TAB).unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    herdr(&["pane", "close", "w1:p2"]),
-                    herdr(&["pane", "list"]),
-                    herdr(&["pane", "layout", "--pane", "w1:p1"]),
-                    resize("w1:p1", "right", "0.4"),
-                ]
-            );
-        }
-
-        #[test]
-        fn a_lone_pane_without_residual_splits_needs_no_resize() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(String::new()));
-            runner.respond(Ok(herdr_envelope(
-                json!({"panes": [{"pane_id": "w1:p1", "tab_id": TAB}]}),
-            )));
-            runner.respond(layout(vec![pane("w1:p1", 0, 0, 120, 60)], vec![]));
-            on_server(runner.clone()).kill_pane("w1:p2", TAB).unwrap();
-            assert_eq!(runner.run_argvs().len(), 3);
-        }
-
-        #[test]
-        fn kill_pane_tolerates_a_pane_gone_close_and_best_effort_restoration() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(failed("pane_not_found"));
-            runner.respond(failed("server_unavailable"));
-            on_server(runner.clone()).kill_pane("w1:p2", TAB).unwrap();
-            assert_eq!(runner.run_argvs()[0], herdr(&["pane", "close", "w1:p2"]));
+        fn kill_pane_closes_then_restores_a_lone_pane_to_full_width_best_effort() {
+            let close = |pane: &str| herdr(&["pane", "close", pane]);
+            let list = || herdr(&["pane", "list"]);
+            let lone_in_tab = || {
+                Ok(herdr_envelope(
+                    json!({"panes": [{"pane_id": "w1:p1", "tab_id": TAB}]}),
+                ))
+            };
+            for (name, pane, tab, replies, calls) in [
+                (
+                    "the last pane of a tab leaves nothing to restore",
+                    "w1:p20",
+                    "w1:t5",
+                    vec![
+                        Ok(String::new()),
+                        Ok(herdr_envelope(json!({"panes": [
+                            {"pane_id": "w1:p1", "tab_id": "w1:t0"},
+                        ]}))),
+                    ],
+                    vec![close("w1:p20"), list()],
+                ),
+                (
+                    "a lone pane with one residual right split is resized to full width",
+                    "w1:p2",
+                    TAB,
+                    vec![
+                        Ok(String::new()),
+                        lone_in_tab(),
+                        layout(
+                            vec![pane("w1:p1", 0, 0, 72, 60)],
+                            vec![split("right", (0, 0, 120, 60), 0.6)],
+                        ),
+                        Ok(String::new()),
+                    ],
+                    vec![
+                        close("w1:p2"),
+                        list(),
+                        herdr(&["pane", "layout", "--pane", "w1:p1"]),
+                        resize("w1:p1", "right", "0.4"),
+                    ],
+                ),
+                (
+                    "a lone pane without residual splits needs no resize",
+                    "w1:p2",
+                    TAB,
+                    vec![
+                        Ok(String::new()),
+                        lone_in_tab(),
+                        layout(vec![pane("w1:p1", 0, 0, 120, 60)], vec![]),
+                    ],
+                    vec![
+                        close("w1:p2"),
+                        list(),
+                        herdr(&["pane", "layout", "--pane", "w1:p1"]),
+                    ],
+                ),
+                (
+                    "a gone pane and a failed restoration still succeed",
+                    "w1:p2",
+                    TAB,
+                    vec![failed("pane_not_found"), failed("server_unavailable")],
+                    vec![close("w1:p2"), list()],
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                for reply in replies {
+                    runner.respond(reply);
+                }
+                on_server(runner.clone()).kill_pane(pane, tab).unwrap();
+                assert_eq!(runner.run_argvs(), calls, "{name}");
+            }
         }
 
         #[test]
@@ -1695,162 +1667,163 @@ mod tests {
         }
 
         #[test]
-        fn window_height_reads_the_layout_area_of_the_first_anchor() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(height(57));
-            assert_eq!(
-                on_server(runner.clone())
-                    .window_height(TAB, &argv(&["w1:p2", "w1:p3"]))
-                    .unwrap(),
-                57
-            );
-            assert_eq!(
-                runner.run_argvs(),
-                vec![herdr(&["pane", "layout", "--pane", "w1:p2"])]
-            );
-        }
-
-        #[test]
-        fn window_height_moves_past_anchors_that_fail() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(failed("pane_not_found"));
-            runner.respond(failed("server_unavailable"));
-            runner.respond(height(122));
-            assert_eq!(
-                on_server(runner.clone())
-                    .window_height(TAB, &argv(&["w1:p2", "w1:p3", "w1:p4"]))
-                    .unwrap(),
-                122
-            );
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    herdr(&["pane", "layout", "--pane", "w1:p2"]),
-                    herdr(&["pane", "layout", "--pane", "w1:p3"]),
-                    herdr(&["pane", "layout", "--pane", "w1:p4"]),
-                ]
-            );
-        }
-
-        #[test]
-        fn window_height_fails_with_the_last_anchor_error_only_when_every_anchor_fails() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(failed("server_unavailable"));
-            runner.respond(failed("pane_not_found"));
-            let error = on_server(runner.clone())
-                .window_height(TAB, &argv(&["w1:p2", "w1:p3"]))
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("pane_not_found"), "{error}");
-            assert!(error.contains("w1:p3"), "{error}");
-            assert!(!error.contains("server_unavailable"), "{error}");
-            assert_eq!(runner.run_argvs().len(), 2);
-        }
-
-        #[test]
-        fn window_height_without_a_layout_area_fails() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(herdr_envelope(
-                json!({"layout": {"panes": [], "splits": []}}),
-            )));
-            assert_eq!(
-                on_server(runner)
-                    .window_height(TAB, &argv(&["w1:p2"]))
-                    .unwrap_err()
-                    .to_string(),
-                "herdr pane layout missing 'area' field"
-            );
-        }
-
-        #[test]
-        fn window_name_reads_the_tab_label() {
-            for label in ["agents", "", " agents | left \r\n", "cafleet-42-0"] {
+        fn window_height_reads_the_layout_area_of_the_first_readable_anchor() {
+            let layout_of = |pane: &str| herdr(&["pane", "layout", "--pane", pane]);
+            let last_anchor_error = |error: &str| {
+                error.contains("pane_not_found")
+                    && error.contains("w1:p3")
+                    && !error.contains("server_unavailable")
+            };
+            let missing_area = |error: &str| error == "herdr pane layout missing 'area' field";
+            let cases: [HeightCase<'_>; 4] = [
+                (
+                    "first anchor",
+                    &["w1:p2", "w1:p3"],
+                    vec![height(57)],
+                    Ok(57),
+                ),
+                (
+                    "failed anchors are skipped",
+                    &["w1:p2", "w1:p3", "w1:p4"],
+                    vec![
+                        failed("pane_not_found"),
+                        failed("server_unavailable"),
+                        height(122),
+                    ],
+                    Ok(122),
+                ),
+                (
+                    "every anchor fails with the last error",
+                    &["w1:p2", "w1:p3"],
+                    vec![failed("server_unavailable"), failed("pane_not_found")],
+                    Err(&last_anchor_error),
+                ),
+                (
+                    "a layout without an area fails",
+                    &["w1:p2"],
+                    vec![Ok(herdr_envelope(
+                        json!({"layout": {"panes": [], "splits": []}}),
+                    ))],
+                    Err(&missing_area),
+                ),
+            ];
+            for (name, anchors, replies, expected) in cases {
                 let runner = FakeRunner::with_binary("herdr");
-                runner.respond(Ok(herdr_envelope(
-                    json!({"tab": {"tab_id": TAB, "label": label}}),
-                )));
-                assert_eq!(on_server(runner.clone()).window_name(TAB).unwrap(), label);
-                assert_eq!(runner.run_argvs(), vec![herdr(&["tab", "get", TAB])]);
+                let reads = replies.len();
+                for reply in replies {
+                    runner.respond(reply);
+                }
+                let result = on_server(runner.clone()).window_height(TAB, &argv(anchors));
+                match expected {
+                    Ok(expected) => assert_eq!(result.unwrap(), expected, "{name}"),
+                    Err(check) => {
+                        let error = result.unwrap_err().to_string();
+                        assert!(check(&error), "{name}: {error}");
+                    }
+                }
+                let read = &anchors[..reads];
+                assert_eq!(
+                    runner.run_argvs(),
+                    read.iter().map(|pane| layout_of(pane)).collect::<Vec<_>>(),
+                    "{name}"
+                );
             }
         }
 
         #[test]
-        fn window_name_rejects_a_reply_without_a_label() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(herdr_envelope(json!({"tab": {"tab_id": TAB}}))));
-            assert_eq!(
-                on_server(runner).window_name(TAB).unwrap_err().to_string(),
-                "herdr tab get missing 'label' field"
-            );
-        }
-
-        #[test]
-        fn window_name_propagates_a_missing_tab() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(failed("tab_not_found"));
-            let error = on_server(runner).window_name(TAB).unwrap_err().to_string();
-            assert!(error.contains("tab_not_found"), "{error}");
-        }
-
-        #[test]
-        fn window_name_requires_the_requested_tab_id_and_a_string_label() {
-            for tab in [
-                json!({"tab_id": "other", "label": "cafleet-42-0"}),
-                json!({"label": "cafleet-42-0"}),
-                json!({"tab_id": null, "label": "cafleet-42-0"}),
-                json!({"tab_id": 1, "label": "cafleet-42-0"}),
-                json!({"tab_id": TAB, "label": null}),
-                json!({"tab_id": TAB, "label": 1}),
-            ] {
+        fn window_name_reads_the_string_label_of_the_requested_tab() {
+            let labelled = |label: &str| json!({"tab_id": TAB, "label": label});
+            let cases = [
+                ("plain label", Ok(labelled("agents")), Ok("agents")),
+                ("empty label", Ok(labelled("")), Ok("")),
+                (
+                    "label with separators and CR LF",
+                    Ok(labelled(" agents | left \r\n")),
+                    Ok(" agents | left \r\n"),
+                ),
+                (
+                    "fleet label",
+                    Ok(labelled("cafleet-42-0")),
+                    Ok("cafleet-42-0"),
+                ),
+                (
+                    "no label",
+                    Ok(json!({"tab_id": TAB})),
+                    Err("herdr tab get missing 'label' field"),
+                ),
+                ("missing tab", Err("tab_not_found"), Err("tab_not_found")),
+                (
+                    "other tab",
+                    Ok(json!({"tab_id": "other", "label": "cafleet-42-0"})),
+                    Err(""),
+                ),
+                ("no tab id", Ok(json!({"label": "cafleet-42-0"})), Err("")),
+                (
+                    "null tab id",
+                    Ok(json!({"tab_id": null, "label": "cafleet-42-0"})),
+                    Err(""),
+                ),
+                (
+                    "integer tab id",
+                    Ok(json!({"tab_id": 1, "label": "cafleet-42-0"})),
+                    Err(""),
+                ),
+                (
+                    "null label",
+                    Ok(json!({"tab_id": TAB, "label": null})),
+                    Err(""),
+                ),
+                (
+                    "integer label",
+                    Ok(json!({"tab_id": TAB, "label": 1})),
+                    Err(""),
+                ),
+            ];
+            for (name, tab, expected) in cases {
                 let runner = FakeRunner::with_binary("herdr");
-                runner.respond(Ok(herdr_envelope(json!({"tab": tab}))));
-                assert!(on_server(runner.clone()).window_name(TAB).is_err(), "{tab}");
-                assert_eq!(runner.run_argvs(), vec![herdr(&["tab", "get", TAB])]);
+                runner.respond(match tab {
+                    Ok(tab) => Ok(herdr_envelope(json!({"tab": tab}))),
+                    Err(code) => failed(code),
+                });
+                let result = on_server(runner.clone()).window_name(TAB);
+                match expected {
+                    Ok(label) => assert_eq!(result.unwrap(), label, "{name}"),
+                    Err(message) => {
+                        let error = result.unwrap_err().to_string();
+                        assert!(error.contains(message), "{name}: {error}");
+                    }
+                }
+                assert_eq!(
+                    runner.run_argvs(),
+                    vec![herdr(&["tab", "get", TAB])],
+                    "{name}"
+                );
             }
         }
 
         #[test]
         fn rename_window_targets_the_recorded_server_and_concrete_tab() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(herdr_envelope(json!({}))));
-            on_server(runner.clone())
-                .rename_window(TAB, "cafleet-42-0")
-                .unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![herdr(&["tab", "rename", TAB, "cafleet-42-0"])]
-            );
-        }
-
-        #[test]
-        fn rename_window_propagates_command_failure() {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(failed("rename denied"));
-            let error = on_server(runner.clone())
-                .rename_window(TAB, "cafleet-42-0")
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("rename denied"), "{error}");
-            assert_eq!(
-                runner.run_argvs(),
-                vec![herdr(&["tab", "rename", TAB, "cafleet-42-0"])]
-            );
-        }
-
-        #[test]
-        fn rename_window_validates_the_json_result_envelope() {
-            for reply in ["not json", r#"{"id":1}"#, r#"{"result":null}"#] {
+            for (name, reply, expected) in [
+                ("renamed", Ok(herdr_envelope(json!({}))), Ok(())),
+                ("refused", failed("rename denied"), Err("rename denied")),
+                ("non-JSON reply", Ok("not json".into()), Err("")),
+                ("reply without a result", Ok(r#"{"id":1}"#.into()), Err("")),
+                ("null result", Ok(r#"{"result":null}"#.into()), Err("")),
+            ] {
                 let runner = FakeRunner::with_binary("herdr");
-                runner.respond(Ok(reply.into()));
-                assert!(
-                    on_server(runner.clone())
-                        .rename_window(TAB, "cafleet-42-0")
-                        .is_err(),
-                    "{reply}"
-                );
+                runner.respond(reply);
+                let result = on_server(runner.clone()).rename_window(TAB, "cafleet-42-0");
+                match expected {
+                    Ok(()) => result.unwrap(),
+                    Err(message) => {
+                        let error = result.unwrap_err().to_string();
+                        assert!(error.contains(message), "{name}: {error}");
+                    }
+                }
                 assert_eq!(
                     runner.run_argvs(),
-                    vec![herdr(&["tab", "rename", TAB, "cafleet-42-0"])]
+                    vec![herdr(&["tab", "rename", TAB, "cafleet-42-0"])],
+                    "{name}"
                 );
             }
         }

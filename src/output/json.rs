@@ -6,13 +6,6 @@ pub(crate) fn member_press(value: &crate::runtime::KeyAcknowledgment) -> Value {
     json!({"member_id":value.member_id,"pane_id":value.pane_id,"keys":value.keys,"status":"acknowledged"})
 }
 
-pub(crate) fn runtime_recovery(report: &crate::runtime::RecoveryReport) -> Value {
-    json!({"member_id":report.member_id,"run_id":report.run_id,"outcome":report.outcome.as_str(),
-        "replayed_count":report.replayed_count,"inbox_count":report.inbox_count,
-        "archived_count":report.archived_count,"status":report.status.as_str(),
-        "cleanup_diagnostics":report.cleanup_diagnostics})
-}
-
 pub(crate) fn placement(row: &Placement) -> Value {
     json!({"backend":row.backend,"mux_session":row.mux_session,
         "mux_window_id":row.mux_window_id,"mux_window_name":row.mux_window_name,
@@ -37,8 +30,7 @@ pub(crate) fn runtime_snapshot(row: &crate::broker::runtime::RuntimeSnapshot) ->
         "current_interaction_id":row.current_interaction_id,
         "unresolved_input_ids":row.unresolved_input_ids,"owner_kind":run.owner_kind.as_str(),"owner_pid":run.owner_pid,
         "owner_start_identity":run.owner_start_identity,"runner_pid":run.runner_pid,"runner_start_identity":run.runner_start_identity,
-        "child_pid":run.child_pid,"child_start_identity":run.child_start_identity,
-        "effective_policy":run.effective_policy_json})
+        "child_pid":run.child_pid,"child_start_identity":run.child_start_identity})
 }
 
 fn runtime_interaction(row: &crate::broker::runtime::InteractionRecord) -> Value {
@@ -57,12 +49,10 @@ pub(crate) fn runtime_event(view: &crate::broker::runtime::RuntimeEventView) -> 
 pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> Value {
     json!({"input":{"input_id":row.input_id,"run_id":row.run_id,"operation_key":row.operation_key,
         "kind":row.kind.as_str(),"payload_digest":row.payload_digest,"state":row.state.as_str(),
-        "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
-        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
-        "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
-        "stop_cause":row.stop_cause.map(|cause| cause.as_str()),
-        "left_stage":row.left_stage.map(|stage| stage.as_str()),
-        "flush_input_id":row.flush_input_id,"flushed_input_ids":row.flushed_input_ids}})
+        "created_at":row.created_at,"updated_at":row.updated_at,
+        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,
+        "delivery":row.delivery().to_json(),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
+        "stop_cause":row.stop_cause.map(|cause| cause.as_str())}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
@@ -91,16 +81,6 @@ pub(crate) fn listen_closed(member_id: i64, reason: &str) -> Value {
 
 pub(crate) fn message_envelope(row: &MessageRecord) -> Value {
     json!({"message":message(row)})
-}
-
-pub(crate) fn send_outcome(
-    row: &MessageRecord,
-    notification_sent: bool,
-    input_id: Option<i64>,
-    delivery: &crate::broker::runtime::DeliveryProjection,
-) -> Value {
-    json!({"message":message(row),"notification_sent":notification_sent,
-        "input_id":input_id,"delivery":delivery.to_json()})
 }
 
 pub(crate) fn member_prompt(
@@ -157,20 +137,10 @@ pub(crate) fn deleted_fleet(row: &DeletedFleet) -> Value {
     json!({"fleet_id":row.fleet_id, "deregistered_count":row.deregistered_count, "members":members})
 }
 
-fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -> Value {
-    let metadata = &row.metadata;
-    json!({"input_id":row.input_id,"event_id":metadata.event_id,"interaction_id":metadata.interaction_id,
-        "expected_owner_epoch":metadata.expected_owner_epoch,"request_token":metadata.request_token,
-        "decision":metadata.key.decision(),"choice_id":metadata.key.choice(),"director_member_id":metadata.director_member_id,
-        "director_mode":metadata.director_mode.as_str(),"decision_source":metadata.decision_source.as_str(),
-        "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
-        "answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
-}
-
 pub(crate) fn permission_response_result(row: &crate::runtime::PermissionResponseResult) -> Value {
-    json!({"response":{"status":row.submission.status.as_str(),"input_id":row.submission.input_id,"member_id":row.member_id,
+    json!({"response":{"status":row.submission.status.as_str(),"member_id":row.member_id,
         "run_id":row.run_id,"owner_epoch":row.owner_epoch,"interaction_id":row.interaction_id,"event_id":row.event_id,
-        "decision":row.key.decision(),"choice":row.key.choice(),"decision_source":row.decision_source.as_str(),"stage":row.submission.stage.as_str(),
+        "decision":row.key.decision(),"choice":row.key.choice(),"stage":row.submission.stage.as_str(),
         "output_seq":row.submission.output_seq,"reason":row.submission.reason}})
 }
 
@@ -188,130 +158,6 @@ pub(crate) fn permission_inspection(row: &crate::runtime::PermissionInspection) 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-
-    mod composer_reliability {
-        use crate::broker::runtime as storage;
-        use crate::broker::runtime::test_support::Fixture;
-
-        #[test]
-        fn input_json_presents_left_stage_immediately_after_its_stop_cause() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            for (stage, cause) in [
-                (
-                    storage::LeftStage::EscapeOnly,
-                    storage::StopCause::ManualInput,
-                ),
-                (
-                    storage::LeftStage::Partial,
-                    storage::StopCause::PointerInput,
-                ),
-                (
-                    storage::LeftStage::LiteralComplete,
-                    storage::StopCause::DeadlineExpired,
-                ),
-                (
-                    storage::LeftStage::Submitted,
-                    storage::StopCause::SubmitUnconfirmed,
-                ),
-            ] {
-                let input = fixture.left_input(
-                    &owner,
-                    stage.as_str(),
-                    storage::InputKind::Prompt,
-                    cause,
-                    stage,
-                );
-                let output = crate::output::json::input_operation(&input);
-                let row = output["input"].as_object().unwrap();
-                let keys = row.keys().map(String::as_str).collect::<Vec<_>>();
-                assert_eq!(
-                    &keys[keys.len() - 4..],
-                    [
-                        "stop_cause",
-                        "left_stage",
-                        "flush_input_id",
-                        "flushed_input_ids"
-                    ]
-                );
-                assert_eq!(row["stop_cause"], cause.as_str());
-                assert_eq!(row["left_stage"], stage.as_str());
-                assert_eq!(row["disposition"], "left_in_composer");
-                assert_eq!(row["delivery"]["status"], "left_in_composer");
-            }
-        }
-    }
-
-    use crate::broker::runtime::RunStatus;
-    use crate::runtime::RecoveryOutcome;
-    use crate::runtime::RecoveryReport;
-    #[test]
-    fn runner_recovery_presentation_pins_ordered_json_outcomes_and_exact_cleanup_text() {
-        for (outcome, wire, status) in [
-            (RecoveryOutcome::Recovered, "recovered", RunStatus::Lost),
-            (
-                RecoveryOutcome::Recovering,
-                "recovering",
-                RunStatus::Recovering,
-            ),
-            (
-                RecoveryOutcome::LiveOrUnreachable,
-                "live_or_unreachable",
-                RunStatus::Running,
-            ),
-            (
-                RecoveryOutcome::OperatorReconciliationRequired,
-                "operator_reconciliation_required",
-                RunStatus::Starting,
-            ),
-        ] {
-            let diagnostics = vec![
-                json!("bounded diagnostic"),
-                json!({"source":"operator_via_director","evidence_ref":"audit:termination"}),
-            ];
-            let report = RecoveryReport {
-                member_id: 7,
-                run_id: 11,
-                outcome,
-                replayed_count: 2,
-                inbox_count: 4,
-                archived_count: 0,
-                status,
-                cleanup_diagnostics: diagnostics.clone(),
-            };
-            let value = crate::output::json::runtime_recovery(&report);
-            assert_eq!(
-                value
-                    .as_object()
-                    .unwrap()
-                    .keys()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-                vec![
-                    "member_id",
-                    "run_id",
-                    "outcome",
-                    "replayed_count",
-                    "inbox_count",
-                    "archived_count",
-                    "status",
-                    "cleanup_diagnostics"
-                ]
-            );
-            assert_eq!(
-                value,
-                json!({"member_id":7,"run_id":11,"outcome":wire,"replayed_count":2,"inbox_count":4,"archived_count":0,"status":status.as_str(),"cleanup_diagnostics":diagnostics})
-            );
-            assert_eq!(
-                crate::output::format_runtime_recovery(&report),
-                format!(
-                    "Recovery: member=7 run=11 outcome={wire} status={} replayed=2 inbox=4 archived=0\nCleanup: bounded diagnostic\nCleanup: {}",
-                    status.as_str(),
-                    diagnostics[1]
-                )
-            );
-        }
-    }
 
     #[test]
     fn listen_pending_is_exactly_the_event_then_the_given_next_command() {
@@ -340,7 +186,6 @@ mod tests {
     }
 
     mod delivery_outcomes {
-        use crate::broker::MessageRecord;
         use crate::broker::runtime::DeliveryMethod;
         use crate::broker::runtime::DeliveryProjection;
         use crate::broker::runtime::DeliveryStatus;
@@ -407,23 +252,6 @@ mod tests {
                     json!({"status":"not_applicable","method":null,"reason":"self_send"}),
                 ),
             ]
-        }
-
-        #[test]
-        fn send_outcome_appends_input_id_and_ordered_delivery_after_its_existing_keys() {
-            let message = MessageRecord::fixture(9, 2, 3, "hello");
-            for (sent, input_id, delivery, expected) in cases() {
-                let output = crate::output::json::send_outcome(&message, sent, input_id, &delivery);
-                assert_key_order(
-                    &output,
-                    &["message", "notification_sent", "input_id", "delivery"],
-                );
-                assert_key_order(&output["delivery"], &["status", "method", "reason"]);
-                assert_eq!(output["notification_sent"], sent);
-                assert_eq!(output["input_id"], json!(input_id));
-                assert_eq!(output["delivery"], expected);
-                assert_eq!(output["message"], crate::output::json::message(&message));
-            }
         }
 
         #[test]
@@ -499,34 +327,41 @@ mod tests {
         }
 
         #[test]
-        fn a_concrete_placement_orders_its_window_and_slot_keys_before_the_pane() {
-            let value = crate::output::json::placement(&placement(true));
-            assert_key_order(&value, &PLACEMENT_KEYS);
-            assert_eq!(
-                value,
-                json!({
-                    "backend": "tmux",
-                    "mux_session": "main",
-                    "mux_window_id": "@6",
-                    "mux_window_name": "cafleet-3-1",
-                    "window_ordinal": 1,
-                    "column_side": "left",
-                    "mux_pane_id": "%12",
-                    "coding_agent": "claude",
-                    "created_at": "2026-11-13T00:00:00+00:00",
-                })
-            );
-        }
-
-        #[test]
-        fn a_pending_placement_has_a_null_window_and_pane_and_keeps_its_slot() {
-            let value = crate::output::json::placement(&placement(false));
-            assert_key_order(&value, &PLACEMENT_KEYS);
-            for key in ["mux_window_id", "mux_window_name", "mux_pane_id"] {
-                assert_eq!(value[key], Value::Null, "{key}");
+        fn a_placement_orders_its_window_and_slot_keys_before_the_pane_and_nulls_pending_ids() {
+            for (name, concrete, window_id, window_name, pane_id) in [
+                (
+                    "concrete placement",
+                    true,
+                    json!("@6"),
+                    json!("cafleet-3-1"),
+                    json!("%12"),
+                ),
+                (
+                    "pending placement",
+                    false,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                ),
+            ] {
+                let value = crate::output::json::placement(&placement(concrete));
+                assert_key_order(&value, &PLACEMENT_KEYS);
+                assert_eq!(
+                    value,
+                    json!({
+                        "backend": "tmux",
+                        "mux_session": "main",
+                        "mux_window_id": window_id,
+                        "mux_window_name": window_name,
+                        "window_ordinal": 1,
+                        "column_side": "left",
+                        "mux_pane_id": pane_id,
+                        "coding_agent": "claude",
+                        "created_at": "2026-11-13T00:00:00+00:00",
+                    }),
+                    "{name}"
+                );
             }
-            assert_eq!(value["window_ordinal"], 1);
-            assert_eq!(value["column_side"], "left");
         }
 
         #[test]
@@ -585,7 +420,7 @@ mod tests {
         use rusqlite::params;
         use serde_json::Value;
 
-        const RUNTIME_KEYS: [&str; 16] = [
+        const RUNTIME_KEYS: [&str; 15] = [
             "run_id",
             "resolved_mode",
             "status",
@@ -601,9 +436,8 @@ mod tests {
             "runner_start_identity",
             "child_pid",
             "child_start_identity",
-            "effective_policy",
         ];
-        const INPUT_KEYS: [&str; 19] = [
+        const INPUT_KEYS: [&str; 14] = [
             "input_id",
             "run_id",
             "operation_key",
@@ -612,95 +446,21 @@ mod tests {
             "state",
             "created_at",
             "updated_at",
-            "message_id",
             "disposition",
             "evidence_ref",
-            "permission_response",
             "delivery",
             "deferred_at",
             "defer_reason",
             "stop_cause",
-            "left_stage",
-            "flush_input_id",
-            "flushed_input_ids",
         ];
 
-        #[test]
-        fn runtime_permission_presentation_flattens_the_audit_in_shipping_order() {
-            let mut fixture = ResponseFixture::new();
-            let receipt = fixture.reserve();
-            let output = crate::output::json::input_operation(&receipt.input);
-            assert_key_order(&output["input"], &INPUT_KEYS);
-            let audit = &output["input"]["permission_response"];
-            assert_key_order(
-                audit,
-                &[
-                    "input_id",
-                    "event_id",
-                    "interaction_id",
-                    "expected_owner_epoch",
-                    "request_token",
-                    "decision",
-                    "choice_id",
-                    "director_member_id",
-                    "director_mode",
-                    "decision_source",
-                    "mode_evidence_ref",
-                    "decision_evidence_ref",
-                    "answer_rule_id",
-                    "decided_at",
-                ],
-            );
-            assert_eq!(output["input"]["delivery"], Value::Null);
-            assert_eq!(output["input"]["deferred_at"], Value::Null);
-            assert_eq!(output["input"]["defer_reason"], Value::Null);
-            assert_eq!(audit["decision"], "allow");
-            assert_eq!(audit["choice_id"], Value::Null);
-            assert_eq!(audit["director_mode"], "auto");
-            assert_eq!(audit["decided_at"], receipt.response.decided_at);
-            assert_eq!(
-                crate::output::format_input_operation(&receipt.input),
-                format!(
-                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=allow choice=- source=director-auto mode=auto director={} epoch={}",
-                    receipt.input.input_id,
-                    fixture.owner.run_id,
-                    fixture.request.metadata.interaction_id,
-                    fixture.event.event_id,
-                    fixture.base.director,
-                    fixture.owner.owner_epoch
-                )
-            );
-            assert_no_secret(&fixture.base.conn, SECRET);
-            assert_no_secret(&fixture.base.conn, &format!("fingerprint-{SECRET}"));
-        }
-        #[test]
-        fn runtime_choice_presentation_names_the_choice_beside_a_null_decision() {
-            let mut fixture = ResponseFixture::question("decline");
-            let receipt = fixture.reserve();
-            let output = crate::output::json::input_operation(&receipt.input);
-            let audit = &output["input"]["permission_response"];
-            assert_eq!(audit["decision"], Value::Null);
-            assert_eq!(audit["choice_id"], "decline");
-            assert_eq!(
-                crate::output::format_input_operation(&receipt.input),
-                format!(
-                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=- choice=decline source=director-auto mode=auto director={} epoch={}",
-                    receipt.input.input_id,
-                    fixture.owner.run_id,
-                    fixture.request.metadata.interaction_id,
-                    fixture.event.event_id,
-                    fixture.base.director,
-                    fixture.owner.owner_epoch
-                )
-            );
-        }
         #[test]
         fn runtime_presentation_exposes_recorded_owner_snapshot_and_unresolved_inputs() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let event = fixture.open(&owner);
-            let input = fixture.input(&owner, "exec:uncertain", InputKind::Exec, None);
-            let queued = fixture.input(&owner, "prompt:queued", InputKind::Prompt, None);
+            let input = fixture.input(&owner, "exec:uncertain", InputKind::Exec);
+            let queued = fixture.input(&owner, "prompt:queued", InputKind::Prompt);
             fixture
                 .conn
                 .execute(
@@ -708,7 +468,7 @@ mod tests {
                     [queued.input_id],
                 )
                 .unwrap();
-            let zero_bytes = fixture.input(&owner, "prompt:zero-bytes", InputKind::Prompt, None);
+            let zero_bytes = fixture.input(&owner, "prompt:zero-bytes", InputKind::Prompt);
             fixture
                 .conn
                 .execute(
@@ -736,7 +496,6 @@ mod tests {
             let runtime = &output["runtime"];
             assert_key_order(runtime, &RUNTIME_KEYS);
             assert_eq!(runtime["run_id"], owner.run_id);
-            assert_eq!(runtime["effective_policy"], Value::Null);
             assert_eq!(
                 runtime["current_interaction_id"],
                 event.interaction_id.unwrap()
@@ -761,7 +520,7 @@ mod tests {
             assert_eq!(
                 text,
                 format!(
-                    "{} worker active window=main\nRuntime: run={} mode=never status=running coverage=unknown review=-",
+                    "{} worker active window=main\nRuntime: run={} mode=never status=running coverage=unknown",
                     fixture.member, owner.run_id
                 )
             );
@@ -779,7 +538,7 @@ mod tests {
             assert_eq!(runtime["coverage"], "tested");
             assert_key_order(runtime, &RUNTIME_KEYS);
             let line = format!(
-                "Runtime: run={} mode=never status=running coverage=tested review=-",
+                "Runtime: run={} mode=never status=running coverage=tested",
                 owner.run_id
             );
             assert_eq!(
@@ -800,57 +559,6 @@ mod tests {
             );
         }
 
-        #[test]
-        fn effective_policy_record_is_rendered_last_in_every_runtime_snapshot_surface() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let event = fixture.open(&owner);
-            for (record, review) in [
-                (
-                    effective_policy("unavailable", None, Some(event.event_id)),
-                    "unavailable",
-                ),
-                (
-                    effective_policy("available", Some("auto"), None),
-                    "available",
-                ),
-            ] {
-                store_effective_policy(&fixture, &record);
-                let run = storage::get_run(&fixture.conn, owner.run_id).unwrap();
-                assert_eq!(run.effective_policy_json.as_ref(), Some(&record));
-                let member =
-                    crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
-                        .unwrap()
-                        .unwrap();
-                let runtime = &crate::output::json::member(&member)["runtime"];
-                assert_key_order(runtime, &RUNTIME_KEYS);
-                assert_eq!(runtime["effective_policy"], record);
-                let line = format!(
-                    "Runtime: run={} mode=never status=running coverage=unknown review={review}",
-                    owner.run_id
-                );
-                assert_eq!(
-                    crate::output::format_member_detail(&member),
-                    format!("{} worker active window=main\n{line}", fixture.member)
-                );
-                let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
-                let shown = crate::output::json::runtime_event(&view);
-                assert_eq!(shown["run"]["effective_policy"], record);
-                assert_key_order(&shown["run"], &RUNTIME_KEYS);
-                assert_eq!(
-                    crate::output::format_runtime_event(&view)
-                        .lines()
-                        .nth(1)
-                        .unwrap(),
-                    line
-                );
-                assert_eq!(
-                    view.event.payload_json.get("effective_policy"),
-                    None,
-                    "the event payload is unchanged"
-                );
-            }
-        }
         #[test]
         fn event_and_input_read_wrappers_follow_the_approved_order_and_compact_text() {
             let mut fixture = Fixture::new();
@@ -886,7 +594,7 @@ mod tests {
             assert_eq!(
                 crate::output::format_runtime_event(&view),
                 format!(
-                    "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown review=-\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
+                    "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
                     event.event_id,
                     owner.run_id,
                     event.message_id.unwrap(),
@@ -894,14 +602,13 @@ mod tests {
                     event.interaction_id.unwrap()
                 )
             );
-            let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec, None);
+            let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec);
             let output = crate::output::json::input_operation(&input);
             assert_key_order(&output["input"], &INPUT_KEYS);
-            assert_eq!(output["input"]["permission_response"], Value::Null);
             assert_eq!(
                 crate::output::format_input_operation(&input),
                 format!(
-                    "Input: {} run={} kind=exec state=in_progress disposition=- message=-",
+                    "Input: {} run={} kind=exec state=in_progress disposition=-",
                     input.input_id, owner.run_id
                 )
             );
@@ -911,20 +618,20 @@ mod tests {
         fn input_presentation_reports_the_recorded_stop_cause_and_keeps_the_text_line() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
-            let caused = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
+            let caused = fixture.input(&owner, "prompt:caused", InputKind::Prompt);
             let caused = storage::record_input_uncertain(
                 &mut fixture.conn,
                 &owner,
                 caused.input_id,
-                StopCause::ManualInput,
+                StopCause::ShortWrite,
             )
             .unwrap();
             let output = crate::output::json::input_operation(&caused);
-            assert_eq!(output["input"]["stop_cause"], "manual_input");
+            assert_eq!(output["input"]["stop_cause"], "short_write");
             assert_eq!(
                 crate::output::format_input_operation(&caused),
                 format!(
-                    "Input: {} run={} kind=prompt state=uncertain disposition=- message=-",
+                    "Input: {} run={} kind=prompt state=uncertain disposition=-",
                     caused.input_id, owner.run_id
                 )
             );
@@ -939,10 +646,10 @@ mod tests {
             .unwrap();
             assert_eq!(
                 crate::output::json::input_operation(&settled)["input"]["stop_cause"],
-                "manual_input",
+                "short_write",
                 "reconciliation keeps the recorded cause"
             );
-            let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt, None);
+            let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt);
             assert_eq!(
                 crate::output::json::input_operation(&plain)["input"]["stop_cause"],
                 Value::Null

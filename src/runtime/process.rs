@@ -15,7 +15,6 @@ use std::os::fd::AsRawFd;
 use std::os::fd::RawFd;
 use std::os::unix::process::ExitStatusExt;
 use std::time::Duration;
-use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ProcessIdentity {
@@ -235,7 +234,8 @@ fn live_group_members(group: i32) -> Result<Vec<i64>> {
 
 pub(super) fn recover_descendants(
     run: &crate::broker::runtime::RunRecord,
-    clock: ShutdownClock,
+    deadlines: ShutdownDeadlines,
+    clock: &dyn crate::time::Clock,
 ) -> Result<ShutdownOutcome> {
     let mut outcome = ShutdownOutcome::complete(None);
     let Some(child) = run.child_process()? else {
@@ -284,18 +284,18 @@ pub(super) fn recover_descendants(
             }
         }
         let until = if signal == nix::sys::signal::Signal::SIGTERM {
-            clock.child_deadline()
+            deadlines.child_deadline()
         } else {
-            clock.storage_deadline()
+            deadlines.storage_deadline()
         };
-        while Instant::now() < until {
+        while clock.now() < until {
             let alive = owned.values().try_fold(false, |alive, process| {
                 Ok::<_, CafleetError>(alive || process.is_alive()?)
             })?;
             if !alive {
                 break;
             }
-            nap_until(until);
+            nap_until(clock, until);
         }
     }
     for process in owned.values() {
@@ -341,13 +341,17 @@ pub(crate) struct PtySession {
     exit: Option<ChildExit>,
     owned: BTreeMap<i64, ProcessIdentity>,
     group_closed: bool,
-    shutdown_clock: Option<ShutdownClock>,
+    shutdown_deadlines: Option<ShutdownDeadlines>,
+    clock: std::sync::Arc<dyn crate::time::Clock>,
 }
 impl PtySession {
     pub(crate) fn has_child(&self) -> bool {
         self.child.is_some()
     }
-    pub(crate) fn prepare(size: TerminalSize) -> Result<Self> {
+    pub(crate) fn prepare(
+        size: TerminalSize,
+        clock: std::sync::Arc<dyn crate::time::Clock>,
+    ) -> Result<Self> {
         size.validate()?;
         let pair = portable_pty::native_pty_system()
             .openpty(pty_size(size))
@@ -368,7 +372,8 @@ impl PtySession {
             exit: None,
             owned: BTreeMap::new(),
             group_closed: false,
-            shutdown_clock: None,
+            shutdown_deadlines: None,
+            clock,
         })
     }
     pub(crate) fn spawn(&mut self, spec: &SpawnSpec) -> Result<ProcessIdentity> {
@@ -435,7 +440,7 @@ impl PtySession {
                         .ok_or_else(|| error("native exit lacks code or signal"))?,
                 ),
             });
-            self.begin_shutdown(ShutdownClock::new(Instant::now()));
+            self.begin_shutdown(ShutdownDeadlines::starting_now(self.clock.as_ref()));
         }
         Ok(self.exit)
     }
@@ -554,22 +559,22 @@ impl PtySession {
         }
         Ok(false)
     }
-    pub(crate) fn begin_shutdown(&mut self, clock: ShutdownClock) -> ShutdownClock {
-        let first = match self.shutdown_clock {
-            Some(prior) if prior.child_deadline() <= clock.child_deadline() => prior,
-            _ => clock,
+    pub(crate) fn begin_shutdown(&mut self, deadlines: ShutdownDeadlines) -> ShutdownDeadlines {
+        let first = match self.shutdown_deadlines {
+            Some(prior) if prior.child_deadline() <= deadlines.child_deadline() => prior,
+            _ => deadlines,
         };
-        self.shutdown_clock = Some(first);
+        self.shutdown_deadlines = Some(first);
         first
     }
-    pub(crate) fn shutdown(&mut self, clock: ShutdownClock) -> ShutdownOutcome {
-        let clock = self.begin_shutdown(clock);
+    pub(crate) fn shutdown(&mut self, deadlines: ShutdownDeadlines) -> ShutdownOutcome {
+        let deadlines = self.begin_shutdown(deadlines);
         let mut diagnostics = Vec::new();
         note(
             &mut diagnostics,
             self.signal_verified(nix::sys::signal::Signal::SIGTERM),
         );
-        while Instant::now() < clock.child_deadline() {
+        while self.clock.now() < deadlines.child_deadline() {
             if note(&mut diagnostics, self.try_wait()).is_none() {
                 break;
             }
@@ -586,11 +591,11 @@ impl PtySession {
                     break;
                 }
             }
-            std::thread::sleep(
+            self.clock.sleep(
                 Duration::from_millis(5).min(
-                    clock
+                    deadlines
                         .child_deadline()
-                        .saturating_duration_since(Instant::now()),
+                        .saturating_duration_since(self.clock.now()),
                 ),
             );
         }
@@ -599,7 +604,7 @@ impl PtySession {
             self.signal_verified(nix::sys::signal::Signal::SIGKILL),
         );
         note(&mut diagnostics, self.close());
-        while Instant::now() < clock.storage_deadline() {
+        while self.clock.now() < deadlines.storage_deadline() {
             let waited = self.try_wait();
             let alive = self.survivors();
             match (waited, alive) {
@@ -610,7 +615,7 @@ impl PtySession {
                 }
                 _ => {}
             }
-            nap_until(clock.storage_deadline());
+            nap_until(self.clock.as_ref(), deadlines.storage_deadline());
         }
         if note(&mut diagnostics, self.survivors()) == Some(true) {
             diagnostics.push("owned descendants remain unconfirmed".into());
@@ -662,7 +667,7 @@ impl PtyIo for PtySession {
 impl Drop for PtySession {
     fn drop(&mut self) {
         if self.child.is_some() && (self.exit.is_none() || self.master.is_some()) {
-            let outcome = self.shutdown(ShutdownClock::new(Instant::now()));
+            let outcome = self.shutdown(ShutdownDeadlines::starting_now(self.clock.as_ref()));
             for diagnostic in outcome.diagnostics {
                 eprintln!("{diagnostic}");
             }
@@ -917,6 +922,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use crate::runtime::process::*;
+    use std::time::Instant;
 
     /// Reads the fixture PTY until its output holds every one of `needles`.
     fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
@@ -985,7 +991,10 @@ mod tests {
                 .expect("the prompting setuid helper is live");
             assert_eq!(session.owned.get(&pid), Some(&helper));
             assert_eq!(session.owned.get(&native.pid), Some(&native));
-            let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+            let outcome = session.shutdown(ShutdownDeadlines::starting_at(
+                Instant::now(),
+                crate::time::SHUTDOWN_UNIT,
+            ));
             assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
             assert!(outcome.native_exit.is_some(), "{outcome:?}");
             assert!(
@@ -1005,22 +1014,26 @@ mod tests {
 
         struct OwnedPty {
             session: PtySession,
-            clock: Option<ShutdownClock>,
+            clock: Option<ShutdownDeadlines>,
             cleaned: bool,
         }
 
         impl OwnedPty {
             fn prepare(size: TerminalSize) -> Self {
                 Self {
-                    session: PtySession::prepare(size).unwrap(),
+                    session: PtySession::prepare(
+                        size,
+                        std::sync::Arc::new(crate::time::SystemClock),
+                    )
+                    .unwrap(),
                     clock: None,
                     cleaned: false,
                 }
             }
             fn stop(&mut self) -> ShutdownOutcome {
-                let clock = *self
-                    .clock
-                    .get_or_insert_with(|| ShutdownClock::new(Instant::now()));
+                let clock = *self.clock.get_or_insert_with(|| {
+                    ShutdownDeadlines::starting_at(Instant::now(), crate::time::SHUTDOWN_UNIT)
+                });
                 let outcome = self.session.shutdown(clock);
                 self.cleaned = outcome.cleanup_state == CleanupState::Complete;
                 outcome
@@ -1208,8 +1221,9 @@ mod tests {
             let process = owned.session.spawn(&spec).unwrap();
             read_until(&mut owned.session, &["ready"]);
             let start = Instant::now();
-            owned.clock = Some(ShutdownClock::new(
+            owned.clock = Some(ShutdownDeadlines::starting_at(
                 start.checked_sub(Duration::from_millis(1700)).unwrap(),
+                crate::time::SHUTDOWN_UNIT,
             ));
             let outcome = owned.stop();
             assert!(start.elapsed() < Duration::from_millis(4750));
@@ -1258,8 +1272,9 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let start = Instant::now();
-            owned.clock = Some(ShutdownClock::new(
+            owned.clock = Some(ShutdownDeadlines::starting_at(
                 start.checked_sub(Duration::from_millis(1700)).unwrap(),
+                crate::time::SHUTDOWN_UNIT,
             ));
             let outcome = owned.stop();
             let elapsed = start.elapsed();
@@ -1375,6 +1390,7 @@ mod tests {
         fn inert(pinned: &[ProcessIdentity]) -> PtySession {
             let origin = Instant::now();
             let mut session = PtySession {
+                clock: std::sync::Arc::new(crate::time::SystemClock),
                 master: None,
                 slave: None,
                 io: None,
@@ -1383,8 +1399,9 @@ mod tests {
                 exit: Some(ChildExit::Code(0)),
                 owned: pinned.iter().cloned().map(|p| (p.pid, p)).collect(),
                 group_closed: false,
-                shutdown_clock: Some(
-                    ShutdownClock::new(origin).clipped(origin + Duration::from_millis(900)),
+                shutdown_deadlines: Some(
+                    ShutdownDeadlines::starting_at(origin, crate::time::SHUTDOWN_UNIT)
+                        .clipped(origin + Duration::from_millis(900)),
                 ),
             };
             session.native = Some(identity(A));
@@ -1393,7 +1410,7 @@ mod tests {
 
         fn boundaries(session: &PtySession) -> [Instant; 3] {
             let clock = session
-                .shutdown_clock
+                .shutdown_deadlines
                 .expect("fixture retains its original clock");
             [
                 clock.child_deadline(),
@@ -1750,6 +1767,7 @@ mod tests {
             ) -> PtySession {
                 PtySession {
                     master: None,
+                    clock: std::sync::Arc::new(crate::time::SystemClock),
                     slave: None,
                     io: None,
                     child: Some(child),
@@ -1757,7 +1775,7 @@ mod tests {
                     exit: None,
                     owned: [(native.pid, native.clone())].into_iter().collect(),
                     group_closed: false,
-                    shutdown_clock: None,
+                    shutdown_deadlines: None,
                 }
             }
 
@@ -1799,13 +1817,16 @@ mod tests {
                     [(native.pid, native.clone())].into_iter().collect()
                 );
                 assert_eq!(session.exit, None);
-                assert!(session.shutdown_clock.is_none());
+                assert!(session.shutdown_deadlines.is_none());
                 assert!(!session.group_closed);
                 assert!(
                     ProcessIdentity::read(native.pid).unwrap().is_some(),
                     "a live leader is not reaped"
                 );
-                let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+                let outcome = session.shutdown(ShutdownDeadlines::starting_at(
+                    Instant::now(),
+                    crate::time::SHUTDOWN_UNIT,
+                ));
                 assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
                 assert_reaped(&native);
             }
@@ -1858,7 +1879,7 @@ mod tests {
                 );
                 assert!(!session.group_closed);
                 assert_eq!(session.exit, Some(ChildExit::Code(3)));
-                assert!(session.shutdown_clock.is_some());
+                assert!(session.shutdown_deadlines.is_some());
                 assert_reaped(&native);
 
                 let mut settled = Script::new([]);
@@ -1910,7 +1931,7 @@ mod tests {
                 script.finished();
                 assert!(session.owned.is_empty());
                 assert!(!session.group_closed);
-                assert!(session.shutdown_clock.is_some());
+                assert!(session.shutdown_deadlines.is_some());
                 assert_reaped(&native);
             }
         }
@@ -2129,8 +2150,8 @@ mod tests {
             run
         }
 
-        fn clock() -> ShutdownClock {
-            ShutdownClock::with_unit(Instant::now(), Duration::from_millis(100))
+        fn clock() -> ShutdownDeadlines {
+            ShutdownDeadlines::starting_at(Instant::now(), Duration::from_millis(100))
         }
 
         fn group_leader() -> (std::process::Child, ProcessIdentity) {
@@ -2169,7 +2190,9 @@ mod tests {
         #[test]
         fn recovery_completes_for_a_zombie_child_alone_in_its_group() {
             let (mut child, identity) = zombie();
-            let outcome = recover_descendants(&with_child(&identity), clock()).unwrap();
+            let outcome =
+                recover_descendants(&with_child(&identity), clock(), &crate::time::SystemClock)
+                    .unwrap();
             child.wait().unwrap();
             assert_eq!(outcome.diagnostics, Vec::<String>::new());
             assert_eq!(outcome.cleanup_state, CleanupState::Complete);
@@ -2182,7 +2205,9 @@ mod tests {
             let (mut descendant, _) = zombie_in_group(group);
             leader.kill().unwrap();
             leader.wait().unwrap();
-            let outcome = recover_descendants(&with_child(&identity), clock()).unwrap();
+            let outcome =
+                recover_descendants(&with_child(&identity), clock(), &crate::time::SystemClock)
+                    .unwrap();
             descendant.wait().unwrap();
             assert_eq!(outcome.diagnostics, Vec::<String>::new());
             assert_eq!(outcome.cleanup_state, CleanupState::Complete);
@@ -2195,7 +2220,9 @@ mod tests {
                 start_identity: format!("{}-stale", identity.start_identity),
                 ..identity
             };
-            let outcome = recover_descendants(&with_child(&stale), clock()).unwrap();
+            let outcome =
+                recover_descendants(&with_child(&stale), clock(), &crate::time::SystemClock)
+                    .unwrap();
             leader.kill().unwrap();
             leader.wait().unwrap();
             assert_eq!(

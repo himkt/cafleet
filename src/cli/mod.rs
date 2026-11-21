@@ -85,7 +85,6 @@ struct DirectorOnly {
 
 const MEMBER_FLEET: &str = "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'";
 /// Recovery also reconciles a deregistered member's run, so its subject keeps its fleet.
-const RECOVER_FLEET: &str = "SELECT fleet_id FROM members WHERE member_id=?1";
 const INPUT_FLEET: &str = "SELECT r.fleet_id FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id WHERE i.input_id=?1";
 const INTERACTION_FLEET: &str = "SELECT r.fleet_id FROM member_interactions i JOIN member_runs r ON r.run_id=i.run_id WHERE i.interaction_id=?1";
 
@@ -107,21 +106,6 @@ fn director_only(command: &Command) -> Option<DirectorOnly> {
             director_member_id,
             ..
         }) => ("member press", MEMBER_FLEET, member_id, director_member_id),
-        Command::Member(M::Flush {
-            member_id,
-            director_member_id,
-            ..
-        }) => ("member flush", MEMBER_FLEET, member_id, director_member_id),
-        Command::Member(M::Recover {
-            member_id,
-            director_member_id,
-            ..
-        }) => (
-            "member recover",
-            RECOVER_FLEET,
-            member_id,
-            director_member_id,
-        ),
         Command::Permission(runtime::PermissionCommand::Respond {
             interaction_id,
             director_member_id,
@@ -231,20 +215,8 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             require_director(&conn, director.as_ref())?;
             member::press(&mut conn, settings, member_id, &keys, json, deadline)
         }
-        Command::Member(member::MemberCommand::Flush {
-            member_id, json, ..
-        }) => {
-            let deadline = crate::time::Deadline::until(
-                std::time::Instant::now() + crate::runtime::flush::FLUSH_DEADLINE,
-            );
-            let mut conn = invocation_connection(&settings.database_url, deadline)?;
-            require_director(&conn, director.as_ref())?;
-            member::flush(&mut conn, settings, member_id, json, deadline)
-        }
         Command::Permission(command) => {
             let deadline = crate::time::Deadline::new();
-            runtime::permission_preflight(&command)
-                .map_err(|source| runtime::permission_error(&command, source))?;
             let mut conn = invocation_connection(&settings.database_url, deadline)
                 .map_err(|source| runtime::permission_error(&command, source))?;
             require_director(&conn, director.as_ref())?;
@@ -898,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn help_describes_every_argument_of_the_runtime_read_input_press_and_recover_commands() {
+    fn help_describes_every_argument_of_the_runtime_read_input_and_press_commands() {
         use clap::CommandFactory;
         let command = CliArgs::command();
         for path in [
@@ -906,7 +878,6 @@ mod tests {
             &["input", "show"],
             &["input", "reconcile"],
             &["member", "press"],
-            &["member", "recover"],
         ] {
             let mut selected = &command;
             for name in path {
@@ -966,30 +937,15 @@ mod tests {
             );
         }
         let respond = subcommand_help(&["permission", "respond"]);
-        for (argument, values) in [
-            (
-                "decision",
-                crate::broker::runtime::PermissionDecision::VALUES,
-            ),
-            (
-                "decision_source",
-                crate::broker::runtime::DecisionSource::VALUES,
-            ),
-            (
-                "director_mode",
-                crate::broker::runtime::DirectorMode::VALUES,
-            ),
-        ] {
-            assert_eq!(
-                possible_values(&["permission", "respond"], argument),
-                values,
-                "{argument}"
-            );
-            assert!(
-                respond.contains(&format!("[possible values: {}]", values.join(", "))),
-                "{argument} help lists {values:?}: {respond}"
-            );
-        }
+        let values = crate::broker::runtime::PermissionDecision::VALUES;
+        assert_eq!(
+            possible_values(&["permission", "respond"], "decision"),
+            values
+        );
+        assert!(
+            respond.contains(&format!("[possible values: {}]", values.join(", "))),
+            "decision help lists {values:?}: {respond}"
+        );
     }
 
     #[test]
@@ -1145,14 +1101,6 @@ mod tests {
                     ]),
                 ),
                 (
-                    "member flush",
-                    owned(&["member", "flush", subject, "--from-member-id", caller]),
-                ),
-                (
-                    "member recover",
-                    owned(&["member", "recover", subject, "--from-member-id", caller]),
-                ),
-                (
                     "permission respond",
                     owned(&[
                         "permission",
@@ -1170,16 +1118,6 @@ mod tests {
                         REQUEST_TOKEN,
                         "--decision",
                         "allow",
-                        "--decision-source",
-                        "user",
-                        "--director-mode",
-                        "manual",
-                        "--mode-evidence-ref",
-                        "mode",
-                        "--decision-evidence-ref",
-                        "decision",
-                        "--operation-key",
-                        "key",
                     ]),
                 ),
                 (
@@ -1252,7 +1190,7 @@ mod tests {
         }
 
         #[test]
-        fn director_only_names_exactly_the_seven_guarded_commands() {
+        fn director_only_names_exactly_the_guarded_commands() {
             for (name, args) in director_only_commands("7", "1") {
                 assert_eq!(
                     director_only(&parse(&args)).map(|guarded| guarded.name),
@@ -1300,7 +1238,7 @@ mod tests {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
                 let input = fixture
-                    .input(&owner, "prompt:guard", InputKind::Prompt, None)
+                    .input(&owner, "prompt:guard", InputKind::Prompt)
                     .input_id;
                 let interaction = fixture
                     .open(&owner)
@@ -1372,34 +1310,6 @@ mod tests {
                         "{name}"
                     );
                 }
-            }
-        }
-
-        #[test]
-        fn require_director_guards_member_recover_of_a_deregistered_member() {
-            let subjects = Subjects::new();
-            subjects
-                .fixture
-                .conn
-                .execute(
-                    "UPDATE members SET status='deregistered' WHERE member_id=?1",
-                    [subjects.fixture.member],
-                )
-                .unwrap();
-            let recover = |caller: i64| {
-                subjects
-                    .commands(caller)
-                    .into_iter()
-                    .find(|(name, _)| *name == "member recover")
-                    .expect("member recover is Director-only")
-                    .1
-            };
-            subjects.check(&recover(subjects.fixture.director)).unwrap();
-            for caller in [subjects.fixture.member, 999_999] {
-                assert_eq!(
-                    subjects.check(&recover(caller)).unwrap_err().to_string(),
-                    guard_message("member recover", caller, subjects.fixture.fleet)
-                );
             }
         }
 

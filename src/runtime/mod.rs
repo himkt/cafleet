@@ -1,11 +1,11 @@
 mod artifacts;
 pub(crate) mod control;
-pub(crate) mod flush;
 mod input;
 pub(crate) mod input_client;
 mod lifecycle;
 pub(crate) mod observation;
 mod press;
+pub(crate) mod preview;
 mod process;
 pub(crate) mod recovery;
 pub(crate) mod service;
@@ -24,9 +24,6 @@ use crate::multiplexer::MultiplexerError;
 pub(crate) use crate::runtime::artifacts::*;
 pub(crate) use crate::runtime::control::CONTROL_PROTOCOL_VERSION;
 pub(crate) use crate::runtime::control::ControlDecoder;
-pub(crate) use crate::runtime::control::FlushAction;
-pub(crate) use crate::runtime::control::FlushReply;
-pub(crate) use crate::runtime::control::FlushWriteOutcome;
 pub(crate) use crate::runtime::control::HealthSnapshot;
 pub(crate) use crate::runtime::control::InputControlOperation;
 pub(crate) use crate::runtime::control::InputControlReply;
@@ -44,7 +41,6 @@ pub(crate) use crate::runtime::control::SubmissionResult;
 pub(crate) use crate::runtime::control::SubmissionStage;
 pub(crate) use crate::runtime::control::SubmissionStatus;
 pub(crate) use crate::runtime::control::SubmitInput;
-pub(crate) use crate::runtime::control::diagnose_runtime_at;
 #[cfg(test)]
 pub(crate) use crate::runtime::control::encode_control_frame;
 pub(crate) use crate::runtime::control::probe_health;
@@ -124,11 +120,10 @@ pub(crate) fn check_deadline(now: std::time::Instant, deadline: std::time::Insta
     }
 }
 
-/// Sleep one polling tick, never past `deadline`.
-pub(crate) fn nap_until(deadline: std::time::Instant) {
-    std::thread::sleep(
-        std::time::Duration::from_millis(2)
-            .min(deadline.saturating_duration_since(std::time::Instant::now())),
+/// Sleep one polling tick on `clock`, never past `deadline`.
+pub(crate) fn nap_until(clock: &dyn crate::time::Clock, deadline: std::time::Instant) {
+    clock.sleep(
+        std::time::Duration::from_millis(2).min(deadline.saturating_duration_since(clock.now())),
     );
 }
 
@@ -152,7 +147,6 @@ pub(crate) struct SpawnSpec {
     pub(crate) argv: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) environment: Vec<(String, String)>,
-    pub(crate) evidence_policy: Value,
     pub(crate) size: TerminalSize,
 }
 
@@ -176,10 +170,6 @@ impl SpawnSpec {
                 .all(|(k, v)| !k.is_empty() && !k.contains(['=', '\0']) && !v.contains('\0')),
             "invalid native environment override",
         )?;
-        ensure(
-            self.evidence_policy.is_object(),
-            "evidence policy must be an object",
-        )?;
         self.size.validate()
     }
 }
@@ -201,6 +191,17 @@ pub(crate) mod test_support {
     use crate::db::test_support::migrated_conn;
     use crate::runtime::*;
     pub(crate) const STARTED_AT: &str = "2026-10-27T14:00:00.000000+00:00";
+
+    /// How far a runtime test's virtual clock starts ahead of real time. The database and lock
+    /// budgets keep real time, so a deadline derived from the virtual clock must lie in the real
+    /// future however little virtual time a test spends.
+    pub(crate) const VIRTUAL_LEAD: std::time::Duration = std::time::Duration::from_secs(3600);
+
+    pub(crate) fn virtual_clock() -> std::sync::Arc<crate::time::test_support::TestClock> {
+        std::sync::Arc::new(crate::time::test_support::TestClock::starting_at(
+            std::time::Instant::now() + VIRTUAL_LEAD,
+        ))
+    }
 
     pub(crate) fn read_fixture_bytes(
         stream: &mut std::os::unix::net::UnixStream,
@@ -303,7 +304,6 @@ pub(crate) mod test_support {
                 resolved_mode: "approve-for-me".into(),
                 mode_source: ModeSource::Default,
                 permission_argv_json: json!(["--approve-for-me"]),
-                event_evidence: EventEvidence::Metadata,
                 native_version: None,
                 coverage: Coverage::Unknown,
                 owner_pid: process.pid,
@@ -358,7 +358,6 @@ pub(crate) mod test_support {
                 ],
                 cwd: self._dir.path().to_path_buf(),
                 environment: Vec::new(),
-                evidence_policy: json!({"mode":"metadata"}),
                 size: TerminalSize { rows: 24, cols: 80 },
             }
         }
