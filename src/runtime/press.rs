@@ -333,29 +333,8 @@ mod tests {
                 )
             })
         });
-        #[cfg(target_os = "macos")]
-        let open_processes = path.as_ref().map(|path| {
-            libproc::processes::pids_by_path(path, false, false).map(|mut pids| {
-                pids.sort_unstable();
-                let total = pids.len();
-                let sampled = pids
-                    .into_iter()
-                    .take(16)
-                    .map(|pid| {
-                        let info = libproc::libproc::proc_pid::pidinfo::<
-                            libproc::libproc::bsd_info::BSDInfo,
-                        >(i32::try_from(pid).unwrap(), 0)
-                        .map(|info| (info.pbi_ppid, info.pbi_start_tvsec, info.pbi_start_tvusec));
-                        (pid, info)
-                    })
-                    .collect::<Vec<_>>();
-                (total, sampled)
-            })
-        });
-        #[cfg(not(target_os = "macos"))]
-        let open_processes = "path-filtered process observation is available on macOS";
         format!(
-            "case={:?}; parent_pid={}; placement={:?}; lock_path={path:?}; named={metadata:?}; path_open_processes_total_and_pid_ppid_start={open_processes:?}; snapshot=after_refusal; open_file_observation_is_not_lock_ownership_proof",
+            "case={:?}; parent_pid={}; placement={:?}; lock_path={path:?}; named={metadata:?}; snapshot=after_refusal",
             probe.mode,
             std::process::id(),
             probe.placement,

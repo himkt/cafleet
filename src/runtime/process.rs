@@ -960,7 +960,11 @@ mod tests {
                 helper.uid() == 0 && helper.mode() & 0o4000 != 0,
                 "{SETUID_HELPER} must be setuid root for this fixture"
             );
-            let mut session = PtySession::prepare(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            let mut session = PtySession::prepare(
+                TerminalSize { rows: 24, cols: 80 },
+                std::sync::Arc::new(crate::time::SystemClock),
+            )
+            .unwrap();
             let spec = SpawnSpec {
                 argv: vec![
                     "/bin/sh".into(),
@@ -969,7 +973,6 @@ mod tests {
                 ],
                 cwd: PathBuf::from("/"),
                 environment: Vec::new(),
-                evidence_policy: serde_json::json!({"mode":"metadata"}),
                 size: TerminalSize { rows: 24, cols: 80 },
             };
             let native = session.spawn(&spec).unwrap();
@@ -1000,6 +1003,33 @@ mod tests {
             assert!(
                 ProcessIdentity::read(pid).unwrap().is_none() || stopped(pid).unwrap(),
                 "the setuid helper remains running after cleanup"
+            );
+        }
+    }
+    #[cfg(target_os = "macos")]
+    mod process_group_tests {
+        use crate::runtime::process::tests::*;
+        use std::os::unix::process::CommandExt;
+
+        #[test]
+        fn kern_proc_pgrp_lists_a_spawned_group_leader_and_then_nothing() {
+            let mut child = std::process::Command::new("/bin/sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let group = i32::try_from(child.id()).unwrap();
+            assert_eq!(
+                group_members(group).unwrap(),
+                vec![i64::from(group)],
+                "a fresh process group lists its leader alone"
+            );
+            child.kill().unwrap();
+            child.wait().unwrap();
+            let members = group_members(group).unwrap();
+            assert!(
+                members.is_empty(),
+                "a reaped group has no members: {members:?}"
             );
         }
     }
