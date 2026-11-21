@@ -714,57 +714,6 @@ mod tests {
         }
 
         #[test]
-        fn effective_policy_record_is_rendered_last_in_every_runtime_snapshot_surface() {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let event = fixture.open(&owner);
-            for (record, review) in [
-                (
-                    effective_policy("unavailable", None, Some(event.event_id)),
-                    "unavailable",
-                ),
-                (
-                    effective_policy("available", Some("auto"), None),
-                    "available",
-                ),
-            ] {
-                store_effective_policy(&fixture, &record);
-                let run = storage::get_run(&fixture.conn, owner.run_id).unwrap();
-                assert_eq!(run.effective_policy_json.as_ref(), Some(&record));
-                let member =
-                    crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
-                        .unwrap()
-                        .unwrap();
-                let runtime = &crate::output::json::member(&member)["runtime"];
-                assert_key_order(runtime, &RUNTIME_KEYS);
-                assert_eq!(runtime["effective_policy"], record);
-                let line = format!(
-                    "Runtime: run={} mode=never status=running coverage=unknown review={review}",
-                    owner.run_id
-                );
-                assert_eq!(
-                    crate::output::format_member_detail(&member),
-                    format!("{} worker active window=main\n{line}", fixture.member)
-                );
-                let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
-                let shown = crate::output::json::runtime_event(&view);
-                assert_eq!(shown["run"]["effective_policy"], record);
-                assert_key_order(&shown["run"], &RUNTIME_KEYS);
-                assert_eq!(
-                    crate::output::format_runtime_event(&view)
-                        .lines()
-                        .nth(1)
-                        .unwrap(),
-                    line
-                );
-                assert_eq!(
-                    view.event.payload_json.get("effective_policy"),
-                    None,
-                    "the event payload is unchanged"
-                );
-            }
-        }
-        #[test]
         fn event_and_input_read_wrappers_follow_the_approved_order_and_compact_text() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();

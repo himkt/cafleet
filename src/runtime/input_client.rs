@@ -4319,7 +4319,6 @@ mod tests {
         use crate::runtime::*;
         use crate::time::Deadline;
         use rusqlite::Connection;
-        use serde_json::json;
         use std::sync::Arc;
         use std::time::Duration;
         use std::time::Instant;
@@ -4390,60 +4389,6 @@ mod tests {
                 ) {
                     Err(failure) => failure.source,
                     Ok(_) => panic!("this inspection is refused"),
-                }
-            }
-
-            #[test]
-            fn permission_inspect_rejects_an_automatic_review_event_naming_an_existing_interaction()
-            {
-                for kind in [
-                    RuntimeEventKind::AutomaticRefusalObserved,
-                    RuntimeEventKind::AutomaticReviewUnavailable,
-                ] {
-                    let mut case = Case::new(Retained::Accepted);
-                    let (_, interaction_id) = opened(&case);
-                    let evidence = storage::evidence::EvidencePolicy::metadata()
-                    .apply(&json!({
-                        "backend":"codex","native_version":case.fixture.run.native_version,
-                        "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,"excerpt":null,"truncated":false
-                    }))
-                    .unwrap();
-                    let annotation = storage::persist_transition(
-                        &mut case.fixture.conn,
-                        &case.owner,
-                        &ObservedTransition {
-                            run_id: case.owner.run_id,
-                            event_seq: 2,
-                            episode_seq: None,
-                            kind,
-                            classification: None,
-                            observed_at: NOW.into(),
-                            evidence_json: evidence,
-                            close_reason: None,
-                            cause_json: None,
-                        },
-                        PersistenceMode::Live,
-                    )
-                    .unwrap()
-                    .0;
-                    let inputs = |conn: &Connection| -> i64 {
-                        conn.query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
-                            row.get(0)
-                        })
-                        .unwrap()
-                    };
-                    let before = inputs(&case.fixture.conn);
-                    let director = case.fixture.run.director_member_id;
-                    let settings = case.settings.clone();
-                    let error = inspect(
-                        &mut case.fixture.conn,
-                        &settings,
-                        annotation.event_id,
-                        interaction_id,
-                        director,
-                    );
-                    assert_eq!(error.exit_code(), 1, "{kind:?}: {}", error.message());
-                    assert_eq!(inputs(&case.fixture.conn), before, "{kind:?}");
                 }
             }
 

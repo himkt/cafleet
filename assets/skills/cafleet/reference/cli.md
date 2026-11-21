@@ -405,22 +405,7 @@ Automatic-review events create no interaction/input eligibility; permission comm
 
 Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification, source `runner_lifecycle`, outcome `unknown`, null `director_action` and `cause={"kind":STOP_CAUSE}` whenever a stop cause is recorded. A prompt or exec result has its input ID and null `message_id`, with delivery and cause derived from its receipt; an uncertain preview has null `input_id`, its `message_id` and delivery `{"status":"uncertain","method":METHOD,"reason":null}`, deduplicated by run and message. Stages are `zero_bytes,partial,submitted,unknown`; an uncertain or in-progress prefix short of the submit key is `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload.
 
-`input_delivery_stalled` reports a queue head that started no attempt within 3 minutes of becoming the head, once per head through recovery; time an open interaction blocks the head does not count. It carries ordered `input_id,message_id,blocking_input_id,waiting_since,delivery,cause`, where `waiting_since` is UTC RFC 3339, delivery is queued and `cause` is `{"kind":KIND,"detail":DETAIL}`; its null interaction/classification, lifecycle source and evidence shape match delivery results. The runner selects the first cause that holds:
-
-| `cause.kind` | Holds when | `blocking_input_id` | `detail` |
-|---|---|---|---|
-| `immediate_attempt` | An immediate client or sweep attempt is in flight | Its receipt, or `null` | `null` |
-| `pending_finalization` | A zero-byte finalization awaits storage | That receipt | `null` |
-| `unresolved_input` | Another ordinary receipt of the run is `in_progress` | That receipt, lowest ID | `null` |
-| `drain_pending` | The queue turn's input drain stays pending | `null` | The drain blocker, e.g. `terminal reply pending` |
-| `pane_input_busy` | The pane input lock stayed busy, e.g. a hung `member press` | `null` | `null` |
-| `delivery_budget_exhausted` | The attempt budget ran out | `null` | `null` |
-| `storage_unavailable` | Storage was unavailable | `null` | `null` |
-| `attempt_failed` | The last attempt failed | `null` | The error, at most 256 bytes |
-| `composer_busy` | The last queue turn waited on a busy composer | `null` | `null` |
-| `queue_turn_not_reached` | No row above holds | `null` | `null` |
-
-For every other cause the action is `{"kind":"review_stalled_queue","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","INPUT_ID","--json"]}`, inspecting the waiting head. INSTRUCTION is exactly `Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.`
+`input_delivery_stalled` reports input that waited 3 minutes without a delivery attempt: a queued prompt or exec head, once per run and input, or the sweep's selected preview held because the composer is not verified empty, once per run and message. Time an open interaction blocks the input does not count. It carries ordered `input_id,message_id,waiting_since`, with exactly one of the two IDs set and `waiting_since` in UTC RFC 3339; its null interaction/classification, lifecycle source and evidence shape match delivery results. Its action is `{"kind":"review_stalled_delivery","instruction":INSTRUCTION,"inspect_argv":["cafleet","member","capture","MEMBER_ID","--json"]}`. INSTRUCTION is exactly `Capture the member's pane. When the composer holds text, submit or clear it with member press keys the capture establishes, or ask the user to clear or submit it on the member's native surface.`
 
 Every argv array appends `--database-url URL` for a non-default database. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
 

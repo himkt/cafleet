@@ -1495,15 +1495,6 @@ mod tests {
             self.outbox
                 .append_synced(&mut self.conn, value, None, until)
         }
-        fn append_synced_with_policy(
-            &mut self,
-            value: &ObservedTransition,
-            effective_policy: Option<&EffectivePolicyObservation>,
-            until: Instant,
-        ) -> Result<()> {
-            self.outbox
-                .append_synced(&mut self.conn, value, effective_policy, until)
-        }
         fn scan(&mut self, until: Instant) -> Result<OutboxScan> {
             self.outbox.scan(&mut self.conn, until)
         }
@@ -1560,85 +1551,6 @@ mod tests {
             &fixture.fixture.run.owner(),
             deadline(),
         )
-    }
-
-    mod effective_policy_frames {
-        use crate::runtime::writer::test_support::frame_bodies;
-        use crate::runtime::writer::test_support::observation;
-        use crate::runtime::writer::test_support::outbox_frame;
-        use crate::runtime::writer::test_support::unavailable;
-        use crate::runtime::writer::tests::*;
-
-        fn framed(body: &Value) -> Vec<u8> {
-            outbox_frame(&serde_json::to_vec(body).unwrap())
-        }
-
-        #[test]
-        fn runner_outbox_unavailable_frame_body_adds_only_the_effective_policy_key() {
-            let fixture = WriterFixture::new();
-            let io = FaultIo::default();
-            let mut outbox = open(&fixture, io.clone());
-            let plain = transition(&fixture, 1);
-            outbox
-                .append_synced_with_policy(&plain, None, deadline())
-                .unwrap();
-            assert_eq!(io.snapshot_bytes(), frame(&plain), "unchanged frame bytes");
-            let value = unavailable(&fixture, 2);
-            let lost = observation(AutomaticReview::Unavailable);
-            outbox
-                .append_synced_with_policy(&value, Some(&lost), deadline())
-                .unwrap();
-            let mut expected = serde_json::to_value(&value).unwrap();
-            expected["effective_policy"] = serde_json::to_value(&lost).unwrap();
-            assert_eq!(
-                frame_bodies(&io.snapshot_bytes()),
-                vec![serde_json::to_value(&plain).unwrap(), expected]
-            );
-            let scan = outbox.scan(deadline()).unwrap();
-            assert_eq!(scan.frames.len(), 2);
-            assert!(scan.frames[0].effective_policy.is_none());
-            assert_eq!(scan.frames[1].transition, value);
-            assert_eq!(
-                serde_json::to_value(scan.frames[1].effective_policy.as_ref().unwrap()).unwrap(),
-                serde_json::to_value(&lost).unwrap()
-            );
-            outbox
-                .append_synced_with_policy(&value, Some(&lost), deadline())
-                .unwrap();
-            assert_eq!(
-                frame_bodies(&io.snapshot_bytes()).len(),
-                2,
-                "identical retry"
-            );
-            assert!(
-                outbox
-                    .append_synced_with_policy(&value, None, deadline())
-                    .is_err(),
-                "a retry without its observation conflicts with the original frame"
-            );
-        }
-
-        #[test]
-        fn runner_outbox_rejects_an_effective_policy_on_any_other_frame() {
-            let fixture = WriterFixture::new();
-            let io = FaultIo::default();
-            let mut outbox = open(&fixture, io.clone());
-            let plain = transition(&fixture, 1);
-            let lost = observation(AutomaticReview::Unavailable);
-            assert!(
-                outbox
-                    .append_synced_with_policy(&plain, Some(&lost), deadline())
-                    .is_err()
-            );
-            assert!(io.snapshot_bytes().is_empty());
-            let mut forged = serde_json::to_value(&plain).unwrap();
-            forged["effective_policy"] = serde_json::to_value(&lost).unwrap();
-            let on_disk = FaultIo::from_bytes(framed(&forged));
-            assert!(initialize(&fixture, on_disk).is_err());
-            let mut malformed = serde_json::to_value(unavailable(&fixture, 1)).unwrap();
-            malformed["effective_policy"] = serde_json::json!({"automatic_review":"available"});
-            assert!(initialize(&fixture, FaultIo::from_bytes(framed(&malformed))).is_err());
-        }
     }
 
     #[test]
@@ -2455,34 +2367,6 @@ mod tests {
 
         fn spool(fixture: &WriterFixture) -> Vec<u8> {
             std::fs::read(&fixture.artifacts.paths.outbox).unwrap()
-        }
-
-        #[test]
-        fn runner_policy_unavailable_frame_spools_its_observation_and_commits_it_with_the_event() {
-            let mut fixture = WriterFixture::new();
-            set_status(&mut fixture, "running");
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Persist);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            let value = unavailable(&fixture, 1);
-            let lost = observation(AutomaticReview::Unavailable);
-            assert!(
-                writer
-                    .try_submit_with_policy(value.clone(), Some(lost.clone()))
-                    .is_ok()
-            );
-            hooks.wait(WriterBoundary::Persist, 1);
-            let mut expected = serde_json::to_value(&value).unwrap();
-            expected["effective_policy"] = serde_json::to_value(&lost).unwrap();
-            assert_eq!(frame_bodies(&spool(&fixture)), vec![expected]);
-            assert_eq!(stored(&fixture), None);
-            drop(release);
-            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
-            let event = storage::get_event(&fixture.fixture.conn, 1).unwrap().event;
-            assert_eq!(event.kind, RuntimeEventKind::AutomaticReviewUnavailable);
-            assert_eq!(stored(&fixture), Some(record(&lost, Some(event.event_id))));
-            assert_eq!(writer.finish(deadline()).0, 0);
         }
 
         #[test]

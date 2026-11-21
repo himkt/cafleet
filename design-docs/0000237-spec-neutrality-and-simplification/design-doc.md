@@ -1,7 +1,7 @@
 # SPEC Neutrality, Test Simplification and Feature Reduction
 
 **Status**: Approved
-**Progress**: 28/83 tasks complete
+**Progress**: 31/83 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -594,11 +594,9 @@ Every step's docs-and-skills task edits the known hits it lists and every furthe
 
 ### Step B4: One stall signal (R3)
 
-- [ ] `SPEC.md`: rewrite §6.9 Input delivery stalled event (L3705–3771) and the stall paragraph (L4010) as one `input_delivery_stalled` event, carrying `waiting_since` and one instruction, for the two cases of the R3 inventory: an unconsumed preview waiting the stall bound behind a non-empty or unverified composer (deduplicated by run plus `message_id`) and a queued prompt or exec head that has started no attempt within the stall bound (deduplicated by run plus input ID); delete the `cause.kind` values, `blocking_input_id`, `review_stalled_queue` and `review_stalled_input` <!-- completed: -->
-- [ ] Docs and skills (tokens `input_delivery_stalled`, `cause.kind`, `blocking_input_id`, `review_stalled_queue`, `review_stalled_input`): `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/roles/director.md`, `docs/docs/concepts/members.md` <!-- completed: -->
-- [ ] Code and tests: reduce `src/broker/runtime/events.rs` and the stall derivation in `src/runtime/input.rs` to the one event, with their tests; add a table test of the event's emission at the stall bound for a preview and for a queued prompt and exec head, each published once under its deduplication key <!-- completed: -->
-
-COMMENT(tester): The B4 tests are `a_queued_prompt_or_exec_head_publishes_one_stall_event_at_the_stall_bound` (prompt and exec heads, with the surviving `an_interaction_resets_the_head_wait_and_a_fresh_wait_publishes_after_it_closes` and `each_head_publishes_its_own_single_event`, all through `assert_stalled_once` in `src/runtime/input.rs` `stall_watchdog`) and `a_preview_behind_a_non_empty_composer_publishes_one_stall_event_at_the_stall_bound` in `src/runtime/service.rs` `preview_sweep`. They assert one `input_delivery_stalled` row per run plus input ID or message ID, with `waiting_since`, no `blocking_input_id` and a non-empty `director_action.instruction`; they assert no cause. The preview test needs one interface the code lacks: the service test harness writes `stall_bound_ms` into the runner's test configuration (beside `preview_sweep`), so the runner must take its stall bound from `RunnerDependencies` (for example a `stall_bound: Duration` field defaulting to 3 minutes), and `test_support` `run_configured` will map `stall_bound_ms` onto it once the field exists. These surviving `src/broker/runtime/events.rs` tests build stall transitions through `stalled_fixture` / `stalled_transition` with `blocking_input_id` and `cause`, and must change with the code task: `stalled_events_remain_readable_and_deduplicated_after_head_and_blocker_settlement`, `a_new_stalled_event_requires_its_head_to_be_ready_and_deferred`, `stalled_publication_rejects_self_and_permission_input_identities` and `stalled_event_readers_validate_the_historical_queued_method_and_reason`. Route them, and the `run_configured` mapping, to the Tester with the code task.
+- [x] `SPEC.md`: rewrite §6.9 Input delivery stalled event (L3705–3771) and the stall paragraph (L4010) as one `input_delivery_stalled` event, carrying `waiting_since` and one instruction, for the two cases of the R3 inventory: an unconsumed preview waiting the stall bound behind a non-empty or unverified composer (deduplicated by run plus `message_id`) and a queued prompt or exec head that has started no attempt within the stall bound (deduplicated by run plus input ID); delete the `cause.kind` values, `blocking_input_id`, `review_stalled_queue` and `review_stalled_input` <!-- completed: 2026-11-21T11:16 -->
+- [x] Docs and skills (tokens `input_delivery_stalled`, `cause.kind`, `blocking_input_id`, `review_stalled_queue`, `review_stalled_input`): `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/roles/director.md`, `docs/docs/concepts/members.md` <!-- completed: 2026-11-21T11:16 -->
+- [x] Code and tests: reduce `src/broker/runtime/events.rs` and the stall derivation in `src/runtime/input.rs` to the one event, with their tests; add a table test of the event's emission at the stall bound for a preview and for a queued prompt and exec head, each published once under its deduplication key <!-- completed: 2026-11-21T11:22 -->
 
 ### Step B5: Remove automatic-review annotations (R7)
 

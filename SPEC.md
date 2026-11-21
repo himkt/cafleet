@@ -3450,7 +3450,7 @@ Runtime event kinds are the §8 `member_runtime_events.kind` values. The event p
 }
 ```
 
-`INSTRUCTION` is the permission-request instruction (§ Request-bound permission responses). Event keys are ordered `event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for applicable lifecycle/result events. Delivery results append `input_id,message_id,delivery,stage`; stalled delivery appends `input_id,message_id,blocking_input_id,waiting_since,delivery`; all events finish with required `director_action`. Permission/question/automatic-review actions order `kind,instruction,inspect_argv`; delivery actions follow § Input delivery result event and § Input delivery stalled event. Other events carry null action. `evidence.backend` and kind identify an automatic reviewer; its effective policy stays on the run.
+`INSTRUCTION` is the permission-request instruction (§ Request-bound permission responses). Event keys are ordered `event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for applicable lifecycle/result events. Delivery results append `input_id,message_id,delivery,stage`; stalled delivery appends `input_id,message_id,waiting_since`; all events finish with required `director_action`. Permission/question/automatic-review actions order `kind,instruction,inspect_argv`; delivery actions follow § Input delivery result event and § Input delivery stalled event. Other events carry null action. `evidence.backend` and kind identify an automatic reviewer; its effective policy stays on the run.
 
 The evidence object, in events and in stored interaction evidence, has ordered keys `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from; it is null exactly when `operation` is null, including under metadata evidence.
 
@@ -3514,7 +3514,14 @@ For prompt and exec, the terminal receipt is the durable source: publication fol
 
 ##### Input delivery stalled event
 
-Queue housekeeping (§ Queue housekeeping) publishes one `input_delivery_stalled` event per run/head input when the head has been the head for the stall bound (3 minutes) and no attempt has started for it. Each queued entry records `head_since` when it becomes the head. An interaction that blocks the head clears `head_since` and the head's stalled flag, and its closure restarts `head_since`, so time an open interaction blocks the head never counts: the `interaction_opened` event already notifies the Director with its own action. The event creates no interaction and stores no literal:
+The runner publishes one `input_delivery_stalled` event when input has waited the stall bound (3 minutes) without a delivery attempt, in two cases:
+
+| Waiting input | Wait starts | Deduplicated by |
+|---|---|---|
+| A queued prompt or exec head that has started no attempt | When the entry becomes the head; an interaction that blocks the head clears the wait and its closure restarts it | Run plus `input_id` |
+| The sweep's selected unnotified preview, held because the composer is not verified empty on a verified-composer run | When the sweep first holds that preview on the composer; an interaction that blocks it clears the wait and its closure restarts it | Run plus `message_id` |
+
+Time an open interaction blocks the input never counts: the `interaction_opened` event already notifies the Director with its own action. Queue housekeeping (§ Queue housekeeping) publishes the head event and the sweep (§ Runner pending-preview sweep) publishes the preview event. The event creates no interaction and stores no literal:
 
 | Field | Value |
 |---|---|
@@ -3523,52 +3530,25 @@ Queue housekeeping (§ Queue housekeeping) publishes one `input_delivery_stalled
 | `source` | `runner_lifecycle` |
 | `decision_outcome` | `"unknown"` |
 | `evidence` | Ordered run evidence with null screen-derived fields |
-| `input_id` | Waiting head input ID |
-| `blocking_input_id` | The receipt the cause names, or null (cause table below) |
-| `waiting_since` | UTC RFC 3339 `head_since` of the waiting head |
-| `delivery` | Head receipt's ordered `status,method,reason` projection, status `queued` |
-| `cause` | `{"kind":KIND,"detail":DETAIL}`, after `delivery` |
-| `director_action` | `review_stalled_queue` (below) |
+| `input_id` | The waiting head's input ID; `null` for a preview |
+| `message_id` | The waiting preview's message ID; `null` for a head |
+| `waiting_since` | UTC RFC 3339 start of the wait |
+| `director_action` | `review_stalled_delivery` (below) |
 
 ```json
-{"input_id": 4805, "blocking_input_id": 4804,
+{"input_id": null, "message_id": 5120,
  "waiting_since": "2026-11-19T12:04:08Z",
- "delivery": {"status": "queued", "method": null, "reason": "earlier_input"},
- "cause": {"kind": "unresolved_input", "detail": null}}
+ "director_action": {"kind": "review_stalled_delivery", "instruction": "...",
+   "inspect_argv": ["cafleet", "member", "capture", "91", "--json"]}}
 ```
 
-Housekeeping derives the cause at publication time from the first row that holds, in order. A *live* row reads current runner state or the sweep's storage read; a *recorded* row reads the obstacle the latest queue turn recorded on the head.
-
-| `cause.kind` | Source | Holds when | `blocking_input_id` | `detail` |
-|---|---|---|---|---|
-| `immediate_attempt` | live | A client-owned immediate attempt or a preview sweep attempt is in flight | Its receipt when reserved, else `null` | `null` |
-| `pending_finalization` | live | A pending zero-byte finalization is set | That receipt | `null` |
-| `unresolved_input` | live | Another ordinary receipt of the run is `in_progress` | That receipt, lowest ID | `null` |
-| `drain_pending` | live | The latest queue turn's input drain was *pending* | `null` | The drain blocker string, e.g. `terminal reply pending` |
-| `pane_input_busy` | recorded | Obstacle `pane_input_busy`, e.g. a `member press` holding the lock | `null` | `null` |
-| `delivery_budget_exhausted` | recorded | Obstacle `delivery_budget_exhausted` | `null` | `null` |
-| `storage_unavailable` | recorded | Obstacle `storage_unavailable` | `null` | `null` |
-| `attempt_failed` | recorded | Obstacle `attempt_failed` | `null` | The attempt error, bounded to 256 bytes |
-| `composer_busy` | recorded | The last queue turn waited on a busy composer | `null` | `null` |
-| `queue_turn_not_reached` | — | No row above holds | `null` | `null` |
-
-`queue_turn_not_reached` means no listed gate explains the stall; it is a runner defect to report. Persistence validates `blocking_input_id` per cause, and an unknown `cause.kind` fails validation:
-
-| `cause.kind` | `blocking_input_id` rule |
-|---|---|
-| `pending_finalization`, `unresolved_input` | Non-null; a receipt of the same run, differing from the head |
-| `immediate_attempt` | Null, or a receipt of the same run differing from the head |
-| Every other kind | Null |
-
-The outbox reconstruction carries the `cause` object together with `input_id`, `blocking_input_id` and `waiting_since`.
-
-For every cause, `director_action` is `{"kind":"review_stalled_queue","instruction":INSTRUCTION,"inspect_argv":["cafleet","input","show","INPUT_ID","--json"]}`, where `INPUT_ID` is the waiting head, and INSTRUCTION is exactly:
+Persistence requires exactly one of `input_id` and `message_id`. A head names a queued ordinary input of the run that is `ready` when first published; a preview names a message addressed to the run's member. `director_action` is `{"kind":"review_stalled_delivery","instruction":INSTRUCTION,"inspect_argv":["cafleet","member","capture","MEMBER_ID","--json"]}`, where `MEMBER_ID` is the run's member, and INSTRUCTION is exactly:
 
 ```text
-Capture the member's pane, inspect the waiting input and confirm with member show that no interaction is open. Resolve the named cause when you can: reconcile an in-progress or uncertain blocker after pane evidence. A queue_turn_not_reached cause is a runner defect to report.
+Capture the member's pane. When the composer holds text, submit or clear it with member press keys the capture establishes, or ask the user to clear or submit it on the member's native surface.
 ```
 
-A verified empty composer resumes the FIFO and the waiting head delivers on the next queue turn. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later head can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication.
+A verified empty composer resumes delivery on the next queue turn or sweep. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
 
 ##### Effective policy record
 
@@ -3785,7 +3765,7 @@ A queued request outlives the originating CLI connection and command deadline. E
 
 **FIFO stop.** On every run, with or without composer verification, after a prompt or exec records `uncertain` the FIFO stays stopped, and no queued input and no sweep preview is written, until `input reconcile` settles that input. No later head can therefore type into a composer that may still hold the stopped text.
 
-A head that has started no attempt within 3 minutes of becoming the head publishes one `input_delivery_stalled` event naming its cause (§ Input delivery stalled event). Time an interaction blocks the head does not count. Each head is deduplicated by run/input identity through orderly shutdown and recovery.
+A head that has started no attempt within 3 minutes of becoming the head publishes one `input_delivery_stalled` event (§ Input delivery stalled event). Time an interaction blocks the head does not count. Each head is deduplicated by run/input identity through orderly shutdown and recovery.
 
 If storage prevents the terminal transaction, discard the zero-byte payload and retain a metadata-only pending finalization at the FIFO head. Retry that transaction on the 100 ms timer without sending bytes or starting another input; commit the receipt when storage recovers, then advance, and its result event follows from that durable receipt. While publication is unavailable, write a runner-stderr diagnostic naming the input ID and persistence failure; the Director receives the durable result after recovery. Ownership loss transfers finalization to fenced recovery. Accepted requests become queued, submitted, not submitted or uncertain; `held` describes work the runner did not accept.
 
@@ -3812,9 +3792,9 @@ Each sweep:
 3. Applies the head's target result: a removed or changed target settles the head `not_submitted/target_inactive` or `target_changed` and removes it.
 4. Runs the stall watchdog (§ Input delivery stalled event).
 
-A transient storage failure (SQLite busy/locked contention or an expired storage deadline) on the read leaves every entry unchanged and records the head obstacle `storage_unavailable`. A sweep first retries a pending zero-byte finalization; a cancellation that storage prevents becomes that pending finalization, and the sweep settles nothing further until it commits.
+A transient storage failure (SQLite busy/locked contention or an expired storage deadline) on the read leaves every entry unchanged. A sweep first retries a pending zero-byte finalization; a cancellation that storage prevents becomes that pending finalization, and the sweep settles nothing further until it commits.
 
-Every receipt write for a queued entry is made by the runner itself, so a non-`ready` queued receipt is an invariant violation. The queue turn records a non-fatal attempt error as the head obstacle `attempt_failed`, with its message bounded to 256 bytes, alongside its runner-stderr diagnostic. It also records its input-drain result: a *pending* drain stores its blocker string, and a *quiescent* drain clears it. The receipt `reconcile` action that settles a queued entry removes it from the FIFO in the same call and publishes nothing. It also accepts a queued `ready` prompt or exec with disposition `not_submitted` and settles it with zero bytes, which is how the Director cancels a queued prompt or exec.
+Every receipt write for a queued entry is made by the runner itself, so a non-`ready` queued receipt is an invariant violation. The queue turn writes a non-fatal attempt error as a runner-stderr diagnostic. The receipt `reconcile` action that settles a queued entry removes it from the FIFO in the same call and publishes nothing. It also accepts a queued `ready` prompt or exec with disposition `not_submitted` and settles it with zero bytes, which is how the Director cancels a queued prompt or exec.
 
 ##### Runner pending-preview sweep
 
@@ -3827,7 +3807,7 @@ Each ordinary member's runner delivers that member's own unnotified pending mess
 | Selection | One short read snapshot confirms that the run's member is an active ordinary member whose recorded run is this run with a concrete placement, then takes the oldest `to_member_id=<member> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
 | Order | Strict oldest first: the sweep types only the selected message and waits for its outcome before it selects again |
 
-Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected. Because the sweep starts a preview only when the FIFO is empty and not stopped and no ordinary attempt is active, a queued prompt or exec always precedes a sweep-selected preview.
+Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected. A selected preview held on the composer for the stall bound publishes one `input_delivery_stalled` event (§ Input delivery stalled event). Because the sweep starts a preview only when the FIFO is empty and not stopped and no ordinary attempt is active, a queued prompt or exec always precedes a sweep-selected preview.
 
 **Delivery state.** A preview's delivery state is `messages.notified_at` plus the runner's in-memory record of a preview typed and awaiting verification; it holds no durable input receipt. On a verified-composer run the sweep types a preview only into a verified empty composer and stamps `notified_at` after confirmed submission; a preview whose submission is not confirmed is uncertain (§ Input delivery result event), stays unnotified and is typed again once the composer is verified empty. On a run without composer verification the sweep types by § Delivery method and interaction priority and stamps `notified_at` after its complete stages; an uncertain preview is stamped first and then published, so it is not typed again.
 

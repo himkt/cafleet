@@ -4185,15 +4185,10 @@ mod tests {
                 ObservationKind::Interaction(InteractionClass::PermissionRequest)
             );
             assert!(observed.fingerprint.is_some());
-            assert_eq!(observed.annotations.len(), 1);
         }
         assert!(
             first.fingerprint == second.fingerprint,
             "the permission request keeps its identity across profile boundaries"
-        );
-        assert!(
-            first.annotations[0].fingerprint == second.annotations[0].fingerprint,
-            "the annotation keeps its identity across profile boundaries"
         );
     }
 
@@ -4391,157 +4386,6 @@ mod tests {
         assert!(matches!(value.kind, ObservationKind::Unknown));
         assert!(matches!(value.match_evidence, MatchEvidence::Absent));
         assert!(value.fingerprint.is_none());
-    }
-
-    mod annotation {
-        use crate::coding_agent::catalog::test_support::annotation::*;
-        use crate::coding_agent::detector::tests::*;
-        fn observe_lines(definition: &Value, rows: &[&str]) -> ScreenObservation {
-            let rows = rows.iter().map(|row| (*row).to_owned()).collect::<Vec<_>>();
-            observation(definition, &terminal(&rows, 80, false).snapshot())
-        }
-
-        fn refusal_screen(operations: &[&str]) -> Vec<String> {
-            let mut rows = Vec::new();
-            for operation in operations {
-                rows.push(format!("Refused: {operation}"));
-                rows.push("Refusal end".to_owned());
-            }
-            rows.push("Live footer".to_owned());
-            rows
-        }
-        #[test]
-        fn annotation_detector_yields_every_qualifying_block_in_row_order_beside_the_primary() {
-            let definition = annotated();
-            let observed = observe_lines(
-                &definition,
-                &refusal_screen(&["write one.txt", "write two.txt"])
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-            );
-            assert_eq!(observed.kind, ObservationKind::Unknown);
-            assert_eq!(observed.rule_id, "unmatched-screen");
-            assert_eq!(observed.annotations.len(), 2);
-            let operations = observed
-                .annotations
-                .iter()
-                .map(|block| block.raw_evidence["operation"].clone())
-                .collect::<Vec<_>>();
-            assert_eq!(operations, [json!("write one.txt"), json!("write two.txt")]);
-            for block in &observed.annotations {
-                assert_eq!(block.kind, ObservationKind::AutomaticRefusal);
-                assert_eq!(block.rule_id, REFUSAL);
-                assert_eq!(block.raw_evidence["rule_id"], REFUSAL);
-            }
-            let (first, second) = (
-                observed.annotations[0].matched_region,
-                observed.annotations[1].matched_region,
-            );
-            assert!(first.bottom <= second.top, "{first:?} {second:?}");
-            assert!(observed.annotations[0].fingerprint != observed.annotations[1].fingerprint);
-            let single = observe_lines(
-                &definition,
-                &refusal_screen(&["write one.txt"])
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-            );
-            assert_eq!(single.annotations.len(), 1);
-            assert!(single.annotations[0].fingerprint == observed.annotations[0].fingerprint);
-        }
-
-        #[test]
-        fn annotation_detector_leaves_the_primary_observation_unchanged() {
-            let mut rows = vec![
-                "Live footer".to_owned(),
-                "Refused: write outside.txt".to_owned(),
-                "Refusal end".to_owned(),
-            ];
-            rows.extend(lines("write disposable.txt"));
-            let screen = terminal(&rows, 80, false).snapshot();
-            let plain = observation(&definitions(), &screen);
-            let annotated = observation(&annotated(), &screen);
-            assert_eq!(
-                annotated.kind,
-                ObservationKind::Interaction(InteractionClass::PermissionRequest)
-            );
-            assert_eq!(annotated.kind, plain.kind);
-            assert_eq!(annotated.rule_id, plain.rule_id);
-            assert_eq!(annotated.match_evidence, plain.match_evidence);
-            assert_eq!(annotated.raw_evidence, plain.raw_evidence);
-            assert_eq!(
-                annotated.verified_noninteraction,
-                plain.verified_noninteraction
-            );
-            assert!(annotated.fingerprint == plain.fingerprint);
-            assert!(plain.annotations.is_empty());
-            assert_eq!(annotated.annotations.len(), 1);
-            assert_eq!(
-                annotated.annotations[0].raw_evidence["operation"],
-                "write outside.txt"
-            );
-        }
-
-        #[test]
-        fn annotation_detector_reports_each_annotation_kind_with_its_own_rule() {
-            let observed = observe_lines(
-                &annotated(),
-                &[
-                    "Automatic review unavailable",
-                    "Mode: automatic",
-                    "Live footer",
-                ],
-            );
-            let mut kinds = observed
-                .annotations
-                .iter()
-                .map(|block| (block.rule_id.clone(), block.kind))
-                .collect::<Vec<_>>();
-            kinds.sort_by(|a, b| a.0.cmp(&b.0));
-            assert_eq!(
-                kinds,
-                [
-                    (
-                        AVAILABLE.to_owned(),
-                        ObservationKind::AutomaticReviewAvailable
-                    ),
-                    (
-                        UNAVAILABLE.to_owned(),
-                        ObservationKind::AutomaticReviewUnavailable
-                    ),
-                ]
-            );
-            for block in &observed.annotations {
-                assert_eq!(block.raw_evidence["operation"], Value::Null);
-            }
-        }
-
-        #[test]
-        fn annotation_detector_frame_guard_rejects_non_live_frames_and_undecorated_quotes() {
-            let definition = annotated();
-            let without_footer =
-                observe_lines(&definition, &["Refused: write one.txt", "Refusal end"]);
-            assert!(without_footer.annotations.is_empty());
-            let viewer = observe_lines(
-                &definition,
-                &[
-                    "Transcript viewer",
-                    "Refused: write one.txt",
-                    "Refusal end",
-                    "Live footer",
-                ],
-            );
-            assert!(viewer.annotations.is_empty());
-            let quoted = observe_lines(
-                &definition,
-                &["The model said Refused: write one.txt", "Live footer"],
-            );
-            assert!(quoted.annotations.is_empty());
-            let undecorated =
-                observe_lines(&definition, &["Refused: write one.txt", "Live footer"]);
-            assert!(undecorated.annotations.is_empty());
-        }
     }
 
     mod operation_rows {

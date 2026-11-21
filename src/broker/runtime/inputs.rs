@@ -1952,31 +1952,6 @@ mod tests {
         assert_eq!(state(&fixture.base.reopen()), before);
     }
 
-    #[test]
-    fn runtime_permission_response_rejects_an_automatic_review_event_before_any_write() {
-        let kind = RuntimeEventKind::AutomaticRefusalObserved;
-        let mut fixture = ResponseFixture::new();
-        let refusal = storage::persist_transition(
-            &mut fixture.base.conn,
-            &fixture.owner,
-            &ObservedTransition {
-                episode_seq: None,
-                kind,
-                classification: None,
-                ..opening(fixture.owner.run_id, 2, 1, metadata())
-            },
-            PersistenceMode::Live,
-        )
-        .unwrap()
-        .0;
-        assert_eq!(refusal.interaction_id, None);
-        let mut request = fixture.request.clone();
-        request.metadata.event_id = refusal.event_id;
-        assert_rejected_unchanged(&mut fixture, &request);
-        assert!(rows(&fixture.base.conn, "member_input_operations").is_empty());
-        assert!(rows(&fixture.base.conn, "member_permission_responses").is_empty());
-    }
-
     fn another_run(fixture: &mut ResponseFixture) -> (RunOwner, NewPermissionResponse) {
         let owner = fixture.base.running_sibling("another-response-worker");
         let event = storage::persist_transition(

@@ -37,8 +37,7 @@ pub(crate) const STAGE_SETTLE: Duration = Duration::from_millis(500);
 const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
-const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
-const ATTEMPT_FAILURE_LIMIT: usize = 256;
+const STALL_BOUND: Duration = Duration::from_secs(180);
 const POST_SUBMIT_VERIFICATION: Duration = Duration::from_secs(2);
 const PASTE_CLOSE_RESERVE: Duration = Duration::from_millis(250);
 const PASTE_OPEN: &[u8] = b"\x1b[200~";
@@ -104,7 +103,22 @@ pub(crate) struct InputCoordinator {
     deferred_failed: bool,
     output_seq: u64,
     bracketed_paste: bool,
-    last_drain_blocker: Option<String>,
+    stall_bound: Duration,
+    preview_wait: Option<PreviewWait>,
+}
+
+/// The sweep's selected preview while the composer holds it; the stall watchdog runs from `since`.
+struct PreviewWait {
+    message_id: i64,
+    since: Instant,
+    stalled: bool,
+}
+
+#[cfg(test)]
+impl InputCoordinator {
+    pub(super) fn set_stall_bound(&mut self, stall_bound: Duration) {
+        self.stall_bound = stall_bound;
+    }
 }
 
 /// A deferred input's terminal zero-byte transaction that storage prevented; it holds only
@@ -137,18 +151,6 @@ pub(crate) struct QueuedInput {
     /// When this entry last became a head that no interaction blocks; the stall watchdog runs
     /// from here, and an attempt start or a blocking interaction clears it.
     head_since: Option<Instant>,
-    recorded: Option<HeadObstacle>,
-}
-
-/// The obstacle the latest queue turn met at the head, which the stall watchdog reports when no
-/// live state explains the stall.
-#[derive(Clone)]
-enum HeadObstacle {
-    PaneInputBusy,
-    DeliveryBudgetExhausted,
-    StorageUnavailable,
-    AttemptFailed(String),
-    ComposerBusy,
 }
 
 type DeliverySelection = (
@@ -432,6 +434,22 @@ fn interaction_cause(status: &ObservationStatus) -> storage::StopCause {
     } else {
         storage::StopCause::InteractionOpen
     }
+}
+
+/// An `input_delivery_stalled` record for exactly one waiting head or preview whose wait began at
+/// `since`.
+fn stalled_record(
+    input_id: Option<i64>,
+    message_id: Option<i64>,
+    since: Instant,
+    now: Instant,
+) -> serde_json::Value {
+    let waiting_since = chrono::Utc::now()
+        - chrono::Duration::from_std(now.duration_since(since)).expect("bounded stall wait");
+    serde_json::json!({
+        "kind":"input_delivery_stalled", "input_id":input_id, "message_id":message_id,
+        "waiting_since":crate::time::format_utc(waiting_since),
+    })
 }
 
 fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
@@ -2032,6 +2050,7 @@ impl InputCoordinator {
             match ordinary_blocker(&status) {
                 Some(OrdinaryBlocker::ObserverUnavailable) => return held("observer_unavailable"),
                 Some(OrdinaryBlocker::Interaction) => {
+                    self.preview_wait = None;
                     return held(interaction_cause(&status).as_str());
                 }
                 None => {}
@@ -2054,7 +2073,10 @@ impl InputCoordinator {
             };
             let (method, reason, stages) =
                 match self.select_delivery(conn, observation, input, deadline)? {
-                    DeliveryChoice::Waiting => return held("composer_busy"),
+                    DeliveryChoice::Waiting => {
+                        self.watch_preview(observation, message.message_id);
+                        return held("composer_busy");
+                    }
                     DeliveryChoice::PlainLimit(cause) => {
                         return Err(error(format!(
                             "a preview renders its pointer form within the plain limit: {cause}"
@@ -2069,6 +2091,7 @@ impl InputCoordinator {
                 return held("delivery_budget_exhausted");
             }
             with_database_deadline(conn, deadline, |conn| self.validate_live(conn))?;
+            self.preview_wait = None;
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
                 request: storage::NewInput {
@@ -2256,7 +2279,6 @@ impl InputCoordinator {
                             attempt_deadline: None,
                             obstacle: "delivery_budget_exhausted",
                             head_since: None,
-                            recorded: None,
                         });
                         operation
                     }
@@ -2408,27 +2430,6 @@ impl InputCoordinator {
     /// must stop, so fenced recovery settles and publishes the receipt.
     pub(super) fn deferred_failed(&self) -> bool {
         self.deferred_failed
-    }
-
-    /// Records the queue turn's input-drain result: a pending drain keeps its blocker.
-    pub(super) fn record_queue_drain(&mut self, drain: InputDrain) {
-        self.last_drain_blocker = match drain {
-            InputDrain::Pending => self.observation_blocker.clone(),
-            InputDrain::Quiescent => None,
-        };
-    }
-
-    /// Records a non-fatal queue-turn attempt error against the current head.
-    pub(super) fn record_attempt_failure(&mut self, failure: &CafleetError) {
-        let Some(head) = self.queue.front_mut() else {
-            return;
-        };
-        let message = failure.message();
-        let mut end = message.len().min(ATTEMPT_FAILURE_LIMIT);
-        while !message.is_char_boundary(end) {
-            end -= 1;
-        }
-        head.recorded = Some(HeadObstacle::AttemptFailed(message[..end].to_owned()));
     }
 
     /// The sweep may start a preview only while no ordinary attempt is active and the FIFO is
@@ -2656,7 +2657,7 @@ impl InputCoordinator {
                 pending.reason,
             )?;
             if self.finalization.is_some() {
-                self.watch_head(observation, None);
+                self.watch_head(observation);
                 return Ok(());
             }
         }
@@ -2668,20 +2669,13 @@ impl InputCoordinator {
                 sweep.push((*input_id, storage::get_input(&tx, *input_id)?.state));
             }
             let target = self.deferred_target(&tx)?;
-            let head = entries.first().copied();
-            let unresolved: Option<i64> = rusqlite::OptionalExtension::optional(tx.query_row(
-                "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND state='in_progress' AND kind IN ('prompt','exec') AND input_id IS NOT ?2 ORDER BY input_id LIMIT 1",
-                rusqlite::params![self.run.run_id, head],
-                |row| row.get(0),
-            ))?;
             tx.commit()?;
-            Ok((sweep, target, unresolved))
+            Ok((sweep, target))
         });
-        let (sweep, target, unresolved) = match read {
+        let (sweep, target) = match read {
             Ok(read) => read,
             Err(cause) if storage_failure(&cause) => {
-                self.note_head_obstacle("storage_unavailable");
-                self.watch_head(observation, None);
+                self.watch_head(observation);
                 return Ok(());
             }
             Err(cause) => return Err(cause),
@@ -2709,18 +2703,19 @@ impl InputCoordinator {
             )?;
             return Ok(());
         }
-        self.watch_head(observation, unresolved);
+        self.watch_head(observation);
         Ok(())
     }
 
-    /// Publishes one `input_delivery_stalled` for a head that has started no attempt within
-    /// `COMPOSER_BUSY_BOUND` of becoming the head; time an interaction blocks it does not count.
-    fn watch_head(&mut self, observation: &ObservationController, unresolved: Option<i64>) {
+    /// Publishes one `input_delivery_stalled` for a head that has started no attempt within the
+    /// stall bound of becoming the head; time an interaction blocks it does not count.
+    fn watch_head(&mut self, observation: &ObservationController) {
         let now = Instant::now();
         let interaction = matches!(
             ordinary_blocker(&observation.status()),
             Some(OrdinaryBlocker::Interaction)
         );
+        let stall_bound = self.stall_bound;
         let Some(head) = self.queue.front_mut() else {
             return;
         };
@@ -2730,55 +2725,42 @@ impl InputCoordinator {
             return;
         }
         let since = *head.head_since.get_or_insert(now);
-        if head.stalled || now.duration_since(since) < COMPOSER_BUSY_BOUND {
+        if head.stalled || now.duration_since(since) < stall_bound {
             return;
         }
         head.stalled = true;
-        let input_id = head.input_id;
-        let recorded = head.recorded.clone();
-        let (kind, blocking_input_id, detail) = self.stall_cause(unresolved, recorded);
-        let waiting_since = chrono::Utc::now()
-            - chrono::Duration::from_std(now.duration_since(since)).expect("bounded head wait");
-        observation.publish_delivery_stalled(serde_json::json!({
-            "kind":"input_delivery_stalled", "input_id":input_id,
-            "blocking_input_id":blocking_input_id,
-            "waiting_since":crate::time::format_utc(waiting_since),
-            "cause":{"kind":kind,"detail":detail},
-        }));
+        observation.publish_delivery_stalled(stalled_record(Some(head.input_id), None, since, now));
     }
 
-    /// The first stall cause that holds: live runner state, then the head's recorded obstacle.
-    fn stall_cause(
-        &self,
-        unresolved: Option<i64>,
-        recorded: Option<HeadObstacle>,
-    ) -> (&'static str, Option<i64>, Option<String>) {
-        if let Some(pending) = self
-            .pending
+    /// Publishes one `input_delivery_stalled` for the sweep's selected preview once the composer
+    /// has held it for the stall bound.
+    fn watch_preview(&mut self, observation: &ObservationController, message_id: i64) {
+        let now = Instant::now();
+        if self
+            .preview_wait
             .as_ref()
-            .filter(|pending| pending.deferred().is_none())
+            .is_none_or(|wait| wait.message_id != message_id)
         {
-            return ("immediate_attempt", pending.input_id(), None);
+            self.preview_wait = Some(PreviewWait {
+                message_id,
+                since: now,
+                stalled: false,
+            });
         }
-        if let Some(finalization) = &self.finalization {
-            return ("pending_finalization", Some(finalization.input_id), None);
+        let wait = self
+            .preview_wait
+            .as_mut()
+            .expect("the preview wait is recorded");
+        if wait.stalled || now.duration_since(wait.since) < self.stall_bound {
+            return;
         }
-        if let Some(blocker) = unresolved {
-            return ("unresolved_input", Some(blocker), None);
-        }
-        if let Some(blocker) = &self.last_drain_blocker {
-            return ("drain_pending", None, Some(blocker.clone()));
-        }
-        match recorded {
-            Some(HeadObstacle::PaneInputBusy) => ("pane_input_busy", None, None),
-            Some(HeadObstacle::DeliveryBudgetExhausted) => {
-                ("delivery_budget_exhausted", None, None)
-            }
-            Some(HeadObstacle::StorageUnavailable) => ("storage_unavailable", None, None),
-            Some(HeadObstacle::AttemptFailed(message)) => ("attempt_failed", None, Some(message)),
-            Some(HeadObstacle::ComposerBusy) => ("composer_busy", None, None),
-            None => ("queue_turn_not_reached", None, None),
-        }
+        wait.stalled = true;
+        observation.publish_delivery_stalled(stalled_record(
+            None,
+            Some(message_id),
+            wait.since,
+            now,
+        ));
     }
 
     /// Starts the queued head once no interaction blocks it, or settles it when its attempt
@@ -2884,7 +2866,6 @@ impl InputCoordinator {
                         .front_mut()
                         .expect("the waiting queue head remains");
                     head.attempt_deadline = None;
-                    head.recorded = Some(HeadObstacle::ComposerBusy);
                     return Ok(());
                 }
             }
@@ -3200,7 +3181,6 @@ impl InputCoordinator {
             attempt_deadline: None,
             obstacle: "delivery_budget_exhausted",
             head_since: None,
-            recorded: None,
         });
         Ok(Some(InputControlReply::Submission(self.result(&operation))))
     }
@@ -3298,12 +3278,6 @@ impl InputCoordinator {
     fn note_head_obstacle(&mut self, obstacle: &'static str) {
         let head = self.queue.front_mut().expect("queued head remains");
         head.obstacle = obstacle;
-        head.recorded = match obstacle {
-            "pane_input_busy" => Some(HeadObstacle::PaneInputBusy),
-            "delivery_budget_exhausted" => Some(HeadObstacle::DeliveryBudgetExhausted),
-            "storage_unavailable" => Some(HeadObstacle::StorageUnavailable),
-            _ => head.recorded.take(),
-        };
     }
 
     /// Records the zero-byte obstacle a started deferred attempt last met, which its expiry
@@ -4907,7 +4881,8 @@ impl InputCoordinator {
             deferred_failed: false,
             output_seq: 0,
             bracketed_paste: false,
-            last_drain_blocker: None,
+            stall_bound: STALL_BOUND,
+            preview_wait: None,
         })
     }
 

@@ -1361,7 +1361,7 @@ mod tests {
     use crate::broker::runtime::*;
 
     #[test]
-    fn new_run_records_launch_intent_and_unreached_phases_without_inventing_policy() {
+    fn new_run_records_launch_intent_and_unreached_phases() {
         let fixture = Fixture::new();
         let run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         assert_eq!(run.status, RunStatus::Starting);
@@ -1372,7 +1372,6 @@ mod tests {
         assert_eq!(run.mode_source, ModeSource::Default);
         assert_eq!(run.requested_mode, None);
         assert_eq!(run.resolved_mode, "never");
-        assert_eq!(run.effective_policy_json, None);
         assert_eq!(run.child_pid, None);
         assert_eq!(run.exit_code, None);
         assert_eq!(run.coverage, Coverage::Unknown);
@@ -1402,7 +1401,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_mode_is_distinct_from_the_default_and_does_not_prove_effective_policy() {
+    fn explicit_mode_is_distinct_from_the_default() {
         let mut fixture = Fixture::new();
         let member = register(&mut fixture.conn, fixture.fleet, "explicit", None);
         let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
@@ -1420,7 +1419,6 @@ mod tests {
         assert_eq!(run.requested_mode.as_deref(), Some("on-request"));
         assert_eq!(run.mode_source, ModeSource::Explicit);
         assert_eq!(run.permission_argv_json, spec.permission_argv_json);
-        assert_eq!(run.effective_policy_json, None);
     }
 
     #[test]

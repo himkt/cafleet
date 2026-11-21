@@ -265,12 +265,12 @@ For an uncertain input, only the Director records evidence-based `input reconcil
 
 A composer rule that never verifies empty after clearing is a profile defect: record it and route it for correction of the bundled profile. You never poll another member's inbox.
 
-On `input_delivery_stalled` with `director_action.kind=review_stalled_queue`:
+On `input_delivery_stalled` with `director_action.kind=review_stalled_delivery`:
 
-1. Verify the event and record its waiting head, `cause` and any `blocking_input_id`.
-2. Capture the member's pane, run its `inspect_argv` and confirm with `member show MEMBER_ID --json` that no interaction is open.
-3. Resolve the named cause when you can ([stall causes](../reference/cli.md#runtime-events)): reconcile an in-progress or uncertain blocker only after pane evidence establishes its disposition. Cancel a queued prompt or exec that blocks the queue with `input reconcile INPUT_ID --disposition not-submitted`, then resend it deliberately. A `queue_turn_not_reached` cause is a runner defect: record it and route it for correction.
-4. When the queue stays stalled and the capture shows the composer holds text, submit or clear it with authorized `member press` keys the capture establishes, or ask the user through {decision_surface} to clear or submit the composer on the member's native surface.
+1. Verify the event and record its waiting `input_id` or `message_id`.
+2. Capture the member's pane with its `inspect_argv` and confirm with `member show MEMBER_ID --json` that no interaction is open.
+3. When the capture shows the composer holds text, submit or clear it with authorized `member press` keys the capture establishes, or ask the user through {decision_surface} to clear or submit the composer on the member's native surface.
+4. When the composer is empty and the input still waits, inspect a waiting head with `input show INPUT_ID --json`; cancel it with `input reconcile INPUT_ID --disposition not-submitted` and resend it deliberately when it cannot proceed.
 
 ## Supervision
 

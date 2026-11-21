@@ -554,6 +554,9 @@ pub(crate) struct RunnerDependencies {
 
     #[cfg(test)]
     pub(crate) preview_sweep: bool,
+
+    #[cfg(test)]
+    pub(crate) stall_bound: Duration,
 }
 pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
     run_service(
@@ -578,6 +581,9 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 
             #[cfg(test)]
             preview_sweep: true,
+
+            #[cfg(test)]
+            stall_bound: Duration::from_secs(180),
         },
     )
 }
@@ -758,6 +764,8 @@ pub(crate) fn run_service(
         } else {
             PreviewSweep::disabled()
         },
+        #[cfg(test)]
+        stall_bound: services.stall_bound,
         deferred_retry: DeferredRetry::default(),
         queue_housekeeping_at: None,
         shutdown_client: None,
@@ -919,6 +927,8 @@ struct RunnerLoop<'a> {
     pending_input_client: Option<PendingInputClient>,
     pending_sweep: Option<PendingSweep>,
     preview_sweep: PreviewSweep,
+    #[cfg(test)]
+    stall_bound: Duration,
     deferred_retry: DeferredRetry,
     queue_housekeeping_at: Option<Instant>,
     shutdown_client: Option<u64>,
@@ -1204,6 +1214,8 @@ impl RunnerLoop<'_> {
             },
             self.handshake_deadline,
         )?);
+        #[cfg(test)]
+        started(&mut self.coordinator).set_stall_bound(self.stall_bound);
         serde_json::to_value(Started {
             identity: ControlIdentity::from_run(&self.run),
             runner: self.process.clone(),
@@ -1375,9 +1387,6 @@ impl RunnerLoop<'_> {
         }
         let deadline = Instant::now() + Duration::from_secs(5);
         let drained = self.native.quiesce(coordinator, deadline);
-        if let Ok(drain) = &drained {
-            coordinator.record_queue_drain(*drain);
-        }
         if let Ok(InputDrain::Quiescent) = drained
             && !self.terminate.load(Ordering::Acquire)
             && !self.resize.load(Ordering::Acquire)
@@ -1387,7 +1396,6 @@ impl RunnerLoop<'_> {
             if coordinator.deferred_failed() {
                 return Err(failure);
             }
-            coordinator.record_attempt_failure(&failure);
             eprintln!("member runtime: deferred input: {}", failure.message());
         }
         Ok(())
@@ -3105,6 +3113,12 @@ pub(crate) mod test_support {
                 preview_sweep: match value.get("preview_sweep") {
                     None => false,
                     Some(enabled) => enabled.as_bool().expect("preview_sweep is a boolean"),
+                },
+                stall_bound: match value.get("stall_bound_ms") {
+                    None => Duration::from_secs(180),
+                    Some(ms) => Duration::from_millis(
+                        ms.as_u64().expect("stall_bound_ms is a millisecond count"),
+                    ),
                 },
             };
             crate::runtime::service::run_service(settings, descriptor, services)

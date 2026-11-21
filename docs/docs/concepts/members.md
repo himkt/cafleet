@@ -104,15 +104,7 @@ Later input waits while text remains in the composer; clearing or submitting it 
 
 ### Stalled queues
 
-When the queue head starts no delivery attempt within 3 minutes of reaching the front, the Director receives one `input_delivery_stalled` event for it. Time an open interaction blocks the head does not count, because the interaction already has its own event. The event names a cause and the action the Director takes:
-
-| Cause | What holds the queue | Director action |
-|---|---|---|
-| `unresolved_input`, `pending_finalization`, `immediate_attempt` | Another input of the member is still in progress | Reconcile the named input from pane evidence |
-| `drain_pending`, `pane_input_busy`, `storage_unavailable`, `delivery_budget_exhausted`, `attempt_failed`, `composer_busy` | A runner obstacle, with its detail where one exists | Resolve the obstacle when possible |
-| `queue_turn_not_reached` | No known gate explains the stall | Report it as a runner defect |
-
-When the queue stays stalled behind text in the composer, the Director captures the pane and submits or clears it with `member press`, or asks you to clear or submit it on the member's native surface. The [stalled-event contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#input-delivery-stalled-event) owns the exact causes and outputs.
+When a queued prompt or native command starts no delivery attempt within 3 minutes of reaching the front of the queue, or a message preview waits 3 minutes behind text in the composer, the Director receives one `input_delivery_stalled` event for it. Time an open interaction blocks the input does not count, because the interaction already has its own event. The event carries one instruction: the Director captures the pane and submits or clears the composer's text with `member press`, or asks you to clear or submit it on the member's native surface. The [stalled-event contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#input-delivery-stalled-event) owns the exact fields.
 
 Long previews use bracketed paste when the backend supports it and has enabled it; otherwise they show a short pointer to the poll that reads the full message. An oversized explicit prompt or native command without a safe delivery mechanism is refused before typing.
 
