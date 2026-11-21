@@ -2487,55 +2487,68 @@ mod tests {
         }
 
         #[test]
-        fn a_faint_suggestion_after_the_prompt_is_an_empty_composer() {
-            let screen = composer(&format!("{FAINT}fix the failing build"), 2);
-            assert_eq!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn an_indexed_foreground_suggestion_after_the_prompt_is_an_empty_composer() {
-            let screen = composer(&format!("{GREY}fix the failing build"), 2);
-            assert_eq!(kind(grey(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn a_bare_prompt_with_the_cursor_after_it_is_an_empty_composer() {
-            assert_eq!(
-                kind(faint(), &composer("", 2)),
-                ObservationKind::ComposerEmpty
-            );
-        }
-
-        #[test]
-        fn a_typed_draft_in_the_default_style_is_not_an_empty_composer() {
-            let screen = composer("fix the failing build", 23);
-            assert_ne!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn typed_text_followed_by_a_suggestion_is_not_an_empty_composer() {
-            let screen = composer(&format!("fix{FAINT} the failing build"), 5);
-            assert_ne!(kind(faint(), &screen), ObservationKind::ComposerEmpty);
-        }
-
-        #[test]
-        fn a_suggestion_with_the_cursor_away_from_the_prompt_is_not_an_empty_composer() {
+        fn only_a_suggestion_in_the_declared_style_with_the_cursor_after_the_prompt_is_empty() {
+            let faint_suggestion = format!("{FAINT}fix the failing build");
+            let grey_suggestion = format!("{GREY}fix the failing build");
+            let cases = [
+                (
+                    "faint suggestion",
+                    faint(),
+                    composer(&faint_suggestion, 2),
+                    true,
+                ),
+                (
+                    "indexed foreground suggestion",
+                    grey(),
+                    composer(&grey_suggestion, 2),
+                    true,
+                ),
+                (
+                    "bare prompt with the cursor after it",
+                    faint(),
+                    composer("", 2),
+                    true,
+                ),
+                (
+                    "typed draft in the default style",
+                    faint(),
+                    composer("fix the failing build", 23),
+                    false,
+                ),
+                (
+                    "typed text followed by a suggestion",
+                    faint(),
+                    composer(&format!("fix{FAINT} the failing build"), 5),
+                    false,
+                ),
+                (
+                    "faint text under a foreground rule",
+                    grey(),
+                    composer(&faint_suggestion, 2),
+                    false,
+                ),
+                (
+                    "foreground text under a faint rule",
+                    faint(),
+                    composer(&grey_suggestion, 2),
+                    false,
+                ),
+            ];
+            for (name, style, screen, empty) in cases {
+                assert_eq!(
+                    kind(style, &screen) == ObservationKind::ComposerEmpty,
+                    empty,
+                    "{name}"
+                );
+            }
             for cursor_col in [0, 1, 3, 23] {
-                let screen = composer(&format!("{FAINT}fix the failing build"), cursor_col);
+                let screen = composer(&faint_suggestion, cursor_col);
                 assert_ne!(
                     kind(faint(), &screen),
                     ObservationKind::ComposerEmpty,
-                    "cursor at column {cursor_col}"
+                    "suggestion with the cursor at column {cursor_col}"
                 );
             }
-        }
-
-        #[test]
-        fn text_in_another_style_than_the_rule_declares_is_not_an_empty_composer() {
-            let faint_text = composer(&format!("{FAINT}fix the failing build"), 2);
-            assert_ne!(kind(grey(), &faint_text), ObservationKind::ComposerEmpty);
-            let grey_text = composer(&format!("{GREY}fix the failing build"), 2);
-            assert_ne!(kind(faint(), &grey_text), ObservationKind::ComposerEmpty);
         }
     }
 

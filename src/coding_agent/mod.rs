@@ -1176,38 +1176,34 @@ mod tests {
     }
 
     #[test]
-    fn unset_variable_resolves_the_default() {
-        for &agent in CodingAgent::all() {
-            assert_eq!(
-                agent.config_dir(&|_| Ok(None), &home()).unwrap(),
-                default_config_dir(agent),
-                "default for {agent:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn absolute_value_is_used_verbatim() {
-        for &agent in CodingAgent::all() {
-            assert_eq!(
-                agent
-                    .config_dir(&only(agent.config_variable(), "/custom/cfg"), &home())
-                    .unwrap(),
-                PathBuf::from("/custom/cfg")
-            );
-        }
-    }
-
-    #[test]
-    fn each_resolver_reads_only_its_own_variable() {
+    fn config_dir_resolves_only_the_backend_variable_or_its_default() {
+        type Lookup = Box<dyn Fn(&str) -> Result<Option<String>, CafleetError>>;
         for &agent in CodingAgent::all() {
             let var = agent.config_variable();
-            let lookup = move |name: &str| Ok((name != var).then(|| "/other/cfg".to_string()));
-            assert_eq!(
-                agent.config_dir(&lookup, &home()).unwrap(),
-                default_config_dir(agent),
-                "{var}'s resolver must ignore every other variable"
-            );
+            let cases: [(&str, Lookup, PathBuf); 3] = [
+                (
+                    "unset variable",
+                    Box::new(|_| Ok(None)),
+                    default_config_dir(agent),
+                ),
+                (
+                    "absolute value used verbatim",
+                    Box::new(only(var, "/custom/cfg")),
+                    PathBuf::from("/custom/cfg"),
+                ),
+                (
+                    "every other variable set",
+                    Box::new(move |name: &str| Ok((name != var).then(|| "/other/cfg".to_string()))),
+                    default_config_dir(agent),
+                ),
+            ];
+            for (name, lookup, expected) in cases {
+                assert_eq!(
+                    agent.config_dir(&lookup, &home()).unwrap(),
+                    expected,
+                    "{agent:?}: {name}"
+                );
+            }
         }
     }
 
@@ -1708,47 +1704,28 @@ mod tests {
         }
 
         #[test]
-        fn hermes_version_rule_records_the_parenthesized_release_date() {
+        fn hermes_version_rule_records_only_a_canonical_parenthesized_release_date() {
+            let no_line = Err("printed no Hermes version line");
+            let non_semver = Err("printed a non-SemVer Hermes version");
             for (line, expected) in [
-                ("Hermes Agent vunknown (2026.9.24)", "2026.9.24"),
-                ("Hermes Agent v0.22.4 (2026.9.24)", "2026.9.24"),
-                ("Hermes Agent v(1) (2026.10.1)", "2026.10.1"),
-                ("Hermes Agent vunknown (2026.9.24-rc.1)", "2026.9.24-rc.1"),
+                ("Hermes Agent vunknown (2026.9.24)", Ok("2026.9.24")),
+                ("Hermes Agent v0.22.4 (2026.9.24)", Ok("2026.9.24")),
+                ("Hermes Agent v(1) (2026.10.1)", Ok("2026.10.1")),
+                (
+                    "Hermes Agent vunknown (2026.9.24-rc.1)",
+                    Ok("2026.9.24-rc.1"),
+                ),
+                ("", no_line),
+                ("Hermes Agent v0.22.4", no_line),
+                ("Hermes Agent vunknown (2026.9.24) ", no_line),
+                (" Hermes Agent vunknown (2026.9.24)", no_line),
+                ("Hermes Agent vunknown (2026.9.24) (2026.9.25)", no_line),
+                ("Hermes Agent vunknown (2026.09.24)", non_semver),
+                ("Hermes Agent vunknown (unknown)", non_semver),
             ] {
                 assert_eq!(
                     CodingAgent::Hermes.version_from_line(line),
-                    Ok(expected),
-                    "{line}"
-                );
-            }
-        }
-
-        #[test]
-        fn hermes_version_rule_rejects_a_line_that_does_not_match() {
-            for line in [
-                "",
-                "Hermes Agent v0.22.4",
-                "Hermes Agent vunknown (2026.9.24) ",
-                " Hermes Agent vunknown (2026.9.24)",
-                "Hermes Agent vunknown (2026.9.24) (2026.9.25)",
-            ] {
-                assert_eq!(
-                    CodingAgent::Hermes.version_from_line(line),
-                    Err("printed no Hermes version line"),
-                    "{line:?}"
-                );
-            }
-        }
-
-        #[test]
-        fn hermes_version_rule_requires_a_canonical_semver_release_date() {
-            for line in [
-                "Hermes Agent vunknown (2026.09.24)",
-                "Hermes Agent vunknown (unknown)",
-            ] {
-                assert_eq!(
-                    CodingAgent::Hermes.version_from_line(line),
-                    Err("printed a non-SemVer Hermes version"),
+                    expected,
                     "{line:?}"
                 );
             }
@@ -1993,94 +1970,86 @@ mod tests {
         }
 
         #[test]
-        fn pi_model_with_a_thinking_suffix_fails_with_the_exact_usage_error() {
-            for level in THINKING {
-                let model = format!("openrouter/moonshotai/kimi-k2.6:{level}");
-                let failure = CodingAgent::Pi
-                    .validate_model(Some(&model))
-                    .expect_err("a thinking suffix is rejected");
-                assert!(matches!(failure, CafleetError::Usage(_)));
-                assert_eq!(failure.exit_code(), 2);
-                assert_eq!(
-                    failure.message(),
-                    format!(
-                        "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '{model}')."
-                    )
-                );
-            }
-            for model in ["kimi:high", "provider/model:free:max"] {
-                assert!(
-                    CodingAgent::Pi.validate_model(Some(model)).is_err(),
-                    "the text after the last ':' decides: {model}"
-                );
-            }
-        }
-
-        #[test]
-        fn pi_model_passes_through_verbatim_when_no_thinking_level_follows_its_last_colon() {
-            for model in [
-                "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-                "openrouter/moonshotai/kimi-k2.6",
-                "claude-opus-5-5",
-                "kimi k2",
-                "provider/model:high:free",
-                "model:",
-            ] {
-                CodingAgent::Pi
-                    .validate_model(Some(model))
-                    .unwrap_or_else(|error| panic!("{model}: {}", error.message()));
-                let built = argv("assignment", Some(model), None, None).unwrap();
-                let index = built.iter().position(|value| value == "--model").unwrap();
-                assert_eq!(built[index + 1], model);
+        fn pi_model_is_refused_only_when_a_thinking_level_follows_its_last_colon() {
+            let suffixed = THINKING.map(|level| format!("openrouter/moonshotai/kimi-k2.6:{level}"));
+            let mut cases: Vec<(&str, bool)> = suffixed
+                .iter()
+                .map(|model| (model.as_str(), false))
+                .collect();
+            cases.extend([
+                ("kimi:high", false),
+                ("provider/model:free:max", false),
+                ("openrouter/meta-llama/llama-3.3-70b-instruct:free", true),
+                ("openrouter/moonshotai/kimi-k2.6", true),
+                ("claude-opus-5-5", true),
+                ("kimi k2", true),
+                ("provider/model:high:free", true),
+                ("model:", true),
+            ]);
+            for (model, accepted) in cases {
+                match CodingAgent::Pi.validate_model(Some(model)) {
+                    Ok(()) => {
+                        assert!(accepted, "{model} accepted");
+                        let built = argv("assignment", Some(model), None, None).unwrap();
+                        let index = built.iter().position(|value| value == "--model").unwrap();
+                        assert_eq!(built[index + 1], model, "{model}");
+                    }
+                    Err(failure) => {
+                        assert!(!accepted, "{model}: {}", failure.message());
+                        assert!(matches!(failure, CafleetError::Usage(_)), "{model}");
+                        assert_eq!(failure.exit_code(), 2, "{model}");
+                        assert_eq!(
+                            failure.message(),
+                            format!(
+                                "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '{model}')."
+                            ),
+                            "{model}"
+                        );
+                    }
+                }
             }
         }
 
         #[test]
-        fn pi_effort_forwards_every_thinking_level_as_the_thinking_option() {
-            for level in THINKING {
-                CodingAgent::Pi.validate_effort(Some(level)).unwrap();
-                let built = argv("assignment", None, Some(level), None).unwrap();
-                let index = built
-                    .iter()
-                    .position(|value| value == "--thinking")
-                    .unwrap();
-                assert_eq!(built[index + 1], level);
-                assert!(!built.iter().any(|value| value == "--effort"), "{built:?}");
+        fn pi_effort_forwards_only_a_thinking_level_as_the_thinking_option() {
+            let cases = THINKING.iter().map(|level| (*level, true)).chain([
+                ("none", false),
+                ("ultra", false),
+                ("HIGH", false),
+                ("", false),
+            ]);
+            for (value, accepted) in cases {
+                match CodingAgent::Pi.validate_effort(Some(value)) {
+                    Ok(()) => {
+                        assert!(accepted, "{value:?} accepted");
+                        let built = argv("assignment", None, Some(value), None).unwrap();
+                        let index = built
+                            .iter()
+                            .position(|token| token == "--thinking")
+                            .unwrap();
+                        assert_eq!(built[index + 1], value, "{value:?}");
+                        assert!(!built.iter().any(|token| token == "--effort"), "{built:?}");
+                    }
+                    Err(failure) => {
+                        assert!(!accepted, "{value:?}: {}", failure.message());
+                        assert!(matches!(failure, CafleetError::Usage(_)), "{value:?}");
+                        assert_eq!(failure.exit_code(), 2, "{value:?}");
+                        assert_eq!(
+                            failure.message(),
+                            format!(
+                                "--effort for the pi backend must be one of off, minimal, low, medium, high, xhigh, max (got '{value}')."
+                            ),
+                            "{value:?}"
+                        );
+                    }
+                }
             }
         }
 
         #[test]
-        fn pi_effort_outside_the_thinking_levels_fails_with_the_exact_usage_error() {
-            for value in ["none", "ultra", "HIGH", ""] {
-                let failure = CodingAgent::Pi
-                    .validate_effort(Some(value))
-                    .expect_err("an unknown pi effort fails");
-                assert!(matches!(failure, CafleetError::Usage(_)));
-                assert_eq!(failure.exit_code(), 2);
-                assert_eq!(
-                    failure.message(),
-                    format!(
-                        "--effort for the pi backend must be one of off, minimal, low, medium, high, xhigh, max (got '{value}')."
-                    )
-                );
-            }
-        }
-
-        #[test]
-        fn pi_prompt_beginning_with_an_at_sign_fails_with_the_exact_usage_error() {
-            for prompt in ["@notes.md", "@", "@{member_id} assignment"] {
-                let failure = CodingAgent::Pi
-                    .validate_prompt(prompt)
-                    .expect_err("a leading '@' is rejected for pi");
-                assert!(matches!(failure, CafleetError::Usage(_)));
-                assert_eq!(failure.exit_code(), 2);
-                assert_eq!(failure.message(), PROMPT_ERROR);
-            }
-        }
-
-        #[test]
-        fn pi_prompt_validation_accepts_every_prompt_whose_first_character_is_not_an_at_sign() {
-            for prompt in [
+        fn only_pi_refuses_a_prompt_whose_first_character_is_an_at_sign() {
+            let pi_refused = ["@notes.md", "@", "@{member_id} assignment"];
+            let pi_accepted = [
                 "assignment",
                 " @notes.md",
                 "\n@notes.md",
@@ -2088,23 +2057,22 @@ mod tests {
                 "-x",
                 "{member_id}",
                 "",
-            ] {
-                CodingAgent::Pi
-                    .validate_prompt(prompt)
-                    .unwrap_or_else(|error| panic!("{prompt:?}: {}", error.message()));
-            }
-        }
-
-        #[test]
-        fn every_other_backend_accepts_a_prompt_beginning_with_an_at_sign() {
+            ];
             for &agent in CodingAgent::all() {
-                if agent == CodingAgent::Pi {
-                    continue;
-                }
-                for prompt in ["@notes.md", "@", "assignment"] {
-                    agent.validate_prompt(prompt).unwrap_or_else(|error| {
-                        panic!("{agent:?} {prompt:?}: {}", error.message())
-                    });
+                let cases = pi_refused
+                    .iter()
+                    .map(|prompt| (*prompt, agent != CodingAgent::Pi))
+                    .chain(pi_accepted.iter().map(|prompt| (*prompt, true)));
+                for (prompt, accepted) in cases {
+                    match agent.validate_prompt(prompt) {
+                        Ok(()) => assert!(accepted, "{agent:?} {prompt:?} accepted"),
+                        Err(failure) => {
+                            assert!(!accepted, "{agent:?} {prompt:?}: {}", failure.message());
+                            assert!(matches!(failure, CafleetError::Usage(_)), "{prompt:?}");
+                            assert_eq!(failure.exit_code(), 2, "{prompt:?}");
+                            assert_eq!(failure.message(), PROMPT_ERROR, "{prompt:?}");
+                        }
+                    }
                 }
             }
         }
@@ -2342,76 +2310,85 @@ mod tests {
         }
 
         #[test]
-        fn codex_daemon_argv_matches_only_the_codex_app_server_signature() {
-            assert_eq!(matching_labels(CODEX_DAEMON), ["codex app-server"]);
-        }
-
-        #[test]
-        fn hermes_gateway_argv_with_options_before_the_subcommand_matches_only_hermes() {
-            assert_eq!(matching_labels(HERMES_GATEWAY), ["hermes gateway run"]);
-        }
-
-        #[test]
-        fn hermes_program_name_matches_the_gateway_signature() {
-            assert_eq!(
-                matching_labels(&["/usr/local/bin/hermes", "gateway", "run"]),
-                ["hermes gateway run"]
-            );
-        }
-
-        #[test]
-        fn non_server_argv_matches_no_signature() {
-            let cases: &[&[&str]] = &[
-                &[
-                    "codex",
-                    "--no-daemon",
-                    "--dangerously-bypass-approvals-and-sandbox",
-                    "<prompt>",
-                ],
-                &[
-                    "codex",
-                    "--enable",
-                    "daemon_auto_start",
-                    "--dangerously-bypass-approvals-and-sandbox",
-                    "<prompt>",
-                ],
-                &["hermes", "chat", "--tui"],
-                &["hermes", "gateway", "status"],
-                &["opencode", "serve", "--service"],
-                &["claude"],
-                &[],
+        fn an_argv_matches_a_signature_only_by_its_program_then_contiguous_subcommand() {
+            let codex = &["codex app-server"][..];
+            let hermes = &["hermes gateway run"][..];
+            let none: &[&str] = &[];
+            let cases: [(&str, &[&str], &[&str]); 16] = [
+                ("codex daemon", CODEX_DAEMON, codex),
+                (
+                    "hermes gateway with options before the subcommand",
+                    HERMES_GATEWAY,
+                    hermes,
+                ),
+                (
+                    "hermes program name",
+                    &["/usr/local/bin/hermes", "gateway", "run"],
+                    hermes,
+                ),
+                (
+                    "codex without the daemon",
+                    &[
+                        "codex",
+                        "--no-daemon",
+                        "--dangerously-bypass-approvals-and-sandbox",
+                        "<prompt>",
+                    ],
+                    none,
+                ),
+                (
+                    "codex enabling daemon auto start",
+                    &[
+                        "codex",
+                        "--enable",
+                        "daemon_auto_start",
+                        "--dangerously-bypass-approvals-and-sandbox",
+                        "<prompt>",
+                    ],
+                    none,
+                ),
+                ("hermes chat", &["hermes", "chat", "--tui"], none),
+                (
+                    "hermes gateway status",
+                    &["hermes", "gateway", "status"],
+                    none,
+                ),
+                ("opencode serve", &["opencode", "serve", "--service"], none),
+                ("claude", &["claude"], none),
+                ("empty argv", &[], none),
+                (
+                    "an option between subcommand tokens",
+                    &["hermes", "gateway", "--quiet", "run"],
+                    none,
+                ),
+                (
+                    "subcommand tokens out of order",
+                    &["hermes", "run", "gateway"],
+                    none,
+                ),
+                (
+                    "subcommand before the program",
+                    &["app-server", "codex"],
+                    none,
+                ),
+                (
+                    "program with a suffix",
+                    &["/usr/bin/codex-linux-sandbox", "app-server"],
+                    none,
+                ),
+                (
+                    "program with a prefix",
+                    &["/opt/xcodex", "app-server"],
+                    none,
+                ),
+                (
+                    "program in a directory of that name",
+                    &["/opt/codex/bin/node", "app-server"],
+                    none,
+                ),
             ];
-            for argv in cases {
-                assert_eq!(matching_labels(argv), Vec::<String>::new(), "{argv:?}");
-            }
-        }
-
-        #[test]
-        fn subcommand_tokens_must_be_contiguous_and_in_order() {
-            for argv in [
-                &["hermes", "gateway", "--quiet", "run"][..],
-                &["hermes", "run", "gateway"][..],
-            ] {
-                assert_eq!(matching_labels(argv), Vec::<String>::new(), "{argv:?}");
-            }
-        }
-
-        #[test]
-        fn subcommand_before_the_program_token_does_not_match() {
-            assert_eq!(
-                matching_labels(&["app-server", "codex"]),
-                Vec::<String>::new()
-            );
-        }
-
-        #[test]
-        fn program_token_compares_the_whole_final_path_component() {
-            for argv in [
-                &["/usr/bin/codex-linux-sandbox", "app-server"][..],
-                &["/opt/xcodex", "app-server"][..],
-                &["/opt/codex/bin/node", "app-server"][..],
-            ] {
-                assert_eq!(matching_labels(argv), Vec::<String>::new(), "{argv:?}");
+            for (name, argv, labels) in cases {
+                assert_eq!(matching_labels(argv), labels, "{name}");
             }
         }
 

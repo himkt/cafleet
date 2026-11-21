@@ -3435,6 +3435,678 @@ pub(crate) mod test_support {
             serde_json::from_value(reply["result"].clone()).unwrap()
         }
     }
+
+    /// The runtime scenario harness: the runner's transport, observation, event writer and input
+    /// coordinator over a scripted native child, fake terminal and temporary database, driven in
+    /// the runner loop's turn order on one virtual [`TestClock`].
+    pub(crate) mod scenario {
+        use std::io;
+        use std::sync::Arc;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use crate::broker::runtime as storage;
+        use crate::coding_agent::CodingAgent;
+        use crate::coding_agent::ComposerOperation;
+        use crate::coding_agent::ProfileCatalog;
+        use crate::coding_agent::catalog::LiteralFraming;
+        use crate::db::test_support::FaultPlan;
+        use crate::error::CafleetError;
+        use crate::runtime::service::DeferredRetry;
+        use crate::runtime::service::PreviewSweep;
+        use crate::runtime::service::QUEUE_HOUSEKEEPING_INTERVAL;
+        use crate::runtime::service::SWEEP_ATTEMPT_BUDGET;
+        use crate::runtime::service::SystemRequestTokens;
+        use crate::runtime::service::input_deadline;
+        use crate::runtime::service::sweep_snapshot;
+        use crate::runtime::service::tick_sleep;
+        use crate::runtime::test_support::Fixture;
+        use crate::runtime::transport::test_support::FakeDisplay;
+        use crate::runtime::transport::test_support::FakeInput;
+        use crate::runtime::writer::WriterBoundary;
+        use crate::runtime::writer::WriterHooks;
+        use crate::runtime::writer::test_support::WriterFixture;
+        use crate::runtime::*;
+        use crate::time::Clock;
+        use crate::time::ClockKind;
+        use crate::time::MonotonicSample;
+        use crate::time::test_support::TestClock;
+
+        /// Every scenario's shutdown unit, so a storage deadline lies 400 ms of virtual time out.
+        const SHUTDOWN_UNIT: Duration = Duration::from_millis(100);
+        /// The real-time bound on waiting for the event writer's thread.
+        const WRITER_WAIT: Duration = Duration::from_secs(10);
+        const TURN_LIMIT: usize = 100_000;
+
+        /// One scripted step of a scenario.
+        #[derive(Clone, Copy, Debug)]
+        pub(crate) enum Step {
+            /// The native child draws the bundled fixture screen with this id.
+            Screen(&'static str),
+            /// The human types these bytes into the outer terminal.
+            Type(&'static [u8]),
+            /// Runner turns until the virtual clock has advanced by at least this much.
+            Run(Duration),
+            /// A control client submits this prompt under the operation key.
+            Prompt {
+                key: &'static str,
+                literal: &'static str,
+            },
+            /// The Director sends the member a message with this body.
+            Message(&'static str),
+            Arm(FaultPlan),
+            Clear(FaultPlan),
+        }
+
+        /// A scenario as data: the native screen the child starts on, the screen it redraws after
+        /// each submit key, the steps, and the runtime event kinds the run records, in order.
+        pub(crate) struct Scenario {
+            pub(crate) name: &'static str,
+            pub(crate) screen: &'static str,
+            pub(crate) redraw: Option<&'static str>,
+            pub(crate) steps: &'static [Step],
+            pub(crate) events: &'static [&'static str],
+        }
+
+        impl Scenario {
+            /// Runs every step and asserts the recorded event kinds, returning the finished runner
+            /// for further row and byte assertions.
+            pub(crate) fn run(&self) -> Runner {
+                let mut runner = Runner::new(self.screen, self.redraw);
+                runner.settle();
+                for step in self.steps {
+                    runner.step(*step);
+                }
+                runner.settle();
+                assert_eq!(runner.event_kinds(), self.events, "{}", self.name);
+                runner
+            }
+        }
+
+        /// The scenario clock as the event writer's thread sees it: the same virtual time, but its
+        /// idle sleeps yield instead of advancing, so only scenario steps move time.
+        struct WriterClock(Arc<TestClock>);
+
+        impl Clock for WriterClock {
+            fn now(&self) -> Instant {
+                self.0.now()
+            }
+            fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+                self.0.wall_now()
+            }
+            fn monotonic_sample(&self) -> std::result::Result<MonotonicSample, CafleetError> {
+                self.0.monotonic_sample()
+            }
+            fn sleep(&self, _: Duration) {
+                std::thread::yield_now();
+            }
+            fn shutdown_unit(&self) -> Duration {
+                self.0.shutdown_unit()
+            }
+            fn kind(&self) -> ClockKind {
+                ClockKind::Deterministic
+            }
+        }
+
+        /// A writer work slice longer than any scenario, so event batches never split on time.
+        struct ScenarioWriterHooks;
+
+        impl WriterHooks for ScenarioWriterHooks {
+            fn before(&self, _: WriterBoundary, _: Instant) -> Result<()> {
+                Ok(())
+            }
+            fn work_slice(&self) -> Duration {
+                Duration::from_secs(3600)
+            }
+        }
+
+        /// The native child behind the PTY: it draws queued screens, records every byte the
+        /// runner writes to it, and draws the `redraw` screen after each write that ends with
+        /// its submit key.
+        pub(crate) struct NativeChild {
+            screens: FakeInput,
+            pub(crate) written: Vec<u8>,
+            redraw: Option<(Vec<u8>, Vec<u8>)>,
+        }
+
+        impl NativeChild {
+            fn draw(&mut self, screen: Vec<u8>) {
+                assert!(!screen.is_empty(), "an empty read is end of file");
+                self.screens.chunks.push_back(screen);
+            }
+        }
+
+        impl ByteInput for NativeChild {
+            fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                self.screens.try_read(bytes)
+            }
+        }
+
+        impl PtyIo for NativeChild {
+            fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.written.extend_from_slice(bytes);
+                if let Some((submit, screen)) = &self.redraw
+                    && self.written.ends_with(submit)
+                {
+                    self.screens.chunks.push_back(screen.clone());
+                }
+                Ok(bytes.len())
+            }
+            fn resize(&mut self, _: TerminalSize) -> Result<()> {
+                Ok(())
+            }
+            fn close(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        pub(crate) fn screen_bytes(id: &str) -> Vec<u8> {
+            use crate::coding_agent::detector::test_support::bundled_screen;
+            use crate::coding_agent::detector::test_support::native_fixture_bytes;
+            native_fixture_bytes(&bundled_screen(id))
+        }
+
+        struct NativeScreen {
+            backend: CodingAgent,
+            version: String,
+            size: TerminalSize,
+        }
+
+        fn native_screen(id: &str) -> NativeScreen {
+            let definitions = crate::coding_agent::catalog::test_support::bundled_definitions();
+            let entry = definitions["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["id"] == id)
+                .unwrap_or_else(|| panic!("bundled fixture {id} is registered"))
+                .clone();
+            let dimension = |key: &str| u16::try_from(entry[key].as_u64().unwrap()).unwrap();
+            NativeScreen {
+                backend: serde_json::from_value(entry["backend"].clone()).unwrap(),
+                version: entry["native_version"].as_str().unwrap().into(),
+                size: TerminalSize {
+                    rows: dimension("rows"),
+                    cols: dimension("cols"),
+                },
+            }
+        }
+
+        enum Pending {
+            Client(Instant),
+            Sweep(Instant),
+        }
+
+        pub(crate) struct Runner {
+            pub(crate) clock: Arc<TestClock>,
+            pub(crate) fixture: Fixture,
+            _artifacts: RunArtifacts,
+            pub(crate) writer: EventWriter,
+            pub(crate) controller: ObservationController,
+            pub(crate) transport: Transport,
+            pub(crate) coordinator: InputCoordinator,
+            pub(crate) human: FakeInput,
+            pub(crate) child: NativeChild,
+            pub(crate) display: FakeDisplay,
+            pub(crate) replies: Vec<std::result::Result<InputControlReply, CafleetError>>,
+            pending: Option<Pending>,
+            preview_sweep: PreviewSweep,
+            deferred_retry: DeferredRetry,
+            queue_housekeeping_at: Option<Instant>,
+            finished: bool,
+        }
+
+        impl Runner {
+            /// A started run of the backend and version that recorded `screen`, at its size, with
+            /// the child showing `screen`.
+            pub(crate) fn new(screen: &str, redraw: Option<&str>) -> Self {
+                let catalog = ProfileCatalog::bundled();
+                let native = native_screen(screen);
+                let clock = Arc::new(
+                    TestClock::starting_at(Instant::now()).with_shutdown_unit(SHUTDOWN_UNIT),
+                );
+                let WriterFixture {
+                    mut fixture,
+                    artifacts,
+                    lock,
+                } = WriterFixture::new();
+                let coverage = catalog
+                    .capabilities(native.backend, Some(&native.version))
+                    .detection;
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3 WHERE run_id=?4",
+                        rusqlite::params![
+                            native.backend.name(),
+                            native.version,
+                            coverage.as_str(),
+                            fixture.run.run_id
+                        ],
+                    )
+                    .unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                        rusqlite::params![native.backend.name(), fixture.run.member_id],
+                    )
+                    .unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                let mut controller = ObservationController::new(&fixture.run, catalog).unwrap();
+                let writer = EventWriter::start_with_hooks(
+                    format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                    fixture.run.clone(),
+                    lock.clone(),
+                    Arc::new(WriterClock(clock.clone())),
+                    Arc::new(ScenarioWriterHooks),
+                )
+                .unwrap();
+                let child = ProcessIdentity::current().unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",
+                        rusqlite::params![
+                            child.pid,
+                            child.start_identity,
+                            clock.wall_stamp(),
+                            fixture.run.run_id
+                        ],
+                    )
+                    .unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                let transport = Transport::new(
+                    native.size,
+                    TransportLimits {
+                        input_bytes: 65536,
+                        display_bytes: 262144,
+                        bytes_per_tick: 16384,
+                    },
+                    clock.clone(),
+                )
+                .unwrap();
+                controller
+                    .started(&fixture.run, &transport.snapshot(), &writer, clock.as_ref())
+                    .unwrap();
+                let coordinator = InputCoordinator::new(
+                    &mut fixture.conn,
+                    &fixture.run,
+                    lock,
+                    InputServices {
+                        catalog: catalog.clone(),
+                        token_source: Box::new(SystemRequestTokens),
+                        clock: clock.clone(),
+                        stage_settle: crate::runtime::input::STAGE_SETTLE,
+                        hooks: crate::runtime::input::test_support::default_input_hooks(),
+                    },
+                    clock.now() + Duration::from_secs(10),
+                )
+                .unwrap();
+                let redraw = redraw.map(|id| {
+                    let plan = catalog
+                        .composer_plan(native.backend, &native.version, ComposerOperation::Prompt)
+                        .expect("a redraw after submit needs the profile's prompt plan");
+                    let submit = plan
+                        .stages("x", LiteralFraming::Plain)
+                        .unwrap()
+                        .into_iter()
+                        .last()
+                        .expect("a prompt plan ends with its submit key");
+                    (submit, screen_bytes(id))
+                });
+                let mut child = NativeChild {
+                    screens: FakeInput::default(),
+                    written: Vec::new(),
+                    redraw,
+                };
+                child.draw(screen_bytes(screen));
+                Self {
+                    clock,
+                    fixture,
+                    _artifacts: artifacts,
+                    writer,
+                    controller,
+                    transport,
+                    coordinator,
+                    human: FakeInput::default(),
+                    child,
+                    display: FakeDisplay::default(),
+                    replies: Vec::new(),
+                    pending: None,
+                    preview_sweep: PreviewSweep::default(),
+                    deferred_retry: DeferredRetry::default(),
+                    queue_housekeeping_at: None,
+                    finished: false,
+                }
+            }
+
+            pub(crate) fn step(&mut self, step: Step) {
+                match step {
+                    Step::Screen(id) => self.child.draw(screen_bytes(id)),
+                    Step::Type(bytes) => {
+                        assert!(!bytes.is_empty(), "an empty read is end of file");
+                        self.human.chunks.push_back(bytes.to_vec());
+                    }
+                    Step::Run(duration) => self.run_for(duration),
+                    Step::Prompt { key, literal } => {
+                        self.submit(InputControlOperation::SubmitPrompt(SubmitInput {
+                            operation_key: key.into(),
+                            input_kind: storage::InputKind::Prompt,
+                            literal: literal.into(),
+                        }))
+                    }
+                    Step::Message(body) => {
+                        let run = &self.fixture.run;
+                        let (director, member) = (run.director_member_id, run.member_id);
+                        crate::broker::send_message(&mut self.fixture.conn, director, member, body)
+                            .unwrap();
+                    }
+                    Step::Arm(plan) => plan.arm(&mut self.fixture.conn),
+                    Step::Clear(plan) => plan.clear(&mut self.fixture.conn),
+                }
+            }
+
+            /// Turns until every queued screen and typed byte is consumed and nothing more moves.
+            pub(crate) fn settle(&mut self) {
+                for _ in 0..TURN_LIMIT {
+                    let start = self.clock.elapsed();
+                    self.turn();
+                    if self.child.screens.chunks.is_empty()
+                        && self.human.chunks.is_empty()
+                        && self.pending.is_none()
+                        && self.clock.elapsed() > start
+                    {
+                        return;
+                    }
+                }
+                panic!("the scenario settles within {TURN_LIMIT} turns");
+            }
+
+            pub(crate) fn run_for(&mut self, duration: Duration) {
+                let until = self.clock.elapsed() + duration;
+                for _ in 0..TURN_LIMIT {
+                    if self.clock.elapsed() >= until {
+                        return;
+                    }
+                    self.turn();
+                }
+                panic!("{duration:?} of virtual time passes within {TURN_LIMIT} turns");
+            }
+
+            /// One runner loop turn of a started runner, in `RunnerLoop::tick_running` order,
+            /// followed by its idle sleep.
+            pub(crate) fn turn(&mut self) {
+                self.await_writer();
+                let clock = self.clock.clone();
+                let progress = self
+                    .coordinator
+                    .progress_with_manual(&mut self.transport, |transport| {
+                        transport.tick(
+                            &mut self.human,
+                            &mut self.child,
+                            &mut self.display,
+                            &mut self.controller.observer(&self.writer, clock.as_ref()),
+                        )
+                    })
+                    .unwrap();
+                self.controller
+                    .poll(&self.transport.snapshot(), &self.writer, clock.as_ref())
+                    .unwrap();
+                self.housekeep_queue();
+                if self.pending.is_some() {
+                    self.complete_pending_input();
+                } else {
+                    self.retry_deferred();
+                    self.sweep_previews();
+                }
+                self.await_writer();
+                let pause = tick_sleep(
+                    &progress,
+                    self.controller.status().next_deadline,
+                    clock.now(),
+                );
+                if !pause.is_zero() {
+                    clock.sleep(pause);
+                }
+            }
+
+            /// Waits in real time until the writer has persisted every accepted event or reported
+            /// a failure, so each turn observes a settled sink.
+            fn await_writer(&self) {
+                let until = Instant::now() + WRITER_WAIT;
+                loop {
+                    let status = self.writer.status();
+                    if status.pending_count == 0 || status.diagnostic.is_some() {
+                        return;
+                    }
+                    assert!(Instant::now() < until, "the event writer settles: {status:?}");
+                    std::thread::yield_now();
+                }
+            }
+
+            fn quiesce(
+                &mut self,
+                deadline: Instant,
+            ) -> std::result::Result<InputDrain, InputFailure> {
+                let clock = self.clock.clone();
+                self.coordinator
+                    .progress_with_manual(&mut self.transport, |transport| {
+                        transport.quiesce_for_input(
+                            &mut self.human,
+                            &mut self.child,
+                            &mut self.display,
+                            &mut self.controller.observer(&self.writer, clock.as_ref()),
+                            deadline,
+                        )
+                    })
+            }
+
+            fn advance(&mut self, deadline: Instant) -> Result<Option<InputControlReply>> {
+                self.coordinator
+                    .advance(
+                        &mut self.fixture.conn,
+                        &mut self.transport,
+                        &mut self.child,
+                        &self.controller,
+                        deadline,
+                    )
+                    .map_err(CafleetError::from)
+            }
+
+            /// Admits a control request the way the runner serves an input client.
+            pub(crate) fn submit(&mut self, operation: InputControlOperation) {
+                let expires = self.clock.now() + Duration::from_secs(30);
+                let request = InputControlRequest {
+                    identity: ControlIdentity::from_run(&self.fixture.run),
+                    expires_at_mono_ns: InputExpiration::capture(expires, self.clock.as_ref())
+                        .unwrap()
+                        .monotonic_ns(),
+                    operation,
+                };
+                let deadline =
+                    input_deadline(&request, self.clock.now(), self.clock.as_ref()).unwrap();
+                match self.coordinator.handle_received(
+                    &mut self.fixture.conn,
+                    request,
+                    &self.controller,
+                    deadline,
+                ) {
+                    Ok(Some(reply)) => self.replies.push(Ok(reply)),
+                    Ok(None) => {
+                        assert!(self.pending.is_none(), "one immediate attempt at a time");
+                        self.pending = Some(Pending::Client(deadline));
+                    }
+                    Err(failure) => self.replies.push(Err(CafleetError::from(failure))),
+                }
+            }
+
+            fn complete_pending_input(&mut self) {
+                let deadline = match self.pending.as_ref().expect("an attempt is in flight") {
+                    Pending::Client(deadline) | Pending::Sweep(deadline) => *deadline,
+                };
+                let result = match self.quiesce(deadline) {
+                    Err(failure) => self
+                        .coordinator
+                        .pending_attempt_failed(&mut self.fixture.conn, &self.controller, failure)
+                        .map(Some)
+                        .map_err(CafleetError::from),
+                    Ok(InputDrain::Pending) => Ok(None),
+                    Ok(InputDrain::Quiescent) => self.advance(deadline),
+                };
+                if matches!(result, Ok(None)) {
+                    return;
+                }
+                self.coordinator.finish_pending_attempt();
+                self.deferred_retry.next_at = None;
+                match self.pending.take().expect("an attempt is in flight") {
+                    Pending::Sweep(_) => self.finish_sweep(
+                        result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
+                    ),
+                    Pending::Client(_) => self.replies.push(
+                        result.map(|reply| reply.expect("a completed input has a reply")),
+                    ),
+                }
+            }
+
+            fn retry_deferred(&mut self) {
+                if !self.coordinator.has_deferred_work()
+                    || !self.deferred_retry.due(
+                        self.coordinator.deferred_attempt_writing(),
+                        self.controller.status(),
+                        self.clock.now(),
+                    )
+                {
+                    return;
+                }
+                let deadline = self.clock.now() + Duration::from_secs(5);
+                if let Ok(InputDrain::Quiescent) = self.quiesce(deadline)
+                    && let Err(failure) = self.advance(deadline)
+                {
+                    assert!(
+                        !self.coordinator.deferred_failed(),
+                        "deferred input stops the runner: {failure}"
+                    );
+                }
+            }
+
+            fn housekeep_queue(&mut self) {
+                let now = self.clock.now();
+                if self.queue_housekeeping_at.is_some_and(|at| now < at) {
+                    return;
+                }
+                self.queue_housekeeping_at = Some(now + QUEUE_HOUSEKEEPING_INTERVAL);
+                if let Err(failure) = self
+                    .coordinator
+                    .queue_housekeeping(&mut self.fixture.conn, &self.controller)
+                {
+                    assert!(
+                        !self.coordinator.deferred_failed(),
+                        "queue housekeeping stops the runner: {failure}"
+                    );
+                }
+            }
+
+            fn sweep_previews(&mut self) {
+                let now = self.clock.now();
+                self.preview_sweep
+                    .observe(self.controller.status().eligibility);
+                if !self.coordinator.sweep_may_start() || !self.preview_sweep.due(now) {
+                    return;
+                }
+                let deadline = now + SWEEP_ATTEMPT_BUDGET;
+                let run = self.fixture.run.clone();
+                match crate::db::with_database_deadline(&mut self.fixture.conn, deadline, |conn| {
+                    sweep_snapshot(conn, &run)
+                }) {
+                    Ok(Some(message)) => {
+                        let reply = self
+                            .coordinator
+                            .handle_preview(&mut self.fixture.conn, &message, &self.controller, deadline)
+                            .map_err(CafleetError::from);
+                        match reply {
+                            Ok(None) => self.pending = Some(Pending::Sweep(deadline)),
+                            Ok(Some(reply)) => self.finish_sweep(Ok(reply)),
+                            Err(cause) => self.finish_sweep(Err(cause)),
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(_) => self.preview_sweep.back_off(self.clock.now()),
+                }
+            }
+
+            fn finish_sweep(&mut self, reply: Result<InputControlReply>) {
+                let now = self.clock.now();
+                let submission = match reply {
+                    Ok(InputControlReply::Submission(submission)) => submission,
+                    Ok(_) => unreachable!("a preview submission replies with a submission"),
+                    Err(_) => {
+                        self.preview_sweep.back_off(now);
+                        return;
+                    }
+                };
+                match submission.status {
+                    SubmissionStatus::Accepted => self.preview_sweep.reset(),
+                    SubmissionStatus::Held
+                        if matches!(
+                            submission.reason.as_deref(),
+                            Some(
+                                "pane_input_busy"
+                                    | "storage_unavailable"
+                                    | "observer_unavailable"
+                                    | "delivery_budget_exhausted"
+                            )
+                        ) =>
+                    {
+                        self.preview_sweep.back_off(now)
+                    }
+                    SubmissionStatus::Held
+                    | SubmissionStatus::Queued
+                    | SubmissionStatus::Rejected
+                    | SubmissionStatus::Uncertain => {}
+                }
+            }
+
+            pub(crate) fn event_kinds(&self) -> Vec<String> {
+                self.fixture
+                    .conn
+                    .prepare(
+                        "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
+                    )
+                    .unwrap()
+                    .query_map([self.fixture.run.run_id], |row| row.get(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            }
+
+            pub(crate) fn eligibility(&self) -> InputEligibility {
+                self.controller.health(&self.writer).eligibility
+            }
+
+            /// Stops the writer at the shutdown storage deadline and returns its unsaved
+            /// `(pending, gap)` counts; a writer that cannot persist is abandoned at that deadline.
+            pub(crate) fn finish(&mut self) -> (u64, u64) {
+                self.finished = true;
+                self.await_writer();
+                let until = ShutdownDeadlines::starting_now(self.clock.as_ref()).storage_deadline();
+                self.writer.begin_shutdown(until);
+                if self.writer.status().pending_count > 0 {
+                    self.clock
+                        .advance(until.saturating_duration_since(self.clock.now()));
+                }
+                self.writer.finish(until)
+            }
+        }
+
+        impl Drop for Runner {
+            fn drop(&mut self) {
+                if !self.finished && !std::thread::panicking() {
+                    self.finish();
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4989,6 +5661,177 @@ mod tests {
             first(&mut partial, &mut peer, 0, deadline);
             peer.shutdown(Shutdown::Write).unwrap();
             assert!(partial.poll(&crate::time::SystemClock).is_err());
+        }
+    }
+
+    mod scenarios {
+        use std::time::Duration;
+
+        use crate::coding_agent::ComposerOperation;
+        use crate::coding_agent::ProfileCatalog;
+        use crate::coding_agent::catalog::LiteralFraming;
+        use crate::db::test_support::FaultPlan;
+        use crate::runtime::service::test_support::scenario::*;
+        use crate::runtime::*;
+
+        const IDLE: &str = "codex-0.167.0-composer-idle-empty-tmux-120-1";
+        const APPROVAL: &str = "codex-0.167.0-allow-pre-stage-tmux-120-1";
+        const STATUS: &str = "codex-0.167.0-auto-status-tmux-120-1";
+        const EVENT_FAULT: FaultPlan = FaultPlan::Abort {
+            trigger: "scenario_event_fault",
+            on: "BEFORE INSERT ON member_runtime_events",
+            message: "scenario event fault",
+        };
+
+        fn prompt_program(literal: &str) -> Vec<u8> {
+            ProfileCatalog::bundled()
+                .composer_plan(
+                    crate::coding_agent::CodingAgent::Codex,
+                    "0.167.0",
+                    ComposerOperation::Prompt,
+                )
+                .unwrap()
+                .stages(literal, LiteralFraming::Plain)
+                .unwrap()
+                .concat()
+        }
+
+        #[test]
+        fn screen_scenarios_record_their_event_sequences() {
+            const SCENARIOS: &[Scenario] = &[
+                Scenario {
+                    name: "an idle composer records nothing",
+                    screen: IDLE,
+                    redraw: None,
+                    steps: &[Step::Run(Duration::from_secs(2))],
+                    events: &[],
+                },
+                Scenario {
+                    name: "an approval form opens an interaction that a later screen closes",
+                    screen: STATUS,
+                    redraw: None,
+                    steps: &[
+                        Step::Screen(APPROVAL),
+                        Step::Run(Duration::from_secs(1)),
+                        Step::Screen(STATUS),
+                        Step::Run(Duration::from_secs(1)),
+                    ],
+                    events: &["interaction_opened", "interaction_closed"],
+                },
+            ];
+            for scenario in SCENARIOS {
+                let mut runner = scenario.run();
+                assert_eq!(runner.finish(), (0, 0), "{}", scenario.name);
+            }
+        }
+
+        #[test]
+        fn human_typing_reaches_the_child_and_the_child_screen_reaches_the_display() {
+            const TYPING: Scenario = Scenario {
+                name: "typing",
+                screen: IDLE,
+                redraw: None,
+                steps: &[Step::Type(b"typed by hand")],
+                events: &[],
+            };
+            let mut runner = TYPING.run();
+            assert_eq!(runner.child.written, b"typed by hand");
+            assert_eq!(runner.display.bytes, screen_bytes(IDLE));
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn a_prompt_into_a_verified_empty_composer_writes_its_plan_and_is_accepted() {
+            const LITERAL: &str = "scenario prompt";
+            const PROMPT: Scenario = Scenario {
+                name: "prompt",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                steps: &[
+                    Step::Prompt {
+                        key: "scenario:prompt",
+                        literal: LITERAL,
+                    },
+                    Step::Run(Duration::from_secs(5)),
+                ],
+                events: &[],
+            };
+            let mut runner = PROMPT.run();
+            assert_eq!(runner.child.written, prompt_program(LITERAL));
+            let [Ok(InputControlReply::Submission(reply))] = runner.replies.as_slice() else {
+                panic!("one submission reply, got {}", runner.replies.len());
+            };
+            assert_eq!(reply.status, SubmissionStatus::Accepted);
+            assert_eq!(reply.stage, SubmissionStage::Submitted);
+            assert!(
+                runner
+                    .clock
+                    .sleeps()
+                    .iter()
+                    .sum::<Duration>()
+                    >= crate::runtime::input::STAGE_SETTLE,
+                "the staged write settles on the virtual clock"
+            );
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn the_sweep_types_a_stored_message_into_the_empty_composer_and_stamps_it() {
+            const PREVIEW: Scenario = Scenario {
+                name: "preview",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                steps: &[
+                    Step::Message("scenario preview"),
+                    Step::Run(Duration::from_secs(3)),
+                ],
+                events: &[],
+            };
+            let mut runner = PREVIEW.run();
+            let notified: Option<String> = runner
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE to_member_id=?1",
+                    [runner.fixture.run.member_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(notified.is_some(), "the delivered preview is stamped");
+            let typed = String::from_utf8_lossy(&runner.child.written).into_owned();
+            assert!(typed.contains("scenario preview"), "{typed:?}");
+            assert_eq!(runner.finish(), (0, 0));
+        }
+
+        #[test]
+        fn an_event_storage_fault_holds_input_until_the_writer_persists_again() {
+            const FAULTED: Scenario = Scenario {
+                name: "event fault",
+                screen: STATUS,
+                redraw: None,
+                steps: &[
+                    Step::Arm(EVENT_FAULT),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                ],
+                events: &[],
+            };
+            let mut runner = FAULTED.run();
+            assert!(runner.writer.status().diagnostic.is_some());
+            assert_eq!(
+                runner.eligibility(),
+                InputEligibility::Hold(GateReason::Gap)
+            );
+            runner.step(Step::Clear(EVENT_FAULT));
+            runner.step(Step::Run(Duration::from_secs(5)));
+            assert!(
+                runner
+                    .event_kinds()
+                    .contains(&"interaction_opened".to_owned()),
+                "{:?}",
+                runner.event_kinds()
+            );
+            runner.finish();
         }
     }
 }

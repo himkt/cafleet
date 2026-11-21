@@ -676,6 +676,45 @@ pub(crate) mod test_support {
         }
     }
 
+    /// A storage fault a test arms and clears. `Abort` installs a trigger in the database file,
+    /// so every connection's matching statement fails with `message`; `RefuseCommit` turns each
+    /// commit on the arming connection into a rollback.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum FaultPlan {
+        Abort {
+            trigger: &'static str,
+            on: &'static str,
+            message: &'static str,
+        },
+        RefuseCommit,
+    }
+
+    impl FaultPlan {
+        pub(crate) fn arm(self, conn: &mut Connection) {
+            match self {
+                Self::Abort {
+                    trigger,
+                    on,
+                    message,
+                } => conn
+                    .execute_batch(&format!(
+                        "CREATE TRIGGER {trigger} {on} BEGIN SELECT RAISE(ABORT,'{message}'); END"
+                    ))
+                    .unwrap(),
+                Self::RefuseCommit => conn.commit_hook(Some(|| true)).unwrap(),
+            }
+        }
+
+        pub(crate) fn clear(self, conn: &mut Connection) {
+            match self {
+                Self::Abort { trigger, .. } => conn
+                    .execute_batch(&format!("DROP TRIGGER {trigger}"))
+                    .unwrap(),
+                Self::RefuseCommit => conn.commit_hook(None::<fn() -> bool>).unwrap(),
+            }
+        }
+    }
+
     pub(crate) fn wal_snapshot(database: &Path) -> [(PathBuf, Vec<u8>); 3] {
         ["", "-wal", "-shm"].map(|suffix| {
             let path = PathBuf::from(format!("{}{suffix}", database.display()));

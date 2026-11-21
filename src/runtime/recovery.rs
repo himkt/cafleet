@@ -900,37 +900,46 @@ mod tests {
         #[test]
         fn runner_recovery_terminal_bookkeeping_faults_rollback_atomically_then_retry_without_events()
          {
-            for fault in ["owner", "diagnostic", "finish", "commit"] {
+            use crate::db::test_support::FaultPlan;
+            const FAULTS: &[(&str, FaultPlan)] = &[
+                (
+                    "owner",
+                    FaultPlan::Abort {
+                        trigger: "fail_history",
+                        on: "BEFORE UPDATE OF owner_epoch ON member_runs",
+                        message: "owned history owner fault",
+                    },
+                ),
+                (
+                    "diagnostic",
+                    FaultPlan::Abort {
+                        trigger: "fail_history",
+                        on: "BEFORE UPDATE OF cleanup_diagnostics_json ON member_runs",
+                        message: "owned history diagnostic fault",
+                    },
+                ),
+                (
+                    "finish",
+                    FaultPlan::Abort {
+                        trigger: "fail_history",
+                        on: "BEFORE UPDATE OF cleanup_state ON member_runs WHEN NEW.cleanup_state='complete'",
+                        message: "owned history finish fault",
+                    },
+                ),
+                ("commit", FaultPlan::RefuseCommit),
+            ];
+            for &(fault, plan) in FAULTS {
                 let mut case = original_terminal(RunStatus::Failed);
                 let before_run = case.fixture.run.clone();
                 let prior = retained_history(&case.fixture.conn);
                 let artifact = lose_artifacts(&mut case, false);
-                let trigger = match fault {
-                    "owner" => Some(
-                        "CREATE TRIGGER fail_history BEFORE UPDATE OF owner_epoch ON member_runs BEGIN SELECT RAISE(ABORT,'owned history owner fault'); END",
-                    ),
-                    "diagnostic" => Some(
-                        "CREATE TRIGGER fail_history BEFORE UPDATE OF cleanup_diagnostics_json ON member_runs BEGIN SELECT RAISE(ABORT,'owned history diagnostic fault'); END",
-                    ),
-                    "finish" => Some(
-                        "CREATE TRIGGER fail_history BEFORE UPDATE OF cleanup_state ON member_runs WHEN NEW.cleanup_state='complete' BEGIN SELECT RAISE(ABORT,'owned history finish fault'); END",
-                    ),
-                    "commit" => None,
-                    _ => unreachable!(),
-                };
-                fail_next(&mut case.fixture.conn, trigger);
+                plan.arm(&mut case.fixture.conn);
                 let before = rows(&case.fixture.conn);
                 let result = recover_missing(&mut case);
-                case.fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
+                plan.clear(&mut case.fixture.conn);
                 assert!(result.is_err(), "{fault}");
                 assert_eq!(rows(&case.fixture.conn), before, "{fault}");
-                assert_eq!(metadata(&artifact.path), artifact.identity);
-                if trigger.is_some() {
-                    case.fixture
-                        .conn
-                        .execute_batch("DROP TRIGGER fail_history")
-                        .unwrap();
-                }
+                assert_eq!(metadata(&artifact.path), artifact.identity, "{fault}");
                 if fault == "commit" {
                     let report = recover_missing(&mut case).unwrap();
                     assert_terminal_bookkeeping(
@@ -1094,41 +1103,59 @@ mod tests {
         #[test]
         fn runner_recovery_missing_path_faults_rollback_owner_provenance_counters_episode_and_events_together()
          {
-            for fault in [
-                "owner",
-                "provenance",
-                "closure",
-                "loss",
-                "terminal",
-                "commit",
-            ] {
+            use crate::db::test_support::FaultPlan;
+            const FAULTS: &[(&str, FaultPlan)] = &[
+                (
+                    "owner",
+                    FaultPlan::Abort {
+                        trigger: "fault",
+                        on: "BEFORE UPDATE OF owner_epoch ON member_runs",
+                        message: "injected owner failure",
+                    },
+                ),
+                (
+                    "provenance",
+                    FaultPlan::Abort {
+                        trigger: "fault",
+                        on: "BEFORE UPDATE OF cleanup_diagnostics_json ON member_runs",
+                        message: "injected provenance failure",
+                    },
+                ),
+                (
+                    "closure",
+                    FaultPlan::Abort {
+                        trigger: "fault",
+                        on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='interaction_closed'",
+                        message: "injected closure failure",
+                    },
+                ),
+                (
+                    "loss",
+                    FaultPlan::Abort {
+                        trigger: "fault",
+                        on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='runner_lost'",
+                        message: "injected loss failure",
+                    },
+                ),
+                (
+                    "terminal",
+                    FaultPlan::Abort {
+                        trigger: "fault",
+                        on: "BEFORE UPDATE OF status ON member_runs WHEN NEW.status='lost'",
+                        message: "injected terminal failure",
+                    },
+                ),
+                ("commit", FaultPlan::RefuseCommit),
+            ];
+            for &(fault, plan) in FAULTS {
                 let mut case = Case::new();
                 persist_opening(&mut case);
                 missing_lock(&mut case);
-                let statement = match fault {
-                    "owner" => Some(
-                        "CREATE TRIGGER fault BEFORE UPDATE OF owner_epoch ON member_runs BEGIN SELECT RAISE(ABORT,'injected owner failure'); END",
-                    ),
-                    "provenance" => Some(
-                        "CREATE TRIGGER fault BEFORE UPDATE OF cleanup_diagnostics_json ON member_runs BEGIN SELECT RAISE(ABORT,'injected provenance failure'); END",
-                    ),
-                    "closure" => Some(
-                        "CREATE TRIGGER fault BEFORE INSERT ON member_runtime_events WHEN NEW.kind='interaction_closed' BEGIN SELECT RAISE(ABORT,'injected closure failure'); END",
-                    ),
-                    "loss" => Some(
-                        "CREATE TRIGGER fault BEFORE INSERT ON member_runtime_events WHEN NEW.kind='runner_lost' BEGIN SELECT RAISE(ABORT,'injected loss failure'); END",
-                    ),
-                    "terminal" => Some(
-                        "CREATE TRIGGER fault BEFORE UPDATE OF status ON member_runs WHEN NEW.status='lost' BEGIN SELECT RAISE(ABORT,'injected terminal failure'); END",
-                    ),
-                    "commit" => None,
-                    _ => unreachable!(),
-                };
-                fail_next(&mut case.fixture.conn, statement);
+                plan.arm(&mut case.fixture.conn);
                 let before = rows(&case.fixture.conn);
                 let mut host = new_host();
                 let result = case.recover(&mut host);
-                case.fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
+                plan.clear(&mut case.fixture.conn);
                 assert!(result.is_err(), "{fault}");
                 assert_eq!(rows(&case.fixture.conn), before, "{fault}");
             }
@@ -2542,13 +2569,6 @@ pub(crate) mod test_support {
         Host::new(Instant::now() + Duration::from_secs(2))
     }
 
-    /// Makes the next write fail: `Some` installs that trigger, `None` refuses the next commit.
-    pub(crate) fn fail_next(conn: &mut Connection, trigger: Option<&str>) {
-        match trigger {
-            Some(trigger) => conn.execute_batch(trigger).unwrap(),
-            None => conn.commit_hook(Some(|| true)).unwrap(),
-        }
-    }
 
     pub(crate) fn rows(conn: &Connection) -> Vec<TableSnapshot> {
         crate::db::test_support::table_snapshot(conn, |_| true)

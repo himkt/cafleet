@@ -1,7 +1,7 @@
 # SPEC Neutrality, Test Simplification and Feature Reduction
 
 **Status**: Approved
-**Progress**: 67/79 tasks complete
+**Progress**: 70/79 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -725,14 +725,14 @@ Step C4 may reclassify a row when it converts the test.
 ### Step C2: Rules and clock
 
 - [x] Add the three § Rule changes bullets to `.claude/rules/code-quality.md` § Test placement and summarize the techniques in `docs/docs/contributing.md` <!-- completed: 2026-11-21T14:21 -->
-- [ ] Make `time::Clock` `Send + Sync` with the capabilities of `ObservationClock`, `InputDeadlineClock` and `ShutdownClock`, make `TestClock` thread-safe, and remove the three abstractions <!-- completed: -->
-- [ ] Route every in-scope production time read and sleep in `src/runtime/` and `src/broker/runtime/` through the injected clock <!-- completed: -->
+- [x] Make `time::Clock` `Send + Sync` with the capabilities of `ObservationClock`, `InputDeadlineClock` and `ShutdownClock`, make `TestClock` thread-safe, and remove the three abstractions <!-- completed: 2026-11-21T15:31 -->
+- [x] Route every in-scope production time read and sleep in `src/runtime/` and `src/broker/runtime/` through the injected clock <!-- completed: 2026-11-21T15:31 -->
 
 COMMENT(programmer): C2 phase (b) production is in the tree (typecheck clean). Every in-scope production time read and sleep now goes through `time::Clock`: the runner's `RunnerDependencies.clock` reaches the writer, transport, PTY session, input coordinator, observation controller, lifecycle shutdown and recovery. Entry points reached from outside the scope get their clock from a host or a parameter (`src/cli` passes `SystemClock`), and `system.rs`'s real-process runner reads `SystemClock`. `Clock` gained `wall_now()` (`DateTime<Utc>`), and `wall_stamp()` is now its provided formatted form. The SQL stamps in `src/broker/runtime/` stay on `now_stamp()`. Test-region rewrite rules (signature changes): (1) `nap_until(deadline)` → `nap_until(clock, deadline)`; `control::pause(deadline)` → `pause(deadline, clock)`. (2) `EventWriter::start(url, run, lock, clock)`, `start_with_hooks(url, run, lock, clock, hooks)`; `PtySession::prepare(size, clock)` and `Transport::new(size, limits, clock)` take an `Arc<dyn Clock>`; `InputServices` has a `clock: Arc<dyn Clock>` field. (3) Host traits: `LaunchHost::now` and `ShutdownHost::now` become `fn clock(&self) -> &dyn Clock`; `InputCommandHost` gains `fn clock(&self) -> &dyn Clock`; `RecoveryHost` gains `fn clock(&self) -> Arc<dyn Clock>` (an owned handle, because descriptor removal borrows the host mutably); `NativeLaunchHost::new(mux, target, cwd, clock)`. (4) Control: `ControlClient::connect`/`connect_starting(path, deadline, clock)`, `exchange(request, deadline, clock)`, `exchange_input(request, deadline, clock)`, `control::request(run, request, deadline, clock)`, `request_shutdown(conn, run, deadline, clock)`, `probe_health(run, deadline, clock)`. (5) Artifacts and recovery: `RunLock::transfer_to_runner_with_deadline(conn, owner, process, deadline, clock)` (its `#[cfg(test)]` `transfer_to_runner` wrapper passes `SystemClock`), `transfer_to_reconciler_checked(conn, expected, process, deadline, check, clock)`, `RecoveryDescriptor::pin(conn, run, lock, until, clock)`, `remove(conn, run, lock, until, clock, unlink)`, `process::recover_descendants(run, deadlines, clock)`. (6) `Client::poll(clock)` in `src/runtime/service.rs`. (7) A test type implementing `Clock` implements `wall_now` instead of `wall_stamp`. (8) `src/runtime/process.rs` no longer imports `std::time::Instant` at the top, so its test modules import it themselves. The first `mise //:test` pass reports 24 errors (in `process.rs`, `observation.rs`, `lifecycle.rs`, `input_client.rs`, `input.rs`, `recovery.rs`, `writer.rs`); rules 1–8 cover the rest as they surface. `mise //:lint` also needs `TestClock::advance` and `with_shutdown_unit` used by a test (phase (a) left them unused).
 
 ### Step C3: Harness
 
-- [ ] Build the runtime scenario harness in `src/runtime/service.rs` `test_support` with fixture-rendered screens, fake multiplexer, temporary SQLite, `TestClock` and SQLite fault plans <!-- completed: -->
+- [x] Build the runtime scenario harness in `src/runtime/service.rs` `test_support` with fixture-rendered screens, fake multiplexer, temporary SQLite, `TestClock` and SQLite fault plans <!-- completed: 2026-11-21T15:41 -->
 
 ### Step C4: Conversion
 
