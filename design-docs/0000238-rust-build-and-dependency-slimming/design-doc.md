@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
 **Status**: Approved
-**Progress**: 33/37 tasks complete
+**Progress**: 37/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -355,20 +355,20 @@ Record the results in this section as a table with metric, before, after and loa
 
 #### Results
 
-Before-values were measured on 2026-11-21 in a detached worktree at `27ea540f` (cafleet 0.35.4, Rust 1.100.0, 8 CPUs), with the Tester building in parallel. Load is the `/proc/loadavg` 1-minute value before each run. Cargo 1.100 places the test executable under `<target>/debug/build/cafleet/<hash>/out/cafleet-<hash>`, not `target/debug/deps/`.
+Before-values were measured on 2026-11-21 in a detached worktree at `27ea540f` (cafleet 0.35.4, Rust 1.100.0, 8 CPUs), with the Tester building in parallel. After-values were measured the same day on the final tree at `26f04791` on the same host: crate counts, cold builds and suite runs in the main checkout, and incremental builds in a byte-identical copy of its sources under `/tmp`, so the timing edit never touched the checkout. Load is the `/proc/loadavg` 1-minute value before each run. Cargo 1.100 places the test executable under `<target>/debug/build/cafleet/<hash>/out/cafleet-<hash>`, not `target/debug/deps/`.
 
-| Metric | Before | After | Load (before) |
+| Metric | Before | After | Load per run (before; after) |
 |---|---|---|---|
-| Crate counts as is (Linux normal / Linux normal+build / darwin normal+build) | 122 / 130 / 139 | — | — |
-| Crate counts pruned (expected after-value) | 75 / 83 / 82 | — | — |
-| Cold test build (median of 125, 112, 96 s) | 112 s | — | 9.60, 7.43, 9.82 |
-| Incremental test build (median of 5.72, 5.60, 6.27 s) | 5.72 s | — | 8.98, 8.57, 8.01 |
-| Test binary size | 207,265,056 B (198 MiB) | — | — |
-| Local suite wall time, `mise //:test` on 8 threads (median of 62.1, 33.7, 42.8 s; harness-reported 54.3, 32.1, 41.1 s) | 42.8 s | — | 7.05, 5.46, 6.33 |
-| CI ubuntu `test` job, last `main` run before the change: run 44897372541 (https://github.com/himkt/cafleet/actions/runs/44897372541) at `8f0a6d6b` | 215 s job; 163 s `mise //:test` step | — | — |
-| CI macOS `test` job | — | — | — |
+| Crate counts (Linux normal / Linux normal+build / darwin normal+build) | 122 / 130 / 139 | 75 / 83 / 82, equal to the Step 1 pruned counts | — |
+| Cold test build (before 125, 112, 96 s; after 70, 70, 67 s) | 112 s | 70 s | 9.60, 7.43, 9.82; 8.70, 11.19, 10.63 |
+| Incremental test build (before 5.72, 5.60, 6.27 s; after 5.32, 5.27, 5.80 s) | 5.72 s | 5.32 s | 8.98, 8.57, 8.01; 10.59, 10.46, 9.77 |
+| Test binary size | 207,265,056 B (198 MiB) | 129,783,288 B (124 MiB) | — |
+| Local suite wall time, `mise //:test` on 8 threads (before 62.1, 33.7, 42.8 s; after 31.3, 30.5, 31.4 s) | 42.8 s | 31.3 s | 7.05, 5.46, 6.33; 8.90, 10.53, 11.70 |
+| Local suite harness time (before 54.3, 32.1, 41.1 s; after 29.2, 29.0, 29.8 s) | 41.1 s | 29.2 s | same runs |
+| CI ubuntu `test` job: before, last `main` run 44897372541 (https://github.com/himkt/cafleet/actions/runs/44897372541) at `8f0a6d6b`; after, PR run 44902706007 (https://github.com/himkt/cafleet/actions/runs/44902706007) at `26f04791` | 215 s job; 163 s `mise //:test` step | 167 s job; 115 s `mise //:test` step | — |
+| CI macOS `test` job, PR run 44902706007 at `26f04791` | — | 206 s job; 161 s `mise //:test` step | — |
 
-The first suite run includes an incremental rebuild of about 6 s after the incremental-build measurement restored `now_stamp`.
+The first before-suite run includes an incremental rebuild of about 6 s after the incremental-build measurement restored `now_stamp`. The after-suite runs recompiled nothing.
 
 #### Suite-regression check result
 
@@ -411,6 +411,16 @@ Initialized database at /Users/runner/work/_temp/smoke.db.
 ```
 
 `setup` also installed every backend's skills and assets under the temporary `HOME` and skipped the Hermes plugin because the runner has no `hermes` binary.
+
+#### macOS first-run failures
+
+The first macOS CI runs, 44900304239 and 44900813380, failed one lint entry and two tests. All three were fixed in this PR, and run 44902139006 (https://github.com/himkt/cafleet/actions/runs/44902139006) at `93be0503` passed all four `lint` and `test` entries, the macOS process-group tests included.
+
+| Entry | Failure | Cause | Resolution |
+|---|---|---|---|
+| `lint (macos-15)` | `clippy::chunks_exact_to_as_chunks` at `src/runtime/process.rs` `.chunks_exact(KINFO_PROC_BYTES)` | This design's new macOS `group_members` (§ First macOS CI run case 1) | Split the records with `as_chunks::<KINFO_PROC_BYTES>()`, which also yields the partial-record remainder that the length check uses |
+| `test (macos-15)` | `refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it` panicked at `src/runtime/process.rs:1022`: `session.owned.get(&pid)` was `None` for the live `/usr/bin/su` helper | Pre-existing stale test: `try_wait` scans the group only after the leader exits, so the live-leader call never pinned the helper. The test had not compiled on macOS before this branch | Test-only fix that drives the ownership refresh explicitly; `group_members` was unchanged |
+| `test (macos-15)` | `a_busy_layout_lock_fails_member_delete_and_leaves_run_pane_and_row_unchanged` panicked at `src/cli/member.rs:3065`: waited 6.43 ms < 300 ms | Pre-existing: the test depended on a host `tmux`, which `macos-15` lacks | The user chose a fix in this PR; the test was rewritten onto the fake tmux runner |
 
 ### Documentation updates
 
@@ -468,7 +478,7 @@ Initialized database at /Users/runner/work/_temp/smoke.db.
 
 - [x] Change the `//:test` task's CPU-count command per § CI <!-- completed: 2026-11-21T11:36 -->
 - [x] Restructure `ci.yml` into the Linux and macOS `lint` and `test` entries, with `CARGO_PROFILE_TEST_OPT_LEVEL=1` on the test step <!-- completed: 2026-11-21T11:36 -->
-- [ ] Push the branch and confirm all four CI entries pass, with the macOS `test` entry running the macOS process-group tests; handle failures per § First macOS CI run <!-- completed: -->
+- [x] Push the branch and confirm all four CI entries pass, with the macOS `test` entry running the macOS process-group tests; handle failures per § First macOS CI run (all four passed in run 44902139006 at `93be0503`; see § macOS first-run failures) <!-- completed: 2026-11-21T12:12 -->
 
 ### Step 6: Dev/test profiles
 
@@ -487,9 +497,9 @@ Initialized database at /Users/runner/work/_temp/smoke.db.
 
 ### Step 8: After-measurements and final validation
 
-- [ ] Measure every § Measurements metric on the final tree (3 runs each, with load) and record before/after <!-- completed: -->
-- [ ] Record the PR's ubuntu and macOS `test` job durations <!-- completed: -->
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass, and every CI entry passes on the PR <!-- completed: -->
+- [x] Measure every § Measurements metric on the final tree (3 runs each, with load) and record before/after <!-- completed: 2026-11-21T12:20 -->
+- [x] Record the PR's ubuntu and macOS `test` job durations <!-- completed: 2026-11-21T12:20 -->
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass, and every CI entry passes on the PR <!-- completed: 2026-11-21T12:20 -->
 
 Implementers leave the installed `cafleet` untouched, because the executing fleet runs on it. After the execute fleet is deleted, the Director reinstalls the CLI with `mise //:install`.
 
