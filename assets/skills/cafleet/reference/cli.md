@@ -195,13 +195,13 @@ Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C
 
 Validate identity, ownership, reachability, storage and the operation's own receipt first. Its own uncertain attempt requires inspection; while another prompt or exec of the run is uncertain, the runner's FIFO is stopped. Unknown detection alone permits fallback. A verified-composer run has empty-composer observation and the operation's measured plan from its recorded backend/native version.
 
-An open/candidate interaction (`permission_request`, `question`, `unknown_interaction`, including obscured) or earlier queued input defers a prompt or exec with zero bytes, including Escape, and leaves a preview pending. A verified empty composer with a measured plan receives text, a short settle and the measured submit key without Escape. Terminal replies and complete mouse reports during the settle preserve submission; keyboard/paste input stops it as `uncertain/manual_input`. Pointer input between literal chunks stops continuation as `pointer_input`; permission tokens and gated answers still revoke on pointer input.
+An open/candidate interaction (`permission_request`, `question`, `unknown_interaction`, including obscured) or earlier queued input defers a prompt or exec with zero bytes, including Escape, and leaves a preview pending. A verified empty composer with a measured plan receives text, a short settle and the measured submit key without Escape. Only an interaction that opens or becomes a candidate during the write stops it; keyboard, paste and pointer input and terminal replies leave the write running, and post-submit verification detects a literal that was not submitted. Permission tokens and gated answers still revoke on keyboard and pointer input.
 
 A measured plan with an unverified/nonempty composer queues a prompt or exec under `composer_busy` and leaves a preview pending, then delivers when empty; a human draft blocks previews until it is cleared or submitted. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
 
 Absent plan/profile/version probe uses fallback `submission_plan_unavailable`: Escape, settle, literal (`! ` prefix for exec), settle, Enter. Recheck interactions before each stage; permission answers require their tested plan.
 
-Long input uses a plan's declared bracketed-paste framing when the child has enabled it; otherwise a preview over its measured plain limit uses the short `poll` pointer. Oversized prompt/exec input without safe framing is refused before typing; a queued refusal settles `not_submitted/plain_limit_exceeded`. On verified-composer runs, `submitted` requires confirmation by a verified empty composer or a newly opened interaction; an ineffective submit key produces `uncertain/submit_unconfirmed`, stage `submitted`. Insufficient immediate budget returns zero-byte `queued` with `delivery_budget_exhausted`.
+Long input uses a plan's declared bracketed-paste framing when the child has enabled it; otherwise a preview over its measured plain limit uses the short `poll` pointer. Oversized prompt/exec input without safe framing is refused before typing; a queued refusal settles `not_submitted/plain_limit_exceeded`. On verified-composer runs, `submitted` requires confirmation by a verified empty composer or a newly opened interaction; an ineffective submit key records `uncertain` with an unconfirmed-submission diagnostic, stage `submitted`. Insufficient immediate budget returns zero-byte `queued` with `delivery_budget_exhausted`.
 
 ### Runner queue
 
@@ -378,7 +378,7 @@ Create/show include `member_id,name,registered_at,placement,runtime`; show also 
 
 Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health. Effective policy contains `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
 
-Uncertain prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write_failed (method=profile)` and `input_id=INPUT_ID`.
+Uncertain prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write failed: EIO (method=profile)` and `input_id=INPUT_ID`.
 
 ### Delivery reporting
 
@@ -403,7 +403,7 @@ Both automatic-review kinds carry `null` `interaction_id` and `classification`, 
 
 Automatic-review events create no interaction/input eligibility; permission commands reject their association before writing.
 
-Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification, source `runner_lifecycle`, outcome `unknown`, null `director_action` and `cause={"kind":STOP_CAUSE}` whenever recorded. A prompt or exec result has its input ID and null `message_id`, with delivery and cause derived from its receipt; an uncertain preview has null `input_id`, its `message_id` and delivery `{"status":"uncertain","method":METHOD,"reason":null}`, deduplicated by run and message. Stages are `zero_bytes,escape_only,partial,literal_complete,submitted,unknown`; an uncertain/in-progress written prefix remains `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload.
+Delivery results contain `input_id,message_id,delivery,stage`, null interaction/classification, source `runner_lifecycle`, outcome `unknown`, null `director_action` and `cause={"diagnostic":DIAGNOSTIC}` whenever a stop cause is recorded. A prompt or exec result has its input ID and null `message_id`, with delivery and cause derived from its receipt; an uncertain preview has null `input_id`, its `message_id` and delivery `{"status":"uncertain","method":METHOD,"reason":null}`, deduplicated by run and message. Stages are `zero_bytes,partial,submitted,unknown`; an uncertain or in-progress prefix short of the submit key is `partial`. Deferred first results and immediate stopped staged writes publish once, without literal payload.
 
 `input_delivery_stalled` reports a queue head that started no attempt within 3 minutes of becoming the head, once per head through recovery; time an open interaction blocks the head does not count. It carries ordered `input_id,message_id,blocking_input_id,waiting_since,delivery,cause`, where `waiting_since` is UTC RFC 3339, delivery is queued and `cause` is `{"kind":KIND,"detail":DETAIL}`; its null interaction/classification, lifecycle source and evidence shape match delivery results. The runner selects the first cause that holds:
 
@@ -436,23 +436,7 @@ Kinds: `prompt,exec,permission_response`; states: `ready,in_progress,accepted,un
 
 Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. A not-submitted receipt without a recorded method reports a null method with `method_unrecorded`. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
 
-`stop_cause` records a staged stop and survives settlement/reconciliation; it is required on transition to uncertain and otherwise nullable.
-
-| Cause | Recorded when |
-|---|---|
-| `manual_accounting_failed` | Manual-input accounting failed when a staged stage stopped |
-| `manual_input` | Keyboard/paste input since literal start or fallback Escape; pointer input also stops permission responses with this cause |
-| `pointer_input` | Pointer input between ordinary literal chunks |
-| `interaction_candidate` | A staged stage stopped on a candidate interaction |
-| `interaction_open` | A staged stage stopped on any other blocking interaction |
-| `observer_unavailable` | A staged stage stopped because the observer was unavailable or reported a gap |
-| `deadline_expired` | Complete-prefix chunk bound reached or insufficient budget remains before the submit key |
-| `submit_unconfirmed` | Submit effect remained unconfirmed; uncertain, stage `submitted` |
-| `short_write` | A stopped prefix ends inside a scalar/paste marker, or an answer stage writes short |
-| `write_failed` | PTY/checkpoint error, unrecorded possible I/O, failed/short close, short submit key, failed deferred, written immediate or permission attempt |
-| `runner_stopped` | Shutdown ended an active attempt that may have written a child byte |
-
-At checks the first matching cause among the first six wins, then an incomplete-prefix stop takes the `short_write` override. Every stop records `uncertain`, and the runner sends no second submit key. Director reconciliation of uncertainty requires nonempty evidence, owner synchronization and no active writer; an unreachable owner preserves uncertainty. Missing live placement fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`; repeating a settled ordinary disposition returns original evidence and a conflicting disposition fails. Settlement writes no input and establishes no native result.
+`stop_cause` is a free-text diagnostic naming why an attempt that wrote bytes ended without confirmed submission; it is required on transition to uncertain, survives settlement/reconciliation and is otherwise null. Its wording is non-normative. It names an interaction that appeared during the write (for example `interaction permission_request appeared`), an unconfirmed submission, an expired attempt deadline, a write failure, a runner stop, or manual input that revoked a permission response. Every stop records `uncertain`, and the runner sends no second submit key. Director reconciliation of uncertainty requires nonempty evidence, owner synchronization and no active writer; an unreachable owner preserves uncertainty. Missing live placement fails with `Error: receipt reconciliation requires the member's live runner; the input stays uncertain`; repeating a settled ordinary disposition returns original evidence and a conflicting disposition fails. Settlement writes no input and establishes no native result.
 
 Reconciling a queued `ready` prompt or exec as `not-submitted` cancels it with zero bytes and removes it from the queue.
 
