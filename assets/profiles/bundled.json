@@ -9026,169 +9026,9 @@
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           }
-        },
-        {
-          "id": "claude-auto-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^● [A-Z][A-Za-z]*\\(",
-            "end_pattern": "^  ⎿ \\x{a0}Denied by auto mode classifier ∙ \\[",
-            "max_rows": 8,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n  ⎿ \\x{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-refusal-notice",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
-            "end_pattern": "^─{3,}(?: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "line",
-              "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-unavailable",
-          "priority": 40,
-          "observation": "automatic_review_unavailable",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +auto mode disabled by settings(?:$|[^0-9A-Za-z_])",
-            "end_pattern": "^─{3,}(?: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "notice",
-              "scope": "line",
-              "pattern": "^ +(?P<notice>auto mode disabled by settings)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-mode-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "claude-auto-refusal",
-            "claude-auto-refusal-notice",
-            "claude-auto-unavailable",
-            "claude-auto-mode-indicator"
-          ],
-          "fixture_ids": [
-            "claude-2.1.302-auto-verbose-two-refusals-1",
-            "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
-            "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
-            "claude-2.1.302-auto-refusal-notice-working-1",
-            "claude-2.1.302-auto-refusal-notice-idle-1",
-            "claude-2.1.302-auto-two-refusals-notice-1",
-            "claude-2.1.302-auto-unavailable-notice-1",
-            "claude-2.1.302-auto-idle-composer-1",
-            "claude-2.1.302-auto-quote-false-positive-1",
-            "claude-2.1.302-auto-verbose-quote-false-positive-1",
-            "claude-2.1.302-auto-transcript-viewer-1",
-            "claude-2.1.302-auto-verbose-transcript-viewer-1",
-            "claude-2.1.302-auto-unavailable-manual-footer-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "claude-bash-permission",
@@ -10577,160 +10417,9 @@
               "^  Showing detailed transcript · ctrl\\+o to toggle"
             ]
           }
-        },
-        {
-          "id": "claude-auto-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^● [A-Z][A-Za-z]*\\(",
-            "end_pattern": "^  ⎿ \\x{a0}Denied by auto mode classifier ∙ \\[",
-            "max_rows": 8,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n  ⎿ \\x{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-refusal-notice",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
-            "end_pattern": "^─{3,}(?: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "line",
-              "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation"
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-unavailable",
-          "priority": 40,
-          "observation": "automatic_review_unavailable",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^ +auto mode disabled by settings(?:$|[^0-9A-Za-z_])",
-            "end_pattern": "^─{3,}(?: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* ─)?$",
-            "max_rows": 2,
-            "cursor": "any",
-            "panel_separator": "│"
-          },
-          "matchers": [
-            {
-              "id": "notice",
-              "scope": "line",
-              "pattern": "^ +(?P<notice>auto mode disabled by settings)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "claude-auto-mode-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "either",
-            "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^❯\\x{a0}"
-            ],
-            "reject_patterns": [
-              "^  Showing detailed transcript · ctrl\\+o to toggle"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "claude-auto-refusal",
-            "claude-auto-refusal-notice",
-            "claude-auto-unavailable",
-            "claude-auto-mode-indicator"
-          ],
-          "fixture_ids": [
-            "claude-2.1.322-ask-allow-post-stage-tmux-120-1",
-            "claude-2.1.322-ask-deny-post-stage-tmux-120-1",
-            "claude-2.1.322-readout-allow-post-stage-tmux-120-1",
-            "claude-2.1.322-readout-deny-post-stage-tmux-120-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "claude-bash-permission",
@@ -11269,98 +10958,9 @@
             "choices": []
           },
           "verified_noninteraction": true
-        },
-        {
-          "id": "codex-auto-review-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^✗ Request denied for codex to run [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]",
-            "end_pattern": "^[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
-            "max_rows": 6,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}](?:\\n  [^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])*)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation",
-              "row_margin": "  "
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "codex-auto-review-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^  Permissions: +Workspace \\(Approve for me\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
-            "end_pattern": "^  Permissions: +Workspace \\(Approve for me\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "codex-auto-review-refusal",
-            "codex-auto-review-indicator"
-          ],
-          "fixture_ids": [
-            "codex-0.163.0-auto-refusal-working-1",
-            "codex-0.163.0-auto-refusal-idle-1",
-            "codex-0.163.0-auto-refusal-after-overlay-1",
-            "codex-0.163.0-auto-two-refusals-1",
-            "codex-0.163.0-auto-two-refusals-resized-1",
-            "codex-0.163.0-auto-two-refusals-restored-1",
-            "codex-0.163.0-auto-denial-limit-interrupted-1",
-            "codex-0.163.0-auto-status-indicator-1",
-            "codex-0.163.0-auto-quote-false-positive-1",
-            "codex-0.163.0-auto-refusal-warning-overlay-1",
-            "codex-0.163.0-auto-warning-overlay-1",
-            "codex-0.163.0-auto-expanded-detail-1",
-            "codex-0.166.0-auto-status-tmux-120-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "codex-exec-approval"
@@ -11612,86 +11212,9 @@
               "faint": true
             }
           }
-        },
-        {
-          "id": "codex-auto-review-refusal",
-          "priority": 40,
-          "observation": "automatic_refusal",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^✗ Request denied for codex to run [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]",
-            "end_pattern": "^[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
-            "max_rows": 6,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "operation",
-              "scope": "region",
-              "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}](?:\\n  [^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])*)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\z"
-            }
-          ],
-          "extract": {
-            "operation": {
-              "matcher_id": "operation",
-              "capture": "operation",
-              "row_margin": "  "
-            },
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
-        },
-        {
-          "id": "codex-auto-review-indicator",
-          "priority": 40,
-          "observation": "automatic_review_available",
-          "region": {
-            "screen": "alternate",
-            "start_pattern": "^  Permissions: +Workspace \\(Approve for me\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
-            "end_pattern": "^  Permissions: +Workspace \\(Approve for me\\)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
-            "max_rows": 1,
-            "cursor": "any"
-          },
-          "matchers": [
-            {
-              "id": "mode",
-              "scope": "line",
-              "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
-            }
-          ],
-          "extract": {
-            "operation": null,
-            "choices": []
-          },
-          "frame": {
-            "require_patterns": [
-              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
-            ],
-            "reject_patterns": [
-              "^  k keep & next · esc dismiss & close"
-            ]
-          },
-          "verified_noninteraction": false
         }
       ],
       "capabilities": {
-        "annotations": {
-          "rule_ids": [
-            "codex-auto-review-refusal",
-            "codex-auto-review-indicator"
-          ],
-          "fixture_ids": [
-            "codex-0.167.0-auto-status-tmux-120-1"
-          ]
-        },
         "detection": {
           "rule_ids": [
             "codex-exec-approval"
@@ -12108,7 +11631,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "opencode-shell-permission",
@@ -12660,7 +12182,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "opencode-shell-permission",
@@ -13090,7 +12611,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "hermes-approval-escalate",
@@ -13515,7 +13035,6 @@
         }
       ],
       "capabilities": {
-        "annotations": null,
         "detection": {
           "rule_ids": [
             "pi-gate-approval"

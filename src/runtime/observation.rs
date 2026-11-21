@@ -1,6 +1,4 @@
 use crate::broker::runtime as storage;
-use crate::broker::runtime::AutomaticReview;
-use crate::broker::runtime::EffectivePolicyObservation;
 use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::InteractionCloseReason;
 use crate::broker::runtime::InteractionEvidenceUpdate;
@@ -12,14 +10,10 @@ use crate::broker::runtime::RuntimeCauseKind;
 use crate::broker::runtime::RuntimeEventKind;
 use crate::broker::runtime::evidence::EvidencePolicy;
 use crate::broker::stored_enum;
-use crate::coding_agent::AnnotationBlock;
-use crate::coding_agent::AnnotationFingerprint;
 use crate::coding_agent::AnswerMatch;
 use crate::coding_agent::Detector;
 use crate::coding_agent::ProfileCatalog;
 use crate::runtime::*;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 use std::time::Duration;
 use std::time::Instant;
@@ -499,28 +493,14 @@ impl ObservationController {
         })
     }
     fn retain(&mut self, update: EpisodeUpdate) -> Result<()> {
-        let primary = update
-            .transitions
-            .iter()
-            .filter(|draft| {
-                !matches!(
-                    draft.kind,
-                    RuntimeEventKind::AutomaticRefusalObserved
-                        | RuntimeEventKind::AutomaticReviewUnavailable
-                )
-            })
-            .count();
         ensure(
-            self.pending.is_none() && primary <= 2,
+            self.pending.is_none() && update.transitions.len() <= 2,
             "one bounded observation update required",
         )?;
         self.visibility = update.visibility;
         self.eligibility = update.eligibility;
         self.next_deadline = update.next_deadline;
-        if !update.transitions.is_empty()
-            || update.latest_evidence.is_some()
-            || update.effective_policy.is_some()
-        {
+        if !update.transitions.is_empty() || update.latest_evidence.is_some() {
             self.pending = Some(PendingEpisodeUpdate {
                 update,
                 next_draft: 0,
@@ -599,23 +579,8 @@ impl ObservationController {
                     );
                 }
                 let value = pending.materialized.take().expect("materialized original");
-                let carried = pending
-                    .update
-                    .effective_policy
-                    .as_ref()
-                    .filter(|observation| {
-                        observation.automatic_review == storage::AutomaticReview::Unavailable
-                            && value.kind == RuntimeEventKind::AutomaticReviewUnavailable
-                    })
-                    .cloned();
-                let carries = carried.is_some();
-                match writer.try_submit_with_policy(value, carried) {
-                    Ok(()) => {
-                        pending.next_draft += 1;
-                        if carries {
-                            pending.update.effective_policy = None;
-                        }
-                    }
+                match writer.try_submit(value) {
+                    Ok(()) => pending.next_draft += 1,
                     Err(retained) => {
                         pending.materialized = Some(retained.transition);
                         self.pending_error = Some(retained.cause);
@@ -634,13 +599,6 @@ impl ObservationController {
                     }
                 }
             } else {
-                if let Some(observation) = pending.update.effective_policy.take() {
-                    ensure(
-                        observation.automatic_review == storage::AutomaticReview::Available,
-                        "an unavailable effective policy travels with its event",
-                    )?;
-                    writer.try_record_policy(observation);
-                }
                 self.pending = None;
                 self.pending_error = None;
             }
@@ -7704,7 +7662,6 @@ pub(crate) struct EpisodeUpdate {
     pub(crate) transitions: Vec<TransitionDraft>,
     pub(crate) latest_evidence: Option<InteractionEvidenceUpdate>,
     pub(crate) next_deadline: Option<Instant>,
-    pub(crate) effective_policy: Option<EffectivePolicyObservation>,
 }
 impl EpisodeUpdate {
     pub(crate) fn new(visibility: Visibility, eligibility: InputEligibility) -> Self {
@@ -7714,87 +7671,11 @@ impl EpisodeUpdate {
             transitions: Vec::new(),
             latest_evidence: None,
             next_deadline: None,
-            effective_policy: None,
         }
     }
 }
 fn earliest(deadline: &mut Option<Instant>, until: Instant) {
     *deadline = Some(deadline.map_or(until, |old| old.min(until)));
-}
-#[derive(Default)]
-struct AnnotationState {
-    candidate_since: Option<Instant>,
-    emitted: bool,
-    absent_since: Option<Instant>,
-}
-#[derive(Default)]
-struct AnnotationTracker {
-    states: BTreeMap<String, BTreeMap<AnnotationFingerprint, AnnotationState>>,
-    unavailable_emitted: BTreeSet<String>,
-    last_policy: Option<(AutomaticReview, Option<String>)>,
-}
-impl AnnotationTracker {
-    fn age_absent(&mut self, value: &ScreenObservation, now: Instant, update: &mut EpisodeUpdate) {
-        for (rule, states) in &mut self.states {
-            let resettable =
-                value.verified_noninteraction && value.guarded_annotation_rules.contains(rule);
-            states.retain(|fingerprint, state| {
-                let shown = value
-                    .annotations
-                    .iter()
-                    .any(|block| &block.rule_id == rule && &block.fingerprint == fingerprint);
-                if shown {
-                    state.absent_since = None;
-                    return true;
-                }
-                state.candidate_since = None;
-                if !state.emitted {
-                    return false;
-                }
-                if !resettable {
-                    state.absent_since = None;
-                    return true;
-                }
-                let since = *state.absent_since.get_or_insert(now);
-                !settled(now, since, BOUNDARY_SETTLE, &mut update.next_deadline)
-            });
-        }
-    }
-    fn stable(
-        &mut self,
-        block: &AnnotationBlock,
-        now: Instant,
-        update: &mut EpisodeUpdate,
-    ) -> bool {
-        let state = self
-            .states
-            .entry(block.rule_id.clone())
-            .or_default()
-            .entry(block.fingerprint.clone())
-            .or_default();
-        if state.emitted {
-            return true;
-        }
-        let since = *state.candidate_since.get_or_insert(now);
-        settled(now, since, CANDIDATE_SETTLE, &mut update.next_deadline)
-    }
-    fn mark_emitted(&mut self, block: &AnnotationBlock) -> bool {
-        let state = self
-            .states
-            .get_mut(&block.rule_id)
-            .and_then(|states| states.get_mut(&block.fingerprint))
-            .expect("a stable annotation has its state");
-        !std::mem::replace(&mut state.emitted, true)
-    }
-    fn forget_candidates(&mut self) {
-        for states in self.states.values_mut() {
-            states.retain(|_, state| {
-                state.candidate_since = None;
-                state.absent_since = None;
-                state.emitted
-            });
-        }
-    }
 }
 struct Candidate {
     fingerprint: SemanticFingerprint,
@@ -7835,7 +7716,6 @@ pub(crate) struct EpisodeTracker {
     last_time: Option<Instant>,
     finished: bool,
     current_evidence: Option<Value>,
-    annotations: AnnotationTracker,
 }
 const CANDIDATE_SETTLE: Duration = Duration::from_millis(100);
 const BOUNDARY_SETTLE: Duration = Duration::from_millis(250);
@@ -7878,7 +7758,6 @@ impl EpisodeTracker {
             last_time: None,
             finished: false,
             current_evidence: None,
-            annotations: AnnotationTracker::default(),
         })
     }
     pub(crate) fn active_episode(&self) -> Option<(i64, InteractionClass)> {
@@ -7963,93 +7842,6 @@ impl EpisodeTracker {
         Ok(draft)
     }
     pub(crate) fn observe(
-        &mut self,
-        value: &ScreenObservation,
-        now: Instant,
-        at: &str,
-    ) -> Result<EpisodeUpdate> {
-        let mut update = self.observe_primary(value, now, at)?;
-        self.observe_annotations(value, now, at, &mut update)?;
-        Ok(update)
-    }
-    fn observe_annotations(
-        &mut self,
-        value: &ScreenObservation,
-        now: Instant,
-        at: &str,
-        update: &mut EpisodeUpdate,
-    ) -> Result<()> {
-        self.annotations.age_absent(value, now, update);
-        let mut unavailable_policy = false;
-        for block in &value.annotations {
-            if !self.annotations.stable(block, now, update) {
-                continue;
-            }
-            let first = self.annotations.mark_emitted(block);
-            let observed_mode = || {
-                self.policy
-                    .displayed_mode(&block.rule_id, block.raw_evidence["observed_mode"].as_str())
-            };
-            let observation = |automatic_review, observed_mode| EffectivePolicyObservation {
-                automatic_review,
-                observed_mode,
-                rule_id: block.rule_id.clone(),
-                observed_at: at.into(),
-            };
-            match block.kind {
-                ObservationKind::AutomaticReviewAvailable => {
-                    self.annotations.unavailable_emitted.clear();
-                    let mode = observed_mode()?;
-                    let state = (AutomaticReview::Available, mode.clone());
-                    // The worker may drop a queued available write, so each fresh emission of
-                    // the indicator resubmits it; the storage write keeps the change-only rule.
-                    if !unavailable_policy
-                        && (first || self.annotations.last_policy.as_ref() != Some(&state))
-                    {
-                        update.effective_policy =
-                            Some(observation(AutomaticReview::Available, mode));
-                        self.annotations.last_policy = Some(state);
-                    }
-                }
-                ObservationKind::AutomaticRefusal if first => {
-                    let evidence = self.policy.apply(&block.raw_evidence)?;
-                    update.transitions.push(self.draft(
-                        RuntimeEventKind::AutomaticRefusalObserved,
-                        None,
-                        evidence,
-                        None,
-                        at,
-                    ));
-                }
-                ObservationKind::AutomaticReviewUnavailable
-                    if first
-                        && self
-                            .annotations
-                            .unavailable_emitted
-                            .insert(block.rule_id.clone()) =>
-                {
-                    let evidence = self.policy.apply(&block.raw_evidence)?;
-                    update.transitions.push(self.draft(
-                        RuntimeEventKind::AutomaticReviewUnavailable,
-                        None,
-                        evidence,
-                        None,
-                        at,
-                    ));
-                    if !unavailable_policy {
-                        let mode = observed_mode()?;
-                        update.effective_policy =
-                            Some(observation(AutomaticReview::Unavailable, mode.clone()));
-                        self.annotations.last_policy = Some((AutomaticReview::Unavailable, mode));
-                        unavailable_policy = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-    fn observe_primary(
         &mut self,
         value: &ScreenObservation,
         now: Instant,
@@ -8189,7 +7981,6 @@ impl EpisodeTracker {
         self.current_evidence = None;
         self.candidate = None;
         self.clear_boundaries();
-        self.annotations.forget_candidates();
         Ok(())
     }
     fn clear_boundaries(&mut self) {
@@ -8336,22 +8127,6 @@ pub(crate) mod test_support {
         update
     }
 
-    pub(crate) fn is_annotation_event(transition: &TransitionDraft) -> bool {
-        matches!(
-            transition.kind,
-            RuntimeEventKind::AutomaticRefusalObserved
-                | RuntimeEventKind::AutomaticReviewUnavailable
-        )
-    }
-
-    pub(crate) type PolicyChange = (AutomaticReview, Option<String>, String, String);
-
-    #[derive(Default)]
-    pub(crate) struct Held {
-        pub(crate) events: Vec<TransitionDraft>,
-        pub(crate) policy: Vec<PolicyChange>,
-    }
-
     /// Replays one backend's bundled fixtures through a tracker at 50 ms steps, numbering
     /// every frame so each observation carries a fresh `screen_seq`.
     pub(crate) struct Run {
@@ -8376,9 +8151,6 @@ pub(crate) mod test_support {
             let mut value = (self.observe)(id);
             value.output_seq = self.sequence;
             value.raw_evidence["screen_seq"] = json!(self.sequence);
-            for block in &mut value.annotations {
-                block.raw_evidence["screen_seq"] = json!(self.sequence);
-            }
             value
         }
 
@@ -8396,24 +8168,6 @@ pub(crate) mod test_support {
                     self.observe(&value, millis)
                 })
                 .collect()
-        }
-
-        pub(crate) fn hold(&mut self, id: &str, from: u64, until: u64) -> Held {
-            let mut held = Held::default();
-            for update in self.steps(id, from, until) {
-                held.policy
-                    .extend(update.effective_policy.as_ref().map(|observation| {
-                        (
-                            observation.automatic_review,
-                            observation.observed_mode.clone(),
-                            observation.rule_id.clone(),
-                            observation.observed_at.clone(),
-                        )
-                    }));
-                held.events
-                    .extend(update.transitions.into_iter().filter(is_annotation_event));
-            }
-            held
         }
 
         pub(crate) fn episode(&mut self, id: &str, from: u64, until: u64) -> Vec<TransitionDraft> {
@@ -9127,78 +8881,6 @@ mod tests {
         }
     }
 
-    fn detailed(detail: &str, sequence: u64) -> ScreenObservation {
-        let mut rows = lines("write disposable.txt");
-        rows.insert(5, format!("Detail: {detail}"));
-        sequenced(
-            observation(&definitions(), &terminal(&rows, 80, false).snapshot()),
-            sequence,
-        )
-    }
-
-    #[test]
-    fn runtime_episode_excerpt_only_change_refreshes_policy_evidence_without_another_opening() {
-        let secret = "synthetic-secret-194";
-        let policy = EvidencePolicy::redacted(
-            &json!({"schema_version":1,"patterns":[secret],"sensitive_rules":[]}),
-            &[RULE],
-        )
-        .unwrap();
-        let mut tracker = EpisodeTracker::new(1, policy).unwrap();
-        let origin = Instant::now();
-        let first = detailed("first", 1);
-        assert!(first.fingerprint == detailed("second", 1).fingerprint);
-        open(&mut tracker, &first, origin);
-        let unchanged = tracker
-            .observe(
-                &detailed("first", 2),
-                origin + Duration::from_millis(200),
-                NOW,
-            )
-            .unwrap();
-        assert!(unchanged.transitions.is_empty());
-        assert!(unchanged.latest_evidence.is_none());
-        let changed = tracker
-            .observe(
-                &detailed("second", 3),
-                origin + Duration::from_millis(300),
-                NOW,
-            )
-            .unwrap();
-        assert!(changed.transitions.is_empty());
-        let refresh = changed.latest_evidence.unwrap();
-        assert_eq!(
-            (refresh.run_id, refresh.episode_seq, refresh.output_seq),
-            (1, 1, 3)
-        );
-        assert_eq!(refresh.evidence_json["screen_seq"], 3);
-        assert!(
-            refresh.evidence_json["excerpt"]
-                .as_str()
-                .unwrap()
-                .contains("Detail: second")
-        );
-        let secret_detail = tracker
-            .observe(
-                &detailed(secret, 4),
-                origin + Duration::from_millis(400),
-                NOW,
-            )
-            .unwrap();
-        assert!(secret_detail.transitions.is_empty());
-        let refresh = secret_detail.latest_evidence.unwrap();
-        assert_eq!(refresh.evidence_json["excerpt"], json!("[redacted]"));
-        assert!(!refresh.evidence_json.to_string().contains(secret));
-        let settled = tracker
-            .observe(
-                &detailed(secret, 5),
-                origin + Duration::from_millis(500),
-                NOW,
-            )
-            .unwrap();
-        assert!(settled.latest_evidence.is_none());
-    }
-
     #[test]
     fn runtime_episode_identical_requests_are_distinct_only_after_a_verified_boundary() {
         let origin = Instant::now();
@@ -9400,39 +9082,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_evidence_policy_precedes_every_transition_and_redraw_update() {
-        let secret = "synthetic-secret-194";
-        for named_sensitive in [false, true] {
-            let value = secret_observation(secret, 80, 1);
-            let policy = EvidencePolicy::redacted(
-                    &json!({"schema_version":1,"patterns":[secret],"sensitive_rules":if named_sensitive {vec![RULE]}else{vec![]}}),
-                    &[RULE],
-                )
-                .unwrap();
-            let mut tracker = EpisodeTracker::new(1, policy).unwrap();
-            let origin = Instant::now();
-            let result = open(&mut tracker, &value, origin);
-            let evidence = &result.transitions[0].evidence_json;
-            assert!(!evidence.to_string().contains(secret));
-            assert!(evidence.get("semantic_fingerprint").is_none());
-            assert_eq!(
-                evidence["operation"],
-                if named_sensitive {
-                    Value::Null
-                } else {
-                    json!("[redacted]")
-                }
-            );
-            let redraw = secret_observation(secret, 100, 2);
-            let update = tracker
-                .observe(&redraw, origin + Duration::from_millis(200), NOW)
-                .unwrap();
-            assert!(update.transitions.is_empty());
-            assert!(update.latest_evidence.is_none());
-        }
-    }
-
-    #[test]
     fn runtime_episode_metadata_removes_each_screen_field_and_leaves_no_redraw_refresh() {
         let secret = "synthetic-secret-194";
         let origin = Instant::now();
@@ -9621,7 +9270,6 @@ mod tests {
                 assert_eq!(run.coverage, coverage, "{native:?}");
                 if native.is_none() {
                     assert_eq!(run.resolved_mode, "approve-for-me");
-                    assert!(run.effective_policy_json.is_none());
                 }
             }
         }
@@ -11043,144 +10691,6 @@ mod tests {
             assert_eq!(event_at(&fixture, 65).event, closed.event);
             assert_eq!(event_at(&fixture, 66).event, opened.event);
         }
-
-        #[test]
-        fn controller_actual_adapter_retains_foreign_episode_refresh_and_holds_until_drain() {
-            let mut fixture = WriterFixture::new();
-            configure_redacted(&mut fixture);
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Receive);
-            let mut writer = start(&fixture, hooks.clone());
-            let release = Release(hooks.clone());
-            hooks.wait(WriterBoundary::Receive, 1);
-            let clock = Clock::new();
-            let (mut controller, _child, mut terminal) =
-                started_controller(&mut fixture, &writer, &clock, &catalog(), redacted_policy());
-            let mut opening_sequences = Vec::new();
-            let mut first_refresh_sequence = 0;
-            for index in 0..2 {
-                clock.set(index * 200);
-                terminal
-                    .feed_observed(
-                        &detailed_form(&format!("write collision-{index}.txt"), "opened"),
-                        &mut controller.observer(&writer, &clock),
-                    )
-                    .unwrap();
-                opening_sequences.push(terminal.snapshot().screen_seq);
-                clock.set(index * 200 + 100);
-                controller
-                    .poll(&terminal.snapshot(), &writer, &clock)
-                    .unwrap();
-                if index == 0 {
-                    clock.set(150);
-                    terminal
-                        .feed_observed(
-                            &detail_rewrite("refreshed"),
-                            &mut controller.observer(&writer, &clock),
-                        )
-                        .unwrap();
-                    first_refresh_sequence = terminal.snapshot().screen_seq;
-                    assert!(writer.status().pending_evidence);
-                }
-            }
-            assert_eq!(writer.status().pending_count, 3);
-            assert!(writer.status().pending_evidence);
-            assert!(!writer.status().diagnostic.is_some());
-            assert!(!controller.has_pending());
-            clock.set(400);
-            terminal
-                .feed_observed(b"\x1b", &mut controller.observer(&writer, &clock))
-                .unwrap();
-            assert!(
-                !controller.status().retained_evidence,
-                "a screen_seq-only redraw schedules no refresh"
-            );
-            assert!(!writer.status().diagnostic.is_some());
-            terminal
-                .feed_observed(
-                    &detail_rewrite("collided"),
-                    &mut controller.observer(&writer, &clock),
-                )
-                .unwrap();
-            let retained_sequence = terminal.snapshot().screen_seq;
-            let status = controller.status();
-            assert!(status.retained_evidence);
-            assert!(!status.retained_transition);
-            assert!(!status.retained_draft);
-            assert!(status.gap_count > 0);
-            assert_eq!(status.eligibility, InputEligibility::Hold(GateReason::Gap));
-            assert!(writer.status().pending_evidence);
-            assert!(writer.status().diagnostic.is_some());
-            assert!(
-                writer
-                    .status()
-                    .diagnostic
-                    .as_deref()
-                    .unwrap()
-                    .contains("refresh episode collision")
-            );
-            terminal
-                .feed_observed(
-                    &detailed_form("write later-unclassified.txt", "opened"),
-                    &mut controller.observer(&writer, &clock),
-                )
-                .unwrap();
-            assert!(terminal.snapshot().screen_seq > retained_sequence);
-            assert!(controller.status().retained_evidence);
-            assert_eq!(
-                controller.status().eligibility,
-                InputEligibility::Hold(GateReason::Gap)
-            );
-            assert_eq!(writer.status().pending_count, 3);
-            assert_eq!(committed(&fixture), 0);
-            drop(release);
-            wait_until(|| {
-                controller
-                    .poll(&terminal.snapshot(), &writer, &clock)
-                    .unwrap();
-                !controller.has_pending()
-                    && !writer.status().pending_evidence
-                    && writer.status().pending_count == 0
-                    && !writer.status().diagnostic.is_some()
-            });
-            let first = event_at(&fixture, 1);
-            let closed = event_at(&fixture, 2);
-            let second = event_at(&fixture, 3);
-            assert_eq!(first.event.kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(closed.event.kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(closed.event.payload_json["close_reason"], "superseded");
-            assert_eq!(second.event.kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(first.interaction.as_ref().unwrap().episode_seq, 1);
-            assert_eq!(closed.interaction.as_ref().unwrap().episode_seq, 1);
-            assert_eq!(second.interaction.as_ref().unwrap().episode_seq, 2);
-            assert_eq!(
-                first.event.payload_json["evidence"]["screen_seq"],
-                opening_sequences[0]
-            );
-            assert_eq!(
-                closed.event.payload_json["evidence"]["screen_seq"],
-                first_refresh_sequence
-            );
-            assert_eq!(
-                second.event.payload_json["evidence"]["screen_seq"],
-                opening_sequences[1]
-            );
-            assert_eq!(
-                second.interaction.as_ref().unwrap().evidence_json["screen_seq"],
-                retained_sequence
-            );
-            let episodes: i64 = fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT COUNT(*) FROM member_interactions WHERE run_id=?1",
-                    [fixture.fixture.run.run_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(episodes, 2);
-            assert_eq!(writer.finish(deadline()), (0, 0));
-        }
     }
 
     mod bundled_claude_auto_tracker {
@@ -11190,14 +10700,6 @@ mod tests {
 
         const CLAUDE_VERSION: &str = "2.1.302";
 
-        const RUNNING: &str = "claude-2.1.302-auto-approved-running-1";
-        const NOTICE_IDLE: &str = "claude-2.1.302-auto-refusal-notice-idle-1";
-        const NOTICE_WORKING: &str = "claude-2.1.302-auto-refusal-notice-working-1";
-        const NOTICE_EXPIRED: &str = "claude-2.1.302-auto-refusal-notice-expired-1";
-        const FORM_HIDING_NOTICE: &str = "claude-2.1.302-auto-ask-hiding-refusal-notice-1";
-        const RESTORED: &str = "claude-2.1.302-auto-verbose-refusal-restored-idle-1";
-        const HIDDEN_BY_FORM: &str = "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1";
-        const VERBOSE_VIEWER: &str = "claude-2.1.302-auto-verbose-transcript-viewer-1";
         const TIP_FORM: &str = "claude-2.1.302-access-permission-1";
         const TIP_ALLOW_PRE_STAGE: &str = "claude-2.1.302-access-allow-pre-stage-1";
         const TIP_ALLOW_RUNNING: &str = "claude-2.1.302-access-allow-running-1";
@@ -11245,64 +10747,6 @@ mod tests {
             assert_eq!(
                 running[0].close_reason,
                 Some(InteractionCloseReason::NotVisible)
-            );
-        }
-
-        #[test]
-        fn tracker_resets_a_refusal_only_after_250_ms_of_absence_on_verified_frames() {
-            let mut short = replay_run(EvidencePolicy::metadata());
-            assert_eq!(short.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(short.hold(NOTICE_EXPIRED, 150, 350).events.is_empty());
-            assert!(
-                short.hold(NOTICE_IDLE, 400, 700).events.is_empty(),
-                "200 ms of absence does not reset"
-            );
-            let mut long = replay_run(EvidencePolicy::metadata());
-            assert_eq!(long.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(long.hold(NOTICE_EXPIRED, 150, 450).events.is_empty());
-            let again = long.hold(NOTICE_IDLE, 500, 700);
-            assert_eq!(
-                again.events.len(),
-                1,
-                "300 ms of verified absence resets: {:?}",
-                again.events
-            );
-            let mut working = replay_run(EvidencePolicy::metadata());
-            assert_eq!(working.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(observe(RUNNING).verified_noninteraction);
-            assert!(working.hold(RUNNING, 150, 450).events.is_empty());
-            assert_eq!(
-                working.hold(NOTICE_WORKING, 500, 700).events.len(),
-                1,
-                "verified working frames advance the reset"
-            );
-        }
-
-        #[test]
-        fn tracker_keeps_a_refusal_hidden_by_a_form_or_overlay_and_emits_nothing_when_it_returns() {
-            for hiding in [HIDDEN_BY_FORM, VERBOSE_VIEWER] {
-                let mut run = replay_run(EvidencePolicy::metadata());
-                assert_eq!(run.hold(RESTORED, 0, 100).events.len(), 1, "{hiding}");
-                assert!(run.hold(hiding, 150, 1500).events.is_empty(), "{hiding}");
-                assert!(run.hold(RESTORED, 1550, 1900).events.is_empty(), "{hiding}");
-            }
-            let mut notice = replay_run(EvidencePolicy::metadata());
-            assert_eq!(notice.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(notice.hold(FORM_HIDING_NOTICE, 150, 1500).events.is_empty());
-            assert!(notice.hold(NOTICE_IDLE, 1550, 1900).events.is_empty());
-            let mut interrupted = replay_run(EvidencePolicy::metadata());
-            assert_eq!(interrupted.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(interrupted.hold(NOTICE_EXPIRED, 150, 300).events.is_empty());
-            assert!(
-                interrupted
-                    .hold(FORM_HIDING_NOTICE, 350, 500)
-                    .events
-                    .is_empty()
-            );
-            assert!(interrupted.hold(NOTICE_EXPIRED, 550, 700).events.is_empty());
-            assert!(
-                interrupted.hold(NOTICE_IDLE, 750, 1000).events.is_empty(),
-                "a form between absent frames restarts the continuous absence"
             );
         }
     }

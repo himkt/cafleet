@@ -2425,7 +2425,7 @@ pub(crate) mod test_support {
             rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
             rule["extract"] = json!({"operation":null,"choices":[]});
             rule["verified_noninteraction"] = json!(true);
-            catalog["profiles"][0]["capabilities"] = json!({"detection":null,"annotations":null,"answers":[],"composer":{
+            catalog["profiles"][0]["capabilities"] = json!({"detection":null,"answers":[],"composer":{
                 "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
                 "submission":{
                     "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]},

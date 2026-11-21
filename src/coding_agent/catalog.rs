@@ -280,8 +280,6 @@ struct RawCapabilities {
     detection: Option<RawCapability>,
     #[serde(deserialize_with = "Option::deserialize")]
     composer: Option<RawCapability>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    annotations: Option<RawCapability>,
     answers: Vec<RawAnswer>,
 }
 
@@ -595,7 +593,6 @@ pub(super) struct Profile {
     pub(crate) rules: Vec<Rule>,
     pub(crate) detection: Option<Capability>,
     pub(crate) composer: Option<Capability>,
-    pub(crate) annotations: Option<Capability>,
     pub(crate) submissions: [Option<ComposerSubmission>; 2],
     pub(crate) answers: Vec<Answer>,
 }
@@ -697,7 +694,6 @@ fn operation_capture(raw: RawOperation, matchers: &[Matcher]) -> Result<Capture>
 fn compile_rule(raw: RawRule) -> Result<Rule> {
     let kind = raw.observation;
     let continues = kind == ObservationKind::PermissionContinuation;
-    let annotation = kind.is_annotation();
     let continuation = match (
         continues,
         raw.continues_rule_id,
@@ -747,36 +743,13 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         .operation
         .map(|operation| operation_capture(operation, &matchers))
         .transpose()?;
-    if annotation {
-        require(
-            choices.is_empty() && !verified,
-            "annotation rules declare no choices or verified noninteraction",
-        )?;
-        require(
-            operation.is_some() == (kind == ObservationKind::AutomaticRefusal),
-            "only automatic refusal annotations capture an operation",
-        )?;
-    }
-    match (
-        &raw.frame,
-        annotation,
-        matches!(kind, ObservationKind::Interaction(_)),
-    ) {
-        (None, true, _) => return Err(invalid("annotation rules declare a frame")),
-        (Some(frame), true, _) => require(
-            !frame.require.is_empty(),
-            "annotation frame requires a live-screen pattern",
-        )?,
-        (Some(frame), false, true) => require(
+    match (&raw.frame, matches!(kind, ObservationKind::Interaction(_))) {
+        (Some(frame), true) => require(
             !frame.reject.is_empty(),
             "interaction frame requires a reject pattern",
         )?,
-        (Some(_), false, false) => {
-            return Err(invalid(
-                "only annotation and interaction rules declare a frame",
-            ));
-        }
-        (None, false, _) => {}
+        (Some(_), false) => return Err(invalid("only interaction rules declare a frame")),
+        (None, _) => {}
     }
     let suggestion = raw.suggestion.map(suggestion_style).transpose()?;
     require(
@@ -901,13 +874,10 @@ fn validate_continuation(rule: &Rule, rules: &[Rule]) -> Result<()> {
 enum Group {
     Detection,
     Composer,
-    Annotations,
 }
 impl Group {
     fn of(kind: ObservationKind) -> Self {
-        if kind.is_annotation() {
-            Self::Annotations
-        } else if kind == ObservationKind::ComposerEmpty {
+        if kind == ObservationKind::ComposerEmpty {
             Self::Composer
         } else {
             Self::Detection
@@ -1072,18 +1042,6 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
     };
     let detection = group(&capabilities.detection, Group::Detection)?;
     let composer = group(&capabilities.composer, Group::Composer)?;
-    let annotations = group(&capabilities.annotations, Group::Annotations)?;
-    require(
-        rules
-            .iter()
-            .filter(|rule| rule.kind.is_annotation())
-            .all(|rule| {
-                annotations
-                    .as_ref()
-                    .is_some_and(|group| group.rules.contains(&rule.id))
-            }),
-        "every annotation rule belongs to the annotations group",
-    )?;
     let submissions = match capabilities
         .composer
         .and_then(|composer| composer.submission)
@@ -1113,7 +1071,6 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
         rules,
         detection,
         composer,
-        annotations,
         submissions,
         answers,
     })
@@ -1947,7 +1904,6 @@ pub(crate) mod test_support {
     struct ProvenanceCapabilities {
         detection: Option<ProvenanceCapability>,
         composer: Option<ProvenanceCapability>,
-        annotations: Option<ProvenanceCapability>,
         answers: Vec<Cited>,
     }
 
@@ -2120,13 +2076,9 @@ pub(crate) mod test_support {
                     "executable composer plans require empty-composer observation",
                 )?;
             }
-            for capability in [
-                &capabilities.detection,
-                &capabilities.composer,
-                &capabilities.annotations,
-            ]
-            .into_iter()
-            .flatten()
+            for capability in [&capabilities.detection, &capabilities.composer]
+                .into_iter()
+                .flatten()
             {
                 cite(&capability.fixture_ids)?;
                 if let Some(submission) = &capability.submission {
@@ -2249,14 +2201,13 @@ pub(crate) mod test_support {
 
     /// A Codex catalog whose profiles are `(label, min_version)` thresholds,
     /// each citing one fixture captured at its boundary for detection,
-    /// composer observation, both composer operations, annotations and an
-    /// allow answer; the label names that fixture and answer rule.
+    /// composer observation, both composer operations and an allow answer; the label names that fixture and answer rule.
     pub(crate) fn thresholds(profiles: &[(&str, &str)]) -> Value {
         thresholds_for(CodingAgent::Codex, profiles)
     }
 
     pub(crate) fn thresholds_for(backend: CodingAgent, profiles: &[(&str, &str)]) -> Value {
-        let base = crate::coding_agent::catalog::test_support::annotation::annotated();
+        let base = synthetic_definitions();
         let composer = simple_definition("composer_empty", true)["profiles"][0]["rules"][0].clone();
         let mut value = base.clone();
         value["fixtures"] = json!([]);
@@ -2275,7 +2226,6 @@ pub(crate) mod test_support {
                 .push(composer.clone());
             let capabilities = &mut profile["capabilities"];
             capabilities["detection"]["fixture_ids"] = json!([id]);
-            capabilities["annotations"]["fixture_ids"] = json!([id]);
             capabilities["composer"] = json!({
                 "rule_ids":["synthetic-composer_empty"],"fixture_ids":[id],
                 "submission":{
@@ -2340,7 +2290,7 @@ pub(crate) mod test_support {
                         {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
                         {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
                     ]},"verified_noninteraction":false}],
-                "capabilities":{"detection":{"rule_ids":["synthetic-permission"],"fixture_ids":["synthetic-permission-1"]},"composer":null,"annotations":null,"answers":[]}}]
+                "capabilities":{"detection":{"rule_ids":["synthetic-permission"],"fixture_ids":["synthetic-permission-1"]},"composer":null,"answers":[]}}]
         })
     }
 
@@ -2641,62 +2591,11 @@ pub(crate) mod test_support {
                 "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
                 "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[FIXTURE]}
             });
-            json!({"detection":null,"composer":composer,"annotations":null,"answers":[]})
+            json!({"detection":null,"composer":composer,"answers":[]})
         } else {
-            json!({"detection":declaration,"composer":null,"annotations":null,"answers":[]})
+            json!({"detection":declaration,"composer":null,"answers":[]})
         };
         value
-    }
-
-    pub(crate) mod annotation {
-        use crate::coding_agent::catalog::test_support::*;
-        pub(crate) const REFUSAL: &str = "synthetic-auto-refusal";
-        pub(crate) const UNAVAILABLE: &str = "synthetic-auto-unavailable";
-        pub(crate) const AVAILABLE: &str = "synthetic-auto-indicator";
-
-        pub(crate) fn annotation_rule(id: &str, observation: &str) -> Value {
-            let (start, matchers, operation) = match observation {
-                "automatic_refusal" => (
-                    "^Refused: ",
-                    json!([
-                        {"id":"operation","scope":"line","pattern":"^Refused: (?P<operation>.+)$"},
-                        {"id":"decoration","scope":"line","pattern":"^Refusal end$"}
-                    ]),
-                    json!({"matcher_id":"operation","capture":"operation"}),
-                ),
-                "automatic_review_unavailable" => (
-                    "^Automatic review unavailable$",
-                    json!([{"id":"notice","scope":"line","pattern":"^Automatic review unavailable$"}]),
-                    Value::Null,
-                ),
-                _ => (
-                    "^Mode: automatic$",
-                    json!([{"id":"badge","scope":"line","pattern":"^Mode: automatic$"}]),
-                    Value::Null,
-                ),
-            };
-            let end = if observation == "automatic_refusal" {
-                "^Refusal end$"
-            } else {
-                start
-            };
-            json!({"id":id,"priority":50,"observation":observation,
-                "region":{"screen":"either","start_pattern":start,"end_pattern":end,"max_rows":4,"cursor":"any"},
-                "matchers":matchers,
-                "extract":{"operation":operation,"choices":[]},
-                "verified_noninteraction":false,"frame":{"require_patterns":["^Live footer$"],"reject_patterns":["^Transcript viewer$"]}})
-        }
-
-        pub(crate) fn annotated() -> Value {
-            let mut value = synthetic_definitions();
-            let rules = value["profiles"][0]["rules"].as_array_mut().unwrap();
-            rules.push(annotation_rule(REFUSAL, "automatic_refusal"));
-            rules.push(annotation_rule(UNAVAILABLE, "automatic_review_unavailable"));
-            rules.push(annotation_rule(AVAILABLE, "automatic_review_available"));
-            value["profiles"][0]["capabilities"]["annotations"] =
-                json!({"rule_ids":[REFUSAL, UNAVAILABLE, AVAILABLE],"fixture_ids":[FIXTURE]});
-            value
-        }
     }
 
     use crate::broker::runtime::Coverage;
@@ -3600,7 +3499,7 @@ mod tests {
         use crate::coding_agent::catalog::tests::*;
 
         fn with_separator(pointer: &str, separator: Value) -> Value {
-            let mut value = crate::coding_agent::catalog::test_support::annotation::annotated();
+            let mut value = crate::coding_agent::catalog::test_support::synthetic_definitions();
             value.pointer_mut(pointer).unwrap()["region"]["panel_separator"] = separator;
             value
         }
@@ -7916,7 +7815,6 @@ mod tests {
                 "composer/fixture_ids",
                 "composer/submission/prompt/fixture_ids",
                 "composer/submission/exec/fixture_ids",
-                "annotations/fixture_ids",
                 "answers/0/fixture_ids",
             ] {
                 for (profile, captured) in [(0, "1.5.0"), (0, "2.0.0-rc.1"), (1, "9.0.0")] {

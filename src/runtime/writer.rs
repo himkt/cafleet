@@ -1,5 +1,4 @@
 use crate::broker::runtime as storage;
-use crate::broker::runtime::EffectivePolicyObservation;
 use crate::broker::runtime::InteractionEvidenceUpdate;
 use crate::broker::runtime::ObservedTransition;
 use crate::broker::runtime::PersistenceMode;
@@ -54,8 +53,6 @@ pub(crate) struct WriterStatus {
     pub(crate) pending_evidence: bool,
     pub(crate) gap_count: u64,
     pub(crate) diagnostic: Option<String>,
-    #[cfg(test)]
-    pub(crate) policy_diagnostic: Option<String>,
 }
 #[derive(Debug)]
 pub(crate) struct RetainedTransition {
@@ -76,9 +73,6 @@ struct Refresh {
 #[derive(Default)]
 struct Mailbox {
     pending: u64,
-    policies: u64,
-    #[cfg(test)]
-    policy_diagnostic: Option<String>,
     gaps: u64,
     diagnostic: Option<String>,
     last_sequence: i64,
@@ -109,37 +103,15 @@ impl Mailbox {
     fn success(&mut self) {
         self.diagnostic = None;
     }
-    fn policy_dropped(&mut self, cause: &CafleetError) {
-        eprintln!("member runtime: effective policy update dropped: {cause}");
-        #[cfg(test)]
-        {
-            self.policy_diagnostic = Some(cause.message().into_owned());
-        }
-    }
 }
 pub(crate) struct EventWriter {
-    sender: mpsc::SyncSender<Work>,
+    sender: mpsc::SyncSender<Box<ObservedTransition>>,
     mailbox: Arc<Mutex<Mailbox>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
-enum Work {
-    Event {
-        transition: Box<ObservedTransition>,
-        effective_policy: Option<EffectivePolicyObservation>,
-    },
-    Policy(EffectivePolicyObservation),
-}
 struct Pending {
-    work: Work,
+    transition: Box<ObservedTransition>,
     synced: bool,
-}
-impl Pending {
-    fn event_seq(&self) -> Option<i64> {
-        match &self.work {
-            Work::Event { transition, .. } => Some(transition.event_seq),
-            Work::Policy(_) => None,
-        }
-    }
 }
 impl EventWriter {
     pub(crate) fn start(database_url: String, run: RunRecord, lock: Arc<RunLock>) -> Result<Self> {
@@ -214,22 +186,14 @@ impl EventWriter {
             thread: Some(thread),
         })
     }
-    fn send(&self, work: Work) -> Result<()> {
+    fn send(&self, transition: Box<ObservedTransition>) -> Result<()> {
         self.sender
-            .try_send(work)
+            .try_send(transition)
             .map_err(|_| error("runtime observation channel is full or unavailable"))
     }
-    #[cfg(test)]
     pub(crate) fn try_submit(
         &self,
         transition: ObservedTransition,
-    ) -> std::result::Result<(), Box<RetainedTransition>> {
-        self.try_submit_with_policy(transition, None)
-    }
-    pub(crate) fn try_submit_with_policy(
-        &self,
-        transition: ObservedTransition,
-        effective_policy: Option<EffectivePolicyObservation>,
     ) -> std::result::Result<(), Box<RetainedTransition>> {
         let mut state = self.mailbox.lock().expect("writer mailbox");
         let result = (|| -> Result<()> {
@@ -238,16 +202,8 @@ impl EventWriter {
                 transition.event_seq > state.last_sequence,
                 "accepted event sequence regressed",
             )?;
-            ensure(
-                effective_policy.is_none()
-                    || transition.kind == RuntimeEventKind::AutomaticReviewUnavailable,
-                "only an unavailable review event carries an effective policy",
-            )?;
             crate::broker::runtime::evidence::validate(&transition.evidence_json)?;
-            self.send(Work::Event {
-                transition: Box::new(transition.clone()),
-                effective_policy,
-            })
+            self.send(Box::new(transition.clone()))
         })();
         match result {
             Ok(()) => {
@@ -270,23 +226,6 @@ impl EventWriter {
                 state.failure(&cause);
                 Err(Box::new(RetainedTransition { transition, cause }))
             }
-        }
-    }
-    pub(crate) fn try_record_policy(&self, observation: EffectivePolicyObservation) {
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        let sent = if state.stop {
-            Err(error("event writer is stopped"))
-        } else {
-            self.send(Work::Policy(observation))
-        };
-        match sent {
-            Ok(()) => {
-                state.policies = state
-                    .policies
-                    .checked_add(1)
-                    .expect("policy update count overflow");
-            }
-            Err(cause) => state.policy_dropped(&cause),
         }
     }
     #[cfg(test)]
@@ -368,8 +307,6 @@ impl EventWriter {
             pending_evidence: state.refresh.is_some(),
             gap_count: state.gaps,
             diagnostic: state.diagnostic.clone(),
-            #[cfg(test)]
-            policy_diagnostic: state.policy_diagnostic.clone(),
         }
     }
     pub(crate) fn diagnostic(&self) -> Option<String> {
@@ -442,7 +379,7 @@ struct Worker {
     run: RunRecord,
     lock: Arc<RunLock>,
     mailbox: Arc<Mutex<Mailbox>>,
-    receiver: mpsc::Receiver<Work>,
+    receiver: mpsc::Receiver<Box<ObservedTransition>>,
     queue: VecDeque<Pending>,
     committed: i64,
     compact: bool,
@@ -460,12 +397,7 @@ impl Worker {
                 if state.deadline.is_some_and(|end| Instant::now() >= end) {
                     break;
                 }
-                if state.stop
-                    && state.pending == 0
-                    && state.policies == 0
-                    && state.refresh.is_none()
-                    && !self.compact
-                {
+                if state.stop && state.pending == 0 && state.refresh.is_none() && !self.compact {
                     break;
                 }
             }
@@ -519,9 +451,9 @@ impl Worker {
 
             check_deadline(Instant::now(), until)?;
             match self.receiver.try_recv() {
-                Ok(work) => self.queue.push_back(Pending {
-                    synced: matches!(work, Work::Policy(_)),
-                    work,
+                Ok(transition) => self.queue.push_back(Pending {
+                    transition,
+                    synced: false,
                 }),
                 Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
             }
@@ -531,24 +463,13 @@ impl Worker {
     fn sync_pending(&mut self) -> Result<()> {
         for pending in &mut self.queue {
             if !pending.synced {
-                let Work::Event {
-                    transition,
-                    effective_policy,
-                } = &pending.work
-                else {
-                    unreachable!("effective policy updates are never spooled")
-                };
                 let until = self
                     .mailbox
                     .lock()
                     .expect("writer mailbox")
                     .work_deadline(self.work_slice);
-                self.spool.append_synced(
-                    &mut self.conn,
-                    transition,
-                    effective_policy.as_ref(),
-                    until,
-                )?;
+                self.spool
+                    .append_synced(&mut self.conn, &pending.transition, until)?;
                 pending.synced = true;
             }
         }
@@ -563,11 +484,10 @@ impl Worker {
                 .as_ref()
                 .filter(|value| {
                     value.barrier <= self.committed
-                        && self.queue.front().is_none_or(|pending| {
-                            pending
-                                .event_seq()
-                                .is_none_or(|sequence| sequence > value.barrier)
-                        })
+                        && self
+                            .queue
+                            .front()
+                            .is_none_or(|pending| pending.transition.event_seq > value.barrier)
                 })
                 .cloned()
         };
@@ -608,64 +528,21 @@ impl Worker {
             .lock()
             .expect("writer mailbox")
             .work_deadline(self.work_slice);
-        match &pending.work {
-            Work::Event {
-                transition,
-                effective_policy,
-            } => {
-                #[cfg(test)]
-                self.hooks.before(WriterBoundary::Persist, until)?;
+        let transition = &pending.transition;
+        #[cfg(test)]
+        self.hooks.before(WriterBoundary::Persist, until)?;
 
-                with_database_deadline(&mut self.conn, until, |conn| {
-                    self.lock.validate(conn, &self.run.owner())?;
-                    match effective_policy {
-                        Some(observation) => storage::persist_transition_with_effective_policy(
-                            conn,
-                            &self.run.owner(),
-                            transition,
-                            observation,
-                            PersistenceMode::Live,
-                        ),
-                        None => storage::persist_transition(
-                            conn,
-                            &self.run.owner(),
-                            transition,
-                            PersistenceMode::Live,
-                        ),
-                    }
-                    .map(|_| ())
-                })?;
-                self.committed = transition.event_seq;
-                self.compact = true;
-                self.queue.pop_front();
-                let mut state = self.mailbox.lock().expect("writer mailbox");
-                state.pending = state.pending.checked_sub(1).expect("accepted writer count");
-                state.success();
-            }
-            Work::Policy(observation) => {
-                let outcome = (|| -> Result<bool> {
-                    #[cfg(test)]
-                    self.hooks.before(WriterBoundary::Persist, until)?;
-
-                    self.lock.validate(&self.conn, &self.run.owner())?;
-                    storage::record_effective_policy(
-                        &mut self.conn,
-                        &self.run.owner(),
-                        observation,
-                        until,
-                    )
-                })();
-                self.queue.pop_front();
-                let mut state = self.mailbox.lock().expect("writer mailbox");
-                state.policies = state
-                    .policies
-                    .checked_sub(1)
-                    .expect("accepted policy update count");
-                if let Err(cause) = outcome {
-                    state.policy_dropped(&cause);
-                }
-            }
-        }
+        with_database_deadline(&mut self.conn, until, |conn| {
+            self.lock.validate(conn, &self.run.owner())?;
+            storage::persist_transition(conn, &self.run.owner(), transition, PersistenceMode::Live)
+                .map(|_| ())
+        })?;
+        self.committed = transition.event_seq;
+        self.compact = true;
+        self.queue.pop_front();
+        let mut state = self.mailbox.lock().expect("writer mailbox");
+        state.pending = state.pending.checked_sub(1).expect("accepted writer count");
+        state.success();
         Ok(())
     }
     fn compact_if_idle(&mut self) -> Result<()> {
@@ -725,49 +602,17 @@ impl OutboxIo for File {
 }
 pub(crate) struct OutboxFrame {
     pub(crate) transition: ObservedTransition,
-    pub(crate) effective_policy: Option<EffectivePolicyObservation>,
     pub(crate) start: u64,
     pub(crate) end: u64,
 }
-const EFFECTIVE_POLICY_KEY: &str = "effective_policy";
-fn frame_body(
-    transition: &ObservedTransition,
-    effective_policy: Option<&EffectivePolicyObservation>,
-) -> Result<Vec<u8>> {
-    let Some(observation) = effective_policy else {
-        return serde_json::to_vec(transition).map_err(io_error);
-    };
-    let mut body = serde_json::to_value(transition).map_err(io_error)?;
-    body.as_object_mut()
-        .expect("a transition serializes as an object")
-        .insert(
-            EFFECTIVE_POLICY_KEY.into(),
-            serde_json::to_value(observation).map_err(io_error)?,
-        );
-    serde_json::to_vec(&body).map_err(io_error)
-}
-fn parse_frame_body(
-    body: &[u8],
-) -> Result<(ObservedTransition, Option<EffectivePolicyObservation>)> {
-    let mut value = serde_json::from_slice::<Value>(body).map_err(io_error)?;
-    let effective_policy = value
-        .as_object_mut()
-        .ok_or_else(|| error("outbox frame body must be an object"))?
-        .remove(EFFECTIVE_POLICY_KEY)
-        .map(serde_json::from_value::<EffectivePolicyObservation>)
-        .transpose()
-        .map_err(io_error)?;
+fn parse_frame_body(body: &[u8]) -> Result<ObservedTransition> {
+    let value = serde_json::from_slice::<Value>(body).map_err(io_error)?;
     let transition: ObservedTransition = serde_json::from_value(value.clone()).map_err(io_error)?;
     ensure(
         value == serde_json::to_value(&transition).map_err(io_error)?,
         "unknown outbox transition fields",
     )?;
-    ensure(
-        effective_policy.is_none()
-            || transition.kind == storage::RuntimeEventKind::AutomaticReviewUnavailable,
-        "only an unavailable review frame carries an effective policy",
-    )?;
-    Ok((transition, effective_policy))
+    Ok(transition)
 }
 pub(crate) struct OutboxScan {
     pub(crate) frames: Vec<OutboxFrame>,
@@ -936,7 +781,7 @@ impl<S: OutboxIo> Outbox<S> {
             self.io.read_exact(&mut body).map_err(io_error)?;
             let digest: [u8; 32] = Sha256::digest(&body).into();
             ensure(digest == checksum, "outbox frame checksum mismatch")?;
-            let (transition, effective_policy) = parse_frame_body(&body)?;
+            let transition = parse_frame_body(&body)?;
             storage::validate_transition(&run, &transition)?;
             ensure(
                 transition.event_seq >= previous,
@@ -949,7 +794,6 @@ impl<S: OutboxIo> Outbox<S> {
             let end = position + FRAME_HEADER + bytes;
             frames.push(OutboxFrame {
                 transition,
-                effective_policy,
                 start: position,
                 end,
             });
@@ -967,7 +811,6 @@ impl<S: OutboxIo> Outbox<S> {
         &mut self,
         conn: &mut Connection,
         value: &ObservedTransition,
-        effective_policy: Option<&EffectivePolicyObservation>,
         until: Instant,
     ) -> Result<()> {
         let run = self.validate(conn, until)?;
@@ -980,12 +823,7 @@ impl<S: OutboxIo> Outbox<S> {
                 self.dirty = false;
             }
         }
-        ensure(
-            effective_policy.is_none()
-                || value.kind == storage::RuntimeEventKind::AutomaticReviewUnavailable,
-            "only an unavailable review frame carries an effective policy",
-        )?;
-        let body = frame_body(value, effective_policy)?;
+        let body = serde_json::to_vec(value).map_err(io_error)?;
         let digest: [u8; 32] = Sha256::digest(&body).into();
         if let Some(old) = self.known.get(&value.event_seq) {
             ensure(*old == digest, "conflicting outbox sequence retry")?;
@@ -1492,8 +1330,7 @@ mod tests {
 
     impl TestOutbox {
         fn append_synced(&mut self, value: &ObservedTransition, until: Instant) -> Result<()> {
-            self.outbox
-                .append_synced(&mut self.conn, value, None, until)
+            self.outbox.append_synced(&mut self.conn, value, until)
         }
         fn scan(&mut self, until: Instant) -> Result<OutboxScan> {
             self.outbox.scan(&mut self.conn, until)
@@ -1622,8 +1459,6 @@ mod tests {
             let mut raw = value.evidence_json.clone();
             raw["excerpt"] = serde_json::json!("x".repeat(6000));
             value.evidence_json = policy.apply(&raw).unwrap();
-            value.kind = RuntimeEventKind::AutomaticRefusalObserved;
-            value.cause_json = None;
             let bytes = frame(&value);
             (value, bytes)
         };

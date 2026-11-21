@@ -2669,16 +2669,12 @@ mod tests {
                 "fixture-model",
                 "--effort",
                 "high",
-                "--event-evidence",
-                "metadata",
                 "literal '$x' `text` assignment",
             ]);
             let Command::Member(member::MemberCommand::Create(member::CreateArgs {
                 coding_agent,
                 model,
                 effort,
-                event_evidence,
-                event_redaction_file,
                 ..
             })) = CliArgs::try_parse_from(arguments).unwrap().command
             else {
@@ -2687,29 +2683,6 @@ mod tests {
             assert_eq!(coding_agent, Some(crate::coding_agent::CodingAgent::Codex));
             assert_eq!(model.as_deref(), Some("fixture-model"));
             assert_eq!(effort.as_deref(), Some("high"));
-            assert_eq!(event_evidence, "metadata");
-            assert_eq!(event_redaction_file, None);
-            let mut arguments = create_arguments();
-            arguments.extend([
-                "--event-evidence",
-                "redacted",
-                "--event-redaction-file",
-                "/tmp/synthetic-redaction.json",
-                "literal assignment",
-            ]);
-            let Command::Member(member::MemberCommand::Create(member::CreateArgs {
-                event_evidence,
-                event_redaction_file,
-                ..
-            })) = CliArgs::try_parse_from(arguments).unwrap().command
-            else {
-                panic!("member create expected")
-            };
-            assert_eq!(event_evidence, "redacted");
-            assert_eq!(
-                event_redaction_file.as_deref(),
-                Some(std::path::Path::new("/tmp/synthetic-redaction.json"))
-            );
         }
 
         #[test]
@@ -2759,44 +2732,6 @@ mod tests {
                 failure.message(),
                 "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got 'openrouter/moonshotai/kimi-k2.6:high')."
             );
-        }
-
-        #[test]
-        fn runtime_policy_invalid_redaction_configuration_fails_before_creation_effects() {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("redaction.json");
-            for bytes in [
-                b"not json".to_vec(),
-                vec![0xff],
-                br#"{"schema_version":1,"patterns":["secret"],"sensitive_rules":["missing-rule"]}"#
-                    .to_vec(),
-            ] {
-                std::fs::write(&path, bytes).unwrap();
-                invalid_creation(
-                    CodingAgent::Codex,
-                    &[
-                        "--event-evidence".into(),
-                        "redacted".into(),
-                        "--event-redaction-file".into(),
-                        path.to_str().unwrap().into(),
-                    ],
-                );
-            }
-        }
-
-        #[test]
-        fn runtime_policy_redaction_options_form_a_validated_launch_only_group() {
-            for extra in [
-                vec!["--event-evidence".into(), "redacted".into()],
-                vec![
-                    "--event-evidence".into(),
-                    "metadata".into(),
-                    "--event-redaction-file".into(),
-                    "/tmp/unused-redaction.json".into(),
-                ],
-            ] {
-                invalid_creation(CodingAgent::Codex, &extra);
-            }
         }
 
         #[test]

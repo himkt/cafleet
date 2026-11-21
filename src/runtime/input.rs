@@ -9289,7 +9289,7 @@ mod tests {
                 rule["extract"] = serde_json::json!({"operation":null,"choices":[]});
                 rule["verified_noninteraction"] = serde_json::json!(true);
                 value["profiles"][0]["capabilities"] = serde_json::json!({
-                    "detection":null,"annotations":null,"answers":[],"composer":{
+                    "detection":null,"answers":[],"composer":{
                         "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
                         "submission":{"prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
                     }
@@ -10192,23 +10192,6 @@ mod tests {
                 body,
             );
         }
-        pub(super) fn with_redacted_inspection(
-            body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
-        ) {
-            with_definition_profile(
-            inspection_fixture_definition(),
-            b"unused-program~".to_vec(),
-            HostProfile::synthetic(
-                storage::evidence::EvidencePolicy::redacted(
-                    &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
-                    &["synthetic-permission"],
-                )
-                .unwrap(),
-                "redacted",
-            ),
-            body,
-        );
-        }
         pub(super) fn with_definition(
             definition: serde_json::Value,
             expected_program: Vec<u8>,
@@ -10334,9 +10317,6 @@ mod tests {
             h.drain();
             settled_ids(h)
         }
-        pub(super) fn detail_rewrite(detail: &str) -> Vec<u8> {
-            format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
-        }
         pub(super) fn settled_ids(h: &mut Host) -> (i64, i64, i64, i64) {
             loop {
                 h.drain();
@@ -10388,6 +10368,33 @@ mod tests {
         pub(super) fn inspect(h: &mut Host, ids: (i64, i64, i64, i64)) -> PermissionInspection {
             h.drain();
             inspect_request(h, request(h, ids), h.until).unwrap()
+        }
+
+        #[test]
+        fn events_and_permission_inspection_carry_metadata_only_evidence() {
+            with_inspection(|h, _, _| {
+                let ids = stable_form(h);
+                let inspection = inspect(h, ids);
+                let event = storage::get_event(&h.fixture.conn, ids.0).unwrap();
+                for (surface, evidence) in [
+                    ("event", event.event.payload_json["evidence"].clone()),
+                    ("inspection", inspection.evidence.clone()),
+                ] {
+                    for field in ["operation", "choices", "excerpt"] {
+                        assert_eq!(
+                            evidence[field],
+                            serde_json::Value::Null,
+                            "{surface} {field}: {evidence}"
+                        );
+                    }
+                    assert!(
+                        !evidence
+                            .to_string()
+                            .contains("PRIVATE_INSPECTION_OPERATION"),
+                        "{surface}: {evidence}"
+                    );
+                }
+            });
         }
 
         #[test]
@@ -10767,74 +10774,6 @@ mod tests {
         }
 
         #[test]
-        fn permission_inspection_missing_facts_use_validated_post_policy_evidence_only() {
-            use crate::coding_agent::CodingAgent;
-            use crate::coding_agent::Detector;
-            use crate::runtime::TerminalSize;
-            use crate::runtime::TerminalState;
-            let catalog =
-                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
-                    .unwrap();
-            let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
-            let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            terminal
-                .feed(&inspection_fixture_form(
-                    "write public.txt",
-                    "synthetic-only",
-                ))
-                .unwrap();
-            let raw = detector.observe(&terminal.snapshot()).unwrap().raw_evidence;
-            let redacted = storage::evidence::EvidencePolicy::redacted(&serde_json::json!({"schema_version":1,"patterns":["OWNED_SECRET"],"sensitive_rules":[]}),&["synthetic-permission"]).unwrap();
-            let missing = |value: &serde_json::Value| {
-                inspection_missing_evidence(value)
-                    .unwrap()
-                    .iter()
-                    .map(|missing| missing.as_str())
-                    .collect::<Vec<_>>()
-            };
-            let public = redacted.apply(&raw).unwrap();
-            let unavailable = [
-                "operation",
-                "arguments",
-                "cwd",
-                "environment",
-                "targets",
-                "effects",
-                "choice_scope",
-            ];
-            assert_eq!(missing(&public), unavailable[1..]);
-            assert_eq!(
-                missing(
-                    &storage::evidence::EvidencePolicy::metadata()
-                        .apply(&raw)
-                        .unwrap()
-                ),
-                unavailable
-            );
-            for operation in [
-                serde_json::Value::Null,
-                serde_json::json!(" "),
-                serde_json::json!("OWNED_SECRET"),
-                serde_json::json!("[redacted]"),
-            ] {
-                let mut changed = raw.clone();
-                if operation.is_null() {
-                    changed["operation_rows"] = serde_json::Value::Null;
-                }
-                changed["operation"] = operation;
-                assert_eq!(missing(&redacted.apply(&changed).unwrap()), unavailable);
-            }
-            let mut truncated = raw.clone();
-            truncated["truncated"] = serde_json::json!(true);
-            assert_eq!(missing(&redacted.apply(&truncated).unwrap()), unavailable);
-            let mut corrupt = public;
-            corrupt["evidence_digest"] = serde_json::json!("f".repeat(64));
-            assert!(inspection_missing_evidence(&corrupt).is_err());
-            corrupt.as_object_mut().unwrap().remove("operation");
-            assert!(inspection_missing_evidence(&corrupt).is_err());
-        }
-
-        #[test]
         fn permission_inspection_current_authority_has_no_debug_or_serialized_representation() {
             assert_not_impl!(CurrentRequest: std::fmt::Debug, serde::Serialize);
         }
@@ -10856,7 +10795,6 @@ mod tests {
         use crate::runtime::input::tests::ordinary_prompt::support::Host;
         use crate::runtime::input::tests::ordinary_prompt::support::Pty;
         use crate::runtime::input::tests::permission_inspection_contracts::counts;
-        use crate::runtime::input::tests::permission_inspection_contracts::detail_rewrite;
         use crate::runtime::input::tests::permission_inspection_contracts::form;
         use crate::runtime::input::tests::permission_inspection_contracts::inspect;
         use crate::runtime::input::tests::permission_inspection_contracts::inspect_request;
@@ -10869,7 +10807,6 @@ mod tests {
         use crate::runtime::input::tests::permission_inspection_contracts::with_claude_inspection;
         use crate::runtime::input::tests::permission_inspection_contracts::with_definition;
         use crate::runtime::input::tests::permission_inspection_contracts::with_inspection;
-        use crate::runtime::input::tests::permission_inspection_contracts::with_redacted_inspection;
         use crate::runtime::input::*;
         use std::sync::atomic::Ordering;
         use std::time::Duration;
@@ -11321,41 +11258,6 @@ mod tests {
         }
 
         #[test]
-        fn permission_drain_reason_is_current_and_never_a_stale_earlier_reason() {
-            with_redacted_inspection(|h, _, _| {
-                let ids = stable_detailed_form(h, "opened");
-                let inspected = inspect(h, ids);
-                let input = command(
-                    h,
-                    &inspected,
-                    "response:stale-reason",
-                    PermissionDecision::Allow,
-                );
-                let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
-                lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-                h.child_output(detail_rewrite("refreshed"));
-                assert!(matches!(h.quiesce_once(), InputDrain::Pending));
-                assert_eq!(blocked_reason(h, ids), "observation evidence pending");
-                neutral_output_flood(h);
-                assert!(matches!(h.quiesce_once(), InputDrain::Pending));
-                assert_eq!(
-                    blocked_reason(h, ids),
-                    OUTPUT_ARRIVING,
-                    "inspection reports the latest drain's reason"
-                );
-                let refused = refused_reason(h, &input);
-                assert!(
-                    refused.contains(&format!("permission request is blocked: {OUTPUT_ARRIVING}")),
-                    "{refused:?}"
-                );
-                assert_eq!(counts(h), [0, 0, 0]);
-                lock.execute_batch("COMMIT").unwrap();
-                drop(lock);
-                h.drain();
-            });
-        }
-
-        #[test]
         fn permission_pending_admission_drain_refuses_respond_before_any_receipt() {
             with_inspection(|h, _, _| {
                 let ids = stable_form(h);
@@ -11518,7 +11420,7 @@ mod tests {
         #[test]
         fn pointer_reports_revoke_permission_tokens_without_keyboard_generation_changes() {
             for pointer in [b"\x1b[<0;10;20M".as_slice(), b"\x1b[M !!"] {
-                with_redacted_inspection(|host, _, _| {
+                with_inspection(|host, _, _| {
                     let ids = stable_detailed_form(host, "opened");
                     let inspection = inspect(host, ids);
                     let input = command(
@@ -11539,378 +11441,6 @@ mod tests {
             }
         }
 
-        #[test]
-        fn permission_response_fresh_admission_rejects_revoked_token_then_reserves_selected_deny_plan()
-         {
-            with_redacted_inspection(|h, _, _| {
-                let ids = stable_detailed_form(h, "opened");
-                let inspected = inspect(h, ids);
-                let stale = command(h, &inspected, "response:stale", PermissionDecision::Allow);
-                h.type_human(b"!");
-                h.drain();
-                let failure = match h.respond(&stale) {
-                    Err(failure) => failure,
-                    Ok(_) => panic!("revoked token refuses the fresh response"),
-                };
-                assert_eq!(
-                    (
-                        failure.context.run_id,
-                        failure.context.interaction_id,
-                        failure.context.input_id
-                    ),
-                    (Some(h.fixture.run.run_id), Some(ids.1), None)
-                );
-                assert_eq!(
-                    failure.context.operation_key.as_deref(),
-                    Some(stale.operation_key.as_str())
-                );
-                assert!(!failure.source.message().contains(&stale.request_token));
-                assert_eq!(counts(h), [0, 0, 0]);
-                assert!(h.pty.program.is_empty());
-                assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
-                let before_gap = inspect(h, ids);
-                let before_gap = command(
-                    h,
-                    &before_gap,
-                    "response:before-gap",
-                    PermissionDecision::Allow,
-                );
-                h.fixture.conn.execute_batch("CREATE TRIGGER reject_response_refresh BEFORE UPDATE OF evidence_json ON member_interactions BEGIN SELECT RAISE(ABORT,'owned response refresh failure'); END").unwrap();
-                let generation = h.controller.request_generation();
-                h.child_output(detail_rewrite("refreshed"));
-                h.coordinator
-                    .progress_with_manual(&mut h.transport, |transport| {
-                        transport.quiesce_for_input(
-                            &mut h.human,
-                            &mut h.pty,
-                            &mut h.output,
-                            &mut h
-                                .controller
-                                .observer(&h.writer, &crate::runtime::RealObservationClock),
-                            h.until,
-                        )
-                    })
-                    .unwrap();
-                loop {
-                    let status = h.writer.status();
-                    if status.diagnostic.is_some() {
-                        assert!(status.pending_evidence);
-                        assert!(
-                            status
-                                .diagnostic
-                                .as_deref()
-                                .unwrap()
-                                .contains("owned response refresh failure")
-                        );
-                        break;
-                    }
-                    assert!(
-                        Instant::now() < h.until,
-                        "actual refresh failure is observed"
-                    );
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                h.controller
-                    .poll(
-                        &h.transport.snapshot(),
-                        &h.writer,
-                        &crate::runtime::RealObservationClock,
-                    )
-                    .unwrap();
-                assert!(h.controller.status().gap_count > 0);
-                assert!(h.controller.current_request().is_none());
-                assert!(h.controller.request_generation() > generation);
-                let during_gap = h.controller.health(&h.writer);
-                let ordinary_key = "prompt:recovered-writer";
-                let ordinary = h.request(ordinary_key);
-                let InputControlOperation::SubmitPrompt(ordinary_input) = &ordinary.operation
-                else {
-                    panic!("existing ordinary fixture supplies a Prompt request")
-                };
-                let ordinary_literal = ordinary_input.literal.clone();
-                let held = h.coordinator.handle_received(
-                    &mut h.fixture.conn,
-                    ordinary,
-                    &h.controller,
-                    h.until,
-                );
-                let removed = h
-                    .fixture
-                    .conn
-                    .execute_batch("DROP TRIGGER reject_response_refresh");
-                assert!(
-                    removed.is_ok(),
-                    "primary={:?}; trigger_cleanup={removed:?}",
-                    held.as_ref().err()
-                );
-                assert!(during_gap.degraded);
-                assert!(matches!(during_gap.eligibility, InputEligibility::Hold(_)));
-                let Some(InputControlReply::Submission(held)) = held.unwrap() else {
-                    panic!("actual writer gap returns the ordinary Held reply")
-                };
-                assert_eq!(
-                    (held.status, held.stage, held.input_id),
-                    (SubmissionStatus::Held, SubmissionStage::ZeroBytes, None)
-                );
-                assert!(h.coordinator.pending.is_none());
-                assert!(
-                    storage::find_input(&h.fixture.conn, h.fixture.run.run_id, ordinary_key)
-                        .unwrap()
-                        .is_none()
-                );
-                assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
-                while h.writer.status().diagnostic.is_some() {
-                    assert!(
-                        Instant::now() < h.until,
-                        "original writer recovers in budget"
-                    );
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                loop {
-                    h.drain();
-                    if h.controller.current_request().is_some() {
-                        break;
-                    }
-                    assert!(
-                        Instant::now() < h.until,
-                        "complete request is observed again"
-                    );
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                let recovered = h.controller.health(&h.writer);
-                assert!(h.controller.status().gap_count > 0);
-                assert!(recovered.gap_count > 0);
-                assert!(!recovered.degraded);
-                assert_eq!(recovered.pending_count, 0);
-                assert!(!recovered.pending_evidence);
-                assert!(recovered.diagnostic.is_none());
-                let proof = h
-                    .transport
-                    .take_input_drain()
-                    .expect("actual recovered transport installs a current quiet proof");
-                h.transport
-                    .validate_observation_drain(&proof, h.until)
-                    .unwrap();
-                assert!(h.respond(&before_gap).is_err());
-                assert_eq!(counts(h), [0, 0, 0]);
-                assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
-                let fresh = inspect(h, ids);
-                let input = command(h, &fresh, "response:fresh-deny", PermissionDecision::Deny);
-                assert_ne!(input.request_token, stale.request_token);
-                assert_ne!(input.request_token, before_gap.request_token);
-                assert!(
-                    h.respond(&input).unwrap().is_none(),
-                    "fresh supported response enters the actual pending writer"
-                );
-                assert_eq!(counts(h), [0, 0, 0]);
-                let id = arm_stage(h, 1);
-                assert_eq!(counts(h), [1, 1, 1]);
-                assert_eq!(
-                    audit(h, id, &input, "inspection-deny-plan").input.state,
-                    storage::InputState::InProgress
-                );
-                h.drain();
-                assert!(
-                    h.advance().is_none(),
-                    "first complete answer stage is not complete submission"
-                );
-                let checkpoint = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (checkpoint.stage, checkpoint.written_bytes),
-                    (SubmissionStage::Partial, 1)
-                );
-                arm_stage(h, 2);
-                h.drain();
-                let result = response(h.advance().expect("actual final response stage"));
-                assert_eq!(
-                    (
-                        result.submission.status,
-                        result.submission.stage,
-                        result.submission.input_id
-                    ),
-                    (
-                        SubmissionStatus::Accepted,
-                        SubmissionStage::Submitted,
-                        Some(id)
-                    )
-                );
-                assert_eq!(
-                    (
-                        result.interaction_id,
-                        result.event_id,
-                        &result.key,
-                        result.decision_source
-                    ),
-                    (
-                        input.interaction_id,
-                        input.event_id,
-                        &input.key,
-                        input.decision_source
-                    )
-                );
-                assert_eq!(
-                    h.pty.offers,
-                    vec![b"!".to_vec(), b"n".to_vec(), b"\r".to_vec()]
-                );
-                assert_eq!(
-                    audit(h, id, &input, "inspection-deny-plan").input.state,
-                    storage::InputState::Accepted
-                );
-                let notified: Option<String> = h
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [ids.2],
-                        |r| r.get(0),
-                    )
-                    .unwrap();
-                assert!(notified.is_none());
-                let before_composer = h.transport.snapshot().screen_seq;
-                h.child_output(b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end");
-                loop {
-                    h.drain();
-                    let status = h.controller.status();
-                    let health = h.controller.health(&h.writer);
-                    if status.eligibility == InputEligibility::ComposerEmpty
-                        && status.visibility == Visibility::NotVisible
-                        && !status.retained_transition
-                        && !status.retained_draft
-                        && !status.retained_evidence
-                        && status.diagnostic.is_none()
-                        && !health.degraded
-                        && health.pending_count == 0
-                        && !health.pending_evidence
-                    {
-                        break;
-                    }
-                    assert!(
-                        Instant::now() < h.until,
-                        "actual recovered writer observes complete ordinary composition"
-                    );
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                assert!(h.transport.snapshot().screen_seq > before_composer);
-                assert!(h.controller.status().gap_count > 0);
-                let current = h.controller.health(&h.writer);
-                assert!(current.gap_count > 0);
-                assert_eq!(current.eligibility, InputEligibility::ComposerEmpty);
-                assert_eq!(current.visibility, Visibility::NotVisible);
-                assert!(current.diagnostic.is_none());
-                let proof = h
-                    .transport
-                    .take_input_drain()
-                    .expect("real recovered composer supplies a complete quiet proof");
-                h.transport
-                    .validate_observation_drain(&proof, h.until)
-                    .unwrap();
-                assert!(
-                    storage::find_input(&h.fixture.conn, h.fixture.run.run_id, ordinary_key)
-                        .unwrap()
-                        .is_none()
-                );
-                assert!(h.coordinator.pending.is_none());
-                assert_eq!(
-                    h.pty.offers,
-                    vec![b"!".to_vec(), b"n".to_vec(), b"\r".to_vec()]
-                );
-                let ordinary = h.request(ordinary_key);
-                h.confirm_after_programs([[ordinary_literal.as_bytes(), b"~"].concat()]);
-                let resumed = h
-                    .coordinator
-                    .handle_received(&mut h.fixture.conn, ordinary, &h.controller, h.until)
-                    .unwrap();
-                let projection = match resumed.as_ref() {
-                    None => None,
-                    Some(InputControlReply::Submission(reply)) => Some((
-                        reply.status,
-                        reply.stage,
-                        reply.input_id,
-                        reply.reason.as_deref(),
-                    )),
-                    Some(_) => panic!("ordinary retry has its typed submission reply"),
-                };
-                assert!(
-                    projection.is_none(),
-                    "current complete composer accepts explicit retry after writer recovery: reply={projection:?}; status={:?}",
-                    h.controller.status()
-                );
-                for _ in 0..16 {
-                    h.drain();
-                    assert!(h.advance().is_none());
-                    assert_eq!(
-                        h.pty.offers.len(),
-                        3,
-                        "fresh guard precedes ordinary native input"
-                    );
-                    if h.hooks.count("before") == 3 {
-                        break;
-                    }
-                }
-                assert_eq!(h.hooks.count("reserved"), 2);
-                assert_eq!(h.hooks.count("before"), 3);
-                let reserved =
-                    storage::find_input(&h.fixture.conn, h.fixture.run.run_id, ordinary_key)
-                        .unwrap()
-                        .unwrap();
-                assert_eq!(reserved.kind, storage::InputKind::Prompt);
-                assert_eq!(reserved.state, storage::InputState::InProgress);
-                assert_ne!(reserved.input_id, id);
-                let submitted = loop {
-                    assert!(
-                        Instant::now() < h.until,
-                        "recovered ordinary writer completes its staged submission"
-                    );
-                    h.drain();
-                    if let Some(reply) = h.advance() {
-                        let InputControlReply::Submission(submitted) = reply else {
-                            panic!(
-                                "recovered ordinary writer returns its real completed submission"
-                            )
-                        };
-                        break submitted;
-                    }
-                    std::thread::sleep(Duration::from_millis(5));
-                };
-                assert_eq!(
-                    (submitted.status, submitted.stage, submitted.input_id),
-                    (
-                        SubmissionStatus::Accepted,
-                        SubmissionStage::Submitted,
-                        Some(reserved.input_id)
-                    )
-                );
-                assert_eq!(
-                    storage::get_input(&h.fixture.conn, reserved.input_id)
-                        .unwrap()
-                        .state,
-                    storage::InputState::Accepted
-                );
-                let expected_bytes = [ordinary_literal.as_bytes(), b"~"].concat();
-                assert_eq!(
-                    h.pty.offers,
-                    vec![
-                        b"!".to_vec(),
-                        b"n".to_vec(),
-                        b"\r".to_vec(),
-                        ordinary_literal.as_bytes().to_vec(),
-                        b"~".to_vec()
-                    ]
-                );
-                let point = h
-                    .coordinator
-                    .retained_checkpoint(reserved.input_id)
-                    .unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (
-                        SubmissionStage::Submitted,
-                        u64::try_from(expected_bytes.len()).unwrap()
-                    )
-                );
-                assert!(h.controller.status().gap_count > 0);
-            });
-        }
         fn admitted(
             h: &mut Host,
             key: &str,

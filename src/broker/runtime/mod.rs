@@ -128,7 +128,6 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         coverage: row.get("coverage")?,
         status: row.get("status")?,
         native_version: row.get("native_version")?,
-        effective_policy_json: optional_json(row, "effective_policy_json", false)?,
         owner_epoch: row.get("owner_epoch")?,
         owner_kind: row.get("owner_kind")?,
         owner_pid: row.get("owner_pid")?,
@@ -169,7 +168,6 @@ pub(crate) fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, Cafle
         "member_runs.permission_argv_json",
         "string arguments required",
     )?;
-    events::validate(&run)?;
     Ok(run)
 }
 
@@ -455,7 +453,6 @@ stored_enum!(OwnerKind, "member_runs.owner_kind", { Creator => "creator", Runner
 stored_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete", Incomplete => "incomplete" });
 stored_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
 stored_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
-stored_enum!(AutomaticReview, "effective_policy.automatic_review", { Available => "available", Unavailable => "unavailable" });
 stored_enum!(test_values InteractionClass, "member_interactions.classification", {
     PermissionRequest => "permission_request", Question => "question",
     UnknownInteraction => "unknown_interaction"
@@ -467,8 +464,6 @@ stored_enum!(test_values InteractionCloseReason, "member_interactions.close_reas
 stored_enum!(RuntimeEventKind,"member_runtime_events.kind", {
     CoverageUnknown => "coverage_unknown", InteractionOpened => "interaction_opened",
     InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
-    AutomaticRefusalObserved => "automatic_refusal_observed",
-    AutomaticReviewUnavailable => "automatic_review_unavailable",
     InputDeliveryResult => "input_delivery_result", InputDeliveryStalled => "input_delivery_stalled",
     RunnerDegraded => "runner_degraded",
     RunnerLost => "runner_lost", RunnerExited => "runner_exited"
@@ -518,15 +513,6 @@ impl RunStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct EffectivePolicyObservation {
-    pub(crate) automatic_review: AutomaticReview,
-    pub(crate) observed_mode: Option<String>,
-    pub(crate) rule_id: String,
-    pub(crate) observed_at: String,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct NewRun {
     pub(crate) member_id: i64,
@@ -565,7 +551,6 @@ pub(crate) struct RunRecord {
     pub(crate) coverage: Coverage,
     pub(crate) status: RunStatus,
     pub(crate) native_version: Option<String>,
-    pub(crate) effective_policy_json: Option<Value>,
     pub(crate) owner_epoch: i64,
     pub(crate) owner_kind: OwnerKind,
     pub(crate) owner_pid: i64,
@@ -1283,15 +1268,6 @@ pub(crate) mod test_support {
                 }
             }
         }
-    }
-
-    /// The redaction policy for `patterns` that recognizes the native permission request.
-    pub(crate) fn redacted_policy(patterns: &[&str]) -> evidence::EvidencePolicy {
-        evidence::EvidencePolicy::redacted(
-            &json!({"schema_version":1,"patterns":patterns,"sensitive_rules":[]}),
-            &["native-tool-permission"],
-        )
-        .unwrap()
     }
 
     pub(crate) fn replace_public_payload(

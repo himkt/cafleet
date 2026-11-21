@@ -1367,7 +1367,6 @@ mod tests {
                 ("event_evidence", "raw"),
                 ("backend", "bogus"),
                 ("database_identity_json", "[]"),
-                ("effective_policy_json", "[]"),
                 ("permission_argv_json", "{}"),
                 ("cleanup_diagnostics_json", "{}"),
                 ("runtime_dir_identity_json", "[]"),

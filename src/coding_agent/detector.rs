@@ -26,9 +26,6 @@ pub(crate) enum ObservationKind {
     PermissionContinuation,
     ComposerEmpty,
     Unknown,
-    AutomaticRefusal,
-    AutomaticReviewUnavailable,
-    AutomaticReviewAvailable,
 }
 
 impl TryFrom<String> for ObservationKind {
@@ -47,9 +44,6 @@ impl ObservationKind {
             "permission_continuation" => Self::PermissionContinuation,
             "composer_empty" => Self::ComposerEmpty,
             "unknown" => Self::Unknown,
-            "automatic_refusal" => Self::AutomaticRefusal,
-            "automatic_review_unavailable" => Self::AutomaticReviewUnavailable,
-            "automatic_review_available" => Self::AutomaticReviewAvailable,
             _ => return Err(CafleetError::Usage("invalid profile observation".into())),
         })
     }
@@ -59,18 +53,7 @@ impl ObservationKind {
             Self::PermissionContinuation => "permission_continuation",
             Self::ComposerEmpty => "composer_empty",
             Self::Unknown => "unknown",
-            Self::AutomaticRefusal => "automatic_refusal",
-            Self::AutomaticReviewUnavailable => "automatic_review_unavailable",
-            Self::AutomaticReviewAvailable => "automatic_review_available",
         }
-    }
-    pub(crate) fn is_annotation(self) -> bool {
-        matches!(
-            self,
-            Self::AutomaticRefusal
-                | Self::AutomaticReviewUnavailable
-                | Self::AutomaticReviewAvailable
-        )
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,33 +84,6 @@ pub(crate) struct ScreenObservation {
     pub(crate) verified_noninteraction: bool,
     pub(crate) output_seq: u64,
     pub(crate) continues_rule_id: Option<String>,
-    pub(crate) annotations: Vec<AnnotationBlock>,
-    pub(crate) guarded_annotation_rules: Vec<String>,
-}
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct AnnotationFingerprint {
-    rule_id: String,
-    shown: String,
-}
-#[derive(Clone)]
-pub(crate) struct AnnotationBlock {
-    pub(crate) kind: ObservationKind,
-    pub(crate) rule_id: String,
-    pub(crate) matched_region: ScreenRegion,
-    pub(crate) raw_evidence: Value,
-    pub(crate) fingerprint: AnnotationFingerprint,
-}
-fn normalized_shown(text: &str, row_margin: Option<&str>) -> String {
-    let mut rows = text.split('\n');
-    let mut joined = rows.next().expect("split yields a first row").to_owned();
-    for row in rows {
-        joined.push_str(
-            row_margin
-                .and_then(|margin| row.strip_prefix(margin))
-                .unwrap_or(row),
-        );
-    }
-    joined.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 pub(crate) struct Detector {
     backend: CodingAgent,
@@ -306,7 +262,6 @@ struct Matched<'a> {
     region: ScreenRegion,
     operation: Option<String>,
     choices: Vec<String>,
-    mode: Option<String>,
     excerpt: String,
     focuses: BTreeMap<String, String>,
     matcher_lines: BTreeMap<String, usize>,
@@ -346,27 +301,6 @@ fn frame_guard_holds(rule: &Rule, lines: &[LogicalLine]) -> bool {
             .reject
             .iter()
             .any(|pattern| lines.iter().any(|line| pattern.is_match(&line.text)))
-}
-fn match_annotation_blocks<'a>(
-    rule: &'a Rule,
-    screen: &ScreenSnapshot,
-    lines: &[LogicalLine],
-) -> Vec<Matched<'a>> {
-    if !frame_guard_holds(rule, lines) {
-        return Vec::new();
-    }
-    let mut blocks = Vec::new();
-    let mut next_free = 0;
-    for candidate in qualifying_regions(rule, screen, lines) {
-        if candidate.0 < next_free {
-            continue;
-        }
-        if let Some(block) = extract(rule, lines, candidate) {
-            next_free = candidate.1 + 1;
-            blocks.push(block);
-        }
-    }
-    blocks
 }
 fn qualifying_regions(
     rule: &Rule,
@@ -552,7 +486,7 @@ fn extract<'a>(
         Some(reference) => {
             let value = captured(reference, &values)?;
             let plain = reference.row_margin.is_none() && reference.row_trailer.is_none();
-            Some(if plain || rule.kind.is_annotation() {
+            Some(if plain {
                 value
             } else {
                 displayed_rows(&value, reference)?
@@ -565,17 +499,11 @@ fn extract<'a>(
         .iter()
         .map(|choice| captured(&choice.label, &values))
         .collect::<Option<Vec<_>>>()?;
-    let mode = values
-        .values()
-        .find_map(|named| named.get("mode"))
-        .filter(|mode| !mode.is_empty())
-        .cloned();
     Some(Matched {
         rule,
         region,
         operation,
         choices,
-        mode,
         excerpt: region_text,
         focuses,
         matcher_lines,
@@ -758,51 +686,6 @@ impl Detector {
             profile: catalog.matching(backend, version).cloned(),
         }
     }
-    fn annotation_blocks(
-        &self,
-        profile: &Profile,
-        screen: &ScreenSnapshot,
-        lines: &ScreenLines,
-        unmatched_evidence: &Value,
-    ) -> Vec<AnnotationBlock> {
-        let Some(group) = &profile.annotations else {
-            return Vec::new();
-        };
-        let mut blocks = profile
-            .rules
-            .iter()
-            .filter(|rule| group.rules.contains(&rule.id))
-            .flat_map(|rule| match_annotation_blocks(rule, screen, lines.of(rule)))
-            .map(|matched| {
-                let mut raw_evidence = evidence(
-                    unmatched_evidence,
-                    matched.rule,
-                    matched.operation.as_deref(),
-                    &matched.excerpt,
-                );
-                raw_evidence["observed_mode"] = json!(matched.mode);
-                AnnotationBlock {
-                    kind: matched.rule.kind,
-                    fingerprint: AnnotationFingerprint {
-                        rule_id: matched.rule.id.clone(),
-                        shown: normalized_shown(
-                            matched.operation.as_deref().unwrap_or(&matched.excerpt),
-                            matched
-                                .rule
-                                .operation
-                                .as_ref()
-                                .and_then(|capture| capture.row_margin.as_deref()),
-                        ),
-                    },
-                    rule_id: matched.rule.id.clone(),
-                    matched_region: matched.region,
-                    raw_evidence,
-                }
-            })
-            .collect::<Vec<_>>();
-        blocks.sort_by_key(|block| (block.matched_region.top, block.rule_id.clone()));
-        blocks
-    }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
         let mut observation = ScreenObservation {
             kind: ObservationKind::Unknown,
@@ -814,27 +697,11 @@ impl Detector {
             verified_noninteraction: false,
             output_seq: screen.screen_seq,
             continues_rule_id: None,
-            annotations: Vec::new(),
-            guarded_annotation_rules: Vec::new(),
         };
         let Some(profile) = &self.profile else {
             return Ok(observation);
         };
         let lines = ScreenLines::new(screen, profile)?;
-        observation.annotations =
-            self.annotation_blocks(profile, screen, &lines, &observation.raw_evidence);
-        observation.guarded_annotation_rules = profile
-            .rules
-            .iter()
-            .filter(|rule| {
-                profile
-                    .annotations
-                    .as_ref()
-                    .is_some_and(|group| group.rules.contains(&rule.id))
-                    && frame_guard_holds(rule, lines.of(rule))
-            })
-            .map(|rule| rule.id.clone())
-            .collect();
         let mut matched = profile
             .rules
             .iter()

@@ -10,8 +10,6 @@ pub(crate) use crate::coding_agent::catalog::AnswerStage;
 pub(crate) use crate::coding_agent::catalog::ComposerOperation;
 pub(crate) use crate::coding_agent::catalog::ProfileCatalog;
 pub(crate) use crate::coding_agent::catalog::StageGate;
-pub(crate) use crate::coding_agent::detector::AnnotationBlock;
-pub(crate) use crate::coding_agent::detector::AnnotationFingerprint;
 pub(crate) use crate::coding_agent::detector::AnswerMatch;
 pub(crate) use crate::coding_agent::detector::Detector;
 pub(crate) use crate::coding_agent::detector::MatchEvidence;

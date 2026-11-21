@@ -37,8 +37,7 @@ pub(crate) fn runtime_snapshot(row: &crate::broker::runtime::RuntimeSnapshot) ->
         "current_interaction_id":row.current_interaction_id,
         "unresolved_input_ids":row.unresolved_input_ids,"owner_kind":run.owner_kind.as_str(),"owner_pid":run.owner_pid,
         "owner_start_identity":run.owner_start_identity,"runner_pid":run.runner_pid,"runner_start_identity":run.runner_start_identity,
-        "child_pid":run.child_pid,"child_start_identity":run.child_start_identity,
-        "effective_policy":run.effective_policy_json})
+        "child_pid":run.child_pid,"child_start_identity":run.child_start_identity})
 }
 
 fn runtime_interaction(row: &crate::broker::runtime::InteractionRecord) -> Value {
@@ -502,7 +501,7 @@ mod tests {
         use rusqlite::params;
         use serde_json::Value;
 
-        const RUNTIME_KEYS: [&str; 16] = [
+        const RUNTIME_KEYS: [&str; 15] = [
             "run_id",
             "resolved_mode",
             "status",
@@ -518,7 +517,6 @@ mod tests {
             "runner_start_identity",
             "child_pid",
             "child_start_identity",
-            "effective_policy",
         ];
         const INPUT_KEYS: [&str; 15] = [
             "input_id",
@@ -649,7 +647,6 @@ mod tests {
             let runtime = &output["runtime"];
             assert_key_order(runtime, &RUNTIME_KEYS);
             assert_eq!(runtime["run_id"], owner.run_id);
-            assert_eq!(runtime["effective_policy"], Value::Null);
             assert_eq!(
                 runtime["current_interaction_id"],
                 event.interaction_id.unwrap()
@@ -674,7 +671,7 @@ mod tests {
             assert_eq!(
                 text,
                 format!(
-                    "{} worker active window=main\nRuntime: run={} mode=never status=running coverage=unknown review=-",
+                    "{} worker active window=main\nRuntime: run={} mode=never status=running coverage=unknown",
                     fixture.member, owner.run_id
                 )
             );
@@ -692,7 +689,7 @@ mod tests {
             assert_eq!(runtime["coverage"], "tested");
             assert_key_order(runtime, &RUNTIME_KEYS);
             let line = format!(
-                "Runtime: run={} mode=never status=running coverage=tested review=-",
+                "Runtime: run={} mode=never status=running coverage=tested",
                 owner.run_id
             );
             assert_eq!(
@@ -748,7 +745,7 @@ mod tests {
             assert_eq!(
                 crate::output::format_runtime_event(&view),
                 format!(
-                    "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown review=-\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
+                    "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
                     event.event_id,
                     owner.run_id,
                     event.message_id.unwrap(),

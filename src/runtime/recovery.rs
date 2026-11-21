@@ -667,7 +667,6 @@ fn persist(
     conn: &mut Connection,
     result: &mut RecoveryCompletion,
     transition: &ObservedTransition,
-    effective_policy: Option<&storage::EffectivePolicyObservation>,
     original: bool,
     #[cfg_attr(
         not(test),
@@ -679,20 +678,13 @@ fn persist(
     host: &mut impl RecoveryHost,
     until: Instant,
 ) -> Result<()> {
-    let (event, inserted) = with_database_deadline(conn, until, |conn| match effective_policy {
-        Some(observation) => storage::persist_transition_with_effective_policy(
-            conn,
-            &result.run.owner(),
-            transition,
-            observation,
-            PersistenceMode::Recovery,
-        ),
-        None => storage::persist_transition(
+    let (event, inserted) = with_database_deadline(conn, until, |conn| {
+        storage::persist_transition(
             conn,
             &result.run.owner(),
             transition,
             PersistenceMode::Recovery,
-        ),
+        )
     })?;
     if inserted {
         count_commit(&mut result.report, &event, original)?;
@@ -775,8 +767,8 @@ fn publish_delivery_results<S: OutboxIo>(
                 crate::time::now_stamp(),
                 evidence.clone(),
             );
-            outbox.append_synced(conn, &transition, None, until)?;
-            persist(conn, result, &transition, None, false, host, until)?;
+            outbox.append_synced(conn, &transition, until)?;
+            persist(conn, result, &transition, false, host, until)?;
         }
     }
     Ok(())
@@ -819,15 +811,7 @@ fn perform(
         check_deadline(Instant::now(), until)?;
         #[cfg(test)]
         host.checkpoint(RecoveryBoundary::BeforeReplay, &result.run, until)?;
-        persist(
-            conn,
-            result,
-            &frame.transition,
-            frame.effective_policy.as_ref(),
-            true,
-            host,
-            until,
-        )?;
+        persist(conn, result, &frame.transition, true, host, until)?;
     }
     let existing = with_database_deadline(conn, until, |conn| terminal_outcome(conn, &result.run))?;
     let target = match existing {
@@ -841,8 +825,8 @@ fn perform(
                 loss_transitions(conn, &result.run, *sequences.start(), false)
             })?;
             for transition in transitions {
-                outbox.append_synced(conn, &transition, None, until)?;
-                persist(conn, result, &transition, None, false, host, until)?;
+                outbox.append_synced(conn, &transition, until)?;
+                persist(conn, result, &transition, false, host, until)?;
             }
             RunStatus::Lost
         }
@@ -4074,7 +4058,7 @@ pub(crate) mod test_support {
                 Outbox::open_owned(&mut conn, &self.fixture.run, held.clone(), deadline).unwrap();
             for transition in transitions {
                 spool
-                    .append_synced(&mut conn, transition, None, deadline)
+                    .append_synced(&mut conn, transition, deadline)
                     .unwrap();
             }
         }
