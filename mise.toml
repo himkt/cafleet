@@ -6,9 +6,9 @@ config_roots = [
 ]
 
 [tools]
-"aqua:pnpm/pnpm" = "12.19.0"
+"aqua:pnpm/pnpm" = "12.20.0"
 "core:node" = "26.13.1"
-"core:rust" = { version = "1.99.1", components = ["clippy", "rustfmt"] }
+"core:rust" = { version = "1.100.0", components = ["clippy", "rustfmt"] }
 "core:zig" = "0.15.2"
 
 [tasks.skill-install]
