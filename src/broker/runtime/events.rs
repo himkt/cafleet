@@ -318,6 +318,7 @@ fn published_delivery(
     Ok(DeliveryFields {
         input_id: Some(input_id),
         message_id: None,
+        blocked_by_input_id: None,
         cause: result_stop_cause(&input, published.status),
         action: Value::Null,
         waiting_since: None,
@@ -359,6 +360,7 @@ fn preview_delivery(
     Ok(DeliveryFields {
         input_id: None,
         message_id: Some(message_id),
+        blocked_by_input_id: None,
         delivery: Some(DeliveryProjection {
             status: DeliveryStatus::Uncertain,
             method: Some(method),
@@ -403,7 +405,9 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
         cause_json: if view.event.kind == RuntimeEventKind::InputDeliveryStalled {
             Some(
                 json!({"kind":"input_delivery_stalled","input_id":payload["input_id"],
-                "message_id":payload["message_id"],"waiting_since":payload["waiting_since"]}),
+                "message_id":payload["message_id"],
+                "blocked_by_input_id":payload["blocked_by_input_id"],
+                "waiting_since":payload["waiting_since"]}),
             )
         } else if view.event.kind == RuntimeEventKind::InputDeliveryResult {
             let mut cause = json!({"kind":"input_delivery_result",
@@ -517,19 +521,39 @@ pub(crate) fn validate_transition(
     Ok(())
 }
 
+const STALLED_RECORD_KEYS: [&str; 5] = [
+    "kind",
+    "input_id",
+    "message_id",
+    "blocked_by_input_id",
+    "waiting_since",
+];
+
 fn validate_stalled_record(transition: &ObservedTransition) -> Result<(), CafleetError> {
     let record = transition
         .cause_json
         .as_ref()
-        .filter(|record| record.as_object().is_some_and(|record| record.len() == 4))
+        .filter(|record| {
+            record.as_object().is_some_and(|record| {
+                record.len() == STALLED_RECORD_KEYS.len()
+                    && STALLED_RECORD_KEYS
+                        .iter()
+                        .all(|key| record.contains_key(*key))
+            })
+        })
         .ok_or_else(|| invalid("cause_json", "stalled delivery record required"))?;
     let named = |id: &Value| id.as_i64().is_some_and(|id| id > 0);
+    let ids = [
+        &record["input_id"],
+        &record["message_id"],
+        &record["blocked_by_input_id"],
+    ];
     require(
         record["kind"] == "input_delivery_stalled"
-            && ((named(&record["input_id"]) && record["message_id"].is_null())
-                || (record["input_id"].is_null() && named(&record["message_id"]))),
+            && ids.iter().all(|id| id.is_null() || named(id))
+            && ids.iter().filter(|id| named(id)).count() == 1,
         "cause_json",
-        "a stalled record names exactly one waiting input or message and its wait start",
+        "a stalled record names exactly one waiting input, message or blocker and its wait start",
     )?;
     rfc3339(
         record["waiting_since"]
@@ -826,6 +850,7 @@ fn apply_interaction(
 struct DeliveryFields {
     input_id: Option<i64>,
     message_id: Option<i64>,
+    blocked_by_input_id: Option<i64>,
     delivery: Option<DeliveryProjection>,
     stage: Value,
     cause: Option<StopCause>,
@@ -850,8 +875,9 @@ fn action_database_args(conn: &Connection) -> Result<Vec<String>, CafleetError> 
     })
 }
 
-/// The fields of a stalled event: a queued ordinary head of this run, or a message addressed to
-/// the run's member. A new record whose head is no longer ready archives as `head_not_ready`.
+/// The fields of a stalled event: a queued ordinary head of this run, a message addressed to
+/// the run's member, or a `prompt`/`exec` input of this run that blocks them in any state. A new
+/// record whose head is no longer ready archives as `head_not_ready`.
 fn stalled_delivery(
     conn: &Connection,
     run: &RunRecord,
@@ -860,9 +886,10 @@ fn stalled_delivery(
 ) -> Result<DeliveryFields, CafleetError> {
     let input_id = record["input_id"].as_i64();
     let message_id = record["message_id"].as_i64();
+    let blocked_by_input_id = record["blocked_by_input_id"].as_i64();
     let mut archive = None;
-    match (input_id, message_id) {
-        (Some(input_id), None) => {
+    let action = match (input_id, message_id, blocked_by_input_id) {
+        (Some(input_id), None, None) => {
             let input = get_input(conn, input_id)?;
             require(
                 input.run_id == run.run_id && input.deferred_at.is_some(),
@@ -872,33 +899,41 @@ fn stalled_delivery(
             if !published && input.state != InputState::Ready {
                 archive = Some(ArchiveReason::HeadNotReady);
             }
+            review_stalled_delivery_action(conn, run)?
         }
-        (None, Some(message_id)) => {
+        (None, Some(message_id), None) => {
             let message = crate::broker::messaging::get_message(conn, message_id)?;
             require(
                 message.to_member_id == run.member_id,
                 "message_id",
                 "a stalled preview addresses the run's member",
             )?;
+            review_stalled_delivery_action(conn, run)?
+        }
+        (None, None, Some(blocker)) => {
+            require(
+                get_input(conn, blocker)?.run_id == run.run_id,
+                "blocked_by_input_id",
+                "a stalled blocker is an input of this run",
+            )?;
+            reconcile_uncertain_input_action(conn, blocker)?
         }
         _ => {
             return Err(invalid(
                 "input_id",
-                "a stalled event names exactly one waiting input or message",
+                "a stalled event names exactly one waiting input, message or blocker",
             ));
         }
-    }
+    };
     let waiting_since = record["waiting_since"]
         .as_str()
         .ok_or_else(|| invalid("waiting_since", "timestamp required"))?
         .to_owned();
     rfc3339(&waiting_since, "waiting_since")?;
-    let action = json!({"kind":"review_stalled_delivery",
-        "instruction":REVIEW_STALLED_DELIVERY_INSTRUCTION,
-        "inspect_argv":member_capture_argv(conn, run.member_id)?});
     Ok(DeliveryFields {
         input_id,
         message_id,
+        blocked_by_input_id,
         delivery: None,
         stage: Value::Null,
         cause: None,
@@ -907,6 +942,33 @@ fn stalled_delivery(
         archive,
     })
 }
+
+fn review_stalled_delivery_action(
+    conn: &Connection,
+    run: &RunRecord,
+) -> Result<Value, CafleetError> {
+    Ok(json!({"kind":"review_stalled_delivery",
+        "instruction":REVIEW_STALLED_DELIVERY_INSTRUCTION,
+        "inspect_argv":member_capture_argv(conn, run.member_id)?}))
+}
+
+fn reconcile_uncertain_input_action(
+    conn: &Connection,
+    blocker: i64,
+) -> Result<Value, CafleetError> {
+    let mut argv = vec![
+        "cafleet".to_owned(),
+        "input".into(),
+        "show".into(),
+        blocker.to_string(),
+        "--json".into(),
+    ];
+    argv.extend(action_database_args(conn)?);
+    Ok(json!({"kind":"reconcile_uncertain_input",
+        "instruction":RECONCILE_UNCERTAIN_INPUT_INSTRUCTION,"inspect_argv":argv}))
+}
+
+const RECONCILE_UNCERTAIN_INPUT_INSTRUCTION: &str = "Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.";
 
 fn member_capture_argv(conn: &Connection, member_id: i64) -> Result<Value, CafleetError> {
     let mut argv = vec![
@@ -955,7 +1017,10 @@ fn payload(
         payload["input_id"] = json!(fields.input_id);
         payload["message_id"] = json!(fields.message_id);
         match (&fields.waiting_since, &fields.delivery) {
-            (Some(waiting_since), None) => payload["waiting_since"] = json!(waiting_since),
+            (Some(waiting_since), None) => {
+                payload["blocked_by_input_id"] = json!(fields.blocked_by_input_id);
+                payload["waiting_since"] = json!(waiting_since);
+            }
             (None, Some(delivery)) => {
                 payload["delivery"] = delivery.to_json();
                 payload["stage"] = fields.stage.clone();
@@ -988,6 +1053,51 @@ pub(crate) fn persist_transition(
     owned_transaction(conn, owner, |conn, run| {
         persist_transition_in_transaction(conn, run, transition, mode)
     })
+}
+
+/// The persisted delivery record of the same kind that names the same waiting input, preview or
+/// blocker; stalled head and preview records match only unblocked rows.
+fn duplicated_delivery(
+    conn: &Connection,
+    run: &RunRecord,
+    kind: RuntimeEventKind,
+    record: &Value,
+) -> Result<Option<i64>, CafleetError> {
+    let unblocked = if kind == RuntimeEventKind::InputDeliveryStalled {
+        " AND json_type(payload_json,'$.blocked_by_input_id')='null'"
+    } else {
+        ""
+    };
+    let (condition, id) = if let Some(input_id) = record["input_id"].as_i64() {
+        (
+            format!("json_extract(payload_json,'$.input_id')=?3{unblocked}"),
+            input_id,
+        )
+    } else if let Some(message_id) = record["message_id"].as_i64() {
+        (
+            format!(
+                "json_type(payload_json,'$.input_id')='null' AND json_extract(payload_json,'$.message_id')=?3{unblocked}"
+            ),
+            message_id,
+        )
+    } else {
+        let blocker = record["blocked_by_input_id"]
+            .as_i64()
+            .expect("a validated delivery record names its input, message or blocker");
+        (
+            "json_extract(payload_json,'$.blocked_by_input_id')=?3".to_owned(),
+            blocker,
+        )
+    };
+    Ok(conn
+        .query_row(
+            &format!(
+                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind=?2 AND {condition}"
+            ),
+            params![run.run_id, kind.as_str(), id],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 pub(crate) fn persist_transition_in_transaction(
@@ -1047,23 +1157,7 @@ pub(crate) fn persist_transition_in_transaction(
             .cause_json
             .as_ref()
             .expect("validated delivery results carry their record");
-        let published: Option<i64> = match record["input_id"].as_i64() {
-            Some(input_id) => conn
-                .query_row(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind=?2 AND json_extract(payload_json,'$.input_id')=?3",
-                    params![run.run_id, transition.kind.as_str(), input_id],
-                    |row| row.get(0),
-                )
-                .optional()?,
-            None => conn
-                .query_row(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind=?2 AND json_type(payload_json,'$.input_id')='null' AND json_extract(payload_json,'$.message_id')=?3",
-                    params![run.run_id, transition.kind.as_str(), record["message_id"].as_i64()],
-                    |row| row.get(0),
-                )
-                .optional()?,
-        };
-        duplicate = published.is_some();
+        duplicate = duplicated_delivery(conn, run, transition.kind, record)?.is_some();
         if transition.kind == RuntimeEventKind::InputDeliveryStalled {
             Some(stalled_delivery(conn, run, record, false)?)
         } else if let Some(input_id) = record["input_id"].as_i64() {
@@ -1072,6 +1166,7 @@ pub(crate) fn persist_transition_in_transaction(
             Some(DeliveryFields {
                 input_id: Some(input_id),
                 message_id: None,
+                blocked_by_input_id: None,
                 cause: result_stop_cause(&input, delivery.status),
                 action: Value::Null,
                 waiting_since: None,

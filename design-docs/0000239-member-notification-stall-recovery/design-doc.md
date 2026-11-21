@@ -1,7 +1,7 @@
 # Member notification stall recovery
 
 **Status**: Approved
-**Progress**: 44/57 tasks complete
+**Progress**: 51/57 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -494,18 +494,15 @@ The Permanent phase queues its second prompt behind an open interaction, because
 - [x] Add the doctor `member.<id>.runtime` rows with concurrent 1 s probes and `DOCTOR_GAP_ERROR_AGE` <!-- completed: 2026-11-21T20:50 -->
 - [x] Add the `member show` and doctor tests for each situation <!-- completed: 2026-11-21T20:50 -->
 
-COMMENT(programmer): `mise //:lint` fails only on test code: clippy `unused_mut` at `src/cli/member.rs` `probe_observation_skips_unprobed_statuses_and_fails_without_a_runner` (`let mut fixture = Fixture::new();`). Production code is clippy- and fmt-clean on the scratch copy; this needs a Tester fix.
-COMMENT(director): Tester: remove the unneeded `mut`, then remove both markers.
-
 ### Step 8: Stall behind an uncertain input
 
-- [ ] Add `storage::first_uncertain_ordinary_input` <!-- completed: -->
-- [ ] Add `BlockedWait` and `watch_blocked`, called first in `queue_housekeeping` <!-- completed: -->
-- [ ] Suppress `watch_head` while a blocker exists <!-- completed: -->
-- [ ] Move every stalled record to the 5-key form and add `blocked_record` <!-- completed: -->
-- [ ] Update `validate_stalled_record`, `original`, `stalled_delivery`, the dedup queries and `payload` per § Stall behind an uncertain input, routing a blocked dedup hit through the Step 5 `duplicate_delivery` archival <!-- completed: -->
-- [ ] Make `publish_delivery_result` compare `blocked_by_input_id` per § Duplicate delivery records <!-- completed: -->
-- [ ] Add the blocked-wait and suppression tests, the blocked record validation and `original` round-trip tests, the blocked dedup query's `duplicate_delivery` test and the `publish_delivery_result` test for two blocked records naming different blockers <!-- completed: -->
+- [x] Add `storage::first_uncertain_ordinary_input` <!-- completed: 2026-11-21T20:57 -->
+- [x] Add `BlockedWait` and `watch_blocked`, called first in `queue_housekeeping` <!-- completed: 2026-11-21T20:57 -->
+- [x] Suppress `watch_head` while a blocker exists <!-- completed: 2026-11-21T20:57 -->
+- [x] Move every stalled record to the 5-key form and add `blocked_record` <!-- completed: 2026-11-21T20:57 -->
+- [x] Update `validate_stalled_record`, `original`, `stalled_delivery`, the dedup queries and `payload` per § Stall behind an uncertain input, routing a blocked dedup hit through the Step 5 `duplicate_delivery` archival <!-- completed: 2026-11-21T20:57 -->
+- [x] Make `publish_delivery_result` compare `blocked_by_input_id` per § Duplicate delivery records <!-- completed: 2026-11-21T20:57 -->
+- [x] Add the blocked-wait and suppression tests, the blocked record validation and `original` round-trip tests, the blocked dedup query's `duplicate_delivery` test and the `publish_delivery_result` test for two blocked records naming different blockers <!-- completed: 2026-11-21T20:57 -->
 
 ### Step 9: Validation
 

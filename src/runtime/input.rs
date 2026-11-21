@@ -178,12 +178,21 @@ pub(crate) struct InputCoordinator {
     bracketed_paste: bool,
     stall_bound: Duration,
     preview_wait: Option<PreviewWait>,
+    blocked_wait: Option<BlockedWait>,
     diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
 }
 
 /// The sweep's selected preview while the composer holds it; the stall watchdog runs from `since`.
 struct PreviewWait {
     message_id: i64,
+    since: Instant,
+    stalled: bool,
+}
+
+/// Queued input or a pending preview waiting behind the run's lowest uncertain ordinary input;
+/// the stall watchdog runs from `since`.
+struct BlockedWait {
+    blocker_input_id: i64,
     since: Instant,
     stalled: bool,
 }
@@ -565,12 +574,30 @@ fn stalled_record(
     now: Instant,
     clock: &dyn crate::time::Clock,
 ) -> serde_json::Value {
-    let waiting_since = clock.wall_now()
-        - chrono::Duration::from_std(now.duration_since(since)).expect("bounded stall wait");
     serde_json::json!({
         "kind":"input_delivery_stalled", "input_id":input_id, "message_id":message_id,
-        "waiting_since":crate::time::format_utc(waiting_since),
+        "blocked_by_input_id":null, "waiting_since":waiting_since(since, now, clock),
     })
+}
+
+/// An `input_delivery_stalled` record for queued input or a pending preview held behind the
+/// uncertain `blocker` since `since`.
+fn blocked_record(
+    blocker: i64,
+    since: Instant,
+    now: Instant,
+    clock: &dyn crate::time::Clock,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind":"input_delivery_stalled", "input_id":null, "message_id":null,
+        "blocked_by_input_id":blocker, "waiting_since":waiting_since(since, now, clock),
+    })
+}
+
+fn waiting_since(since: Instant, now: Instant, clock: &dyn crate::time::Clock) -> String {
+    let waiting_since = clock.wall_now()
+        - chrono::Duration::from_std(now.duration_since(since)).expect("bounded stall wait");
+    crate::time::format_utc(waiting_since)
 }
 
 /// The in-progress in-memory record of a receipt-free attempt with its selected delivery.
@@ -2623,7 +2650,11 @@ impl InputCoordinator {
         conn: &mut Connection,
         observation: &ObservationController,
     ) -> Result<()> {
-        if self.input_fenced || self.queue.is_empty() {
+        if self.input_fenced {
+            return Ok(());
+        }
+        self.watch_blocked(conn, observation)?;
+        if self.queue.is_empty() {
             return Ok(());
         }
         if let Some(pending) = self.finalization.take() {
@@ -2689,19 +2720,81 @@ impl InputCoordinator {
         Ok(())
     }
 
+    /// Tracks queued input or a pending preview waiting behind the run's lowest uncertain ordinary
+    /// input, and publishes one blocked `input_delivery_stalled` once that wait lasts the stall
+    /// bound. A transient storage failure skips the pass and keeps the wait.
+    fn watch_blocked(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) -> Result<()> {
+        let (run_id, member_id) = (self.run.run_id, self.run.member_id);
+        let queued = !self.queue.is_empty();
+        let read = with_database_deadline(
+            conn,
+            self.services.clock.now() + DEFERRED_FINALIZATION,
+            |conn| {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                let blocker = storage::first_uncertain_ordinary_input(&tx, run_id)?;
+                let waiter = blocker.is_some()
+                    && (queued || crate::broker::oldest_pending_preview(&tx, member_id)?.is_some());
+                tx.commit()?;
+                Ok((blocker, waiter))
+            },
+        );
+        let (blocker, waiter) = match read {
+            Ok(read) => read,
+            Err(cause) if storage_failure(&cause) => return Ok(()),
+            Err(cause) => return Err(cause),
+        };
+        let Some(blocker) = blocker.filter(|_| waiter) else {
+            self.blocked_wait = None;
+            return Ok(());
+        };
+        let now = self.services.clock.now();
+        if self
+            .blocked_wait
+            .as_ref()
+            .is_none_or(|wait| wait.blocker_input_id != blocker)
+        {
+            self.blocked_wait = Some(BlockedWait {
+                blocker_input_id: blocker,
+                since: now,
+                stalled: false,
+            });
+        }
+        let wait = self
+            .blocked_wait
+            .as_mut()
+            .expect("the blocked wait is recorded");
+        if wait.stalled || now.duration_since(wait.since) < self.stall_bound {
+            return Ok(());
+        }
+        wait.stalled = true;
+        observation.publish_delivery_stalled(blocked_record(
+            blocker,
+            wait.since,
+            now,
+            self.services.clock.as_ref(),
+        ));
+        Ok(())
+    }
+
     /// Publishes one `input_delivery_stalled` for a head that has started no attempt within the
-    /// stall bound of becoming the head; time an interaction blocks it does not count.
+    /// stall bound of becoming the head; time an interaction or an uncertain blocker holds it
+    /// does not count.
     fn watch_head(&mut self, observation: &ObservationController) {
         let now = self.services.clock.now();
         let interaction = matches!(
             ordinary_blocker(&observation.status()),
             Some(OrdinaryBlocker::Interaction)
         );
+        let blocked = self.blocked_wait.is_some();
         let stall_bound = self.stall_bound;
         let Some(head) = self.queue.front_mut() else {
             return;
         };
-        if interaction {
+        if interaction || blocked {
             head.head_since = None;
             head.stalled = false;
             return;
@@ -4913,6 +5006,7 @@ impl InputCoordinator {
             bracketed_paste: false,
             stall_bound: STALL_BOUND,
             preview_wait: None,
+            blocked_wait: None,
             diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
         })
     }

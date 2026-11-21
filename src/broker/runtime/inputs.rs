@@ -316,6 +316,18 @@ pub(crate) fn find_input(
     input.map(|input| validate_input(conn, input)).transpose()
 }
 
+pub(crate) fn first_uncertain_ordinary_input(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<Option<i64>, CafleetError> {
+    Ok(conn.query_row(
+        "SELECT MIN(input_id) FROM member_input_operations
+         WHERE run_id=?1 AND state='uncertain' AND kind IN ('prompt','exec')",
+        [run_id],
+        |row| row.get(0),
+    )?)
+}
+
 pub(crate) enum InputReservation {
     Inserted(InputOperation),
     Existing(InputOperation),

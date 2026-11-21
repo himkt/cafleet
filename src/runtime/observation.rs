@@ -276,6 +276,7 @@ impl ObservationController {
         if queue.iter().all(|queued| {
             queued["input_id"] != record["input_id"]
                 || queued["message_id"] != record["message_id"]
+                || queued["blocked_by_input_id"] != record["blocked_by_input_id"]
                 || queued["kind"] != record["kind"]
         }) {
             queue.push_back(record);
