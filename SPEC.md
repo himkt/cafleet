@@ -3356,7 +3356,7 @@ A fenced run recovers only through `member delete` and a replacement member; mem
 
 Durability begins at a successful SQLite commit, and notification is claimed only after it. A hard runner crash loses the transitions that had not committed; recovery records the run's loss with `runner_lost`, which identifies that coverage gap. While the database stays unavailable, the control health response, the runner diagnostics and the local diagnostic preserve the actual error, and memory stays bounded.
 
-**Diagnostic text.** Every runner diagnostic text that is stored or transmitted (the `event_rejected` cause's `error`, the health observation's `writer_diagnostic` and `member_runner_diagnostics.message`) has each control character U+0000–U+001F and U+007F replaced with a space, is trimmed and is truncated to at most 512 bytes at a UTF-8 boundary. Each text starts with a fixed non-empty label and is an error text; it carries no input literal, message body or pane text.
+**Diagnostic text.** Every runner diagnostic text that is stored or transmitted (the `event_rejected` cause's `error`, the health observation's `writer_diagnostic` and `member_runner_diagnostics.message`) has each control character U+0000–U+001F and U+007F replaced with a space, is trimmed and is truncated to at most 512 bytes at a UTF-8 boundary. Each text is a non-empty error message; it carries no input literal, message body or pane text.
 
 **Runner diagnostics.** The live runner stores its diagnostics in `member_runner_diagnostics` (§8), one row per run, source and message, and keeps printing each to its standard error:
 

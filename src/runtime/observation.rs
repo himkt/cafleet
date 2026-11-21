@@ -573,6 +573,16 @@ impl ObservationController {
                         let screen_seq = self
                             .last_output
                             .expect("an evidence refusal follows a validated screen");
+                        self.diagnostics.record(
+                            storage::RunnerDiagnosticSource::EventWriter,
+                            &format!(
+                                "event writer rejected {} event {}: {}",
+                                retained.transition.kind.as_str(),
+                                retained.transition.event_seq,
+                                retained.cause.message()
+                            ),
+                            &now.observed_at,
+                        );
                         let replacement = storage::event_rejected_transition(
                             &self.run,
                             &retained.transition,

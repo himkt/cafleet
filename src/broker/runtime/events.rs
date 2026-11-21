@@ -745,7 +745,7 @@ pub(crate) fn is_diagnostic_text(text: &str) -> bool {
 }
 
 /// A runner diagnostic as stored or transmitted: control characters become spaces, and the
-/// trimmed text keeps at most 512 bytes. Every caller's message starts with a fixed label.
+/// trimmed text keeps at most 512 bytes. Every caller passes a non-empty error message.
 pub(crate) fn diagnostic_text(message: &str) -> String {
     let replaced: String = message
         .chars()
@@ -761,7 +761,7 @@ pub(crate) fn diagnostic_text(message: &str) -> String {
     }
     assert!(
         !text.is_empty(),
-        "a runner diagnostic starts with a fixed label"
+        "a runner diagnostic is a non-empty error message"
     );
     text.to_owned()
 }

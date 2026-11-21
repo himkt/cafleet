@@ -564,7 +564,8 @@ pub(crate) fn with_database_budget<T>(
     scoped_database_budget(conn, deadline, ScopeKind::Wait, None, operation)
 }
 
-/// Like [`with_database_budget`] until `until`, and statements also abort once it passes.
+/// Like [`with_database_budget`] until `until`, and statements also abort once it passes. An
+/// operation that returns after `until`, by value or error, fails with `DeadlineExceeded`.
 pub(crate) fn with_database_deadline<T>(
     conn: &mut Connection,
     until: Instant,
@@ -572,9 +573,9 @@ pub(crate) fn with_database_deadline<T>(
 ) -> Result<T, CafleetError> {
     let deadline = Deadline::until(until);
     deadline.remaining()?;
-    let value = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, None, operation)?;
+    let result = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, None, operation);
     deadline.remaining()?;
-    Ok(value)
+    result
 }
 
 /// Like [`with_database_deadline`], and the scope also ends once `shared`, which another thread
@@ -588,15 +589,15 @@ pub(crate) fn with_shared_database_deadline<T>(
     let effective =
         || Deadline::until(shared_instant(shared).map_or(until, |lowered| until.min(lowered)));
     effective().remaining()?;
-    let value = scoped_database_budget(
+    let result = scoped_database_budget(
         conn,
         Deadline::until(until),
         ScopeKind::Cancellable,
         Some(shared),
         operation,
-    )?;
+    );
     effective().remaining()?;
-    Ok(value)
+    result
 }
 
 // Pane side effects are irreversible; mandatory storage finalization gets a
