@@ -1,7 +1,7 @@
 # Rust build and dependency slimming
 
 **Status**: Approved
-**Progress**: 30/37 tasks complete
+**Progress**: 33/37 tasks complete
 **Last Updated**: 2026-11-21
 
 ## Overview
@@ -391,6 +391,27 @@ Run on 2026-11-21 in the main checkout on the Step 5 tree, 8 CPUs, with other fl
 
 At opt-level 0, A's median wall time of 34.37 s exceeds the largest B run, 33.10 s, so A regresses. At opt-level 1, A's median of 33.79 s stays below the largest fresh B run, 35.02 s. **Selected: `libsqlite3-sys` opt-level 1.**
 
+#### Release gate result
+
+**Outcome: passed.** Both gate jobs succeeded in two runs, so `release.yml` adopts § Adopted shape.
+
+| Run | Head | `darwin-zigbuild` build step | `darwin-zigbuild` | `darwin-zigbuild-smoke` |
+|---|---|---|---|---|
+| 44902139006 (https://github.com/himkt/cafleet/actions/runs/44902139006) | `93be0503` | 70 s | success | success |
+| 44901914139 (https://github.com/himkt/cafleet/actions/runs/44901914139) | `11e6026d` | 69 s | success | success |
+
+The zig-linked darwin build step took 69–70 s, against 111 s for the 0.35.4 native darwin build step. The smoke step of run 44901914139 printed these lines on `macos-15` (macOS 15.8.2, arm64), with no SDK supplied:
+
+```text
+./cafleet: valid on disk
+./cafleet: satisfies its Designated Requirement
+cafleet 0.35.4
+Initialized database at /Users/runner/work/_temp/smoke.db.
+[]
+```
+
+`setup` also installed every backend's skills and assets under the temporary `HOME` and skipped the Hermes plugin because the runner has no `hermes` binary.
+
 ### Documentation updates
 
 | Target | Change |
@@ -460,9 +481,9 @@ At opt-level 0, A's median wall time of 34.37 s exceeds the largest B run, 33.10
 ### Step 7: Single-runner release gate
 
 - [x] Add the temporary `darwin-zigbuild` and `darwin-zigbuild-smoke` jobs to `ci.yml` and push <!-- completed: 2026-11-21T12:01 -->
-- [ ] Record the gate run URL, the darwin build-step duration and the outcome in § Release gate result <!-- completed: -->
-- [ ] On pass, convert `release.yml` to the adopted shape; on failure, leave `release.yml` unchanged <!-- completed: -->
-- [ ] Remove both temporary jobs from `ci.yml` <!-- completed: -->
+- [x] Record the gate run URL, the darwin build-step duration and the outcome in § Release gate result <!-- completed: 2026-11-21T12:09 -->
+- [x] On pass, convert `release.yml` to the adopted shape; on failure, leave `release.yml` unchanged <!-- completed: 2026-11-21T12:09 -->
+- [x] Remove both temporary jobs from `ci.yml` <!-- completed: 2026-11-21T12:09 -->
 
 ### Step 8: After-measurements and final validation
 
